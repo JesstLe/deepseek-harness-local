@@ -15,4 +15,6 @@ Copy `config/cordis.patch.yml` to `.dsh/cordis.patch.yml` on a fresh installatio
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for Chinese setup and operation notes and [VERIFICATION.txt](VERIFICATION.txt) for command-level results. Configure a model key in Settings → Models; credentials never belong in Git.
 
+The current installation includes eight CC Switch groups and 38 Harness-verified model routes; see [CCSWITCH.md](CCSWITCH.md). Only credential references are versioned. Actual keys and the rollback credential snapshots remain in the ignored local application home.
+
 Upstream: https://github.com/deepseek-ai/deepseek-harness

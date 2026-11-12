@@ -1,0 +1,104 @@
+CC Switch -> DeepSeek Harness, 2026-11-12
+Working directory: E:/Workspace/deepseek-harness-local
+
+CHANGED FIELD: web profile llm-pi-ai.config.providers: 0 -> 8 grouped routes, 38 model entries.
+Fields: displayName, apiKeyEnv (reference only), api, baseURL, models, defaultContextWindow, defaultMaxTokens.
+Credential changes: 8 new reference entries through the supported credentials/set API.
+Preserved: existing DeepSeek Account login records; agent-default-model={provider:deepseek-account,model:deepseek-flash,reasoningEffort:high}; welcome settings and home light-theme patch.
+
+MODIFIED_FILE: E:/Workspace/deepseek-harness-local/evidence/ccswitch/MODIFIED_FILE.yml
+DIFF_FILE: E:/Workspace/deepseek-harness-local/evidence/ccswitch/DIFF_FILE.diff
+VERIFICATION: E:/Workspace/deepseek-harness-local/evidence/ccswitch/VERIFICATION.txt
+ROLLBACK: E:/Workspace/deepseek-harness-local/evidence/ccswitch/ROLLBACK.sh
+ACTIVE PROFILE: E:/Workspace/deepseek-harness-local/.dsh/profiles/web/cordis.patch.yml
+ORIGINAL: E:/Workspace/deepseek-harness-local/evidence/ccswitch/ORIGINAL.yml
+ORIGINAL_SHA256: 44a6c8bf62e2c128b628921ed79e503cb36d8a9894695e036c18e1e39d70dd55
+Private credential originals and fixtures: .dsh/import-ccswitch/ (not in Git).
+
+BASELINE
+Command: node scripts/import-ccswitch.mjs baseline
+Input: active Web profile and managed credentials before import.
+Literal output:
+BASELINE groups=0 original_sha256=44a6c8bf62e2c128b628921ed79e503cb36d8a9894695e036c18e1e39d70dd55 default_preserved=1
+Exit status: 0
+
+MODIFIED
+Command: node scripts/import-ccswitch.mjs apply
+Input: .dsh/import-ccswitch/accepted.json (private source, never printed or committed).
+Literal output:
+MODIFIED groups=8 models=38 credentials_saved=8 source_unchanged=1
+Exit status: 0
+Command: node scripts/import-ccswitch.mjs finalize
+Input: live profile, successful runtime-probes.json and runtime-extras.json.
+Literal output:
+FINALIZED groups=8 models=38 runtime_verified=1 unsuccessful_routes_excluded=1
+Exit status: 0
+Command: node scripts/import-ccswitch.mjs verify
+Input: authenticated local settings/describe, credentials/describe and session/modelCatalog; previous credential snapshot.
+Literal output:
+RUNTIME groups=8 models=38 credentials=8 defaults_preserved=1 previous_credentials_preserved=1
+Exit status: 0
+
+ROLLBACK
+Command: "D:/DEV/Git/bin/bash.exe" -c "chmod +x evidence/ccswitch/ROLLBACK.sh && ./evidence/ccswitch/ROLLBACK.sh rollback-test"
+Input: a separate copy of modified profile and credentials; original snapshots.
+Literal output:
+ROLLBACK profile_restored=1 credentials_restored=1 original_hash_match=1 active_still_modified=1
+Exit status: 0
+Restored status: profile fixture is byte-identical to ORIGINAL_SHA256, and credential fixture is byte-identical to its private original.
+Restored behavior/settings: no imported groups or new credential refs in the restored fixture; original account/defaults retained.
+Active profile and credentials remain modified and in use. Active rollback was not performed.
+
+SOURCE
+Command: python scripts/ccswitch-scan.py inventory
+Literal output: INVENTORY groups=10 models=34 skipped=6
+Exit status: 0
+Command: python scripts/ccswitch-scan.py verify-source
+Literal output: CC_SWITCH_SOURCE=UNCHANGED rows=18
+Exit status: 0
+Source is read-only SQLite; row setting hashes, not whole-DB hashes, distinguish changes by other running CC Switch processes.
+
+MODEL VALIDATION
+Command: python scripts/ccswitch-scan.py probe
+Input: 34 configured model routes plus 41 discovered conversational candidates from open's mixed 174-entry catalog.
+Literal final output: PROBE groups=8 valid=38 failed=37
+Exit status: 0 (scan completed; per-model failures remain in probe-results.json).
+First discovery attempt stopped before model work because the mixed catalog exceeded 100 entries; filtered conversational model candidates before running the bounded batch.
+Command: node scripts/probe-opencode.mjs
+Literal final output: OPENCODE_NATIVE valid=0 excluded=11
+Exit status: 0 (diagnostic batch completed).
+Observed auth failure: HTTP 401, api_key_expired.
+Exact CC Switch endpoint recheck with required x-opencode-session and explicit User-Agent also returned 401/api_key_expired; see opencode-source-confirmation.json.
+
+Command: node scripts/verify-ccswitch-runtime.mjs
+Input: installed official dsh headless profile, per-model overlay, credential supplied only through the child environment; task='Reply exactly OK. Do not use tools or perform any other action.'
+Literal final output: HARNESS_RUNTIME tested=38 valid=36 failed=2
+Exit status: 1
+Failures: open/deepseek-v4.1-flash and open/deepseek-v4-flash returned 503 or EMPTY_RESPONSE.
+Command: node scripts/verify-ccswitch-runtime.mjs --retry-failed
+Literal final output:
+HARNESS_RUNTIME tested=38 valid=36 failed=2
+TARGETED_RECHECK models=2 output_budget=4096
+Exit status: 1
+Both failed routes were removed from final configuration, not labeled valid.
+An initial retry process was denied private-file reads after an ACL change. Corrected inheritance on the private snapshot directory and reran; no keys were printed.
+
+Command: node scripts/verify-ccswitch-runtime.mjs --extras
+Input: two CC Switch [1M] client aliases without the suffix on the wire, plus the original LAN Responses route with the real Harness streaming stack.
+Literal final output: HARNESS_RUNTIME tested=3 valid=2 failed=1
+Exit status: 1
+Positive model results: gpt-6-astra => output OK, exit 0; gpt-6.1-sol => output OK, exit 0 (both in the source group named 桦).
+LAN route result: dsh: TRANSPORT: Connection error.: read ECONNRESET; exit 1, not imported.
+Final model proof: 36 earlier passes + 2 successful alias-resolution passes = 38 imported model routes; all have output OK and process exit 0.
+The 1M context setting is inherited intent, not a capacity/load-test result.
+
+WEB SERVICE
+Command: node scripts/verify-http.mjs
+Literal output: HTTP_SMOKE=PASS root=200 token_exchange=303 light_theme=1 assets=4 unauthorized=401 authenticated_unknown_route=404
+Exit status: 0
+session/modelCatalog: 8 added CC groups plus the pre-existing DeepSeek Account group; failures=[]; original default unchanged.
+
+PACKAGING
+Credentials, source candidates with literal keys, login records, child environment and credential backups are excluded from Git.
+The rollback shell is executable and LF-pinned. Original profile and fixture bytes are not normalized by Git.
+Minimal request success does not assert future provider uptime, account quota, full-context capacity, all tool calls, image input, or image/video generation support.

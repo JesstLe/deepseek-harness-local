@@ -31,7 +31,7 @@ cd E:\Workspace\deepseek-harness-local
 
 Web UI 的 **Settings → Models** 接收 DeepSeek API Key，应用将密钥存入 `.dsh/.credentials.yaml`。自定义 OpenAI 兼容服务使用 **Add model provider → Custom model API**，分别填写 API 地址、协议、模型 ID 和凭据。凭据文件、会话、日志和进程信息均排除在 Git 之外。
 
-首次进入页面后选择工作区；建议选择具体项目目录，而不是整个磁盘。模型密钥尚未提供；本地 HTTP 服务验收不等同于真实模型请求成功。
+首次进入页面后选择工作区；建议选择具体项目目录，而不是整个磁盘。已从 CC Switch 导入 8 个分组、38 条模型路由，逐条通过实际 Harness 最小请求；现有 DeepSeek Account 登录和默认模型未更改。分组、排除项和回滚说明见 `CCSWITCH.md`。
 
 ## 配置回滚
 
@@ -42,5 +42,6 @@ Web UI 的 **Settings → Models** 接收 DeepSeek API Key，应用将密钥存�
 - 已完成：官方来源确认、版本选择、独立目录、配置修改、配置副本回滚、启停脚本、桌面入口、依赖安装、服务启动、HTTP/静态资源/鉴权验收、重复启动检测、停止释放端口及重新启动。
 - 安装说明：首次下载连接重置，缓存重试成功；仅为五个指定版本的依赖开启安装脚本，随后 `npm rebuild` 成功。
 - 源码下载：两次 Git 传输出现 early EOF；本次运行使用官方 npm 成品，不依赖源码 checkout。
-- 待完成：用户提供模型密钥后的真实模型请求；未配置开机自启。
+- 本轮追加完成：只读读取 CC Switch、分组导入有效凭据、实际模型请求验证、保留账号登录及默认模型、配置与凭据副本回滚验证。
+- 未配置开机自启；OpenCode Go 过期密钥、连接中断的局域网反代及其他缺少 API Key 的条目未作为有效路由导入。
 - 验证明细：`VERIFICATION.txt`。
