@@ -1,0 +1,118 @@
+DeepSeek Harness local deployment - 2026-11-12
+
+CHANGED FIELDS: home: null -> E:/Workspace/deepseek-harness-local/.dsh;
+telemetryMode: FEEDBACK_ONLY -> DISABLED; openBrowser: true -> false.
+Listener unchanged: 127.0.0.1:3080.
+Additional home patch: ui-theme.preference=light; session-log-deepseek.enabled=false.
+The JSON rollback does not remove this separate home patch.
+
+MODIFIED_FILE: E:/Workspace/deepseek-harness-local/config/local.json
+DIFF_FILE: E:/Workspace/deepseek-harness-local/evidence/config.diff
+VERIFICATION: E:/Workspace/deepseek-harness-local/VERIFICATION.txt
+ROLLBACK: E:/Workspace/deepseek-harness-local/ROLLBACK.sh
+ORIGINAL: E:/Workspace/deepseek-harness-local/evidence/deployment.original.json
+ORIGINAL_SHA256: AFA24C8A007F20D99512B8410FA03BF3B9ACBB6E27E5946F880578275BAACB0D
+
+Working directory for all commands: E:/Workspace/deepseek-harness-local
+
+BASELINE
+Command: node scripts/check-config.mjs evidence/deployment.original.json
+Input: evidence/deployment.original.json
+Literal output:
+{"host":"127.0.0.1","port":3080,"home":null,"telemetryMode":"FEEDBACK_ONLY","openBrowser":true}
+Exit status: 0
+
+MODIFIED
+Command: node scripts/check-config.mjs config/local.json
+Input: config/local.json
+Literal output:
+{"host":"127.0.0.1","port":3080,"home":"E:/Workspace/deepseek-harness-local/.dsh","telemetryMode":"DISABLED","openBrowser":false}
+Exit status: 0
+
+ROLLBACK
+Preparation: Copy-Item config/local.json evidence/rollback-test.json
+Command: "D:/DEV/Git/bin/bash.exe" -c "chmod +x ROLLBACK.sh && ./ROLLBACK.sh evidence/rollback-test.json"
+Input: evidence/rollback-test.json (modified copy)
+Literal output:
+ROLLBACK_OK original configuration restored; application data retained
+Exit status: 0
+Command: node scripts/check-config.mjs evidence/rollback-test.json
+Literal output:
+{"host":"127.0.0.1","port":3080,"home":null,"telemetryMode":"FEEDBACK_ONLY","openBrowser":true}
+Exit status: 0
+Restored status: byte-identical baseline configuration on rollback-test.json; SHA256 matches ORIGINAL_SHA256.
+Restored behavior: default home selection, FEEDBACK_ONLY telemetry and browser-open preference.
+The active MODIFIED_FILE remains changed. No application data was deleted.
+
+INSTALLATION / SERVICE
+Local deployment verified and left RUNNING. Real-model validation pending provision of an API key.
+First npm install command: npm install --save-exact @deepseek-ai/dsh@0.2.2-rc.1 --no-audit --no-fund
+First npm install exit status: 1
+Literal failure: npm error code ECONNRESET; npm error network aborted
+Log: D:/DEV/Cache/npm/_logs/2026-11-12T03_26_05_457Z-debug-0.log
+Retry uses the completed npm cache with --prefer-offline --fetch-retries=5 --fetch-retry-mintimeout=1000 --maxsockets=5.
+Retry command: npm install --save-exact @deepseek-ai/dsh@0.2.2-rc.1 --no-audit --no-fund --prefer-offline --fetch-retries=5 --fetch-retry-mintimeout=1000 --maxsockets=5
+Literal result: added 652 packages in 58s
+Exit status: 0
+Command: npm approve-scripts @deepseek-ai/dsh-subprocess-local koffi node-pty @google/genai protobufjs
+Result: exact-version allowScripts entries recorded for those five packages in package.json.
+Exit status: 0
+Command: npm rebuild
+Literal output: rebuilt dependencies successfully
+Exit status: 0
+Command: node node_modules/@deepseek-ai/dsh/lib/bin.js --version
+Literal output: 0.2.2-rc.1
+Exit status: 0
+Command: node node_modules/@deepseek-ai/dsh/lib/bin.js web --dump-config
+Input environment: DSH_HOME=E:/Workspace/deepseek-harness-local/.dsh; DSH_TELEMETRY_MODE=DISABLED
+Result file: evidence/effective-config.yml
+Observed fields: ui-theme.config.preference=light; session-log-deepseek.config.enabled=false
+Exit status: 0
+
+Command: pwsh -NoProfile -ExecutionPolicy Bypass -File ./Start-DeepSeek.ps1
+Input: config/local.json
+Literal output: RUNNING PID=45652 URL=http://127.0.0.1:3080 HTTP=200
+Exit status: 0
+Command: node scripts/verify-http.mjs
+First attempt exit status: 1
+First literal assertion result: 303 !== 302
+Correction: installed 0.2.2-rc.1 uses HTTP 303 for the browser token exchange; master documentation described 302. Smoke expectation aligned to installed runtime; runtime unchanged.
+Final literal output: HTTP_SMOKE=PASS root=200 token_exchange=303 light_theme=1 assets=4 unauthorized=401 authenticated_unknown_route=404
+Final exit status: 0
+Command: pwsh -NoProfile -ExecutionPolicy Bypass -File ./Start-DeepSeek.ps1
+Literal output: ALREADY_RUNNING PID=45652 URL=http://127.0.0.1:3080
+Exit status: 0
+Command: pwsh -NoProfile -ExecutionPolicy Bypass -File ./Stop-DeepSeek.ps1
+Literal output: STOPPED PID=45652
+Exit status: 0
+Command: if (Get-NetTCPConnection -State Listen -LocalPort 3080 -ErrorAction SilentlyContinue) { throw 'PORT_NOT_RELEASED' }; 'STOP_VERIFIED port=3080 released=1'
+Literal output: STOP_VERIFIED port=3080 released=1
+Exit status: 0
+Command: pwsh -NoProfile -ExecutionPolicy Bypass -File ./Start-DeepSeek.ps1
+Literal output: RUNNING PID=36856 URL=http://127.0.0.1:3080 HTTP=200
+Exit status: 0
+Command: node scripts/verify-http.mjs
+Literal output: HTTP_SMOKE=PASS root=200 token_exchange=303 light_theme=1 assets=4 unauthorized=401 authenticated_unknown_route=404
+Exit status: 0
+Command: node scripts/verify-pty.mjs
+Literal output: WINDOWS_PTY=PASS marker=DSH_PTY_OK exit=0
+Exit status: 0
+Initial inline PTY probe printed the marker but retained a Windows native worker; terminated that probe process only. Reusable probe explicitly exits after the verified PTY exit event.
+
+DESKTOP ENTRY: C:/Users/13357/Desktop/DeepSeek Harness.lnk
+Launch target: pwsh.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File E:/Workspace/deepseek-harness-local/Start-DeepSeek.ps1 -Open
+No automatic browser opening or startup task was configured during verification.
+Credentials, session data, runtime PID, token-bearing URLs and original server logs are ignored by Git.
+
+SOURCE DOWNLOAD ATTEMPT
+Command: git clone https://github.com/deepseek-ai/deepseek-harness.git E:/Workspace/deepseek-harness
+Exit status: 1
+Literal result:
+error: RPC failed; curl 56 schannel: server closed abruptly (missing close_notify)
+error: 1687 bytes of body are still expected
+fetch-pack: unexpected disconnect while reading sideband packet
+fatal: early EOF
+fatal: fetch-pack: invalid index-pack output
+Retry command: git -c http.version=HTTP/1.1 clone --depth 1 --single-branch https://github.com/deepseek-ai/deepseek-harness.git E:/Workspace/deepseek-harness
+Retry exit status: 1, same curl 56 / early EOF result (3276 bytes of body still expected).
+The npm deployment does not depend on the source checkout. Source checkout not delivered.
