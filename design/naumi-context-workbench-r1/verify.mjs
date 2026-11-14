@@ -20,3 +20,13 @@ const mappings=JSON.parse(fs.readFileSync(dir+'SOURCE_MAPPING.json','utf8'));
 const inventory=JSON.parse(fs.readFileSync('design/naumi-element-rebuild/ELEMENTS.json','utf8')).elements;
 for(const m of mappings)assert.equal(inventory.find(e=>e.id===m.id)?.name,m.name);
 console.log('DESIGN_CHECK pages=2 mappings=19 no_default_trajectory=1 standard_mode_advanced_only=1');
+const workbench=fs.readFileSync(dir+'WORKBENCH.html','utf8');
+assert(workbench.includes('class="original-sidebar"'));
+assert(!workbench.includes('class="rail"'));
+assert(!workbench.includes('class="navigator"'));
+const oldSource=execFileSync('git',['show','f87498e:design/naumi-context-workbench-r1/build-preview.mjs'],{encoding:'utf8'}).replaceAll('\r\n','\n');
+for(const name of ['sidebar','main']){
+ const re=new RegExp('const '+name+'=(`[^]*?`);\\n');
+ assert.equal(source.replaceAll('\r\n','\n').match(re)?.[1],oldSource.match(re)?.[1],name+' content changed');
+}
+console.log('LEFT_REVISION original_single_column=1 split_rail_removed=1 main_and_right_content_unchanged=1');
