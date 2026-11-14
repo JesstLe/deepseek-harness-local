@@ -24,9 +24,13 @@ const workbench=fs.readFileSync(dir+'WORKBENCH.html','utf8');
 assert(workbench.includes('class="original-sidebar"'));
 assert(!workbench.includes('class="rail"'));
 assert(!workbench.includes('class="navigator"'));
-const oldSource=execFileSync('git',['show','f87498e:design/naumi-context-workbench-r1/build-preview.mjs'],{encoding:'utf8'}).replaceAll('\r\n','\n');
-for(const name of ['sidebar','main']){
- const re=new RegExp('const '+name+'=(`[^]*?`);\\n');
- assert.equal(source.replaceAll('\r\n','\n').match(re)?.[1],oldSource.match(re)?.[1],name+' content changed');
-}
-console.log('LEFT_REVISION original_single_column=1 split_rail_removed=1 main_and_right_content_unchanged=1');
+const oldSource=execFileSync('git',['show','140dac4:design/naumi-context-workbench-r1/build-preview.mjs'],{encoding:'utf8'}).replaceAll('\r\n','\n');
+const re=/const originalSidebar=(`[^]*?`);\n/;
+assert.equal(source.replaceAll('\r\n','\n').match(re)?.[1],oldSource.match(re)?.[1],'Original left sidebar changed');
+const sideHTML=fs.readFileSync(dir+'CONTEXT_PANEL.html','utf8');
+assert.equal((workbench.match(/class="model-selector"/g)||[]).length,1);
+assert(!sideHTML.includes('class="model-selector"'));
+assert(!sideHTML.includes('<span>模型</span>'));
+assert(!sideHTML.includes('<span>推理等级</span>'));
+assert(workbench.indexOf('class="model-selector"')>workbench.indexOf('class="composer-toolbar"'));
+console.log('MODEL_POSITION composer_right=1 selector_count=1 right_panel_duplicates=0 left_sidebar_unchanged=1');
