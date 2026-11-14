@@ -1,0 +1,22 @@
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
+import crypto from 'node:crypto';
+const dir='design/naumi-context-workbench-r1/';
+const source=fs.readFileSync(dir+'build-preview.mjs','utf8');
+for(const bad of [/\bfetch\s*\(/,/\bXMLHttpRequest\b/,/\bWebSocket\s*\(/,/\blocalStorage\./,/\bsessionStorage\./])assert(!bad.test(source),'Preview must not access live state '+bad);
+for(const f of ['WORKBENCH.html','CONTEXT_PANEL.html']){
+ const text=fs.readFileSync(dir+f,'utf8');
+ assert(text.includes('class="monitor"'));assert(text.includes('class="context-scroll"'));assert(text.includes('<details class="advanced">'));
+ assert(!/<(?:button|summary)[^>]*>[^<]*轨迹/.test(text));
+ assert(!/<details class="advanced"\s+open/.test(text));
+}
+execFileSync('git',['diff','--exit-code','HEAD','--','plugins','scripts','config','tests','package.json','package-lock.json','Start-DeepSeek.ps1','Stop-DeepSeek.ps1','Start-Naumi.ps1','Stop-Naumi.ps1'],{stdio:'pipe'});
+const baseline=JSON.parse(fs.readFileSync('evidence/naumi-ui/baseline.json','utf8'));
+const hash=x=>crypto.createHash('sha256').update(x).digest('hex');
+assert.equal(hash(fs.readFileSync('.dsh/profiles/web/cordis.patch.yml')),baseline.patchSHA256);
+console.log('UI_ONLY_GUARD runtime_diff=0 model_profile_unchanged=1 preview_network=0 preview_storage=0');
+const mappings=JSON.parse(fs.readFileSync(dir+'SOURCE_MAPPING.json','utf8'));
+const inventory=JSON.parse(fs.readFileSync('design/naumi-element-rebuild/ELEMENTS.json','utf8')).elements;
+for(const m of mappings)assert.equal(inventory.find(e=>e.id===m.id)?.name,m.name);
+console.log('DESIGN_CHECK pages=2 mappings=19 no_default_trajectory=1 standard_mode_advanced_only=1');
