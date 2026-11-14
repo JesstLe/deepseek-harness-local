@@ -50,3 +50,9 @@ npm run naumi:sync
 ## 完成口径
 
 本地定制运行、原始功能回归与业务读取分别给证据。只读业务聚合不等于写流程/SSO集成，模型目录不等于所有供应商在本轮重新收费调用通过。此模块不改两个业务系统的数据库结构、业务记录或部署配置；一次失败的旧测试账号登录可产生系统正常认证限流日志。
+
+## 2026-11-14 登录复核续跑
+
+用户报告已在T3预览登录后，再读现有两个server预览页：两者profileId均为default；3112 `/api/workspace` 返回401「请先登录」，导航 `/workbench` 返回 `/login`；3080 `/naumi/workspace` 返回401 `COLLABORATION_LOGIN_REQUIRED`。受控会话未得到可用企业身份；尚未确定是窗口同步还是会话失效，不据此归因。`NAUMI_UI_FIXTURE` 草稿计数为0。
+
+未重复试账号、未读取密码、未复制登录Cookie、未发送模型请求或业务写操作。集中重跑14项模块测试、HTTP smoke、profile baseline/modified、副本回滚均通过；活动配置保留Naumi。证据在 `evidence/naumi-ui/LOGIN_CHECK.json`。真实企业任务/交付对应、当前账号角色展示验收仍待有效企业会话，不把测试夹具通过视为真实账号通过。
