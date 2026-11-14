@@ -1,0 +1,10 @@
+import fs from 'node:fs';
+import crypto from 'node:crypto';
+const original=fs.readFileSync('node_modules/@deepseek-ai/dsh-client-ui-layout/lib/client.js','utf8');
+const marker='const productTitle = "DeepSeek Harness";';
+if(original.split(marker).length!==2)throw Error('Upstream layout changed: expected exactly one product title; review before rebuilding');
+const built=original.replace('id: "@deepseek-ai/dsh-client-ui-layout"','id: "@naumi/dsh-ui-layout"').replace(marker,'const productTitle = "Naumi · 企业协作";');
+const hash=x=>crypto.createHash('sha256').update(x).digest('hex');
+fs.writeFileSync('plugins/naumi-ui-layout/client.js',built);
+fs.writeFileSync('plugins/naumi-ui-layout/UPSTREAM.json',JSON.stringify({package:'@deepseek-ai/dsh-client-ui-layout',version:'0.2.2-rc.1',originalSHA256:hash(original),modifiedSHA256:hash(built),substitutions:['browser module registration id','product title constant']},null,2)+'\n');
+console.log('NAUMI_LAYOUT substitutions=2 upstream_unchanged=1');

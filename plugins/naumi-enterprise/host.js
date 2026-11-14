@@ -1,0 +1,39 @@
+import {readFile} from 'node:fs/promises';
+import {fileURLToPath} from 'node:url';
+import {businessCookie,projectWorkspace,validateOrigin} from './domain.js';
+export const inject=['webServer','connection'];
+/** Supported plugin routes, index branding and an authenticated read-only business adapter. */
+export function apply(ctx,config) {
+  const collaborationOrigin=validateOrigin(config.collaborationOrigin);
+  const designOrigin=validateOrigin(config.designOrigin);
+  const assets=new Map([['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml']]);
+  ctx.effect(()=>ctx.webServer.register({kind:'prefix',path:'/naumi/assets',handler:async(req,res)=>{
+    const name=new URL(req.url,'http://localhost').pathname.split('/').at(-1);
+    if(!['GET','HEAD'].includes(req.method)||!assets.has(name)){res.writeHead(404).end();return;}
+    const content=await readFile(fileURLToPath(new URL('./assets/'+name,import.meta.url)));
+    res.writeHead(200,{'Content-Type':assets.get(name),'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff'});res.end(req.method==='HEAD'?undefined:content);
+  }}));
+  ctx.effect(()=>ctx.webServer.register({kind:'exact',path:'/naumi/workspace',handler:async(req,res)=>{
+    res.setHeader('Cache-Control','private, no-store');res.setHeader('Content-Type','application/json; charset=utf-8');
+    const respond=(status,body)=>{res.writeHead(status);res.end(JSON.stringify(body));};
+    const admission=ctx.connection.admit(req);
+    if('rejection' in admission){respond(admission.rejection,{error:'HARNESS_AUTH_REQUIRED'});return;}
+    if(admission.peer.principal.kind!=='owner'){respond(403,{error:'HARNESS_OWNER_REQUIRED'});return;}
+    if(req.method!=='GET'){res.setHeader('Allow','GET');respond(405,{error:'READ_ONLY'});return;}
+    const cookie=businessCookie(req.headers.cookie);
+    if(!cookie){respond(401,{error:'COLLABORATION_LOGIN_REQUIRED',loginUrl:collaborationOrigin+'/login'});return;}
+    const controller=new AbortController();
+    const onClose=()=>{if(!res.writableEnded)controller.abort();};res.on('close',onClose);
+    try {
+      const upstream=await fetch(collaborationOrigin+'/api/workspace',{redirect:'manual',headers:{cookie,accept:'application/json'},signal:AbortSignal.any([controller.signal,AbortSignal.timeout(12000)])});
+      if(!upstream.ok){respond([401,403].includes(upstream.status)?upstream.status:502,{error:upstream.status===401?'COLLABORATION_LOGIN_REQUIRED':upstream.status===403?'COLLABORATION_ACCESS_PENDING':'COLLABORATION_UNAVAILABLE',loginUrl:collaborationOrigin+'/login'});return;}
+      const data=projectWorkspace(await upstream.json());respond(200,data);
+    } catch(error){if(!res.destroyed)respond(502,{error:error?.name==='TimeoutError'?'COLLABORATION_TIMEOUT':'COLLABORATION_UNAVAILABLE'});}
+    finally{res.off('close',onClose);}
+  }}));
+  ctx.on('webserver/index-inject',table=>{
+    table.push({kind:'global',name:'__NAUMI__',value:{collaborationOrigin,designOrigin,version:'0.1.0'}});
+    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
+  });
+  ctx.effect(()=>ctx.webServer.tapIndex(html=>html.replace(/<title>[^<]*<\/title>/i,'<title>Naumi · 企业协作</title>').replace(/<link[^>]+rel="(?:shortcut )?icon"[^>]*href="(?!\/naumi\/)[^"]*"[^>]*>/g,'')));
+}

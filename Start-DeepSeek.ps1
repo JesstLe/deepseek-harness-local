@@ -1,6 +1,12 @@
 param([switch]$Open)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
+$lockKey = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($root.ToLowerInvariant())))
+$startupMutex = [Threading.Mutex]::new($false, "Local\NaumiHarness-$lockKey")
+$ownsMutex = $false
+try {
+try { $ownsMutex = $startupMutex.WaitOne(120000) } catch [Threading.AbandonedMutexException] { $ownsMutex = $true }
+if (!$ownsMutex) { throw 'Another local Harness start operation is still active.' }
 $config = Get-Content -Raw (Join-Path $root 'config/local.json') | ConvertFrom-Json
 $entry = Join-Path $root 'node_modules/@deepseek-ai/dsh/lib/bin.js'
 $pidFile = Join-Path $root 'runtime/server.pid'
@@ -51,3 +57,7 @@ for ($i=0; $i -lt 90; $i++) {
     Start-Sleep -Seconds 1
 }
 throw "Startup timeout: $lastFailure. See logs. PID=$($server.Id)"
+} finally {
+    if ($ownsMutex) { $startupMutex.ReleaseMutex() }
+    $startupMutex.Dispose()
+}
