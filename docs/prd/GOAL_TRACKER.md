@@ -36,3 +36,9 @@ owner确认的run_agent规则、原子持久队列、原AgentLoop/Native工具�
 修复正式npm包漏M4运行模块与直接peer声明，增加AST/实物pack/import闭包；内置官方dingtalk-workspace-cli 1.0.68固定完整性/许可证、员工独立配置与可写原生缓存、无开发PATH launcher、真实readonly能力观察和Naumi技能。staging逐文件hash/私有状态路径扫描，默认build重stage，beforePack拒绝陈旧/追加/损坏资源。268项本地回归及251项副本回滚通过，实际3080仍62sessions/0running/3bots/revision10，没有接入或改员工数据。本模块的正式包与unpacked桌面构建/启动证据在evidence/employee-package持续记录，详见EMPLOYEE_PACKAGING_M5.md。
 
 下一M5.2：profile实例与端口隔离、受管依赖junction升级、可配置远程企业首次登录/session桥、数据迁移/版本回退；随后NSIS干净安装/升级/卸载、员工授权与真实业务验收。总目标active，不以unpacked启动代替安装验收，不以本地CLI已内置代替企业授权或真实模型路由。
+
+## M5.2 实例与依赖生命周期验收增量
+
+独立实例HMAC/持久回执/端口竞争处理、真实引导URL就绪、私有默认工作区注册、受管junction事务/4阶段硬退出恢复、Windows独立worker及认证退出/重入门已实现。293项回归、268项副本恢复、正式npm包72文件、打包ASAR/resource源码一致性通过；真实双profile/native浏览器、正常重启、Electron主进程SIGKILL后原worker PID接回、正常退出及persona/memory/schema1保留通过。详见DESKTOP_LIFECYCLE_M5_2.md及evidence/desktop-lifecycle/VERIFICATION.txt。
+
+下一M5.3：远程企业首次连接/session桥、endpoint/home归属边界与首次能力刷新；再业务数据/安装版本迁移回退、NSIS实际安装升级卸载、签名/依赖审查和真实员工/供应商使用。当前实际3080仍原服务，本增量不自动注册或启用员工。总目标active。

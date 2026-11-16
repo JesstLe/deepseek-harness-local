@@ -4,12 +4,12 @@ const fs=require('node:fs');
 const {app,BrowserWindow,ipcMain,Menu,nativeTheme,shell}=require('electron');
 const {Guests}=require('./guests.cjs');
 const {startBridge}=require('./tools.cjs');
-const {localSettings,ensureBackend}=require('./backend.cjs');
+const {localSettings,ensureBackend,stopBackend,createQuitGate}=require('./backend.cjs');
 app.setName('Naumi');app.setAppUserModelId('com.naumi.desktop');
 if(process.env.NAUMI_USER_DATA)app.setPath('userData',path.resolve(process.env.NAUMI_USER_DATA));
 if(process.env.NAUMI_TEST_HIDDEN==='1'){app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');app.commandLine.appendSwitch('disable-renderer-backgrounding');}
 const locked=app.requestSingleInstanceLock();
-let window,primarySession,guests,bridge,backend,settings,quitting=false,booting=false;
+let window,primarySession,guests,bridge,backend,settings,booting=false;
 if(!locked){app.quit();}else{
 app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.show();window.focus();}});
 app.whenReady().then(async()=>{
@@ -37,9 +37,10 @@ app.whenReady().then(async()=>{
  await showStartup();
  if(process.env.NAUMI_TEST_HIDDEN!=='1')window.show();
  await boot();
- if(process.env.NAUMI_TEST==='1')globalThis.__naumiTest={window,guests,bridge,settings};
+ if(process.env.NAUMI_TEST==='1')globalThis.__naumiTest={window,guests,bridge,settings,backend};
 }).catch(error=>{console.error('NAUMI_DESKTOP_START_FAILED',error.message);app.quit();});
-app.on('before-quit',event=>{if(quitting)return;quitting=true;event.preventDefault();void(async()=>{try{await guests?.flush();await primarySession?.cookies.flushStore();}finally{await bridge?.close();if(backend?.owned)backend.child.kill();app.quit();}})().catch(()=>app.exit(1));});
+const quitGate=createQuitGate({shutdown:async()=>{try{await guests?.flush();await primarySession?.cookies.flushStore();}finally{await bridge?.close();await stopBackend(backend);}},onReady:()=>app.quit(),onError:()=>app.exit(1)});
+app.on('before-quit',event=>quitGate.beforeQuit(event));
 app.on('window-all-closed',()=>app.quit());
 }
 async function showStartup(error=''){
@@ -50,8 +51,9 @@ async function boot(){
  if(booting)return;booting=true;
  try{
   settings??=localSettings(app);
+  const nextBackend=await ensureBackend(settings);
+  backend=backend?.owned&&!nextBackend.owned&&backend.child.exitCode===null&&backend.child.signalCode===null?{...nextBackend,owned:true,child:backend.child}:nextBackend;
   if(!guests){guests=new Guests({hostURL:settings.url,account:'local',timeout:process.env.NAUMI_TEST==='1'?Number(process.env.NAUMI_TEST_TIMEOUT??30000):30000});guests.attach(window);}
-  backend=await ensureBackend(settings);
   if(!bridge)bridge=await startBridge({home:settings.home,guests,window});
   await window.loadURL(backend.launchURL);
  }catch(error){await showStartup(error.message);}

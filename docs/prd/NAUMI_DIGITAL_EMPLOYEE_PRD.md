@@ -348,3 +348,10 @@ HBT-003/004、CAP-001、BUD-001、LOC-004/005/006、EMP-002/003 扩展；独立�
 - EMP/LOC安装基础：独立员工DWS配置与版本化原生组件缓存、内置Node/CLI launcher、禁继承开发者凭证、禁后台升级/使用追踪；readonly状态只证明本地账号存在，不推断远端在线权限。
 - 268项Harness/桌面回归、251项副本恢复原行为和persona/memory/schema保留通过。正式运行树已生成70359文件hash清单；正式npm包、unpacked构建/启动结果以evidence/employee-package/VERIFICATION.txt最终记录为准。
 - M5尚未退出：远程企业登录session桥、实例/端口隔离、升级/迁移/版本回退与NSIS真实安装链继续。实际3080数据未动，没有自动员工登记/上传/主动AI启用；真实网关路由与员工业务验收仍独立。
+
+## M5.2 桌面生命周期验收增量（2026-11-17）
+
+- 新员工默认standalone，不以相同Logo作为服务归属。独立profile身份/HMAC、精确PID/bundle、持久starting/ready与受控端口处理已实现；UNKNOWN不启动副本，旧bundle存活时不切其依赖。
+- profileVersion1/identityProtocol1、私有工作区first-use事务、受管依赖journal/4阶段硬退出恢复、既有配置/真实SQLite/浏览器数据保留、实际bootstrap回执再导航、Windows worker独立生命周期、认证停机与退出重入门已验收。
+- 293模块、268副本基线、正式npm72文件/ASAR3模块/resource6份源码一致性、真实双桌面profile/原生浏览器/正常重启/主进程硬杀原PID接回/实际退出通过；UNKNOWN数据为明确样例，真实模型与执行账本的强杀证据仍见M4，不混淆层级。
+- 证据evidence/desktop-lifecycle/VERIFICATION.txt，细粒度INS-01~16见DESKTOP_LIFECYCLE_M5_2.md。未退出项：远程企业首次连接/归属边界、业务schema与安装版本迁移/回退、NSIS真实安装链、签名与依赖、真实员工/模型使用。总目标active。

@@ -1,0 +1,63 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+import {createHash,randomUUID} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
+import {stageDingTalk} from './stage-dingtalk.mjs';
+import {auditPackage} from '../../scripts/audit-enterprise-package.mjs';
+const project=fileURLToPath(new URL('../..',import.meta.url));
+const sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+export function verifyStagedImports(staged){
+  const script=`import{registerHooks}from'node:module';import{pathToFileURL}from'node:url';import path from'node:path';const base=pathToFileURL(process.cwd()+path.sep).href;registerHooks({resolve(specifier,context,next){const result=next(specifier,context);if(result.url.startsWith('file:')&&!result.url.startsWith(base))throw Error('STAGED_IMPORT_OUTSIDE_BUNDLE');return result;}});await import('./node_modules/@naumi/dsh-enterprise/host.js');console.log('STAGED_HOST_IMPORT_OK no_ancestor_dependencies=1');`;
+  const result=execFileSync(path.join(staged,'node.exe'),['--input-type=module','-e',script],{cwd:staged,encoding:'utf8',env:{SystemRoot:process.env.SystemRoot,PATH:path.dirname(process.execPath)}});
+  if(!result.includes('STAGED_HOST_IMPORT_OK no_ancestor_dependencies=1'))throw Error('RUNTIME_IMPORT_PROBE_FAILED');return result.trim();
+}
+export function runtimeInventory(target){
+  const files=[];
+  const walk=dir=>{for(const entry of fs.readdirSync(dir,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name))){const file=path.join(dir,entry.name);if(entry.isSymbolicLink())throw Error('RUNTIME_SYMLINK_REMAINING');if(entry.isDirectory())walk(file);else files.push({path:path.relative(target,file).replaceAll('\\','/'),size:fs.statSync(file).size,sha256:sha(file)});}};
+  walk(target);return files;
+}
+export function scanRuntimeInventory(files){
+  const forbidden=/(?:^|\/)(?:\.env(?:\..*)?|\.credentials[^/]*|cookies(?:\.sqlite)?|login data|local state|web data|employee[^/]*\.sqlite(?:-wal|-shm)?|sessions|logs|\.git|\.dsh|browser-profiles|naumi-desktop-bridge\.json|backend-link\.json|device-private-key[^/]*|.*\.(?:pem|pfx|key))$/i;
+  // SDK source directories named sessions are code, not a copied employee session store.
+  for(const file of files)if(forbidden.test(file.path)||/^(?:sessions|logs|browser-profiles)\//i.test(file.path)||/(?:^|\/)(?:\.git|\.dsh|browser-profiles)\//i.test(file.path))throw Error('RUNTIME_PRIVATE_FILE '+file.path);
+  return {files:files.length,forbiddenPaths:0};
+}
+export async function prepareRuntime({root=project,target=path.join(root,'runtime/desktop-backend'),archive=process.env.NAUMI_DINGTALK_ARCHIVE}={}){
+  root=path.resolve(root);target=path.resolve(target);
+  const runtime=path.join(root,'runtime');
+  if(!target.startsWith(runtime+path.sep)||fs.existsSync(target)&&fs.lstatSync(target).isSymbolicLink())throw Error('RUNTIME_TARGET_INVALID');
+  if(fs.existsSync(target)&&!fs.existsSync(path.join(target,'runtime-manifest.json')))throw Error('RUNTIME_TARGET_NOT_OWNED');
+  if(process.versions.node!=='24.19.0'||process.platform!=='win32'||process.arch!=='x64')throw Error('RUNTIME_BUILD_PLATFORM_VERSION');
+  auditPackage(path.join(root,'plugins/naumi-enterprise'),{checkInstalled:true});
+  fs.mkdirSync(runtime,{recursive:true});const staged=path.join(runtime,'desktop-stage-'+randomUUID());fs.mkdirSync(staged);
+  try{
+    // Only runtime dependencies and source plugins are input. No user home/profile/config is copied.
+    fs.cpSync(path.join(root,'node_modules'),path.join(staged,'node_modules'),{recursive:true,dereference:true,filter:source=>!source.split(path.sep).some(x=>['.cache','.bin','dingtalk-workspace-cli'].includes(x))});
+    fs.cpSync(path.join(root,'plugins'),path.join(staged,'plugins'),{recursive:true});
+    for(const [source,name]of [['naumi-enterprise','dsh-enterprise'],['naumi-ui-layout','dsh-ui-layout'],['naumi-sidebar-browser','dsh-sidebar-browser']])fs.cpSync(path.join(root,'plugins',source),path.join(staged,'node_modules/@naumi',name),{recursive:true});
+    fs.copyFileSync(process.execPath,path.join(staged,'node.exe'));
+    const defaults=path.join(staged,'defaults');fs.mkdirSync(defaults);
+    fs.writeFileSync(path.join(defaults,'profile.json'),JSON.stringify({name:'naumi-profile-web',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}},null,2));
+    fs.writeFileSync(path.join(defaults,'profile.yml'),'- id: ui-settings-general\n  config:\n    welcomeNoticeVersion: 2026-09-28.1\n');
+    fs.writeFileSync(path.join(defaults,'home.yml'),'- id: ui-theme\n  config:\n    preference: light\n- id: session-log-deepseek\n  config:\n    enabled: false\n');
+    fs.cpSync(path.join(root,'desktop/upstream'),path.join(staged,'licenses/harness-browser'),{recursive:true});
+    const dingtalk=await stageDingTalk(staged,{archive});
+    const closure=auditPackage(path.join(staged,'node_modules/@naumi/dsh-enterprise'),{checkInstalled:true,dependencyRoot:path.join(staged,'node_modules')});
+    verifyStagedImports(staged);
+    const inventory=runtimeInventory(staged),scan=scanRuntimeInventory(inventory);
+    fs.writeFileSync(path.join(staged,'runtime-files.json'),JSON.stringify(inventory,null,2)+'\n');
+    const manifest={product:'Naumi',schemaVersion:2,version:JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json'))).version,node:process.versions.node,harness:'0.2.2-rc.1',agentDesktop:'1.3.1',dingtalk,personalCredentials:false,browserProfiles:false,bootstrap:'offline',nodeSHA256:sha(path.join(staged,'node.exe')),inventorySHA256:sha(path.join(staged,'runtime-files.json')),closure,scan};
+    fs.writeFileSync(path.join(staged,'runtime-manifest.json'),JSON.stringify(manifest,null,2)+'\n');
+    // Publish only after import/closure/content checks. Preserve the preceding bundle for rollback.
+    let previous=null;if(fs.existsSync(target)){previous=target+'.previous-'+randomUUID();fs.renameSync(target,previous);}
+    try{fs.renameSync(staged,target);}catch(e){if(previous)fs.renameSync(previous,target);throw e;}
+    return {target,previous,...manifest};
+  }catch(e){
+    if(path.resolve(staged).startsWith(runtime+path.sep))fs.rmSync(staged,{recursive:true,force:true});
+    throw e;
+  }
+}
+if(process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url){
+  const result=await prepareRuntime();console.log('DESKTOP_RUNTIME_READY '+JSON.stringify({node:result.node,harness:result.harness,dingtalk:result.dingtalk.version,files:result.scan.files,closure:result.closure.status,forbiddenPaths:result.scan.forbiddenPaths,previous:result.previous}));
+}

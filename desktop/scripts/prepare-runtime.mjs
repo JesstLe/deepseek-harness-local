@@ -18,7 +18,7 @@ export function runtimeInventory(target){
   walk(target);return files;
 }
 export function scanRuntimeInventory(files){
-  const forbidden=/(?:^|\/)(?:\.env(?:\..*)?|\.credentials[^/]*|cookies(?:\.sqlite)?|login data|local state|web data|employee[^/]*\.sqlite(?:-wal|-shm)?|sessions|logs|\.git|\.dsh|browser-profiles|naumi-desktop-bridge\.json|backend-link\.json|device-private-key[^/]*|.*\.(?:pem|pfx|key))$/i;
+  const forbidden=/(?:^|\/)(?:\.env(?:\..*)?|\.credentials[^/]*|cookies(?:\.sqlite)?|login data|local state|web data|employee[^/]*\.sqlite(?:-wal|-shm)?|sessions|logs|\.git|\.dsh|browser-profiles|naumi-desktop-bridge\.json|backend-link\.json|desktop-(?:instance|profile|profile-journal|backend)\.json|device-private-key[^/]*|.*\.(?:pem|pfx|key))$/i;
   // SDK source directories named sessions are code, not a copied employee session store.
   for(const file of files)if(forbidden.test(file.path)||/^(?:sessions|logs|browser-profiles)\//i.test(file.path)||/(?:^|\/)(?:\.git|\.dsh|browser-profiles)\//i.test(file.path))throw Error('RUNTIME_PRIVATE_FILE '+file.path);
   return {files:files.length,forbiddenPaths:0};
@@ -47,7 +47,7 @@ export async function prepareRuntime({root=project,target=path.join(root,'runtim
     verifyStagedImports(staged);
     const inventory=runtimeInventory(staged),scan=scanRuntimeInventory(inventory);
     fs.writeFileSync(path.join(staged,'runtime-files.json'),JSON.stringify(inventory,null,2)+'\n');
-    const manifest={product:'Naumi',schemaVersion:2,version:JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json'))).version,node:process.versions.node,harness:'0.2.2-rc.1',agentDesktop:'1.3.1',dingtalk,personalCredentials:false,browserProfiles:false,bootstrap:'offline',nodeSHA256:sha(path.join(staged,'node.exe')),inventorySHA256:sha(path.join(staged,'runtime-files.json')),closure,scan};
+    const manifest={product:'Naumi',schemaVersion:2,desktop:{profileVersion:1,identityProtocol:1},version:JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json'))).version,node:process.versions.node,harness:'0.2.2-rc.1',agentDesktop:'1.3.1',dingtalk,personalCredentials:false,browserProfiles:false,bootstrap:'offline',nodeSHA256:sha(path.join(staged,'node.exe')),inventorySHA256:sha(path.join(staged,'runtime-files.json')),closure,scan};
     fs.writeFileSync(path.join(staged,'runtime-manifest.json'),JSON.stringify(manifest,null,2)+'\n');
     // Publish only after import/closure/content checks. Preserve the preceding bundle for rollback.
     let previous=null;if(fs.existsSync(target)){previous=target+'.previous-'+randomUUID();fs.renameSync(target,previous);}

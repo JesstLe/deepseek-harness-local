@@ -6,9 +6,11 @@ import {installEgoBrowser} from './browser.js';
 import {installTeamProfile} from './team-profile.js';
 import {installBots} from './bots.js';
 import {installDingTalk} from './dingtalk.js';
+import {installDesktopIdentity} from './desktop-identity.js';
 export const inject=['webServer','connection'];
 /** Supported plugin routes, index branding and an authenticated read-only business adapter. */
 export function apply(ctx,config) {
+  installDesktopIdentity(ctx);
   installAgentDesktop(ctx);
   installEgoBrowser(ctx);
   installDingTalk(ctx);

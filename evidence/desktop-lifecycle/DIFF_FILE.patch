@@ -1,0 +1,543 @@
+diff --git a/original/.gitattributes.snapshot b/modified/.gitattributes.snapshot
+index 3e7addc..e611265 100644
+--- a/original/.gitattributes.snapshot
++++ b/modified/.gitattributes.snapshot
+@@ -119,3 +119,9 @@ plugins/naumi-ui-layout/UPSTREAM.json text eol=lf
+ /plugins/naumi-enterprise/dingtalk*.js text eol=lf
+ /plugins/naumi-enterprise/dingtalk-skills/** text eol=lf
+ /scripts/audit-enterprise-package.mjs text eol=lf
++/evidence/desktop-lifecycle/** -text whitespace=cr-at-eol
++/evidence/desktop-lifecycle/DIFF_FILE.patch -text whitespace=-blank-at-eol
++/evidence/desktop-lifecycle/ROLLBACK.sh text eol=lf
++/plugins/naumi-enterprise/desktop-identity.js text eol=lf
++/scripts/*desktop-lifecycle*.mjs text eol=lf
++/docs/implementation/DESKTOP_LIFECYCLE_M5_2.md text eol=lf
+diff --git a/original/.gitignore b/modified/.gitignore
+index 791a0d2..479c78e 100644
+--- a/original/.gitignore
++++ b/modified/.gitignore
+@@ -10,3 +10,5 @@ __pycache__/
+ evidence/employee-package/research/
+ evidence/employee-package/rollback-copy-*/
+ evidence/employee-package/pack-*/
++evidence/desktop-lifecycle/rollback-copy-*/
++evidence/desktop-lifecycle/pack-*/
+diff --git a/original/desktop/app/backend.cjs b/modified/desktop/app/backend.cjs
+index f565b1b..fb43130 100644
+--- a/original/desktop/app/backend.cjs
++++ b/modified/desktop/app/backend.cjs
+@@ -1,46 +1,127 @@
+ 'use strict';
+-const fs=require('node:fs');
+-const path=require('node:path');
++const fs=require('node:fs'),path=require('node:path'),net=require('node:net');
+ const {spawn}=require('node:child_process');
+-const {createHash}=require('node:crypto');
++const {createHash,createHmac,randomBytes,randomUUID,timingSafeEqual}=require('node:crypto');
++const profile=require('./profile.cjs');
+ const delay=ms=>new Promise(r=>setTimeout(r,ms));
+-function localSettings(app){
+- let root=process.env.NAUMI_ROOT;
+- const link=path.join(app.getPath('userData'),'backend-link.json');
++function localURL(value){const u=new URL(value);if(u.protocol!=='http:'||u.hostname!=='127.0.0.1'||u.username||u.password||u.pathname!=='/'||u.search||u.hash||!u.port)throw Error('INVALID_LOCAL_BACKEND');return u.origin;}
++function localSettings(app,{resourcesPath=process.resourcesPath,environment=process.env}={}){
++ let root=environment.NAUMI_ROOT;const userData=app.getPath('userData'),link=path.join(userData,'backend-link.json');
+  if(!root&&app.isPackaged&&fs.existsSync(link))root=JSON.parse(fs.readFileSync(link,'utf8')).root;
+  if(!root&&!app.isPackaged)root=path.resolve(__dirname,'../..');
+  if(root){
+   root=path.resolve(root);const c=JSON.parse(fs.readFileSync(path.join(root,'config/local.json'),'utf8'));
+-  if(!['127.0.0.1','localhost'].includes(c.host)||!Number.isInteger(c.port))throw Error('INVALID_LOCAL_BACKEND');
+-  if(process.env.NAUMI_ROOT&&process.env.NAUMI_TEST!=='1'){fs.mkdirSync(path.dirname(link),{recursive:true});fs.writeFileSync(link,JSON.stringify({root},null,2)+'\n');}
+-  return {root,home:process.env.NAUMI_DSH_HOME??c.home,url:process.env.NAUMI_HOST_URL??`http://${c.host}:${c.port}`,node:process.env.NAUMI_NODE??'node.exe',logDir:path.join(root,'logs')};
++  if(!['127.0.0.1','localhost'].includes(c.host)||!Number.isInteger(c.port)||c.port<1||c.port>65535)throw Error('INVALID_LOCAL_BACKEND');
++  if(environment.NAUMI_ROOT&&environment.NAUMI_TEST!=='1'){fs.mkdirSync(path.dirname(link),{recursive:true});fs.writeFileSync(link,JSON.stringify({root},null,2)+'\n');}
++  return {root,home:environment.NAUMI_DSH_HOME??c.home,url:environment.NAUMI_HOST_URL??`http://${c.host}:${c.port}`,node:environment.NAUMI_NODE??'node.exe',logDir:path.join(root,'logs'),isolated:false};
+  }
+- root=path.join(process.resourcesPath,'backend');
+- const home=path.join(app.getPath('userData'),'harness'),profile=path.join(home,'profiles/web');
+- fs.mkdirSync(profile,{recursive:true});
+- for(const [file,template]of [['package.json','profile.json'],['cordis.patch.yml','profile.yml']])if(!fs.existsSync(path.join(profile,file)))fs.copyFileSync(path.join(root,'defaults',template),path.join(profile,file));
+- if(!fs.existsSync(path.join(home,'cordis.patch.yml')))fs.copyFileSync(path.join(root,'defaults/home.yml'),path.join(home,'cordis.patch.yml'));
+- if(!fs.existsSync(path.join(profile,'node_modules')))fs.symlinkSync(path.join(root,'node_modules'),path.join(profile,'node_modules'),'junction');
+- return {root,home,url:process.env.NAUMI_HOST_URL??'http://127.0.0.1:3080',node:path.join(root,'node.exe'),logDir:path.join(home,'logs')};
++ root=path.join(resourcesPath,'backend');const runtime=profile.runtimeReference(root),home=path.join(userData,'harness');
++ const legacyAdoption=fs.existsSync(path.join(home,'profiles/web/package.json'))&&!profile.exists(path.join(home,'desktop-profile.json'));
++ const identity=profile.identity(home),receipt=profile.runtimeReceipt(home,identity.id);
++ return {root,home,workspace:path.join(home,'workspace'),url:localURL(environment.NAUMI_HOST_URL??`http://127.0.0.1:${receipt?.port??3080}`),node:path.join(root,'node.exe'),logDir:path.join(home,'logs'),isolated:true,identity,runtime,legacyAdoption};
+ }
+ function launchFromLog(settings){
+  for(const name of ['server.out.log','server.err.log']){let text='';try{text=fs.readFileSync(path.join(settings.logDir,name),'utf8');}catch{}const urls=text.match(/http:\/\/127\.0\.0\.1:\d+\/?\?token=[A-Za-z0-9_~.%-]+/g)??[];for(const url of urls.reverse())if(new URL(url).origin===settings.url)return url;}
+  return settings.url;
+ }
+-async function ensureBackend(settings){
++async function waitBootstrap(settings,pid,{timeoutMs=90000,pollMs=350}={}){
++ const deadline=Date.now()+timeoutMs;
++ while(Date.now()<deadline){const url=launchFromLog(settings);if(new URL(url).searchParams.has('token'))return url;if(!alive(pid))throw Error('BACKEND_START_FAILED');await delay(pollMs);}
++ throw Error('BACKEND_BOOTSTRAP_TIMEOUT');
++}
++async function probeIdentity(settings,{fetcher=fetch}={}){
++ const nonce=randomBytes(32).toString('hex');
++ try{
++  const r=await fetcher(settings.url+'/naumi/desktop-instance',{redirect:'error',headers:{'x-naumi-desktop-challenge':nonce},signal:AbortSignal.timeout(1500)});if(!r.ok)return null;
++  const reader=r.body.getReader();let bytes=0,text='';for(;;){const {done,value}=await reader.read();if(done)break;bytes+=value.length;if(bytes>4096){await reader.cancel();return null;}text+=Buffer.from(value).toString('utf8');}
++  const v=JSON.parse(text);if(v.version!==1||v.id!==settings.identity.id||!Number.isInteger(v.pid)||v.pid<1||!/^[a-f0-9]{64}$/.test(v.bundleId)||!/^[a-f0-9]{64}$/.test(v.proof))return null;
++  const proof=createHmac('sha256',settings.identity.key).update([nonce,v.id,v.pid,v.bundleId].join('|')).digest();
++  return timingSafeEqual(proof,Buffer.from(v.proof,'hex'))?v:null;
++ }catch{return null;}
++}
++async function logoProbe(settings,{fetcher=fetch}={}){
+  const expected=createHash('sha256').update(fs.readFileSync(path.join(settings.root,'plugins/naumi-enterprise/assets/symbol.svg'))).digest('hex');
+- const probe=async()=>{try{const r=await fetch(settings.url+'/naumi/assets/symbol.svg',{signal:AbortSignal.timeout(1500)});if(!r.ok)return false;return createHash('sha256').update(Buffer.from(await r.arrayBuffer())).digest('hex')===expected;}catch{return false;}};
+- if(await probe())return {launchURL:launchFromLog(settings),owned:false};
+- // Never take over an unrelated process on the configured port.
+- try{await fetch(settings.url,{signal:AbortSignal.timeout(1000)});throw Error('LOCAL_PORT_OCCUPIED');}catch(e){if(e.message==='LOCAL_PORT_OCCUPIED')throw e;}
++ try{const r=await fetcher(settings.url+'/naumi/assets/symbol.svg',{signal:AbortSignal.timeout(1500),redirect:'error'});if(!r.ok)return false;return createHash('sha256').update(Buffer.from(await r.arrayBuffer())).digest('hex')===expected;}catch{return false;}
++}
++function portTaken(url){return new Promise(resolve=>{const u=new URL(url),s=net.connect({host:'127.0.0.1',port:Number(u.port)});let done=false;const end=value=>{if(done)return;done=true;s.destroy();resolve(value);};s.setTimeout(500,()=>end(true));s.once('connect',()=>end(true));s.once('error',e=>end(e.code!=='ECONNREFUSED'));});}
++function freePort(){return new Promise((resolve,reject)=>{const s=net.createServer();s.once('error',reject);s.listen(0,'127.0.0.1',()=>{const port=s.address().port;s.close(e=>e?reject(e):resolve(port));});});}
++function alive(pid){try{process.kill(pid,0);return true;}catch(e){return e.code!=='ESRCH';}}
++function saveReceipt(settings,value){profile.atomic(path.join(settings.home,'desktop-backend.json'),{version:1,ownerId:settings.identity.id,...value});}
++function clearReceipt(settings,runId){const file=path.join(settings.home,'desktop-backend.json');if(profile.runtimeReceipt(settings.home,settings.identity.id)?.runId===runId)fs.unlinkSync(file);}
++async function stopInstance(settings,pid,bundleId,{timeoutMs=10000}={}){
++ if(!alive(pid))return;
++ const remote=await probeIdentity(settings);if(!remote){if(!alive(pid))return;throw Error('BACKEND_STOP_UNKNOWN');}
++ if(remote.pid!==pid||remote.bundleId!==bundleId)throw Error('BACKEND_STOP_IDENTITY_CHANGED');
++ const nonce=randomBytes(32).toString('hex'),proof=createHmac('sha256',settings.identity.key).update(['stop',nonce,settings.identity.id,pid,bundleId].join('|')).digest('hex');
++ try{const r=await fetch(settings.url+'/naumi/desktop-instance',{method:'POST',redirect:'error',headers:{'x-naumi-desktop-challenge':nonce,'x-naumi-desktop-stop':proof},signal:AbortSignal.timeout(2000)});if(!r.ok)throw Error('STOP');await r.arrayBuffer();}catch{if(!alive(pid))return;throw Error('BACKEND_STOP_UNKNOWN');}
++ const deadline=Date.now()+timeoutMs;while(Date.now()<deadline){if(!alive(pid))return;await delay(50);}throw Error('BACKEND_STOP_UNKNOWN');
++}
++async function stopBackend(backend,{timeoutMs=10000}={}){
++ if(!backend?.owned)return;if(backend.stop){await backend.stop({timeoutMs});return;}if(!backend.child)return;
++ const child=backend.child;if(child.exitCode!==null||child.signalCode!==null)return;
++ const closed=new Promise(resolve=>child.once('close',()=>resolve(true)));if(!child.kill())throw Error('BACKEND_STOP_UNKNOWN');
++ let timer;const done=await Promise.race([closed,new Promise(resolve=>{timer=setTimeout(()=>resolve(false),timeoutMs);})]);clearTimeout(timer);if(!done)throw Error('BACKEND_STOP_UNKNOWN');
++}
++function createQuitGate({shutdown,onReady,onError}){
++ let phase='idle',flight;
++ return {beforeQuit(event){if(phase==='ready')return;event.preventDefault();if(flight)return;phase='stopping';flight=Promise.resolve().then(shutdown).then(()=>{phase='ready';onReady();},error=>{phase='failed';onError(error);});},settled:()=>flight??Promise.resolve(),get phase(){return phase;}};
++}
++async function ensureBackend(settings,{fetcher=fetch,startTimeoutMs=90000,pollMs=350,portRetries=2}={}){
++ if(settings.isolated){
++  settings.url=localURL(settings.url);profile.profileState(settings.home,settings.identity.id);const receipt=profile.runtimeReceipt(settings.home,settings.identity.id);
++  const candidate={...settings,url:receipt?`http://127.0.0.1:${receipt.port}`:settings.url},remote=await probeIdentity(candidate,{fetcher});
++  if(remote){
++   if(remote.bundleId!==settings.runtime.bundleId)throw Error('BACKEND_UPGRADE_REQUIRES_STOP');
++   settings.url=candidate.url;const launchURL=await waitBootstrap(settings,remote.pid,{timeoutMs:startTimeoutMs,pollMs});saveReceipt(settings,{pid:remote.pid,port:Number(new URL(settings.url).port),bundleId:remote.bundleId,phase:'ready',runId:receipt?.runId??randomUUID()});
++   return {launchURL,owned:true,reattached:true,instanceVerified:true,stop:options=>stopInstance(settings,remote.pid,remote.bundleId,options)};
++  }
++  if(receipt&&(receipt.pid===null||alive(receipt.pid)))throw Error(receipt.pid===null?'PROFILE_BACKEND_START_UNKNOWN':'PROFILE_BACKEND_UNREACHABLE');
++  if(await portTaken(settings.url)){
++   if(settings.legacyAdoption&&!receipt&&await logoProbe(settings,{fetcher}))throw Error('LEGACY_BACKEND_REQUIRES_STOP');
++   settings.url='http://127.0.0.1:'+await freePort();
++  }
++  profile.prepareProfile(settings);
++  settings.workspace??=path.join(settings.home,'workspace');
++  if(profile.exists(settings.workspace)&&(!fs.lstatSync(settings.workspace).isDirectory()||fs.lstatSync(settings.workspace).isSymbolicLink()))throw Error('PROFILE_WORKSPACE_UNMANAGED');
++  fs.mkdirSync(settings.workspace,{recursive:true});
++ }else{
++  if(await logoProbe(settings,{fetcher}))return {launchURL:launchFromLog(settings),owned:false};
++  if(await portTaken(settings.url))throw Error('LOCAL_PORT_OCCUPIED');
++ }
+  const entry=path.join(settings.root,'node_modules/@deepseek-ai/dsh/lib/bin.js');if(!fs.existsSync(entry))throw Error('BACKEND_RUNTIME_MISSING');
+  fs.mkdirSync(settings.logDir,{recursive:true});
+- const out=fs.openSync(path.join(settings.logDir,'server.out.log'),'w'),err=fs.openSync(path.join(settings.logDir,'server.err.log'),'w');
+- const target=new URL(settings.url),env={...process.env,PATH:path.join(settings.root,'bin')+path.delimiter+settings.root+path.delimiter+(process.env.PATH??''),DSH_HOME:settings.home,DSH_TELEMETRY_MODE:'DISABLED'};delete env.ELECTRON_RUN_AS_NODE;
+- const child=spawn(settings.node,[entry,'web','--host','127.0.0.1','--port',target.port,'--no-open'],{cwd:settings.root,env,windowsHide:true,stdio:['ignore',out,err]});fs.closeSync(out);fs.closeSync(err);
+- let error;child.on('error',e=>error=e);
+- const deadline=Date.now()+90000;
+- while(Date.now()<deadline){if(error||child.exitCode!==null)throw Error('BACKEND_START_FAILED');if(await probe())return {launchURL:launchFromLog(settings),owned:true,child};await delay(350);}
+- child.kill();throw Error('BACKEND_START_TIMEOUT');
+-}
+-module.exports={localSettings,ensureBackend,launchFromLog};
++ const target=new URL(settings.url),runId=randomUUID(),env={...process.env,PATH:path.join(settings.root,'bin')+path.delimiter+settings.root+path.delimiter+(process.env.PATH??''),DSH_HOME:settings.home,DSH_TELEMETRY_MODE:'DISABLED'};
++ delete env.ELECTRON_RUN_AS_NODE;delete env.NAUMI_DESKTOP_INSTANCE_ID;delete env.NAUMI_DESKTOP_BUNDLE_ID;
++ const base={pid:null,port:Number(target.port),bundleId:settings.runtime?.bundleId,phase:'starting',runId};
++ if(settings.isolated){env.NAUMI_DESKTOP_INSTANCE_ID=settings.identity.id;env.NAUMI_DESKTOP_BUNDLE_ID=settings.runtime.bundleId;}
++ let out,err;try{out=fs.openSync(path.join(settings.logDir,'server.out.log'),'w');err=fs.openSync(path.join(settings.logDir,'server.err.log'),'w');}catch(e){if(out!==undefined)fs.closeSync(out);throw e;}
++ let child;
++ // Windows libuv's non-detached child job dies with the GUI. Standalone workers have an
++ // independent lifetime, and are stopped only through their proven instance on normal quit.
++ try{if(settings.isolated)saveReceipt(settings,base);child=spawn(settings.node,[entry,'web','--host','127.0.0.1','--port',target.port,'--no-open'],{cwd:settings.isolated?settings.workspace:settings.root,env,detached:!!settings.isolated,windowsHide:true,stdio:['ignore',out,err]});}
++ catch(e){if(settings.isolated)clearReceipt(settings,runId);throw e;}
++ finally{fs.closeSync(out);fs.closeSync(err);}
++ let error;child.on('error',e=>error=e);const backend={owned:true,child,instanceVerified:!!settings.isolated};
++ try{
++  if(settings.isolated&&child.pid)saveReceipt(settings,{...base,pid:child.pid});
++  const deadline=Date.now()+startTimeoutMs;
++  while(Date.now()<deadline){
++   if(error||child.exitCode!==null||child.signalCode!==null)throw Error('BACKEND_START_FAILED');
++   const remote=settings.isolated?await probeIdentity(settings,{fetcher}):await logoProbe(settings,{fetcher});
++   if(remote){
++    if(settings.isolated&&(remote.pid!==child.pid||remote.bundleId!==settings.runtime.bundleId))throw Error('BACKEND_IDENTITY_CONFLICT');
++    const launchURL=settings.isolated?await waitBootstrap(settings,child.pid,{timeoutMs:Math.max(1,deadline-Date.now()),pollMs}):launchFromLog(settings);
++    if(settings.isolated)saveReceipt(settings,{...base,pid:child.pid,phase:'ready'});
++    return {...backend,launchURL,...(settings.isolated?{stop:options=>stopInstance(settings,child.pid,settings.runtime.bundleId,options)}:{})};
++   }
++   await delay(pollMs);
++  }
++  throw Error('BACKEND_START_TIMEOUT');
++ }catch(e){
++  if(child.pid)await stopBackend(backend);if(settings.isolated)clearReceipt(settings,runId);
++  let occupied=false;try{occupied=/EADDRINUSE/.test(fs.readFileSync(path.join(settings.logDir,'server.err.log'),'utf8'));}catch{}
++  if(settings.isolated&&e.message==='BACKEND_START_FAILED'&&occupied&&portRetries>0){settings.url='http://127.0.0.1:'+await freePort();return ensureBackend(settings,{fetcher,startTimeoutMs,pollMs,portRetries:portRetries-1});}
++  throw e;
++ }
++}
++module.exports={localSettings,ensureBackend,launchFromLog,localURL,probeIdentity,stopBackend,portTaken,createQuitGate};
+diff --git a/original/desktop/app/main.cjs b/modified/desktop/app/main.cjs
+index f8d2cb9..f7054da 100644
+--- a/original/desktop/app/main.cjs
++++ b/modified/desktop/app/main.cjs
+@@ -4,12 +4,12 @@ const fs=require('node:fs');
+ const {app,BrowserWindow,ipcMain,Menu,nativeTheme,shell}=require('electron');
+ const {Guests}=require('./guests.cjs');
+ const {startBridge}=require('./tools.cjs');
+-const {localSettings,ensureBackend}=require('./backend.cjs');
++const {localSettings,ensureBackend,stopBackend,createQuitGate}=require('./backend.cjs');
+ app.setName('Naumi');app.setAppUserModelId('com.naumi.desktop');
+ if(process.env.NAUMI_USER_DATA)app.setPath('userData',path.resolve(process.env.NAUMI_USER_DATA));
+ if(process.env.NAUMI_TEST_HIDDEN==='1'){app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');app.commandLine.appendSwitch('disable-renderer-backgrounding');}
+ const locked=app.requestSingleInstanceLock();
+-let window,primarySession,guests,bridge,backend,settings,quitting=false,booting=false;
++let window,primarySession,guests,bridge,backend,settings,booting=false;
+ if(!locked){app.quit();}else{
+ app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.show();window.focus();}});
+ app.whenReady().then(async()=>{
+@@ -37,9 +37,10 @@ app.whenReady().then(async()=>{
+  await showStartup();
+  if(process.env.NAUMI_TEST_HIDDEN!=='1')window.show();
+  await boot();
+- if(process.env.NAUMI_TEST==='1')globalThis.__naumiTest={window,guests,bridge,settings};
++ if(process.env.NAUMI_TEST==='1')globalThis.__naumiTest={window,guests,bridge,settings,backend};
+ }).catch(error=>{console.error('NAUMI_DESKTOP_START_FAILED',error.message);app.quit();});
+-app.on('before-quit',event=>{if(quitting)return;quitting=true;event.preventDefault();void(async()=>{try{await guests?.flush();await primarySession?.cookies.flushStore();}finally{await bridge?.close();if(backend?.owned)backend.child.kill();app.quit();}})().catch(()=>app.exit(1));});
++const quitGate=createQuitGate({shutdown:async()=>{try{await guests?.flush();await primarySession?.cookies.flushStore();}finally{await bridge?.close();await stopBackend(backend);}},onReady:()=>app.quit(),onError:()=>app.exit(1)});
++app.on('before-quit',event=>quitGate.beforeQuit(event));
+ app.on('window-all-closed',()=>app.quit());
+ }
+ async function showStartup(error=''){
+@@ -50,8 +51,9 @@ async function boot(){
+  if(booting)return;booting=true;
+  try{
+   settings??=localSettings(app);
++  const nextBackend=await ensureBackend(settings);
++  backend=backend?.owned&&!nextBackend.owned&&backend.child.exitCode===null&&backend.child.signalCode===null?{...nextBackend,owned:true,child:backend.child}:nextBackend;
+   if(!guests){guests=new Guests({hostURL:settings.url,account:'local',timeout:process.env.NAUMI_TEST==='1'?Number(process.env.NAUMI_TEST_TIMEOUT??30000):30000});guests.attach(window);}
+-  backend=await ensureBackend(settings);
+   if(!bridge)bridge=await startBridge({home:settings.home,guests,window});
+   await window.loadURL(backend.launchURL);
+  }catch(error){await showStartup(error.message);}
+diff --git a/modified/desktop/app/profile.cjs b/modified/desktop/app/profile.cjs
+new file mode 100644
+index 0000000..edfdeb6
+--- /dev/null
++++ b/modified/desktop/app/profile.cjs
+@@ -0,0 +1,69 @@
++'use strict';
++const fs=require('node:fs'),path=require('node:path'),{randomUUID,randomBytes,createHash}=require('node:crypto');
++const samePath=(a,b)=>path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase();
++const exists=p=>{try{fs.lstatSync(p);return true;}catch(e){if(e.code==='ENOENT')return false;throw e;}};
++function regular(p){if(exists(p)&&(!fs.lstatSync(p).isFile()||fs.lstatSync(p).isSymbolicLink()))throw Error('PROFILE_METADATA_INVALID');}
++function read(p){regular(p);try{return JSON.parse(fs.readFileSync(p,'utf8'));}catch{throw Error('PROFILE_METADATA_INVALID');}}
++function atomic(p,value){regular(p);const temp=p+'.'+randomUUID()+'.tmp';try{const fd=fs.openSync(temp,'wx',0o600);try{fs.writeFileSync(fd,JSON.stringify(value,null,2)+'\n');fs.fsyncSync(fd);}finally{fs.closeSync(fd);}fs.renameSync(temp,p);}finally{if(exists(temp))fs.unlinkSync(temp);}}
++function directory(p){if(exists(p)&&(!fs.lstatSync(p).isDirectory()||fs.lstatSync(p).isSymbolicLink()))throw Error('PROFILE_DIRECTORY_UNMANAGED');fs.mkdirSync(p,{recursive:true});}
++function identity(home){
++ directory(home);const file=path.join(home,'desktop-instance.json');
++ if(!exists(file))atomic(file,{version:1,id:randomUUID(),key:randomBytes(32).toString('hex')});
++ const value=read(file);if(value.version!==1||!/^[0-9a-f-]{36}$/.test(value.id)||!/^[0-9a-f]{64}$/.test(value.key))throw Error('PROFILE_IDENTITY_INVALID');return value;
++}
++function runtimeReference(root){
++ root=path.resolve(root);const manifest=read(path.join(root,'runtime-manifest.json'));
++ if(manifest.product!=='Naumi'||manifest.schemaVersion!==2||manifest.desktop?.profileVersion!==1||manifest.desktop?.identityProtocol!==1||!/^[a-f0-9]{64}$/.test(manifest.inventorySHA256))throw Error('RUNTIME_DESKTOP_CONTRACT_UNSUPPORTED');
++ if(createHash('sha256').update(fs.readFileSync(path.join(root,'runtime-files.json'))).digest('hex')!==manifest.inventorySHA256)throw Error('RUNTIME_INVENTORY_INVALID');
++ if(createHash('sha256').update(fs.readFileSync(path.join(root,'node.exe'))).digest('hex')!==manifest.nodeSHA256)throw Error('RUNTIME_NODE_INVALID');
++ if(!fs.statSync(path.join(root,'node_modules')).isDirectory())throw Error('RUNTIME_DEPENDENCIES_MISSING');
++ return {root,nodeModules:path.join(root,'node_modules'),bundleId:manifest.inventorySHA256,version:manifest.version};
++}
++function linkTarget(p){if(!exists(p))return null;if(!fs.lstatSync(p).isSymbolicLink())throw Error('PROFILE_DEPENDENCIES_UNMANAGED');return path.resolve(path.dirname(p),fs.readlinkSync(p));}
++function validReference(r){return r&&typeof r.root==='string'&&path.isAbsolute(r.root)&&r.nodeModules===path.join(r.root,'node_modules')&&/^[a-f0-9]{64}$/.test(r.bundleId)&&typeof r.version==='string';}
++function profileState(home,id){
++ const file=path.join(home,'desktop-profile.json');if(!exists(file))return null;
++ const value=read(file);if(value.version!==1||value.ownerId!==id||!validReference(value.current)||value.previous!==null&&!validReference(value.previous))throw Error('PROFILE_STATE_UNSUPPORTED');return value;
++}
++function stateFile(home){return path.join(home,'desktop-profile.json');}
++function journalFile(home){return path.join(home,'desktop-profile-journal.json');}
++/** Main process single-instance lock and absence of a live backend are preconditions. No employee data is migrated. */
++function recoverProfile(home,id){
++ const journal=journalFile(home);if(!exists(journal))return false;
++ const j=read(journal),profile=path.join(home,'profiles/web'),mount=path.join(profile,'node_modules');
++ if(j.version!==1||j.ownerId!==id||!validReference(j.to)||j.from!==null&&!validReference(j.from)||!/^\.naumi-dependencies-[0-9a-f-]{36}$/.test(j.backup)||!['prepared','switched'].includes(j.phase))throw Error('PROFILE_JOURNAL_INVALID');
++ const backup=path.join(profile,j.backup),current=linkTarget(mount),saved=linkTarget(backup),state=profileState(home,id);
++ if(saved&&(!j.from||!samePath(saved,j.from.nodeModules)))throw Error('PROFILE_MIGRATION_STATE_CONFLICT');
++ const committed=state?.current.bundleId===j.to.bundleId&&samePath(state.current.root,j.to.root)&&current&&samePath(current,j.to.nodeModules);
++ if(committed){if(saved)fs.unlinkSync(backup);fs.unlinkSync(journal);return true;}
++ if(current&&!samePath(current,j.to.nodeModules)&&(!j.from||!samePath(current,j.from.nodeModules)))throw Error('PROFILE_MIGRATION_STATE_CONFLICT');
++ if(saved){if(current)fs.unlinkSync(mount);fs.renameSync(backup,mount);}
++ else if(j.from){if(!current)fs.symlinkSync(j.from.nodeModules,mount,'junction');else if(!samePath(current,j.from.nodeModules))throw Error('PROFILE_MIGRATION_STATE_CONFLICT');}
++ else if(current)fs.unlinkSync(mount);
++ fs.unlinkSync(journal);return true;
++}
++function prepareProfile(settings,{fault=()=>{}}={}){
++ const {home,identity:id,runtime:target}=settings,profile=path.join(home,'profiles/web');
++ directory(home);directory(path.join(home,'profiles'));directory(profile);recoverProfile(home,id.id);
++ const state=profileState(home,id.id),mount=path.join(profile,'node_modules'),current=linkTarget(mount);
++ if(current&&(!state||!samePath(current,state.current.nodeModules))&&!samePath(current,target.nodeModules))throw Error('PROFILE_DEPENDENCIES_UNMANAGED');
++ if(state&&current&&!samePath(current,state.current.nodeModules))throw Error('PROFILE_MIGRATION_STATE_CONFLICT');
++ // Only the old default junction to this installation may be adopted without an ownership record.
++ const from=state?.current??(current?target:null),changed=!current||!samePath(current,target.nodeModules),backup='.naumi-dependencies-'+randomUUID();
++ const j={version:1,ownerId:id.id,from,to:target,backup,phase:'prepared'};atomic(journalFile(home),j);fault('prepared');
++ try{
++  if(changed){if(current)fs.renameSync(mount,path.join(profile,backup));fault('detached');fs.symlinkSync(target.nodeModules,mount,'junction');}
++  atomic(journalFile(home),{...j,phase:'switched'});fault('switched');
++  for(const [file,template]of [['package.json','profile.json'],['cordis.patch.yml','profile.yml']])if(!exists(path.join(profile,file)))fs.copyFileSync(path.join(target.root,'defaults',template),path.join(profile,file),fs.constants.COPYFILE_EXCL);
++  if(!exists(path.join(home,'cordis.patch.yml')))fs.copyFileSync(path.join(target.root,'defaults/home.yml'),path.join(home,'cordis.patch.yml'),fs.constants.COPYFILE_EXCL);
++  const previous=state&&(state.current.bundleId!==target.bundleId||!samePath(state.current.root,target.root))?state.current:state?.previous??null;
++  atomic(stateFile(home),{version:1,ownerId:id.id,current:target,previous});fault('committed');
++  if(exists(path.join(profile,backup)))fs.unlinkSync(path.join(profile,backup));fs.unlinkSync(journalFile(home));
++  return {version:1,bundleId:target.bundleId,switched:changed,adopted:!state&&!!current};
++ }catch(e){recoverProfile(home,id.id);throw e;}
++}
++function runtimeReceipt(home,id){
++ const file=path.join(home,'desktop-backend.json');if(!exists(file))return null;const r=read(file);
++ if(r.version!==1||r.ownerId!==id||!Number.isInteger(r.port)||r.port<1||r.port>65535||!['starting','ready'].includes(r.phase)||!(r.pid===null&&r.phase==='starting'||Number.isInteger(r.pid)&&r.pid>0)||!/^[a-f0-9]{64}$/.test(r.bundleId)||!/^[a-f0-9-]{36}$/.test(r.runId))throw Error('PROFILE_BACKEND_RECEIPT_INVALID');return r;
++}
++module.exports={identity,runtimeReference,prepareProfile,recoverProfile,runtimeReceipt,atomic,samePath,exists,profileState};
+diff --git a/original/desktop/scripts/prepare-runtime.mjs b/modified/desktop/scripts/prepare-runtime.mjs
+index b6f147a..4e6715d 100644
+--- a/original/desktop/scripts/prepare-runtime.mjs
++++ b/modified/desktop/scripts/prepare-runtime.mjs
+@@ -18,7 +18,7 @@ export function runtimeInventory(target){
+   walk(target);return files;
+ }
+ export function scanRuntimeInventory(files){
+-  const forbidden=/(?:^|\/)(?:\.env(?:\..*)?|\.credentials[^/]*|cookies(?:\.sqlite)?|login data|local state|web data|employee[^/]*\.sqlite(?:-wal|-shm)?|sessions|logs|\.git|\.dsh|browser-profiles|naumi-desktop-bridge\.json|backend-link\.json|device-private-key[^/]*|.*\.(?:pem|pfx|key))$/i;
++  const forbidden=/(?:^|\/)(?:\.env(?:\..*)?|\.credentials[^/]*|cookies(?:\.sqlite)?|login data|local state|web data|employee[^/]*\.sqlite(?:-wal|-shm)?|sessions|logs|\.git|\.dsh|browser-profiles|naumi-desktop-bridge\.json|backend-link\.json|desktop-(?:instance|profile|profile-journal|backend)\.json|device-private-key[^/]*|.*\.(?:pem|pfx|key))$/i;
+   // SDK source directories named sessions are code, not a copied employee session store.
+   for(const file of files)if(forbidden.test(file.path)||/^(?:sessions|logs|browser-profiles)\//i.test(file.path)||/(?:^|\/)(?:\.git|\.dsh|browser-profiles)\//i.test(file.path))throw Error('RUNTIME_PRIVATE_FILE '+file.path);
+   return {files:files.length,forbiddenPaths:0};
+@@ -47,7 +47,7 @@ export async function prepareRuntime({root=project,target=path.join(root,'runtim
+     verifyStagedImports(staged);
+     const inventory=runtimeInventory(staged),scan=scanRuntimeInventory(inventory);
+     fs.writeFileSync(path.join(staged,'runtime-files.json'),JSON.stringify(inventory,null,2)+'\n');
+-    const manifest={product:'Naumi',schemaVersion:2,version:JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json'))).version,node:process.versions.node,harness:'0.2.2-rc.1',agentDesktop:'1.3.1',dingtalk,personalCredentials:false,browserProfiles:false,bootstrap:'offline',nodeSHA256:sha(path.join(staged,'node.exe')),inventorySHA256:sha(path.join(staged,'runtime-files.json')),closure,scan};
++    const manifest={product:'Naumi',schemaVersion:2,desktop:{profileVersion:1,identityProtocol:1},version:JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json'))).version,node:process.versions.node,harness:'0.2.2-rc.1',agentDesktop:'1.3.1',dingtalk,personalCredentials:false,browserProfiles:false,bootstrap:'offline',nodeSHA256:sha(path.join(staged,'node.exe')),inventorySHA256:sha(path.join(staged,'runtime-files.json')),closure,scan};
+     fs.writeFileSync(path.join(staged,'runtime-manifest.json'),JSON.stringify(manifest,null,2)+'\n');
+     // Publish only after import/closure/content checks. Preserve the preceding bundle for rollback.
+     let previous=null;if(fs.existsSync(target)){previous=target+'.previous-'+randomUUID();fs.renameSync(target,previous);}
+diff --git a/modified/desktop/scripts/verify-desktop-lifecycle.mjs b/modified/desktop/scripts/verify-desktop-lifecycle.mjs
+new file mode 100644
+index 0000000..9d26f62
+--- /dev/null
++++ b/modified/desktop/scripts/verify-desktop-lifecycle.mjs
+@@ -0,0 +1,58 @@
++import {_electron as electron} from '../node_modules/playwright/index.mjs';
++import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import assert from 'node:assert/strict';import {createRequire} from 'node:module';import {fileURLToPath} from 'node:url';import {DatabaseSync} from 'node:sqlite';
++import {EmployeeStore} from '../../plugins/naumi-enterprise/employee-store.js';
++const root=fileURLToPath(new URL('../..',import.meta.url)),e=path.join(root,'evidence/desktop-lifecycle'),exe=path.join(root,'runtime/naumi-desktop-release/win-unpacked/Naumi.exe'),require=createRequire(import.meta.url),{probeIdentity}=require('../app/backend.cjs');
++const base=path.join(root,'.dsh/desktop-lifecycle-'+Date.now()),userA=path.join(base,'employee A'),userB=path.join(base,'employee B');fs.mkdirSync(e,{recursive:true});
++let foreignPosts=0;const logo=fs.readFileSync(path.join(root,'plugins/naumi-enterprise/assets/symbol.svg'));
++const fixture=http.createServer((q,r)=>{if(q.method==='POST')foreignPosts++;if(q.url==='/page'){r.setHeader('X-Frame-Options','DENY');r.setHeader('Content-Type','text/html');r.end('<title>Naumi Lifecycle Fixture</title><h1>Naumi</h1><input aria-label="Lifecycle input">');}else{r.setHeader('Content-Type','image/svg+xml');r.end(logo);}});await new Promise(r=>fixture.listen(0,'127.0.0.1',r));const preferred='http://127.0.0.1:'+fixture.address().port;
++const alive=pid=>{try{process.kill(pid,0);return true;}catch{return false;}};
++const handles=new Set();
++async function launch(userData){
++ const env={...process.env,NAUMI_USER_DATA:userData,NAUMI_HOST_URL:preferred,NAUMI_TEST:'1',NAUMI_TEST_HIDDEN:'1'};
++ for(const key of ['NAUMI_ROOT','NAUMI_DSH_HOME','NAUMI_NODE','ELECTRON_RUN_AS_NODE','NAUMI_DESKTOP_INSTANCE_ID','NAUMI_DESKTOP_BUNDLE_ID'])delete env[key];
++ env.PATH=process.env.SystemRoot+'\\System32;'+process.env.SystemRoot;
++ const app=await electron.launch({executablePath:exe,args:[],env,timeout:90000});handles.add(app);const page=await app.firstWindow();page.on('pageerror',error=>console.log('DESKTOP_PAGE_ERROR '+error.message));page.on('console',message=>{if(message.type()==='error')console.log('DESKTOP_CONSOLE '+message.text().replace(/token=[^&\s]+/g,'token=REDACTED'));});
++ await Promise.race([page.waitForURL(/^http:\/\/127\.0\.0\.1:/,{timeout:120000}),page.waitForURL('**/startup.html?error=**',{timeout:120000}).then(()=>{throw Error('LIFECYCLE_STARTUP '+new URL(page.url()).searchParams.get('error'));})]);
++ await page.getByRole('button',{name:'工作台',exact:true}).first().waitFor();
++ const deadline=Date.now()+15000;let info;
++ while(Date.now()<deadline){info=await app.evaluate(()=>{const t=globalThis.__naumiTest;if(!t)return null;return {shellPid:process.pid,home:t.settings.home,workspace:t.settings.workspace,url:t.settings.url,id:t.settings.identity.id,bundleId:t.settings.runtime.bundleId,verified:t.backend.instanceVerified,owned:t.backend.owned,reattached:t.backend.reattached??false};});if(info)break;await new Promise(r=>setTimeout(r,40));}
++ assert(info?.verified&&info.owned);assert.equal(info.workspace,path.join(info.home,'workspace'));fs.accessSync(info.workspace,fs.constants.W_OK);assert.notEqual(info.url,preferred);const receipt=JSON.parse(fs.readFileSync(path.join(info.home,'desktop-backend.json')));return {app,page,info,pid:receipt.pid};
++}
++async function waitGone(pid){const deadline=Date.now()+10000;while(Date.now()<deadline){if(!alive(pid))return;await new Promise(r=>setTimeout(r,40));}throw Error('PROCESS_EXIT_TIMEOUT');}
++async function close(value){if(!value)return;await value.app.close();handles.delete(value.app);await waitGone(value.info.shellPid);assert.equal(alive(value.pid),false,'managed backend must be observed stopped');}
++async function verifyEmployee(home){for(let attempt=0;;attempt++){let d;try{d=new DatabaseSync(path.join(home,'naumi/employees.sqlite'),{readOnly:true});const p=JSON.parse(d.prepare("SELECT json FROM entities WHERE bot_id='fixture-employee' AND id='profile'").get().json);assert.equal(p.persona,'retained persona');assert(d.prepare("SELECT json FROM entities WHERE bot_id='fixture-employee' AND type='memory'").all().some(r=>JSON.parse(r.json).text==='retained memory'));assert.equal(d.prepare('SELECT state FROM desktop_lifecycle_fixture').get().state,'unknown');assert.equal(d.prepare('PRAGMA user_version').get().user_version,1);return;}catch(error){if(error.errcode!==1546||attempt>=20)throw error;console.log('SQLITE_HANDOFF pending_ioerr=1546 retry='+attempt);await new Promise(r=>setTimeout(r,100));}finally{d?.close();}}}
++function seedEmployee(home){const store=new EmployeeStore(path.join(home,'naumi/employees.sqlite'));try{store.updateProfile('fixture-employee',{expectedRevision:0,operationId:'persona',patch:{persona:'retained persona'}});store.createMemory('fixture-employee',{operationId:'memory',kind:'fact',text:'retained memory'});store.db.exec("CREATE TABLE desktop_lifecycle_fixture(state TEXT);INSERT INTO desktop_lifecycle_fixture VALUES('unknown')");}finally{store.close();}}
++let a,b,restarted,recovered;
++try{
++ seedEmployee(path.join(userA,'harness'));
++ a=await launch(userA);b=await launch(userB);assert.notEqual(a.info.id,b.info.id);assert.notEqual(a.pid,b.pid);assert.notEqual(a.info.url,b.info.url);
++ await a.page.addLocatorHandler(a.page.getByRole('dialog').filter({hasText:'开始使用'}),async d=>{await d.getByRole('button',{name:'关闭',exact:true}).click();});
++ await a.page.getByRole('button',{name:'工作台',exact:true}).first().click();
++ await a.page.getByRole('button',{name:'AI 协作',exact:true}).click();await a.page.locator('button[aria-label="打开右侧边栏"],button[aria-label="收起右侧边栏"]').first().waitFor();const toggle=a.page.getByRole('button',{name:'打开右侧边栏',exact:true});if(await toggle.isVisible())await toggle.click();await a.page.getByText('浏览器',{exact:true}).last().click();const address=a.page.getByRole('textbox',{name:'输入 HTTP(S) 地址',exact:true});await address.fill(preferred+'/page');await address.press('Enter');
++ const deadline=Date.now()+15000;let partition;
++ while(Date.now()<deadline){partition=await a.app.evaluate(()=>{const entry=[...globalThis.__naumiTest.guests.leases.values()].find(v=>v.guest&&!v.guest.isDestroyed()&&v.guest.getTitle()==='Naumi Lifecycle Fixture');return entry?.partition??null;});if(partition)break;await new Promise(r=>setTimeout(r,40));}assert(partition);
++ await a.app.evaluate(async({session},{partition,url})=>{const s=session.fromPartition(partition);await s.cookies.set({url,name:'naumi_lifecycle_fixture',value:'retained-browser-state',expirationDate:Math.floor(Date.now()/1000)+3600});await s.cookies.flushStore();},{partition,url:preferred});
++ const otherCookies=await b.app.evaluate(async({session},{partition,url})=>session.fromPartition(partition).cookies.get({url,name:'naumi_lifecycle_fixture'}),{partition,url:preferred});assert.equal(otherCookies.length,0);
++ await a.page.screenshot({path:path.join(e,'desktop-lifecycle.png')});const first=a;await close(a);a=null;
++ await verifyEmployee(first.info.home);
++ restarted=await launch(userA);assert.equal(restarted.info.id,first.info.id);assert.notEqual(restarted.pid,first.pid);await verifyEmployee(restarted.info.home);
++ const cookies=await restarted.app.evaluate(async({session},{partition,url})=>session.fromPartition(partition).cookies.get({url,name:'naumi_lifecycle_fixture'}),{partition,url:preferred});assert.equal(cookies[0]?.value,'retained-browser-state');
++ // On Windows Playwright.process() is a cmd.exe launcher, not the Electron main process.
++ // Kill only the exact main PID read inside this owned test application's main context.
++ process.kill(restarted.info.shellPid,'SIGKILL');await waitGone(restarted.info.shellPid);handles.delete(restarted.app);
++ assert(alive(restarted.pid),'backend survives a parent-only crash for proven reattachment');const identity=JSON.parse(fs.readFileSync(path.join(restarted.info.home,'desktop-instance.json')));let recoveredProof;const proofDeadline=Date.now()+3000;while(Date.now()<proofDeadline&&alive(restarted.pid)){recoveredProof=await probeIdentity({...restarted.info,identity});if(recoveredProof)break;await new Promise(r=>setTimeout(r,50));}assert.equal(recoveredProof?.pid,restarted.pid);
++ recovered=await launch(userA);assert.equal(recovered.info.id,first.info.id);assert.equal(recovered.pid,restarted.pid);assert.equal(recovered.info.reattached,true);await verifyEmployee(recovered.info.home);
++ await close(recovered);recovered=null;await close(b);b=null;assert.equal(foreignPosts,0);assert.equal((await fetch(preferred)).status,200);
++ const report={status:'PASS',acceptance:'unpacked desktop, not NSIS installation',profiles:2,instanceIdsSeparated:true,foreignLogoAttached:false,foreignProcessStopped:false,portsSeparated:true,nativeBrowser:true,browserStateRetained:true,browserStateCrossProfileLeaked:false,employeePersonaRetained:true,employeeMemoryRetained:true,unknownFixtureRetained:true,employeeSchema:1,parentCrashRecovered:true,originalBackendPidReused:true,reattachedShutdownObserved:true,developmentPath:false,liveEmployeeProfilesTouched:false};
++ fs.writeFileSync(path.join(e,'DESKTOP_LIFECYCLE.json'),JSON.stringify(report,null,2)+'\n');
++ console.log('DESKTOP_LIFECYCLE profiles=2 logo_attach=0 ports=separate native_browser=1 browser_state=retained cross_profile_leak=0');
++ console.log('DESKTOP_RECOVERY normal_restart=PASS parent_crash=PASS original_backend_pid=retained authenticated_stop=PASS');
++ console.log('DESKTOP_DATA persona=retained memory=retained unknown_fixture=retained schema=1 development_path=0 live_data=untouched');
++}catch(error){
++ let index=0;for(const app of handles){try{const page=await app.firstWindow();fs.writeFileSync(path.join(e,'UI_FAILURE_'+index+'.txt'),await page.locator('body').innerText());await page.screenshot({path:path.join(e,'UI_FAILURE_'+index+'.png'),timeout:5000});index++;}catch{}}
++ throw error;
++}finally{
++ for(const app of handles)await app.close().catch(()=>{});
++ // No PID-based kill of a reattached or unrelated process. Its proven instance API owns shutdown.
++ fixture.closeAllConnections();await new Promise(r=>fixture.close(r));
++}
+diff --git a/original/desktop/scripts/verify-staged-runtime.cjs b/modified/desktop/scripts/verify-staged-runtime.cjs
+index c70cd1e..56bac34 100644
+--- a/original/desktop/scripts/verify-staged-runtime.cjs
++++ b/modified/desktop/scripts/verify-staged-runtime.cjs
+@@ -3,7 +3,7 @@ const fs=require('node:fs'),path=require('node:path'),{createHash}=require('node
+ const sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+ function verifyStagedRuntime(root=path.resolve(__dirname,'../..')){
+  const target=path.join(root,'runtime/desktop-backend'),manifest=JSON.parse(fs.readFileSync(path.join(target,'runtime-manifest.json'))),inventory=path.join(target,'runtime-files.json');
+- if(manifest.schemaVersion!==2||manifest.dingtalk?.version!=='1.0.68'||manifest.inventorySHA256!==sha(inventory))throw Error('STAGED_MANIFEST_INVALID');
++ if(manifest.schemaVersion!==2||manifest.desktop?.profileVersion!==1||manifest.desktop?.identityProtocol!==1||manifest.dingtalk?.version!=='1.0.68'||manifest.inventorySHA256!==sha(inventory))throw Error('STAGED_MANIFEST_INVALID');
+  if(manifest.version!==JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json'))).version)throw Error('STAGED_VERSION_STALE');
+  const files=JSON.parse(fs.readFileSync(inventory)),expected=new Set(['runtime-manifest.json','runtime-files.json']);
+  for(const item of files){
+diff --git a/modified/desktop/tests/backend.test.cjs b/modified/desktop/tests/backend.test.cjs
+new file mode 100644
+index 0000000..ef66a92
+--- /dev/null
++++ b/modified/desktop/tests/backend.test.cjs
+@@ -0,0 +1,57 @@
++'use strict';
++const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os'),http=require('node:http');
++const {createHash,createHmac,randomUUID}=require('node:crypto'),{spawn,spawnSync}=require('node:child_process'),{pathToFileURL}=require('node:url');
++const {identity,runtimeReference,prepareProfile,recoverProfile,runtimeReceipt,atomic,profileState}=require('../app/profile.cjs');
++const {localSettings,ensureBackend,stopBackend,probeIdentity,localURL,launchFromLog,createQuitGate}=require('../app/backend.cjs');
++const sha=b=>createHash('sha256').update(b).digest('hex'),source=path.resolve(__dirname,'../..'),identityModule=pathToFileURL(path.join(source,'plugins/naumi-enterprise/desktop-identity.js')).href;
++function fixture(){
++ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-desktop-life-'));
++ const write=(p,value)=>{p=path.join(dir,p);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,typeof value==='string'?value:JSON.stringify(value));return p;};
++ function bundle(name,{bootstrapDelayMs=0}={}){
++  const root=path.join(dir,name),files=JSON.stringify({fixture:name}),exe='fixture-executable';
++  write(name+'/node_modules/.keep','');write(name+'/runtime-files.json',files);write(name+'/node.exe',exe);
++  write(name+'/runtime-manifest.json',{product:'Naumi',schemaVersion:2,desktop:{profileVersion:1,identityProtocol:1},version:name,inventorySHA256:sha(files),nodeSHA256:sha(exe)});
++  for(const [n,t]of [['profile.json','{"name":"fresh-profile"}'],['profile.yml','fresh-profile'],['home.yml','fresh-home']])write(name+'/defaults/'+n,t);
++  write(name+'/plugins/naumi-enterprise/assets/symbol.svg','fixture-naumi-logo');
++  const program=`const http=require('http'),fs=require('fs'),path=require('path');void(async()=>{const {desktopIdentityHandler}=await import(${JSON.stringify(identityModule)});const home=process.env.DSH_HOME,id=JSON.parse(fs.readFileSync(path.join(home,'desktop-instance.json'))),handler=desktopIdentityHandler({...id,bundleId:process.env.NAUMI_DESKTOP_BUNDLE_ID}),port=Number(process.argv[process.argv.indexOf('--port')+1]);const server=http.createServer((q,r)=>{if(q.url==='/naumi/desktop-instance')handler(q,r);else r.end('fixture-naumi-logo');});server.on('error',e=>{console.error(e.code);process.exit(1);});server.listen(port,'127.0.0.1',()=>setTimeout(()=>console.log('http://127.0.0.1:'+port+'/?token=fixture-token'),${bootstrapDelayMs}));})();`;
++  write(name+'/node_modules/@deepseek-ai/dsh/lib/bin.js',program);return runtimeReference(root);
++ }
++ function settings(name,runtime,port=33000+Math.floor(Math.random()*20000)){const home=path.join(dir,name);return {root:runtime.root,home,runtime,identity:identity(home),url:'http://127.0.0.1:'+port,node:process.execPath,logDir:path.join(home,'logs'),isolated:true,legacyAdoption:false};}
++ return {dir,write,bundle,settings,close(){assert(path.resolve(dir).startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(dir,{recursive:true,force:true});}};
++}
++const mount=s=>fs.readlinkSync(path.join(s.home,'profiles/web/node_modules'));
++const state=s=>profileState(s.home,s.identity.id);
++async function listen(handler){const s=http.createServer(handler);await new Promise(r=>s.listen(0,'127.0.0.1',r));return {s,port:s.address().port,async close(){s.closeAllConnections();await new Promise(r=>s.close(r));}};}
++const options={startTimeoutMs:8000,pollMs:35};
++
++test('employee identity persists across starts and separates profiles without putting its key in settings URLs',()=>{const f=fixture();try{const a=identity(f.dir+'/a'),again=identity(f.dir+'/a'),b=identity(f.dir+'/b');assert.deepEqual(a,again);assert.notEqual(a.id,b.id);assert.notEqual(a.key,b.key);assert.equal(a.key.length,64);f.write('a/desktop-instance.json',{version:99});assert.throws(()=>identity(f.dir+'/a'),/IDENTITY_INVALID/);}finally{f.close();}});
++test('runtime contract verifies inventory, bundled Node and known profile version before adopting data',()=>{const f=fixture();try{const a=f.bundle('a');f.write('a/runtime-files.json','tampered');assert.throws(()=>runtimeReference(a.root),/INVENTORY_INVALID/);f.bundle('a');f.write('a/node.exe','tampered');assert.throws(()=>runtimeReference(a.root),/NODE_INVALID/);f.bundle('a');const p=path.join(a.root,'runtime-manifest.json'),m=JSON.parse(fs.readFileSync(p));m.desktop.profileVersion=99;fs.writeFileSync(p,JSON.stringify(m));assert.throws(()=>runtimeReference(a.root),/CONTRACT_UNSUPPORTED/);}finally{f.close();}});
++test('new profile defaults are installed once and existing config/data survive dependency upgrade and rollback',()=>{const f=fixture();try{const a=f.bundle('a'),b=f.bundle('b'),s=f.settings('employee',a);prepareProfile(s);f.write('employee/profiles/web/package.json','{"name":"custom"}');f.write('employee/cordis.patch.yml','custom-home');const data=f.write('employee/employees.sqlite','retained bytes'),before=sha(fs.readFileSync(data));prepareProfile({...s,root:b.root,runtime:b});assert.equal(path.resolve(mount(s)),b.nodeModules);assert.equal(state(s).previous.bundleId,a.bundleId);prepareProfile(s);assert.equal(path.resolve(mount(s)),a.nodeModules);assert.equal(fs.readFileSync(s.home+'/profiles/web/package.json','utf8'),'{"name":"custom"}');assert.equal(fs.readFileSync(s.home+'/cordis.patch.yml','utf8'),'custom-home');assert.equal(sha(fs.readFileSync(data)),before);}finally{f.close();}});
++test('real employee SQLite, browser bytes and uncertain operation records survive runtime-version switching',async()=>{
++ const f=fixture();try{const {EmployeeStore}=await import(pathToFileURL(path.join(source,'plugins/naumi-enterprise/employee-store.js'))),a=f.bundle('a'),b=f.bundle('b'),s=f.settings('employee',a);prepareProfile(s);const file=s.home+'/employees.sqlite',db=new EmployeeStore(file);db.updateProfile('employee',{expectedRevision:0,operationId:'profile',patch:{persona:'retained persona'}});db.createMemory('employee',{operationId:'memory',kind:'fact',text:'retained memory'});db.db.exec("CREATE TABLE lifecycle_fixture(id TEXT PRIMARY KEY,state TEXT);INSERT INTO lifecycle_fixture VALUES('original-operation','unknown')");db.close();const before=sha(fs.readFileSync(file)),browser=f.write('employee/browser/Local State','retained browser bytes'),browserHash=sha(fs.readFileSync(browser));prepareProfile({...s,root:b.root,runtime:b});prepareProfile(s);assert.equal(sha(fs.readFileSync(file)),before);assert.equal(sha(fs.readFileSync(browser)),browserHash);const reopened=new EmployeeStore(file);try{assert.equal(reopened.profile('employee').persona,'retained persona');assert.equal(reopened.allMemories('employee')[0].text,'retained memory');assert.equal(reopened.db.prepare('SELECT state FROM lifecycle_fixture WHERE id=?').get('original-operation').state,'unknown');assert.equal(reopened.db.prepare('PRAGMA user_version').get().user_version,1);}finally{reopened.close();}}finally{f.close();}
++});
++test('legacy default junction is adopted only when it points to this runtime',()=>{const f=fixture();try{const a=f.bundle('a'),b=f.bundle('b'),s=f.settings('employee',a),p=s.home+'/profiles/web';fs.mkdirSync(p,{recursive:true});fs.symlinkSync(a.nodeModules,p+'/node_modules','junction');assert.equal(prepareProfile(s).adopted,true);const other=f.settings('other',a),q=other.home+'/profiles/web';fs.mkdirSync(q,{recursive:true});fs.symlinkSync(b.nodeModules,q+'/node_modules','junction');assert.throws(()=>prepareProfile(other),/DEPENDENCIES_UNMANAGED/);assert.equal(path.resolve(fs.readlinkSync(q+'/node_modules')),b.nodeModules);}finally{f.close();}});
++test('real user dependency directories and metadata symlinks are preserved instead of replaced',()=>{const f=fixture();try{const a=f.bundle('a'),s=f.settings('employee',a),keep=f.write('employee/profiles/web/node_modules/personal.txt','keep');assert.throws(()=>prepareProfile(s),/DEPENDENCIES_UNMANAGED/);assert.equal(fs.readFileSync(keep,'utf8'),'keep');const other=f.settings('other',a);f.write('outside/keep','preserved');fs.symlinkSync(f.dir+'/outside',other.home+'/desktop-profile.json','junction');assert.throws(()=>prepareProfile(other),/METADATA_INVALID/);fs.unlinkSync(other.home+'/desktop-profile.json');}finally{f.close();}});
++test('future profile metadata fails closed without changing employee data or dependency junction',()=>{const f=fixture();try{const a=f.bundle('a'),s=f.settings('employee',a);prepareProfile(s);const p=s.home+'/desktop-profile.json',value=JSON.parse(fs.readFileSync(p));value.version=99;fs.writeFileSync(p,JSON.stringify(value));const before=fs.readFileSync(p);assert.throws(()=>prepareProfile(s),/STATE_UNSUPPORTED/);assert.deepEqual(fs.readFileSync(p),before);assert.equal(path.resolve(mount(s)),a.nodeModules);}finally{f.close();}});
++test('hard process exits at all upgrade checkpoints recover the exact prior or committed mount without touching data',()=>{const f=fixture();try{const a=f.bundle('a'),b=f.bundle('b');for(const phase of ['prepared','detached','switched','committed']){const s=f.settings(phase,a);prepareProfile(s);const data=f.write(phase+'/employee-data.txt','retained-'+phase),before=sha(fs.readFileSync(data)),next={...s,root:b.root,runtime:b};const script=`const{prepareProfile}=require(${JSON.stringify(path.join(source,'desktop/app/profile.cjs'))});prepareProfile(${JSON.stringify(next)},{fault:p=>{if(p===${JSON.stringify(phase)})process.exit(73);}});`;const child=spawnSync(process.execPath,['-e',script],{encoding:'utf8'});assert.equal(child.status,73,child.stderr);assert.equal(recoverProfile(s.home,s.identity.id),true);assert.equal(path.resolve(mount(s)),phase==='committed'?b.nodeModules:a.nodeModules);assert.equal(sha(fs.readFileSync(data)),before);assert(!fs.existsSync(s.home+'/desktop-profile-journal.json'));assert(!fs.readdirSync(s.home+'/profiles/web').some(n=>n.startsWith('.naumi-dependencies-')));}}finally{f.close();}});
++test('a hard exit during first profile creation recovers without inventing employee state',()=>{const f=fixture();try{const a=f.bundle('a'),s=f.settings('employee',a);assert.throws(()=>prepareProfile(s,{fault:phase=>{if(phase==='prepared')throw Error('FIXTURE');}}),/FIXTURE/);assert.equal(recoverProfile(s.home,s.identity.id),true);prepareProfile(s);assert.equal(state(s).current.bundleId,a.bundleId);}finally{f.close();}});
++test('a modified journal cannot target unrelated directories',()=>{const f=fixture();try{const a=f.bundle('a'),s=f.settings('employee',a);prepareProfile(s);f.write('employee/desktop-profile-journal.json',{version:1,ownerId:s.identity.id,from:a,to:a,backup:'../../outside',phase:'prepared'});assert.throws(()=>recoverProfile(s.home,s.identity.id),/JOURNAL_INVALID/);assert.equal(path.resolve(mount(s)),a.nodeModules);}finally{f.close();}});
++test('desktop proofs are fresh, profile-bound and do not expose keys; origin and mutation requests are rejected',async()=>{const f=fixture();let server;try{const {desktopIdentityHandler}=await import(identityModule),a=f.bundle('a'),s=f.settings('employee',a),handler=desktopIdentityHandler({...s.identity,bundleId:a.bundleId});server=await listen(handler);s.url='http://127.0.0.1:'+server.port;const p=await probeIdentity(s);assert.equal(p.id,s.identity.id);assert(!JSON.stringify(p).includes(s.identity.key));assert.equal(await probeIdentity({...s,identity:{...s.identity,key:'0'.repeat(64)}}),null);assert.equal(await probeIdentity(s,{fetcher:async()=>Response.json(p)}),null);for(const request of [{},{headers:{'x-naumi-desktop-challenge':'a'.repeat(64),origin:'https://foreign.example'}},{method:'POST'}])assert([403,405].includes((await fetch(s.url,request)).status));}finally{await server?.close();f.close();}});
++test('standalone first-use workspace uses the original registry transaction and preserves existing choices',async()=>{
++ const f=fixture();try{const {installDesktopIdentity}=await import(identityModule),a=f.bundle('a'),s=f.settings('employee',a),env={DSH_HOME:s.home,NAUMI_DESKTOP_INSTANCE_ID:s.identity.id,NAUMI_DESKTOP_BUNDLE_ID:a.bundleId};for(const eligible of [true,false]){const pending=[],resolved=[];const ctx={effect:fn=>fn(),webServer:{register:()=>()=>{}},inject(names,apply){assert.deepEqual(names,['workspaceRegistry']);pending.push(apply({workspaceRegistry:{async initializeDefault(resolve){if(eligible)resolved.push(await resolve());}}}));}};installDesktopIdentity(ctx,env);await Promise.all(pending);assert.deepEqual(resolved,eligible?[path.join(s.home,'workspace')]:[]);}}finally{f.close();}
++});
++test('a matching Logo on another service never attaches a clean employee profile; its port and process stay intact',async()=>{const f=fixture();let foreign,backend;try{foreign=await listen((_q,r)=>r.end('fixture-naumi-logo'));const a=f.bundle('a'),s=f.settings('employee',a,foreign.port);backend=await ensureBackend(s,options);assert.equal(backend.owned,true);assert.equal(backend.instanceVerified,true);assert.notEqual(new URL(s.url).port,String(foreign.port));assert.equal((await probeIdentity(s)).pid,backend.child.pid);assert.equal(await (await fetch('http://127.0.0.1:'+foreign.port)).text(),'fixture-naumi-logo');}finally{await stopBackend(backend);await foreign?.close();f.close();}});
++test('listener/identity readiness is not bootstrap readiness; delayed owner URL is awaited before navigation',async()=>{const f=fixture();let backend;try{const a=f.bundle('a',{bootstrapDelayMs:250}),s=f.settings('employee',a);backend=await ensureBackend(s,options);assert.equal(new URL(backend.launchURL).searchParams.get('token'),'fixture-token');assert.equal(runtimeReceipt(s.home,s.identity.id).phase,'ready');}finally{await stopBackend(backend);f.close();}});
++test('graceful stop requires a profile/pid/bundle-bound proof and invokes only the proven process callback',async()=>{const f=fixture();let server;try{const {desktopIdentityHandler}=await import(identityModule),a=f.bundle('a'),s=f.settings('employee',a);let stops=0;const handler=desktopIdentityHandler({...s.identity,bundleId:a.bundleId,pid:123,onStop:()=>stops++});server=await listen((req,res)=>{const end=res.end;res.end=function(body){return end.call(this,body);};handler(req,res);});const nonce='c'.repeat(64),url='http://127.0.0.1:'+server.port;for(const invalid of ['0'.repeat(64),createHmac('sha256',s.identity.key).update(['stop',nonce,s.identity.id,456,a.bundleId].join('|')).digest('hex')])assert.equal((await fetch(url,{method:'POST',headers:{'x-naumi-desktop-challenge':nonce,'x-naumi-desktop-stop':invalid}})).status,403);assert.equal(stops,0);const proof=createHmac('sha256',s.identity.key).update(['stop',nonce,s.identity.id,123,a.bundleId].join('|')).digest('hex');assert.equal((await fetch(url,{method:'POST',headers:{'x-naumi-desktop-challenge':nonce,'x-naumi-desktop-stop':proof}})).status,200);await new Promise(r=>setImmediate(r));assert.equal(stops,1);}finally{await server?.close();f.close();}});
++test('a live owned process is reattached only with proof, then restart keeps identity and existing data',async()=>{const f=fixture();let first,second;try{const a=f.bundle('a'),s=f.settings('employee',a);first=await ensureBackend(s,options);const attached=await ensureBackend(s,options);assert.equal(attached.owned,true);assert.equal(attached.reattached,true);assert.equal(attached.instanceVerified,true);assert.equal(attached.launchURL,first.launchURL);assert.equal((await probeIdentity(s)).pid,first.child.pid);f.write('employee/retained.txt','data');await stopBackend(attached);await stopBackend(first);const id=s.identity.id;second=await ensureBackend(s,options);assert.equal(s.identity.id,id);assert.equal(fs.readFileSync(s.home+'/retained.txt','utf8'),'data');assert.notEqual(first.child.pid,second.child.pid);}finally{await stopBackend(first);await stopBackend(second);f.close();}});
++test('parallel clean profiles survive a real preferred-port bind race without sharing a backend',async()=>{const f=fixture();let one,two;const reservation=await listen((_q,r)=>r.end());const port=reservation.port;await reservation.close();try{const a=f.bundle('a'),s=f.settings('one',a,port),t=f.settings('two',a,port);[one,two]=await Promise.all([ensureBackend(s,options),ensureBackend(t,options)]);assert.notEqual(s.url,t.url);assert.notEqual((await probeIdentity(s)).id,(await probeIdentity(t)).id);assert.notEqual(one.child.pid,two.child.pid);}finally{await stopBackend(one);await stopBackend(two);f.close();}});
++test('upgrade refuses to move a live old-bundle profile, then upgrades after an observed stop',async()=>{const f=fixture();let old,newer;try{const a=f.bundle('a'),b=f.bundle('b'),s=f.settings('employee',a);old=await ensureBackend(s,options);await assert.rejects(ensureBackend({...s,root:b.root,runtime:b},options),/UPGRADE_REQUIRES_STOP/);assert.equal(path.resolve(mount(s)),a.nodeModules);assert.equal((await probeIdentity(s)).pid,old.child.pid);await stopBackend(old);newer=await ensureBackend({...s,root:b.root,runtime:b},options);assert.equal(path.resolve(mount(s)),b.nodeModules);}finally{await stopBackend(old);await stopBackend(newer);f.close();}});
++test('unknown starting and live-unreachable receipts never spawn a duplicate or kill another process',async()=>{const f=fixture();try{const a=f.bundle('a'),s=f.settings('employee',a);for(const pid of [null,process.pid]){atomic(s.home+'/desktop-backend.json',{version:1,ownerId:s.identity.id,port:1,pid,bundleId:a.bundleId,phase:'starting',runId:randomUUID()});await assert.rejects(ensureBackend(s,options),pid===null?/START_UNKNOWN/:/UNREACHABLE/);assert.equal(runtimeReceipt(s.home,s.identity.id).pid,pid);assert(!fs.existsSync(s.home+'/desktop-profile.json'));}}finally{f.close();}});
++test('standalone worker survives a real launcher SIGKILL and is reattached/stopped through its original identity',async()=>{
++ const f=fixture();let launcher,backend;try{const a=f.bundle('a'),s=f.settings('employee',a),code=`const{ensureBackend}=require(${JSON.stringify(path.join(source,'desktop/app/backend.cjs'))});void(async()=>{await ensureBackend(${JSON.stringify(s)},{startTimeoutMs:8000,pollMs:35});console.log('FIXTURE_READY');setInterval(()=>{},1000);})();`;launcher=spawn(process.execPath,['-e',code],{windowsHide:true,stdio:['ignore','pipe','pipe']});await new Promise((resolve,reject)=>{let output='';const timer=setTimeout(()=>reject(Error('FIXTURE_START_TIMEOUT')),10000);launcher.stdout.on('data',b=>{output+=b.toString();if(output.includes('FIXTURE_READY')){clearTimeout(timer);resolve();}});launcher.once('error',reject);launcher.once('exit',code=>{if(code!==null&&code!==0){clearTimeout(timer);reject(Error('FIXTURE_EXIT'));}});});const receipt=runtimeReceipt(s.home,s.identity.id),exited=new Promise(r=>launcher.once('exit',r));launcher.kill('SIGKILL');await exited;assert.equal((await probeIdentity({...s,url:'http://127.0.0.1:'+receipt.port})).pid,receipt.pid);backend=await ensureBackend(s,options);assert.equal(backend.reattached,true);assert.equal(runtimeReceipt(s.home,s.identity.id).pid,receipt.pid);}finally{if(launcher?.exitCode===null&&launcher?.signalCode===null)launcher.kill();await stopBackend(backend);f.close();}
++});
++test('known failed spawn clears its own starting receipt instead of leaving a false UNKNOWN',async()=>{const f=fixture();try{const a=f.bundle('a'),s=f.settings('employee',a);s.node=f.dir+'/missing.exe';await assert.rejects(ensureBackend(s,options),/BACKEND_START_FAILED/);assert.equal(runtimeReceipt(s.home,s.identity.id),null);}finally{f.close();}});
++test('legacy data with an unproven legacy process is not duplicated or reset',async()=>{const f=fixture();let foreign;try{foreign=await listen((_q,r)=>r.end('fixture-naumi-logo'));const a=f.bundle('a'),s=f.settings('employee',a,foreign.port);s.legacyAdoption=true;f.write('employee/profiles/web/package.json','old-data');await assert.rejects(ensureBackend(s,options),/LEGACY_BACKEND_REQUIRES_STOP/);assert.equal(fs.readFileSync(s.home+'/profiles/web/package.json','utf8'),'old-data');}finally{await foreign?.close();f.close();}});
++test('packaged settings use persisted instance/port but explicit linked development mode remains unchanged',()=>{const f=fixture();try{const runtime=f.bundle('resources/backend'),app={isPackaged:true,getPath:()=>f.dir+'/user-data'},s=localSettings(app,{resourcesPath:f.dir+'/resources',environment:{}});assert(s.isolated);assert.equal(s.runtime.bundleId,runtime.bundleId);assert.equal(fs.existsSync(s.home+'/profiles/web/node_modules'),false);f.write('linked/config/local.json',{host:'127.0.0.1',port:3090,home:f.dir+'/dev-home'});const linked=localSettings(app,{environment:{NAUMI_ROOT:f.dir+'/linked',NAUMI_TEST:'1'}});assert.equal(linked.isolated,false);assert.equal(linked.url,'http://127.0.0.1:3090');assert.equal(linked.home,f.dir+'/dev-home');}finally{f.close();}});
++test('standalone URL and login token lookup stay on the exact loopback port',()=>{for(const bad of ['https://127.0.0.1:3080','http://localhost:3080','http://example.com:3080','http://u:p@127.0.0.1:3080','http://127.0.0.1:3080/path','http://127.0.0.1:3080/?token=x'])assert.throws(()=>localURL(bad),/INVALID_LOCAL_BACKEND/);const f=fixture();try{f.write('logs/server.out.log','http://127.0.0.1:3080/?token=other\nhttp://127.0.0.1:3081/?token=correct');assert.equal(launchFromLog({logDir:f.dir+'/logs',url:'http://127.0.0.1:3081'}),'http://127.0.0.1:3081/?token=correct');}finally{f.close();}});
++test('repeated quit requests cannot bypass pending async worker shutdown or start it twice',async()=>{let release,calls=0,ready=0,prevented=0;const pending=new Promise(r=>release=r),gate=createQuitGate({shutdown:async()=>{calls++;await pending;},onReady:()=>ready++,onError:()=>assert.fail('unexpected shutdown error')}),event={preventDefault:()=>prevented++};gate.beforeQuit(event);gate.beforeQuit(event);await Promise.resolve();assert.equal(calls,1);assert.equal(prevented,2);assert.equal(ready,0);assert.equal(gate.phase,'stopping');release();await gate.settled();assert.equal(ready,1);gate.beforeQuit(event);assert.equal(prevented,2);assert.equal(gate.phase,'ready');});
+diff --git a/modified/plugins/naumi-enterprise/desktop-identity.js b/modified/plugins/naumi-enterprise/desktop-identity.js
+new file mode 100644
+index 0000000..3f2168f
+--- /dev/null
++++ b/modified/plugins/naumi-enterprise/desktop-identity.js
+@@ -0,0 +1,41 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import {createHmac,timingSafeEqual} from 'node:crypto';
++
++export function desktopIdentityHandler({id,key,bundleId,pid=process.pid,onStop=()=>{if(!process.emit('SIGTERM'))process.exit(0);}}){
++  if(!/^[0-9a-f-]{36}$/.test(id)||!/^[a-f0-9]{64}$/.test(key)||!/^[a-f0-9]{64}$/.test(bundleId))throw Error('DESKTOP_IDENTITY_INVALID');
++  return (req,res)=>{
++    res.setHeader('Cache-Control','no-store');res.setHeader('Content-Type','application/json');res.setHeader('X-Content-Type-Options','nosniff');
++    if(!['GET','POST'].includes(req.method)){res.setHeader('Allow','GET, POST');res.writeHead(405).end();return;}
++    const nonce=req.headers['x-naumi-desktop-challenge'];
++    if(req.headers.origin||typeof nonce!=='string'||!/^[a-f0-9]{64}$/.test(nonce)){res.writeHead(403).end();return;}
++    if(req.method==='POST'){
++      const value=req.headers['x-naumi-desktop-stop'],expected=createHmac('sha256',key).update(['stop',nonce,id,pid,bundleId].join('|')).digest();
++      if(typeof value!=='string'||!/^[a-f0-9]{64}$/.test(value)||!timingSafeEqual(expected,Buffer.from(value,'hex'))){res.writeHead(403).end();return;}
++      // Host compression wraps end(chunk, encoding) and can discard its callback.
++      // finish belongs to the underlying response and survives those wrappers.
++      res.once('finish',()=>setImmediate(onStop));res.setHeader('Connection','close');res.writeHead(200).end(JSON.stringify({version:1,stopping:true}));return;
++    }
++    const proof=createHmac('sha256',key).update([nonce,id,pid,bundleId].join('|')).digest('hex');
++    res.writeHead(200).end(JSON.stringify({version:1,id,pid,bundleId,proof}));
++  };
++}
++export function installDesktopIdentity(ctx,env=process.env){
++  if(!env.NAUMI_DESKTOP_INSTANCE_ID&&!env.NAUMI_DESKTOP_BUNDLE_ID)return;
++  if(!env.DSH_HOME||!path.isAbsolute(env.DSH_HOME))throw Error('DESKTOP_IDENTITY_HOME_REQUIRED');
++  const file=path.join(env.DSH_HOME,'desktop-instance.json');
++  if(fs.lstatSync(file).isSymbolicLink())throw Error('DESKTOP_IDENTITY_INVALID');
++  const identity=JSON.parse(fs.readFileSync(file,'utf8'));
++  if(identity.version!==1||identity.id!==env.NAUMI_DESKTOP_INSTANCE_ID)throw Error('DESKTOP_IDENTITY_INVALID');
++  const handler=desktopIdentityHandler({...identity,bundleId:env.NAUMI_DESKTOP_BUNDLE_ID});
++  ctx.effect(()=>ctx.webServer.register({kind:'exact',path:'/naumi/desktop-instance',handler}));
++  // Use the registry's first-use transaction, not OS Documents discovery or a shared global folder.
++  // Existing registries/history and deliberate default-workspace deletions remain authoritative.
++  ctx.inject(['workspaceRegistry'],async scope=>{
++    await scope.workspaceRegistry.initializeDefault(async()=>{
++      const directory=path.join(env.DSH_HOME,'workspace');
++      if(fs.existsSync(directory)&&(!fs.lstatSync(directory).isDirectory()||fs.lstatSync(directory).isSymbolicLink()))throw Error('DESKTOP_WORKSPACE_UNMANAGED');
++      return directory;
++    });
++  });
++}
+diff --git a/original/plugins/naumi-enterprise/host.js b/modified/plugins/naumi-enterprise/host.js
+index e3d1610..02c3659 100644
+--- a/original/plugins/naumi-enterprise/host.js
++++ b/modified/plugins/naumi-enterprise/host.js
+@@ -6,9 +6,11 @@ import {installEgoBrowser} from './browser.js';
+ import {installTeamProfile} from './team-profile.js';
+ import {installBots} from './bots.js';
+ import {installDingTalk} from './dingtalk.js';
++import {installDesktopIdentity} from './desktop-identity.js';
+ export const inject=['webServer','connection'];
+ /** Supported plugin routes, index branding and an authenticated read-only business adapter. */
+ export function apply(ctx,config) {
++  installDesktopIdentity(ctx);
+   installAgentDesktop(ctx);
+   installEgoBrowser(ctx);
+   installDingTalk(ctx);
+diff --git a/original/plugins/naumi-enterprise/package.json b/modified/plugins/naumi-enterprise/package.json
+index e70efdc..108400a 100644
+--- a/original/plugins/naumi-enterprise/package.json
++++ b/modified/plugins/naumi-enterprise/package.json
+@@ -52,7 +52,8 @@
+     "employee-proactive-ai.js",
+     "employee-runtime-gate.js",
+     "employee-runtime-policy.js",
+-    "dingtalk-skills"
++    "dingtalk-skills",
++    "desktop-identity.js"
+   ],
+   "dsh": {
+     "bundle": {
