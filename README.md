@@ -1,5 +1,9 @@
 # DeepSeek Harness Local
 
+## 开发协作
+
+开工前阅读 [项目规则](AGENTS.md)、[协作与交接说明](docs/AGENT_COLLABORATION.md) 及相关模块文档。规则适用于本仓库；文档变更不触发业务发布。
+
 ## Naumi 定制工作空间
 
 当前运行 Naumi 企业协作定制插件，入口仍是本机3080；桌面快捷方式为 `Naumi 企业协作`。工作台、项目与需求、交付中心、设计中心和系统连接使用原生面板，不替换原会话/模型/工具内核。实现、已验证范围与真实账号待验收项见 [定制记录](docs/implementation/NAUMI_CUSTOMIZATION.md)。
