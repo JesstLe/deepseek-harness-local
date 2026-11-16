@@ -341,3 +341,10 @@ HBT-003/004、CAP-001、BUD-001、LOC-004/005/006、EMP-002/003 扩展；独立�
 - 人工消息优先、单次模型请求/执行时长上限、停止与撤销后的最终guard、原子记录失败、进程强杀UNKNOWN、负责人核对已验收。
 - 251 Harness/桌面、233企业端、11 UI、SIGKILL和53项副本原行为通过，7插件实际3080增量接入。证据 evidence/proactive-ai/VERIFICATION.txt。
 - 真实企业模型路由仍0、员工未自动登记或运行；M5安装包及真实员工/供应商验收继续，总目标active。
+
+## M5.1 打包闭包与钉钉预装增量（2026-11-17）
+
+- CAP-001：正式npm插件包补全M4运行文件和直接依赖声明；固定官方dingtalk-workspace-cli 1.0.68三层完整性、目标平台exe与LICENSE/NOTICE，不跑postinstall、不安装全局skills。既有工具审批/运行门保留，没有新增业务旁路。
+- EMP/LOC安装基础：独立员工DWS配置与版本化原生组件缓存、内置Node/CLI launcher、禁继承开发者凭证、禁后台升级/使用追踪；readonly状态只证明本地账号存在，不推断远端在线权限。
+- 268项Harness/桌面回归、251项副本恢复原行为和persona/memory/schema保留通过。正式运行树已生成70359文件hash清单；正式npm包、unpacked构建/启动结果以evidence/employee-package/VERIFICATION.txt最终记录为准。
+- M5尚未退出：远程企业登录session桥、实例/端口隔离、升级/迁移/版本回退与NSIS真实安装链继续。实际3080数据未动，没有自动员工登记/上传/主动AI启用；真实网关路由与员工业务验收仍独立。

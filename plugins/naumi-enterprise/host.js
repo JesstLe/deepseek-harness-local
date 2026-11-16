@@ -5,11 +5,13 @@ import {installAgentDesktop} from './agent-desktop.js';
 import {installEgoBrowser} from './browser.js';
 import {installTeamProfile} from './team-profile.js';
 import {installBots} from './bots.js';
+import {installDingTalk} from './dingtalk.js';
 export const inject=['webServer','connection'];
 /** Supported plugin routes, index branding and an authenticated read-only business adapter. */
 export function apply(ctx,config) {
   installAgentDesktop(ctx);
   installEgoBrowser(ctx);
+  installDingTalk(ctx);
   installTeamProfile(ctx);
   installBots(ctx,{collaborationOrigin:config.collaborationOrigin});
   const collaborationOrigin=validateOrigin(config.collaborationOrigin);

@@ -36,7 +36,7 @@ async function ensureBackend(settings){
  const entry=path.join(settings.root,'node_modules/@deepseek-ai/dsh/lib/bin.js');if(!fs.existsSync(entry))throw Error('BACKEND_RUNTIME_MISSING');
  fs.mkdirSync(settings.logDir,{recursive:true});
  const out=fs.openSync(path.join(settings.logDir,'server.out.log'),'w'),err=fs.openSync(path.join(settings.logDir,'server.err.log'),'w');
- const target=new URL(settings.url),env={...process.env,PATH:settings.root+path.delimiter+(process.env.PATH??''),DSH_HOME:settings.home,DSH_TELEMETRY_MODE:'DISABLED'};delete env.ELECTRON_RUN_AS_NODE;
+ const target=new URL(settings.url),env={...process.env,PATH:path.join(settings.root,'bin')+path.delimiter+settings.root+path.delimiter+(process.env.PATH??''),DSH_HOME:settings.home,DSH_TELEMETRY_MODE:'DISABLED'};delete env.ELECTRON_RUN_AS_NODE;
  const child=spawn(settings.node,[entry,'web','--host','127.0.0.1','--port',target.port,'--no-open'],{cwd:settings.root,env,windowsHide:true,stdio:['ignore',out,err]});fs.closeSync(out);fs.closeSync(err);
  let error;child.on('error',e=>error=e);
  const deadline=Date.now()+90000;

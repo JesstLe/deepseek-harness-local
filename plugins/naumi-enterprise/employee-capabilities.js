@@ -1,10 +1,11 @@
 import {resolveDesktopRuntime} from './desktop-runtime.js';
 import {NativeBrowserRuntime} from './native-browser-runtime.js';
+import {dingTalkHealth} from './dingtalk-runtime.js';
 
 /** A tool definition is not proof of tool authorization, transport health, or business account access. */
 export class EmployeeCapabilities{
-  constructor({ctx,sync,home,clock=()=>Date.now(),browser,desktop=()=>resolveDesktopRuntime()}={}){
-    Object.assign(this,{ctx,sync,clock,desktop});this.browser=browser??new NativeBrowserRuntime({home});this.values=new Map();this.closed=false;
+  constructor({ctx,sync,home,clock=()=>Date.now(),browser,desktop=()=>resolveDesktopRuntime(),dingtalk=()=>dingTalkHealth({home})}={}){
+    Object.assign(this,{ctx,sync,clock,desktop,dingtalk});this.browser=browser??new NativeBrowserRuntime({home});this.values=new Map();this.closed=false;
   }
   async refresh(){
     if(this.closed)return;if(this.flight)return this.flight;
@@ -20,7 +21,7 @@ export class EmployeeCapabilities{
     const health=await this.browser.health();
     save('browser',{installed:health.installed,connected:health.connected,healthy:health.healthy,toolRegistered:names.includes('naumi_browser'),engine:health.engine,reasonCode:health.reasonCode});
     // This inventory concerns the distributed bundle, not every executable elsewhere on this machine.
-    save('dingtalk',{installed:false,inventoryScope:'naumi_bundle',reasonCode:'DINGTALK_BUNDLE_NOT_REGISTERED'});
+    save('dingtalk',await this.dingtalk());
     save('enterprise',{installed:!!this.sync,connected:null,reasonCode:this.sync?'ENTERPRISE_CONNECTIVITY_NOT_PROBED':'ENTERPRISE_NOT_CONFIGURED'});
   }
   read(botId){

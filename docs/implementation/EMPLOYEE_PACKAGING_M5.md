@@ -1,8 +1,8 @@
 # M5 员工安装包接续
 
-状态：待实现与完整安装验收；2026-11-17已重新核对源码。总目标active。
+状态：M5.1 正式包闭包与钉钉预装已实现并通过模块/实物包/unpacked桌面验证；首次连接/实例隔离/升级迁移与完整安装验收继续。2026-11-17。总目标active。
 
-## 当前源码事实
+## 接续时的源码基线（M5.1 的变化见下文）
 
 - `desktop/package.json` 为Naumi 0.2.0，Electron 44.11.3，NSIS x64；桌面窗口、安装器、卸载器及快捷方式都配置 `app/assets/naumi.ico`。
 - `desktop/scripts/prepare-runtime.mjs` 目前复制Node、依赖、插件、干净profile/home默认配置，不以个人home/logs/credentials为源；但布尔manifest不是内容扫描证据。
@@ -23,3 +23,38 @@
 ## 真实外部验收项
 
 当前3183网关0真实供应商路由，现有真实员工设备未登记。供应商路由/合同定价/负责人预算和真实企业部署地址与账号须以实际配置验收；本机test租户和虚拟上游可验证协议，不能替代这些事实。其间仍继续推进上述构建、登录链、CLI内置与安装迁移模块，不将目标缩减为一个可启动exe。
+
+## M5.1 正式包闭包与预装 CLI（2026-11-17）
+
+### 实现
+
+- 修复 npm `files` 遗漏的 activity/store/capabilities/observation/runtime gate/policy/models/proactive AI 模块；保留既有显式文件清单，增加完整 AST import 与 npm pack 实物闭包门，未来漏文件会在构建前失败。
+- 声明直接使用的 llm-pi-ai、mcp-client、schedule、skill-filesystem、tool-executor-native 和 pi-ai peer；不依赖偶然的传递解析。Acorn 8.19.0 作为明确构建依赖，复用锁文件已有版本，不在共享根依赖目录安装。
+- 固定官方 `dingtalk-workspace-cli@1.0.68` 的 npm SHA512、Windows x64 归档 SHA256 和 dws.exe SHA256；只提取目标平台二进制、标准 launcher、LICENSE/NOTICE/README/CHANGELOG，不执行 npm postinstall，不安装上游全局 skills。
+- 后端 PATH 前置内置 `bin/dws.cmd`，它调用内置 Node 与本应用 launcher；不依赖开发机 PATH 或全局 CLI。应用受管 shell 仍经过原有工具审批及运行门。本次没有新增一个绕过审批的业务执行 API。
+- 清除 inherited DWS/DINGTALK/其他供应商凭证和 endpoint override，使用员工自己的 `DSH_HOME/integrations/dingtalk`，禁用更新检查、使用追踪与全局技能安装。
+- 实测发现官方 exe 会在自身目录释放原生 DLL/config/lock；因此先校验并复制到员工自己的 `home/runtime/dingtalk/version/hash`，再启动。安装 resources 保持不可写且哈希不变；不同员工/版本缓存独立。拒绝受管子目录 junction 与损坏 exe。
+- 能力清单用真实 `auth status --readonly --format json`，固定参数、超时/输出上限，不回传账号详情；已内置、健康、本地有登录信息与远端在线权限分列，`connected=null`、`networkVerified=false`。技能强调精确写操作审批、未知结果核对，安装不等于企业授权。
+- staging 在全新临时目录构建；只输入依赖/插件/干净默认模板，执行离线 host import、逐文件 SHA256 与个人状态路径检查。通过后才发布，旧 bundle 留作回滚。electron-builder `beforePack` 重验完整 inventory 与当前源码，拒绝陈旧/追加/损坏文件；默认 build/build:dir 都重新 stage。
+
+### 已有验证与边界
+
+- 原始基线 251/251；新增 17 项后 268/268。覆盖 tarball 篡改、缺失/越界 import、依赖声明、缓存损坏/junction、凭证环境剥离、能力状态与私有文件路径门。
+- 正式 npm 包 71/71 文件、离线 host import、70,359 文件 staging hash 与私有状态路径门通过；Node resolve hook 拒绝从祖先工作区补依赖，实测无开发依赖回落。真实 dws 版本/schema/auth readonly 与干净员工配置通过，installed/healthy=true、authenticated=false、networkVerified=false。
+- 实际构建 Naumi.exe（unpacked）并在独立 userData/3082/纯系统 PATH 启动，内置 Node、Chromium 原生侧栏及钉钉 CLI 通过；资源目录未被 CLI 自解压写入。Logo 保留已有8处配置与7档ICO。Electron内置Node24.22.2与后端独立Node24.19.0分别记录，不混称同一runtime。
+- 构建没有配置代码签名证书，签名步骤按builder输出跳过；本地desktop依赖安装记录有6项moderate审计提示，没有执行自动升级或audit fix。发布前供应链/签名审查仍在完整M5出口，不因本轮unpacked通过而关闭。
+- 副本回滚恢复 11 个原始文件（含证据字节保留属性）、移除 10 个新增文件；251 项原行为通过，样例 persona/memory/schema 保留，实际服务与数据未动，工作区新实现保留。
+- `evidence/employee-package` 持续保存正式 npm 包实物/CLI/桌面构建证据与四件套。大归档、二进制研究缓存、独立账号与回滚副本均精确忽略，不进入 Git。
+- **本轮不是 M5 整体退出。** 远程企业 origin/主进程 session bridge、同 Logo 服务的实例身份与端口隔离、依赖 junction 升级、数据迁移/版本回退、真实 NSIS 安装/升级/卸载链、员工本人授权和真实业务使用仍待后续模块。没有把打包版启动替代安装验收；没有向真实员工登记或启用主动 AI。
+
+### 复用开发提示
+
+```text
+接续 M5.2：先核对 docs/prd/GOAL_TRACKER.md 与本文件的未退出项；
+只在 fix/naumi-bot-lifecycle-20261116 的隔离树开发。
+保留浅色 Naumi UI、左侧导航、模型位置、原生 Chromium 和既有审批/运行门。
+远程企业 cookie 只由 Electron session 发往配置 origin，不交给 renderer/backend。
+先修 profile 实例身份/端口/受管 junction，再做首次连接与升级迁移。
+逐模块更新文档、集中测试、四件套与副本回滚，区分 unpacked/NSIS/真实员工验收。
+不要改真实员工设备、私人同步或主动规则；网关 routes=0 不是模型业务验收。
+```

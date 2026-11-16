@@ -30,3 +30,9 @@ M3 核心已接入实际 naumi-design-ops（3112），不是旧 naumi-co；详�
 ## M4 受控主动 AI 增量
 
 owner确认的run_agent规则、原子持久队列、原AgentLoop/Native工具消费、精确turn/网关UUID/不可变产物、人工输入抢占、请求/时长/工作窗口上限与UNKNOWN恢复/核对已实现并接入实际3080。251 Harness/桌面、233企业端、11 UI、真实SIGKILL及53项副本基线回归通过；7插件增量、其他hash不变。真实AI规则启用0、设备未登记、网关真实路由0。详见 EMPLOYEE_PROACTIVE_AI_M4.md 与 evidence/proactive-ai/VERIFICATION.txt；下一M5安装包完整集成及真实模型/员工使用验收，总目标active。
+
+## M5.1 正式包完整性与钉钉预装增量
+
+修复正式npm包漏M4运行模块与直接peer声明，增加AST/实物pack/import闭包；内置官方dingtalk-workspace-cli 1.0.68固定完整性/许可证、员工独立配置与可写原生缓存、无开发PATH launcher、真实readonly能力观察和Naumi技能。staging逐文件hash/私有状态路径扫描，默认build重stage，beforePack拒绝陈旧/追加/损坏资源。268项本地回归及251项副本回滚通过，实际3080仍62sessions/0running/3bots/revision10，没有接入或改员工数据。本模块的正式包与unpacked桌面构建/启动证据在evidence/employee-package持续记录，详见EMPLOYEE_PACKAGING_M5.md。
+
+下一M5.2：profile实例与端口隔离、受管依赖junction升级、可配置远程企业首次登录/session桥、数据迁移/版本回退；随后NSIS干净安装/升级/卸载、员工授权与真实业务验收。总目标active，不以unpacked启动代替安装验收，不以本地CLI已内置代替企业授权或真实模型路由。
