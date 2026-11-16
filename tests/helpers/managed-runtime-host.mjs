@@ -17,7 +17,7 @@ export async function managedRuntimeHost(){
   const root=await create(),bot=await directory.create({sessionId:root.id,cwd:dir},{name:'执行员工',purpose:'执行许可验证',kind:'agent'}),other=await create();
   const {privateKey,publicKey}=generateKeyPairSync('ed25519'),tenantId=randomUUID(),memberId=randomUUID(),employeeId=randomUUID(),taskId=randomUUID(),deviceId=randomUUID();
   const vault=new EmployeeDeviceVault(path.join(dir,'device.fixture'),{protect:v=>Buffer.from(v).toString('base64'),unprotect:v=>Buffer.from(v,'base64').toString()});const keys=vault.open();let claims;
-  const remote={taskId,employeeId,placement:'local-bound',leaseSeconds:30,boundDeviceId:deviceId,ownerDeviceId:null,attemptId:null,fencingToken:'0',state:'idle',revision:1,leaseExpiresAt:null};let sync;
+  const remote={taskId,employeeId,placement:'local-bound',leaseSeconds:30,boundDeviceId:deviceId,ownerDeviceId:null,attemptId:null,fencingToken:'0',state:'idle',revision:1,leaseExpiresAt:null};let sync;const deviceActions=new Map();
   const packet=()=>{const payload=Buffer.from(JSON.stringify(claims)).toString('base64url');return {kid:'fixture-key',payload,signature:sign(null,Buffer.from(payload),privateKey).toString('base64url')};};
   const server=http.createServer(async(req,res)=>{
     const send=(status,v)=>res.writeHead(status,{'Content-Type':'application/json'}).end(JSON.stringify(v));
@@ -34,7 +34,7 @@ export async function managedRuntimeHost(){
     }else if(a.action==='execution.renew'||a.action==='execution.uncertain'){
       if(a.execution.attemptId!==remote.attemptId||a.execution.fencingToken!==remote.fencingToken||remote.state!=='owned'){send(409,{code:'EXECUTION_FENCE_STALE'});return;}
       remote.revision++;if(a.action==='execution.uncertain')remote.state='unknown';else remote.leaseExpiresAt=new Date(now+30000).toISOString();result={execution:{...remote}};
-    }else if(a.action==='work.read')result={tasks:[{id:taskId,title:'企业测试任务'}]};
+    }else if(deviceActions.has(a.action)){try{result=await deviceActions.get(a.action)(a);}catch(e){send(e.status??500,{code:e.message});return;}}else if(a.action==='work.read')result={tasks:[{id:taskId,title:'企业测试任务'}]};
     else if(a.action!=='authorize'){send(400,{code:'UNSUPPORTED_FIXTURE_ACTION'});return;}
     send(200,{...result,authorization:packet()});
   });await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;
@@ -48,7 +48,7 @@ export async function managedRuntimeHost(){
   const attach=(args={})=>command('attach',{taskId,allowedTools:['external_write','employee_enterprise_submit'],allowOfflineLocal:true,...args});
   const resume=async()=>{const b=runtime.gate.binding(root.id);return command('resume',{expectedRevision:b.revision});};
   const invoke=async(name,agent=root,args={})=>(await ctx.tools.execute({calls:[{type:'tool-call',id:'call-'+randomUUID(),name,arguments:JSON.stringify(args)}],agent,signal:new AbortController().signal})).results[0].result;
-  return {ctx,root,other,bot,dir,directory,store,sync,origin,claims,remote,taskId,employeeId,runtime,create,command,attach,resume,invoke,get now(){return now;},get modelCalls(){return modelCalls;},get externalCalls(){return externalCalls;},advance:ms=>now+=ms,setNetwork:v=>network=v,setModelHook:v=>modelHook=v,setExternalHook:v=>externalHook=v,refreshClaims:()=>sync.set('authorization',packet()),
+  return {ctx,root,other,bot,dir,directory,store,sync,origin,claims,remote,taskId,employeeId,runtime,create,command,attach,resume,invoke,deviceActions,signPacket(body){const payload=Buffer.from(JSON.stringify({v:1,iss:origin,...body})).toString('base64url');return 'fixture-key.'+payload+'.'+sign(null,Buffer.from(payload),privateKey).toString('base64url');},get now(){return now;},get modelCalls(){return modelCalls;},get externalCalls(){return externalCalls;},advance:ms=>now+=ms,setNetwork:v=>network=v,setModelHook:v=>modelHook=v,setExternalHook:v=>externalHook=v,refreshClaims:()=>sync.set('authorization',packet()),
     release(){remote.ownerDeviceId=null;remote.attemptId=null;remote.state='idle';remote.fencingToken=String(BigInt(remote.fencingToken)+1n);remote.leaseExpiresAt=null;remote.revision++;},
     async cleanup(){await runtime.close();await gateHost.dispose();for(const h of handles.reverse())await h.dispose();for(const d of disposers)d();await sync.close();store.close();await directory.close();llm();await provider.dispose();for(const f of forks.reverse())await f.dispose();server.closeAllConnections();await new Promise(r=>server.close(r));if(!path.resolve(dir).startsWith(path.resolve(os.tmpdir())+path.sep))throw Error('TEMP_ESCAPE');fs.rmSync(dir,{recursive:true,force:true});},
   };

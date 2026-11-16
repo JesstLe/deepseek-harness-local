@@ -75,3 +75,7 @@
 ## M4 受管执行准入增量
 
 已接入真实Agent步骤/模型流/单调工具guard、持久化root/团队/fork继承、原生逐工具执行器、精确租约续租、有效签名授权下local_only和在途UNKNOWN恢复。212全仓回归、8 UI、真实SIGKILL与20项副本回滚通过；10插件文件实际3080增量接入，真实受管绑定0、未自动登记/上传/推理。详见 EMPLOYEE_RUNTIME_GATE_M4.md 与 evidence/runtime-gate。普通会话原模型/权限/执行器保持；权威预算、独立模型通道、受控AI主动工作、M5继续，总目标active。
+
+## M4 企业模型与预算
+
+新增独立模型服务、签名短期设备通道、四级权威预算、真实usage结算、UNKNOWN预留保留与负责人停止核对、原PiAiAdapter和原模型位置接入。模块记录 EMPLOYEE_MODEL_GATEWAY_M4.md；证据 evidence/model-gateway。真实路由、员工启用与调用仍单独验收，不等于M4或M5整体完成。

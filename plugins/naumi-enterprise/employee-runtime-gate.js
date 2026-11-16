@@ -78,7 +78,7 @@ export class EmployeeRuntimeGate{
       return {mode:'waiting_authority',reason:unresolved?'RUNTIME_RESULT_UNRESOLVED':'RUNTIME_LEASE_UNAVAILABLE'};
     }catch(e){return {mode:'waiting_authority',reason:publicError(e)};}
   }
-  inference(b){const m=this.mode(b);return ['unmanaged','online','local_only'].includes(m.mode)?null:m.reason;}
+  inference(b,selection){const m=this.mode(b);if(!['unmanaged','online','local_only'].includes(m.mode))return m.reason;if(b&&this.sync.offlineClaims().requireModelGateway&&selection?.provider!=='naumi-enterprise')return 'RUNTIME_MODEL_GATEWAY_REQUIRED';return null;}
   deny(exec){
     try{
       const b=this.contextSync(exec.agent);if(!b)return;
@@ -174,8 +174,8 @@ export class EmployeeRuntimeGate{
       const b=this.binding(run.rootSessionId),m=this.mode(b);
       if(m.mode!=='online'){run.controller.abort(Error('RUNTIME_TOOL_PERMIT_LOST'));try{this.unknown(b,'RUNTIME_TOOL_PERMIT_LOST',run.id);}catch{this.ctx.logger?.warn('RUNTIME_UNKNOWN_STORAGE_FAILED');}}
     }
-    for(const {agent} of this.models.values()){
-      const b=this.contextSync(agent),reason=this.inference(b);if(reason)agent.cancel({kind:'hook',reason},{keepInbox:true});
+    for(const {agent,provider} of this.models.values()){
+      const b=this.contextSync(agent),reason=this.inference(b,{provider});if(reason)agent.cancel({kind:'hook',reason},{keepInbox:true});
     }
     for(const row of this.store.db.prepare("SELECT json FROM entities WHERE type='managed_session' AND json_extract(json,'$.unknown') IS NOT NULL").all()){
       const b=JSON.parse(row.json);if(!b.unknown||b.unknown.remoteReportedAt||this.remoteReports.has(b.sessionId)||this.clock()-(this.lastReport.get(b.sessionId)??0)<5000)continue;
@@ -208,14 +208,14 @@ export function installEmployeeRuntimeGate(scope,directory,store,{sync,intervalM
   scope.on('agent/created',async({agent})=>{if(await gate.context(agent))gate.mountNative(agent);});
   scope.on('agent/disposed',({agent})=>{gate.nativeExecutors.get(agent)?.();gate.nativeExecutors.delete(agent);});
   gate.initialization=Promise.allSettled(scope.agents.list().map(async agent=>{if(await gate.context(agent))gate.mountNative(agent);}));
-  scope.on('agent/pre-step',async(payload,next)=>{payload.signal.throwIfAborted();const b=await gate.context(payload.agent);if(gate.inference(b))return {kind:'reject'};const decision=await next();payload.signal.throwIfAborted();return gate.inference(gate.contextSync(payload.agent))?{kind:'reject'}:decision;});
+  scope.on('agent/pre-step',async(payload,next)=>{payload.signal.throwIfAborted();const b=await gate.context(payload.agent);if(gate.inference(b,payload.modelSelection))return {kind:'reject'};const decision=await next();payload.signal.throwIfAborted();return gate.inference(gate.contextSync(payload.agent),payload.modelSelection)?{kind:'reject'}:decision;});
   scope.on('tools/pre-execute',async(exec,next)=>{exec.signal.throwIfAborted();await gate.context(exec.agent);const reason=gate.deny(exec);return reason?{kind:'deny',reason}:next();});
   scope.on('tools/execute',(exec,next)=>gate.execute(exec,next));
   scope.on('llm/stream',async function*(options,next){
-    const agent=options.sessionId?scope.agents.get(options.sessionId):null,b=agent?await gate.context(agent):options.sessionId?gate.binding(options.sessionId):null,reason=gate.inference(b);
+    const agent=options.sessionId?scope.agents.get(options.sessionId):null,b=agent?await gate.context(agent):options.sessionId?gate.binding(options.sessionId):null,reason=gate.inference(b,options);
     if(reason)throw new LlmError(reason,'RUNTIME_ADMISSION_DENIED');
-    const token=randomUUID();if(b&&agent&&isAgentLoopRequest(options))gate.models.set(token,{agent});
-    try{for await(const chunk of next()){const reason=gate.inference(agent?gate.contextSync(agent):b?gate.binding(b.sessionId):null);if(reason)throw new LlmError(reason,'RUNTIME_ADMISSION_DENIED');yield chunk;}}finally{gate.models.delete(token);}
+    const token=randomUUID();if(b&&agent&&isAgentLoopRequest(options))gate.models.set(token,{agent,provider:options.provider});
+    try{for await(const chunk of next()){const reason=gate.inference(agent?gate.contextSync(agent):b?gate.binding(b.sessionId):null,options);if(reason)throw new LlmError(reason,'RUNTIME_ADMISSION_DENIED');yield chunk;}}finally{gate.models.delete(token);}
   });
   scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/employee-runtime-gate',handler:async(req,res)=>{
     res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');const a=scope.connection.admit(req);if('rejection'in a){res.writeHead(a.rejection).end();return;}if(a.peer.principal.kind!=='owner'){res.writeHead(403).end();return;}

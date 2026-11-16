@@ -9,6 +9,7 @@ import {EmployeeMemoryMaintenance,maintenanceCommands} from './employee-memory-m
 import {createEnterpriseWorkTools} from './employee-enterprise-work.js';
 import {installEmployeeActivity} from './employee-activity.js';
 import {installEmployeeRuntimeGate} from './employee-runtime-gate.js';
+import {installEmployeeModels} from './employee-models.js';
 
 export function createEmployeeTools(service,{sync}={}){
   const output={schema:{type:'json'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]};
@@ -43,6 +44,7 @@ export function installEmployees(ctx,directory,{store,onReady,heartbeatOptions={
     const workRuntime=installEmployeeWork(scope,directory,data);
     const syncRuntime=installEmployeeSync(scope,directory,data,{origin:collaborationOrigin,sync});
     const gateRuntime=installEmployeeRuntimeGate(scope,directory,data,{sync:syncRuntime});
+    const modelsRuntime=installEmployeeModels(scope,directory,{sync:syncRuntime});
     const service=new EmployeeService(scope,directory,data),maintenance=new EmployeeMemoryMaintenance(data),installed=new Map();
     const activityRuntime=installEmployeeActivity(scope,directory,data,service,{...activityOptions,sync:syncRuntime});
     const heartbeat=new EmployeeHeartbeat({agents:scope.agents,directory,store:data,...heartbeatOptions,onError:()=>scope.logger.warn('EMP_HEARTBEAT_SCAN_FAILED')});
@@ -98,7 +100,7 @@ export function installEmployees(ctx,directory,{store,onReady,heartbeatOptions={
       }catch(error){const code=error instanceof z.ZodError?'EMP_INVALID_REQUEST':/^EMP_[A-Z_]+$/.test(error.message)?error.message:'EMP_STORAGE_UNAVAILABLE';
         send(/CONFLICT/.test(code)?409:/NOT_FOUND/.test(code)?404:/REQUIRED|LOCKED|ARCHIVED|DISABLED/.test(code)?403:/STORAGE|SCHEMA/.test(code)?503:400,{error:code});}
     }}));
-    heartbeat.start();onReady?.({service,store:data,heartbeat,activityRuntime,gateRuntime,settled:()=>Promise.all([...background])});
-    scope.effect(()=>async()=>{heartbeat.close();await gateRuntime?.close();await activityRuntime.close();await syncRuntime?.close();await workRuntime.dispose();for(const dispose of installed.values())dispose();installed.clear();await Promise.all(background);data.close();});
+    heartbeat.start();onReady?.({service,store:data,heartbeat,activityRuntime,gateRuntime,modelsRuntime,settled:()=>Promise.all([...background])});
+    scope.effect(()=>async()=>{heartbeat.close();await gateRuntime?.close();await modelsRuntime?.close();await activityRuntime.close();await syncRuntime?.close();await workRuntime.dispose();for(const dispose of installed.values())dispose();installed.clear();await Promise.all(background);data.close();});
   });
 }

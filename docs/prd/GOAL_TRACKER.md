@@ -22,3 +22,7 @@
 ## 当前接续
 
 M3 核心已接入实际 naumi-design-ops（3112），不是旧 naumi-co；详见 docs/implementation/EMPLOYEE_SYNC_M3.md。当前真实设备未登记、上传关闭。MEM-007 与原生企业工作桥已接入，详见 ENTERPRISE_WORK_BRIDGE.md。M4 执行归属模块已接入，详见 EXECUTION_LEASES_M4.md。能力/运行观察/本地主动规则详见 EMPLOYEE_ACTIVITY_M4.md；受管运行门详见 EMPLOYEE_RUNTIME_GATE_M4.md；下一权威预算/独立模型通道/受控AI主动执行，再 M5 安装包；总目标 active。
+
+## M4 企业模型与预算增量
+
+独立模型网关、签名短期设备凭证、企业/员工/Bot/任务权威预留与真实usage结算、UNKNOWN上界核对、受管会话模型准入和模型管理UI已实现。230 Harness/桌面、233企业端、10 UI与独立进程强杀/重放0已通过。接入及副本回滚证据见 evidence/model-gateway；详见 EMPLOYEE_MODEL_GATEWAY_M4.md。真实供应商路由与负责人预算启用不以空路由health代替，受控主动AI与M5继续，总目标active。

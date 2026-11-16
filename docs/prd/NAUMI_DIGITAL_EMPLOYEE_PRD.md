@@ -324,3 +324,11 @@ HBT-003/004、CAP-001、BUD-001、LOC-004/005/006、EMP-002/003 扩展；独立�
 - COL-001：普通跨Bot能力保留；受管任务内独立派单/调度须使用显式的新任务/执行绑定，不能用于逃逸。真实团队/fork继承根准入。
 - 212回归、8界面、真实AgentLoop/工具管线/签名HTTP故障、SIGKILL恢复、20项副本基线测试和实际3080只读接入通过。实现：EMPLOYEE_RUNTIME_GATE_M4.md；证据：evidence/runtime-gate/VERIFICATION.txt。
 - BUD-001/LOC-004、受控主动AI编排及M5仍未退出；本地fixture模型不是独立网关/收费模型/生产企业或新员工安装验收。
+
+## M4 企业模型与预算验收增量（2026-11-16）
+
+- BUD-001：四级权威费用/Token/请求/并发预算已接入独立网关；派发前原子预留、usage结算、UNKNOWN不退款/不重放、明确停止后上界记账。旧月份UNKNOWN仍占全局并发。
+- LOC-004：独立Node进程和独立账本、有效签名凭证直接调用、不逐句登录；复用原PiAiAdapter，保留模型选择位置。真实AgentLoop控制中心故障实验通过。
+- 230 Harness/桌面、233企业端、10 UI、真实网关SIGKILL恢复、35+223项副本基线回归通过。7插件+5网关/启动+5企业/迁移文件实际接入，原业务数据及其他插件hash保持。
+- 3183实际网关初始0供应商路由；实际3112签发与预算链使用明确test租户并清理，未发真实供应商请求。合同定价/真实路由/负责人启用、受控主动AI编排、M5仍继续，不以health或fixture代替员工安装与业务验收。
+- 详见 EMPLOYEE_MODEL_GATEWAY_M4.md 和 evidence/model-gateway/VERIFICATION.txt；总目标active。
