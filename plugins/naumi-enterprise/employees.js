@@ -3,6 +3,7 @@ import {z} from 'zod';
 import {defineTool} from '@deepseek-ai/dsh-tools';
 import {EmployeeStore,profilePatch,memoryKinds} from './employee-store.js';
 import {EmployeeService,EmployeeHeartbeat} from './employee-service.js';
+import {installEmployeeWork} from './employee-work.js';
 
 export function createEmployeeTools(service){
   const output={schema:{type:'json'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]};
@@ -28,6 +29,7 @@ export function installEmployees(ctx,directory,{store,onReady,heartbeatOptions={
   // agentDefaultModel is a host readiness dependency; never read or modify its selected route here.
   return ctx.inject(['agents','agentTeams','agentDefaultModel','sessions','sessionPersistence','tools','systemPrompt'],scope=>{
     const data=store??new EmployeeStore(path.join(path.dirname(directory.file),'employees.sqlite'));
+    const workRuntime=installEmployeeWork(scope,directory,data);
     const service=new EmployeeService(scope,directory,data),installed=new Map();
     const heartbeat=new EmployeeHeartbeat({agents:scope.agents,directory,store:data,...heartbeatOptions,onError:()=>scope.logger.warn('EMP_HEARTBEAT_SCAN_FAILED')});
     const install=agent=>{
@@ -61,8 +63,9 @@ export function installEmployees(ctx,directory,{store,onReady,heartbeatOptions={
           const q=new URL(req.url??'/naumi/employees','http://localhost').searchParams,botId=str.parse(q.get('botId'));service.bot(botId);
           const view=q.get('view')??'profile';let value;
           if(view==='profile')value={...data.profile(botId),syncState:'local_only'};
-          else if(view==='memories')value=data.memories(botId,{query:q.get('query')??'',status:q.get('status')??'active',limit:q.has('limit')?Number(q.get('limit')):20});
+          else if(view==='memories')value=data.memories(botId,{query:q.get('query')??'',status:q.get('status')??'active',kind:q.get('kind')??'all',offset:q.has('offset')?Number(q.get('offset')):0,limit:q.has('limit')?Number(q.get('limit')):20});
           else if(view==='history')value=data.history(botId,{after:q.has('after')?Number(q.get('after')):0,limit:q.has('limit')?Number(q.get('limit')):50});
+          else if(view==='timeline')value=data.timeline(botId,{before:q.has('before')?Number(q.get('before')):Number.MAX_SAFE_INTEGER,limit:q.has('limit')?Number(q.get('limit')):30});
           else if(view==='export')value=data.export(botId);
           else if(view==='heartbeat')value=heartbeat.read();
           else{send(400,{error:'EMP_INVALID_VIEW'});return;}
@@ -77,6 +80,6 @@ export function installEmployees(ctx,directory,{store,onReady,heartbeatOptions={
         send(/CONFLICT/.test(code)?409:/NOT_FOUND/.test(code)?404:/REQUIRED|LOCKED|ARCHIVED|DISABLED/.test(code)?403:/STORAGE|SCHEMA/.test(code)?503:400,{error:code});}
     }}));
     heartbeat.start();onReady?.({service,store:data,heartbeat,settled:()=>Promise.all([...background])});
-    scope.effect(()=>async()=>{heartbeat.close();for(const dispose of installed.values())dispose();installed.clear();await Promise.all(background);data.close();});
+    scope.effect(()=>async()=>{heartbeat.close();await workRuntime.dispose();for(const dispose of installed.values())dispose();installed.clear();await Promise.all(background);data.close();});
   });
 }

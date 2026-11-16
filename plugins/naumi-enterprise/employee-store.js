@@ -8,7 +8,7 @@ export const PROFILE_FIELDS=['communicationStyle','workStyle','personality','per
 export const profileFields=z.object(Object.fromEntries(PROFILE_FIELDS.map(k=>[k,z.string().trim().max(2000).optional()]))).strict();
 export const profilePatch=profileFields.extend({autoLearning:z.boolean().optional(),lockedFields:z.array(z.enum(PROFILE_FIELDS)).max(4).refine(a=>new Set(a).size===a.length).optional()}).strict();
 export const memoryKinds=['fact','preference','experience','procedure','relationship'];
-const sourceSchema=z.object({kind:z.enum(['owner','user','proposal']),sessionId:z.string().max(200).optional(),messageId:z.string().max(200).optional(),quote:z.string().max(4000).optional(),note:z.string().max(500).optional()}).strict();
+const sourceSchema=z.object({kind:z.enum(['owner','user','proposal','agent']),sessionId:z.string().max(200).optional(),messageId:z.string().max(200).optional(),quote:z.string().max(4000).optional(),note:z.string().max(500).optional()}).strict();
 const stamp=z.string().datetime(),expected=z.number().int().nonnegative(),operation=z.string().min(1).max(200);
 const memoryInput=z.object({kind:z.enum(memoryKinds),text:z.string().trim().min(1).max(4000),status:z.enum(['candidate','active']).default('active'),pinned:z.boolean().default(false),expiresAt:stamp.nullable().default(null)}).strict();
 const memoryPatch=z.object({text:z.string().trim().min(1).max(4000).optional(),status:z.enum(['candidate','active','rejected','deleted']).optional(),pinned:z.boolean().optional(),expiresAt:stamp.nullable().optional()}).strict();
@@ -43,6 +43,7 @@ export class EmployeeStore{
   entity(botId,id){this.ready();const row=this.db.prepare('SELECT json FROM entities WHERE bot_id=? AND id=?').get(botId,id);return row?JSON.parse(row.json):null;}
   profile(botId){return this.entity(botId,'profile')??{id:'profile',botId,revision:0,communicationStyle:'',workStyle:'',personality:'',persona:'',autoLearning:true,lockedFields:[],updatedAt:null};}
   allMemories(botId){this.ready();return this.db.prepare("SELECT json FROM entities WHERE bot_id=? AND type='memory'").all(botId).map(row=>JSON.parse(row.json));}
+  entitiesOfType(botId,type){this.ready();return this.db.prepare('SELECT json FROM entities WHERE bot_id=? AND type=?').all(botId,type).map(row=>JSON.parse(row.json));}
   mutate(botId,operationId,action,payload,actor,fn){
     this.ready();operation.parse(operationId);actor=sourceSchema.parse(actor);if(actor.quote)assertPublicText(actor.quote);
     const digest=createHash('sha256').update(serial({action,payload,actor})).digest('hex');
@@ -114,18 +115,22 @@ export class EmployeeStore{
       return {learned:true,memory,profile:this.profile(botId)};
     });
   }
-  memories(botId,{query='',status='active',limit=20}={}){
-    z.string().max(300).parse(query);z.enum(['active','candidate','rejected','deleted','all']).parse(status);z.number().int().min(1).max(100).parse(limit);
+  memories(botId,{query='',status='active',kind='all',offset=0,limit=20}={}){
+    z.string().max(300).parse(query);z.enum(['active','candidate','rejected','deleted','all']).parse(status);z.enum([...memoryKinds,'all']).parse(kind);z.number().int().min(0).max(5000).parse(offset);z.number().int().min(1).max(100).parse(limit);
     const q=query.trim().toLocaleLowerCase(),tokens=q.split(/\s+/u).filter(Boolean),time=this.clock().getTime();
-    return this.allMemories(botId).filter(m=>(status==='all'||m.status===status)&&(status!=='active'||!m.expiresAt||Date.parse(m.expiresAt)>time))
+    return this.allMemories(botId).filter(m=>(kind==='all'||m.kind===kind)&&(status==='all'||m.status===status)&&(status!=='active'||!m.expiresAt||Date.parse(m.expiresAt)>time))
       .map(m=>({...m,_score:q?tokens.reduce((n,t)=>n+(m.text.toLocaleLowerCase().includes(t)?1:0),0):1})).filter(m=>m._score>0)
-      .sort((a,b)=>Number(b.pinned)-Number(a.pinned)||b._score-a._score||b.updatedAt.localeCompare(a.updatedAt)||a.id.localeCompare(b.id)).slice(0,limit).map(({_score,...m})=>m);
+      .sort((a,b)=>Number(b.pinned)-Number(a.pinned)||b._score-a._score||b.updatedAt.localeCompare(a.updatedAt)||a.id.localeCompare(b.id)).slice(offset,offset+limit).map(({_score,...m})=>m);
   }
   history(botId,{after=0,limit=50}={}){
     this.ready();z.number().int().nonnegative().parse(after);z.number().int().min(1).max(100).parse(limit);
-    return this.db.prepare('SELECT seq,json,sync_state FROM events WHERE bot_id=? AND seq>? ORDER BY seq ASC LIMIT ?').all(botId,after,limit).map(r=>({seq:r.seq,...JSON.parse(r.json),syncState:r.sync_state}));
+    return this.db.prepare('SELECT seq,type,json,sync_state FROM events WHERE bot_id=? AND seq>? ORDER BY seq ASC LIMIT ?').all(botId,after,limit).map(r=>({seq:r.seq,type:r.type,...JSON.parse(r.json),syncState:r.sync_state}));
   }
-  export(botId){return {version:1,domain:'local-owner',syncState:'local_only',profile:this.profile(botId),memories:this.allMemories(botId),exportedAt:this.now()};}
+  timeline(botId,{before=Number.MAX_SAFE_INTEGER,limit=30}={}){
+    this.ready();z.number().int().positive().parse(before);z.number().int().min(1).max(100).parse(limit);
+    return this.db.prepare('SELECT seq,type,json,sync_state FROM events WHERE bot_id=? AND seq<? ORDER BY seq DESC LIMIT ?').all(botId,before,limit).map(r=>({seq:r.seq,type:r.type,...JSON.parse(r.json),syncState:r.sync_state}));
+  }
+  export(botId){return {version:1,domain:'local-owner',syncState:'local_only',profile:this.profile(botId),memories:this.allMemories(botId),work:{goals:this.entitiesOfType(botId,'goal'),deliveries:this.entitiesOfType(botId,'delivery'),artifacts:this.entitiesOfType(botId,'artifact'),reviews:this.entitiesOfType(botId,'review')},exportedAt:this.now()};}
   context(botId){const p=this.profile(botId),memories=this.memories(botId,{limit:8});
     const value={profile:Object.fromEntries(PROFILE_FIELDS.map(k=>[k,p[k].slice(0,900)])),memories:memories.map(m=>({id:m.id,kind:m.kind,text:m.text.slice(0,450)}))};
     while(JSON.stringify(value).length>7800){

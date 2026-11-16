@@ -7,7 +7,7 @@
 | 基础 | Bot 身份、创建修复、跨 Bot 派单回传 | 已实现，本地实际模型链路验证 | `1d6a758`，`evidence/bot-communication` |
 | PRD | 全量需求、架构边界、验收矩阵与阶段 | v1.0 已完成 | `NAUMI_DIGITAL_EMPLOYEE_PRD.md` |
 | M1 | 本地档案、记忆、动态设定、巡检 | 本地基础模块已实现并接入 | SQLite/owner HTTP/Agent 工具/事件/注入/心跳；156 项测试通过；真实跨会话记忆验证；详见下表 |
-| M2 | 员工管理 UI、目标、交付与验收 | 未实现 | 不以 API 代替 UI 验收 |
+| M2 | 员工管理 UI、目标、交付与验收 | 已实现并接入本地；M3 企业权威待接 | 166 项回归；20 项真实壳/SQLite 交互检查；实际本地页面和刷新恢复通过；文本交付版本与本机 owner 验收 |
 | M3 | 企业组织、同步、离线授权 | 未实现 | 需服务端实现与实际部署 |
 | M4 | 主动规则、预算、分布式执行与故障切换 | 未实现 | 需模型网关、租约与故障注入 |
 | M5 | 开箱即用员工安装包 | 待后续功能集成后重建 | 不复用旧 EXE 冒充新功能包 |
@@ -42,3 +42,12 @@
 ## 下次接续入口
 
 按 PRD 需求 ID 与验收编号更新状态；任何局部通过不关闭整个 M1/M2 或服务端上线目标。
+
+## M2 进度
+
+- 实现：员工中心四个可操作页面、人物设定差异与恢复、记忆搜索/类别/分页/审核/有效期/删除、目标与依赖、文本交付不可变版本、逐项验收和复盘候选。
+- API：owner CRUD/下载；Agent 只可提交自己的交付，不可自审；executionStatus 与 businessStatus 分离。
+- 证据：`evidence/employee-center/module-tests.log`、`UI_VERIFICATION.json`、`LIVE_UI_VERIFICATION.json`、`VERIFICATION.txt`。
+- 界面验证为真实 Harness 壳 + 隔离 SQLite/HTTP 工作数据；实际运行版另做只读页面/接口核对，未造真实员工业务数据。
+- M2 交付物目前为文本正文。企业图片/视频资产系统及组织审批权威将在 M3 集成；不把 local-owner 验收说成服务器已批准。
+- 总目标 active，接续 M3：复用 naumi-co 现有 Actor/withTenant/资源授权，不另造不受租户约束的服务端入口。

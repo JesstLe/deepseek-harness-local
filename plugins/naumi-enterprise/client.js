@@ -1,5 +1,11 @@
 /** Async presentation-only module; the original enterprise app below stays intact. */
 function installNaumiContextUI(ctx,React,createPortal,Icon){
+  let restoreEmployees=false;try{restoreEmployees=sessionStorage.getItem('naumi.activePanel')==='naumi-employees';}catch{}
+  ctx.effect(()=>{
+    let dispose,closed=false;
+    void import('/naumi/assets/employee-center.js').then(module=>{if(!closed)dispose=module.installEmployeeCenter(ctx,React,Icon,{openOnReady:restoreEmployees});}).catch(error=>console.error('Naumi employee center:',error));
+    return()=>{closed=true;dispose?.();};
+  });
   ctx.effect(()=>{
     let dispose,closed=false;
     void import('/naumi/assets/team-panel.js').then(module=>{if(!closed)dispose=module.installTeamPanel(ctx,React,createPortal,Icon);}).catch(error=>console.error('Naumi team panel:',error));
