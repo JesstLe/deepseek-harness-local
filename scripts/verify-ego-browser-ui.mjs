@@ -1,0 +1,57 @@
+import fs from 'node:fs';
+import http from 'node:http';
+import assert from 'node:assert/strict';
+import {pathToFileURL} from 'node:url';
+import {connect} from './harness-rpc.mjs';
+const {chromium}=await import(pathToFileURL(process.env.NAUMI_PLAYWRIGHT_MODULE??'E:/Workspace/naumi/node_modules/playwright/index.mjs').href);
+const logs=['logs/server.out.log','logs/server.err.log'].map(p=>fs.readFileSync(p,'utf8')).join('\n');
+const launch=[...logs.matchAll(/http:\/\/127\.0\.0\.1:3080\/?\?token=[A-Za-z0-9_~.%-]+/g)].at(-1)[0];
+const rpc=await connect(),sessions=await rpc('session/list',{_request:{}}),session=sessions.items.find(s=>s.projections?.values?.title==='你好，介绍你的能力');assert(session);
+const server=http.createServer((req,res)=>{res.setHeader('X-Frame-Options','DENY');res.setHeader('Content-Type','text/html; charset=utf-8');res.end('<!doctype html><meta charset="utf-8"><title>Naumi browser sidebar</title><style>body{font:18px system-ui;margin:0;background:#f7f9fc;color:#243b60}main{padding:28px}input,button{font:inherit;padding:10px;margin:4px;border:1px solid #c5d0e5;border-radius:8px;background:white}h1{font-size:26px}</style><main><h1>Naumi Browser</h1><input id="name" aria-label="Fixture name"><button id="save" onclick="document.querySelector(\'#result\').textContent=document.querySelector(\'#name\').value">Apply</button><p id="result"></p></main>');});
+await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;
+const browser=await chromium.launch({headless:true}),context=await browser.newContext({viewport:{width:1600,height:1000},colorScheme:'light'}),page=await context.newPage(),errors=[],checks={};
+page.on('pageerror',e=>errors.push(e.message));
+const check=(name,ok)=>{assert(ok,name);checks[name]=true;console.log('EGO_UI_PASS '+name);};
+const op=args=>page.evaluate(async body=>{const r=await fetch('/naumi/browser',{method:'POST',headers:{'Content-Type':'application/json','X-Naumi-Browser':'1'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw Error(d.error);return d;},{sessionId:session.sessionId,...args});
+try{
+  await page.goto(launch,{waitUntil:'domcontentloaded'});
+  const group=page.locator('[data-slot="sidebar.workspaces"] [role="treeitem"]').filter({hasText:'默认工作区'}).first();await group.waitFor();if(await group.getAttribute('aria-expanded')==='false')await group.click();
+  await page.locator('[data-slot="sidebar.workspaces"] [role="treeitem"]').filter({hasText:session.projections.values.title}).click();
+  await page.getByRole('button',{name:'打开内置浏览器',exact:true}).click();
+  await page.locator('[data-naumi-browser]').waitFor();check('native_right_sidebar',await page.locator('[data-slot="rightbar"] [data-naumi-browser]').count()===1);
+  await page.locator('.naumi-browser-screen img').waitFor();await page.locator('input[aria-label="浏览器地址"]').fill(origin);await page.getByRole('button',{name:'前往',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('.naumi-browser-status')?.textContent.includes('Naumi browser sidebar'));
+  check('actual_ego_page_rendered',await page.locator('.naumi-browser-screen img').evaluate(i=>i.naturalWidth>300));
+  check('no_site_iframe',await page.locator('[data-naumi-browser] iframe').count()===0);
+  const snapshot=await op({action:'snapshot'});check('agent_and_sidebar_same_page',snapshot.snapshot.includes('Naumi Browser'));
+  const surface=page.locator('.naumi-browser-screen'),box=await surface.boundingBox();
+  await page.mouse.click(box.x+130,box.y+140);await page.locator('.naumi-browser-keyboard').pressSequentially('Naumi UI');
+  await page.waitForFunction(()=>!document.querySelector('.naumi-browser-busy'));
+  await op({action:'click',selector:'#save'});
+  const typed=await op({action:'snapshot'});if(!typed.snapshot.includes('Naumi UI'))fs.writeFileSync('.dsh/ego-lite-backup/keyboard-failure.json',JSON.stringify({snapshot:typed.snapshot,width:typed.width,height:typed.height,image:await surface.locator('img').evaluate(i=>({w:i.naturalWidth,h:i.naturalHeight,cw:i.clientWidth,ch:i.clientHeight}))},null,2));check('sidebar_mouse_keyboard',typed.snapshot.includes('Naumi UI'));
+  // Composition events follow the same path used by the employee's IME.
+  await op({action:'click',selector:'#name'});await op({action:'press',key:'Control+a'});
+  await page.locator('.naumi-browser-keyboard').evaluate(el=>{el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'中文侧栏'}));});
+  await page.waitForFunction(()=>!document.querySelector('.naumi-browser-busy'));await op({action:'click',selector:'#save'});check('sidebar_chinese_composition',(await op({action:'snapshot'})).snapshot.includes('中文侧栏'));
+  const model=page.locator('[data-slot="conversation.input.model"] button');check('original_model_still_visible',await model.isVisible());
+  const resizeCalls=[];page.on('request',r=>{if(new URL(r.url()).pathname==='/naumi/browser'&&r.method()==='POST'){const data=r.postDataJSON();if(data.action==='resize')resizeCalls.push({width:data.width,height:data.height});}});
+  await page.evaluate(()=>{window.__egoPerf={active:true,times:[],last:performance.now()};const sample=t=>{const p=window.__egoPerf;if(!p.active)return;p.times.push(t-p.last);p.last=t;requestAnimationFrame(sample);};requestAnimationFrame(sample);});
+  const handle=page.locator('[data-side="rightbar"]');const hb=await handle.boundingBox();assert(hb);await page.mouse.move(hb.x+hb.width/2,400);await page.mouse.down();
+  for(let i=1;i<=55;i++)await page.mouse.move(hb.x+hb.width/2+250*i/55,400);
+  await new Promise(r=>setTimeout(r,260));check('drag_does_not_enqueue_resizes',resizeCalls.length===0);await page.mouse.up();
+  await page.waitForFunction(()=>{const i=document.querySelector('.naumi-browser-screen img');return i&&Math.abs(i.naturalWidth-i.clientWidth)<2;});
+  const dragPerformance=await page.evaluate(()=>{const p=window.__egoPerf;p.active=false;const times=p.times.filter(x=>x>0).sort((a,b)=>a-b);return{frames:times.length,p95Ms:Math.round(times[Math.floor(times.length*.95)]??0),maxMs:Math.round(times.at(-1)??0)};});
+  check('drag_final_viewport_once',resizeCalls.length===1);check('drag_layout_responsive',dragPerformance.p95Ms<100);
+  fs.writeFileSync('evidence/ego-lite/RESIZE_CHECK.json',JSON.stringify({...dragPerformance,pointerMoves:55,resizeRequests:resizeCalls.length,finalViewport:resizeCalls.at(-1)},null,2)+'\n');
+  const requests=[];page.on('request',r=>{if(new URL(r.url()).pathname==='/naumi/browser'&&r.method()==='POST')requests.push(Date.now());});
+  await page.locator('[data-slot="rightbar"] button[aria-label="收起右侧边栏"]').click();const before=requests.length;await new Promise(r=>setTimeout(r,1800));check('hidden_sidebar_stops_polling',requests.length<=before+1);
+  await page.getByRole('button',{name:'打开内置浏览器',exact:true}).click();await page.locator('.naumi-browser-screen img').waitFor();check('collapse_restore_keeps_page',(await op({action:'snapshot'})).snapshot.includes('中文侧栏'));
+  await page.screenshot({path:'evidence/ego-lite/sidebar-desktop.png',animations:'disabled'});
+  await page.setViewportSize({width:390,height:844});await page.waitForFunction(()=>{const b=document.querySelector('[data-naumi-browser]')?.getBoundingClientRect(),i=document.querySelector('.naumi-browser-screen img');return b&&b.left>=0&&b.right<=innerWidth+1&&i&&Math.abs(i.naturalWidth-i.clientWidth)<2;});check('mobile_sidebar_fits',true);await page.screenshot({path:'evidence/ego-lite/sidebar-mobile.png',animations:'disabled'});
+  check('no_frontend_errors',errors.length===0);
+  const skill=await rpc('skills/list',{request:{sessionId:session.sessionId}});check('bundled_skill_visible',skill.skills.some(s=>s.name==='naumi-browser'));
+  const catalog=await rpc('session/modelCatalog');check('nine_model_groups',catalog.groups.length===9);
+  fs.writeFileSync('evidence/ego-lite/UI_CHECK.json',JSON.stringify({checks,errors,at:new Date().toISOString()},null,2)+'\n');
+  console.log('EGO_UI_RESULT checks='+Object.keys(checks).length+' pass='+Object.keys(checks).length+' errors=0');
+}catch(e){fs.writeFileSync('.dsh/ego-lite-backup/ui-failure.txt',String(e.stack));await page.screenshot({path:'evidence/ego-lite/ui-failure.png'});throw e;}
+finally{await op({action:'finish'}).catch(()=>{});await context.close();await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r));}

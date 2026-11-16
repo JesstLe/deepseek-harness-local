@@ -111,6 +111,7 @@ window.__ModuleLoader__.load({id:'@naumi/dsh-enterprise',factory(require){
     const config=window.__NAUMI__;
     if(!config)throw Error('Naumi host configuration missing');
     installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);
+    ctx.inject(['sidebarRight','sidebarRightTabs'],scope=>scope.effect(()=>{let dispose,closed=false;void import('/naumi/assets/browser-client.js').then(m=>{if(!closed)dispose=m.installBrowserUI(scope,React,Icon);}).catch(e=>console.error('Naumi browser UI:',e));return()=>{closed=true;dispose?.();};}));
     ctx.effect(()=>{
       const language=ctx.locale.addLanguage({id:'zh-Naumi',label:'简体中文 · Naumi',fallback:'zh'});
       const dictionary=ctx.locale.register('conversation','zh-Naumi',{'hero.headline':'AI 协作','hero.preview':''});

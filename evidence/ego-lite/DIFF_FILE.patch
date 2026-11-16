@@ -1,0 +1,1033 @@
+diff --git a/docs/implementation/EGO_LITE.md b/docs/implementation/EGO_LITE.md
+new file mode 100644
+index 0000000..aa385eb
+--- /dev/null
++++ b/docs/implementation/EGO_LITE.md
+@@ -0,0 +1,58 @@
++# Naumi 内置浏览器接入
++
++## 产品决定
++
++在Harness原生右侧Sidebar注册browser类型，由ego-lite真实浏览器页面提供交互画面，不使用iframe、不重写页面CSP、不嵌入操作系统窗口。沿用原有停靠、全屏、收起、Session生命周期。左侧导航与模型位置不改。
++
++## 上游核对
++
++仓库commit bacaece43900e8ca68eea3b6f1663835ea38df9e提供MIT SDK和skill；浏览器为独立发行，Windows安装包0.6.3.14，官方SHA256与Authenticode签名均已核验。安装按当前用户、usage stats关闭，不设置系统默认浏览器，不导入Chrome资料。用户已完成首次引导。安装后的skill为2.2.1，与仓库入口2.2.0分开记录。
++
++## 实现
++
++- 原生右侧Sidebar browser类型与会话header入口，左侧导航、原有工作台、模型选择位置不动。
++- browser.js提供Harness owner认证的状态与结构化操作接口，POST需同源意图header，拒绝跨域Origin、超大请求和任意脚本。
++- naumi_browser原生工具按exec.agent.id绑定会话；独立bundled skill provider提供naumi-browser，不修改原desktop skill。
++- 浏览器为真实ego-lite页面，不是iframe。侧栏承载JPEG交互视图；点击、输入、中文组合、粘贴、滚轮、导航历史与页面切换走相同TaskSpace。
++- 浏览器原生Application目录已按固定版本复制到runtime，不复制User Data、Cookie、密码、历史。插件原生runtime/CLI与chrome.dll按锁文件SHA256检查。
++
++## 拉伸性能修复（用户反馈）
++
++原实现每次画面读取启动CLI，并在新CDP会话里重设视口；尺寸、轮询和用户输入共用无界FIFO，出现过时画面覆盖、拖拽积压和页面比例失配。
++
++改动：
++1. 常驻ego嵌入式Node/SDK worker，复用CDP会话。私有loopback端口绑定127.0.0.1，以随机能力令牌认证且拒绝Origin。worker随Naumi生命周期关闭；父进程退出后lease清理，不关闭员工浏览器或个人页面。
++2. 仅在尺寸变化或实际视口丢失时重设viewport；普通帧读取不重复Emulation操作。JPEG按像素预算缩采样，CSS保持contain比例。
++3. BrowserScheduler最多1个在途请求；被动帧仅保留1个待办，尺寸只保留最新值。拖动期间暂停远端resize与轮询，松手和180ms稳定后只应用最终尺寸。
++4. 版本号淘汰旧帧，文字与滚轮连续输入组合但不跨点击重排；点击按等比画面的实际区域映射，留白不点击。
++5. 隐藏/收起停止轮询；卸载取消请求、清空计时器及观察器；写操作结果不明时不重放。
++
++## 当前验证
++
++- 原模块基线36/36；集成与调度器模块测试52/52。
++- 真实浏览器6项：语义填表、中文键盘、历史、HttpOnly Cookie跨导航/刷新保留、页面列表，以及X-Frame-Options DENY站点显示。
++- 真实侧栏16项通过，包括鼠标输入、中文组合、收起恢复、移动端、模型保持、无前端错误和拉伸专项。
++- 连续55次原生handle拖动，期间0个resize，松手后1个最终resize；79个动画帧采样，P95=17ms，max=17ms。该数据是本机fixture测量，不是所有员工机器的帧率承诺。
++- 相同8轮画面读取：旧版启动10个进程、frame中位194ms、总2457ms；常驻版启动1个worker、frame中位69ms、总510ms，视口保持800x600。
++- 原上下文UI真实Chromium27/27通过；现有desktop仍75个工具、模型9组、browser/desktop skill均可见。未发起模型生成、真实业务写操作或登录数据迁移。
++- protected文件8份哈希保持原值。源文件和已安装profile在副本中执行真实rollback，恢复7份原文件、禁用browser集成并保留agent-desktop；活动目录仍为集成后状态。
++
++## 打包、回滚和后续
++
++`runtime/ego-lite-win32-x64-0.6.3.14.zip`为纯浏览器离线runtime，738文件、293684260字节，SHA256为139b82c01274ea5acc8e4485c64b70059d3177694e5afcf3a099f8a17d4f4cb2。已重新打开并执行CRC检查。该大文件保留在本地runtime，不推入Git普通对象；源码含setup/package脚本与离线包清单。
++
++`evidence/ego-lite/`提供MODIFIED_FILE.zip、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh、原始快照及JSON报告。默认rollback脚本仅在副本测试，显式rollback才改活动目录；执行后重启Naumi并刷新页面。回滚保留浏览器安装、离线包与个人浏览器profile，不执行卸载或清除数据。
++
++复验：
++
++```powershell
++node --test tests/naumi-enterprise.test.mjs tests/naumi-context-ui.test.mjs tests/agent-desktop.test.mjs tests/ego-browser.test.mjs tests/ego-browser-scheduler.test.mjs
++node scripts/verify-ego-browser.mjs
++node scripts/verify-ego-browser-ui.mjs
++node scripts/verify-ego-browser-live.mjs
++node scripts/verify-ego-browser-state.mjs rollback-test
++```
++
++性能前后对比脚本使用evidence/ego-lite/performance-original保存的原版本快照，可重复运行；这些文件仅用于基线测量，不被运行服务加载。
++
++当前验收Windows x64；macOS/Linux包没有制作。这里交付浏览器模块及离线组件，不等于完整员工安装程序、企业统一登录或服务端API配置已经完成。首次个人引导仍由员工确认。浏览器本体为上游独立发行，与仓库MIT SDK许可证分别保留，不修改上游二进制。
+diff --git a/package.json b/package.json
+index 442fcdb..23d44b9 100644
+--- a/package.json
++++ b/package.json
+@@ -12,7 +12,10 @@
+     "naumi:test": "node --test tests/naumi-enterprise.test.mjs",
+     "naumi:install": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/setup-naumi.ps1",
+     "desktop:status": "node scripts/agent-desktop.mjs status",
+-    "desktop:verify": "node scripts/verify-agent-desktop.mjs"
++    "desktop:verify": "node scripts/verify-agent-desktop.mjs",
++    "browser:status": "node scripts/ego-browser.mjs status",
++    "browser:verify": "node scripts/verify-ego-browser.mjs",
++    "browser:install": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/setup-ego-browser.ps1"
+   },
+   "dependencies": {
+     "@deepseek-ai/dsh": "0.2.2-rc.1",
+diff --git a/plugins/naumi-enterprise/assets/browser-client.js b/plugins/naumi-enterprise/assets/browser-client.js
+new file mode 100644
+index 0000000..446d53a
+--- /dev/null
++++ b/plugins/naumi-enterprise/assets/browser-client.js
+@@ -0,0 +1,47 @@
++import {BrowserScheduler,browserPoint} from './browser-scheduler.js';
++/** Ego page presentation inside the native Harness docking system. */
++export function installBrowserUI(ctx,React,Icon){
++  const {createElement:h,useState,useEffect,useRef}=React,id='@naumi/ego-browser';
++  const disposers=[];
++  function Browser({sessionId,useTabInfo}){
++    const {tab}=useTabInfo(),[state,setState]=useState(null),[address,setAddress]=useState(''),[error,setError]=useState(null),[busy,setBusy]=useState(false),[pages,setPages]=useState([]);
++    const surface=useRef(null),keyboard=useRef(null),composition=useRef(false),frame=useRef(null),scheduler=useRef(null);
++    if(!scheduler.current)scheduler.current=new BrowserScheduler({
++      request:async(args,signal)=>{const response=await fetch('/naumi/browser',{method:'POST',credentials:'same-origin',cache:'no-store',signal,headers:{'Content-Type':'application/json','X-Naumi-Browser':'1'},body:JSON.stringify({sessionId,...args})});const data=await response.json();if(!response.ok)throw Error(data.error??'EGO_OPERATION_FAILED');return data;},
++      onState:data=>{if(surface.current)delete surface.current.dataset.resizing;setState(old=>({...old,...data}));frame.current={...frame.current,...data};if(data.tabs)setPages(data.tabs.filter(p=>p.label));setAddress(old=>document.activeElement?.getAttribute('aria-label')==='浏览器地址'?old:data.url==='chrome://new-tab-page/'?'':data.url??old);setError(null);},
++      onError:e=>setError(e.message),onBusy:setBusy
++    });
++    const act=args=>scheduler.current.perform(args).catch(e=>{if(e.message!=='BROWSER_VIEW_CLOSED')setError(e.message);});
++    const request=act;
++    useEffect(()=>()=>scheduler.current.dispose(),[]);
++    useEffect(()=>{const box=surface.current;if(box)scheduler.current.resize(box.clientWidth,box.clientHeight);scheduler.current.setActive(tab.visible);return()=>scheduler.current.setActive(false);},[tab.visible,sessionId]);
++    useEffect(()=>{const box=surface.current;if(!box)return;const observer=new ResizeObserver(()=>{if(scheduler.current.resize(box.clientWidth,box.clientHeight))box.dataset.resizing='true';});observer.observe(box);return()=>observer.disconnect();},[]);
++    useEffect(()=>{const down=e=>{if(e.target instanceof Element&&e.target.closest('[data-side="rightbar"],[data-side="sidebar"]'))scheduler.current.setDragging(true);},up=()=>scheduler.current.setDragging(false);window.addEventListener('pointerdown',down,true);window.addEventListener('pointerup',up,true);window.addEventListener('pointercancel',up,true);return()=>{window.removeEventListener('pointerdown',down,true);window.removeEventListener('pointerup',up,true);window.removeEventListener('pointercancel',up,true);};},[]);
++    useEffect(()=>tab.actions.bindCommands({refresh:()=>{void act({action:'reload'});}}),[tab.actions]);
++    const point=e=>frame.current?browserPoint(e.currentTarget.getBoundingClientRect(),frame.current,e.clientX,e.clientY):null;
++    const key=e=>{
++      if(composition.current||e.isComposing)return;
++      if(['Control','Meta','Alt','Shift','CapsLock'].includes(e.key))return;
++      if(e.key==='Tab'||e.key==='Escape'||e.key==='Enter'||e.key==='Backspace'||e.key==='Delete'||e.key.startsWith('Arrow')||['Home','End','PageUp','PageDown'].includes(e.key)||e.ctrlKey||e.metaKey||e.altKey){
++        e.preventDefault();const mods=[e.ctrlKey?'Control':null,e.metaKey?'Meta':null,e.altKey?'Alt':null,e.shiftKey?'Shift':null].filter(Boolean);void act({action:'press',key:[...mods,e.key===' '?'Space':e.key].join('+')});
++      }else if(e.key.length===1){e.preventDefault();void act({action:'text',text:e.key});}
++    };
++    const button=(label,symbol,action,disabled=false)=>h('button',{type:'button',className:'naumi-browser-tool',title:label,'aria-label':label,disabled,onClick:()=>{void act({action});}},symbol);
++    const errors={EGO_ONBOARDING_REQUIRED:'请完成浏览器首次引导',EGO_RUNTIME_NOT_INSTALLED:'浏览器组件未安装',EGO_CONNECTION_UNAVAILABLE:'浏览器暂未连接',EGO_OPERATION_TIMEOUT_NO_REPLAY:'操作超时，请检查页面后再继续',EGO_TASK_SPACE_NAME_IN_USE:'页面当前由浏览器用户控制'};
++    return h('section',{className:'naumi-browser','data-naumi-browser':true},
++      h('form',{className:'naumi-browser-toolbar',onSubmit:e=>{e.preventDefault();void act({action:'navigate',url:address});}},
++        button('后退','←','back',busy||!state?.canGoBack),button('前进','→','forward',busy||!state?.canGoForward),button('刷新网页','↻','reload',busy),
++        h('input',{'aria-label':'浏览器地址',placeholder:'输入网址',value:address,onChange:e=>setAddress(e.target.value),onFocus:e=>e.target.select(),spellCheck:false}),
++        h('button',{type:'submit',className:'naumi-browser-go','aria-label':'前往',disabled:busy},'↵'),
++        h('button',{type:'button',className:'naumi-browser-tool',title:'页面列表','aria-label':'页面列表',onClick:()=>{void request({action:'tabs'});}},h(Icon,{name:'layers',size:16}))),
++      pages.length>0&&h('div',{className:'naumi-browser-pages'},...pages.map(p=>h('button',{key:p.label,className:p.label===state?.label?'selected':'',onClick:()=>{setPages([]);void act({action:'select',label:p.label});}},p.title||p.label))),
++      error&&h('div',{role:'alert',className:'naumi-browser-error'},errors[error]??error,h('button',{onClick:()=>{void act({action:'state'});}},'重新连接')),
++      h('div',{className:'naumi-browser-surface',ref:surface},state?.image?h('div',{className:'naumi-browser-screen',role:'application','aria-label':'浏览器页面',tabIndex:0,onClick:e=>{const p=point(e);if(!p)return;keyboard.current?.focus({preventScroll:true});void act({action:'click',...p});},onWheel:e=>{const p=point(e);if(p)void act({action:'wheel',...p,deltaX:e.deltaX,deltaY:e.deltaY});}},h('img',{src:'data:image/jpeg;base64,'+state.image,alt:'',draggable:false}),h('textarea',{ref:keyboard,className:'naumi-browser-keyboard','aria-label':'浏览器键盘输入',autoComplete:'off',spellCheck:false,onKeyDown:key,onCompositionStart:()=>{composition.current=true;},onCompositionEnd:e=>{composition.current=false;if(e.data)void act({action:'text',text:e.data});e.currentTarget.value='';},onInput:e=>{if(!composition.current&&e.currentTarget.value){void act({action:'text',text:e.currentTarget.value});e.currentTarget.value='';}},onPaste:e=>{e.preventDefault();const text=e.clipboardData.getData('text/plain');if(text)void act({action:'text',text});}})):h('div',{className:'naumi-browser-start'},busy?'正在连接…':'浏览器')),
++      h('div',{className:'naumi-browser-status'},h('i',{'data-connected':!!state}),h('span',null,state?.title??'Naumi 浏览器'),busy&&h('span',{className:'naumi-browser-busy'},'•••')));
++  }
++  disposers.push(ctx.sidebarRightTabs.register({id,kind:'browser',priority:'extension',keepMounted:true,title:()=> '浏览器',guide:[{id:'new',order:25,title:()=> '浏览器'}]}));
++  disposers.push(ctx.slots.inject('sidebar.right.pane.tab',()=>ctx.slots.register({name:'sidebar.right.pane.tab',key:id},Browser)));
++  function OpenButton(){return h('button',{className:'naumi-browser-open','aria-label':'打开内置浏览器',title:'浏览器',onClick:()=>ctx.sidebarRight.openTab('browser')},h(Icon,{name:'link',size:16}),'浏览器');}
++  disposers.push(ctx.slots.inject('conversation.session.header.actions',()=>ctx.slots.register({name:'conversation.session.header.actions',id:'naumi-browser-open',order:79},OpenButton)));
++  return()=>{for(const dispose of disposers.reverse())dispose();};
++}
+diff --git a/plugins/naumi-enterprise/assets/browser-scheduler.js b/plugins/naumi-enterprise/assets/browser-scheduler.js
+new file mode 100644
+index 0000000..c8413f6
+--- /dev/null
++++ b/plugins/naumi-enterprise/assets/browser-scheduler.js
+@@ -0,0 +1,54 @@
++/** One in-flight operation; resize and passive frames are latest-only, mutations stay ordered. */
++export function browserViewport(width,height){return {width:Math.max(200,Math.min(2560,Math.round(width))),height:Math.max(120,Math.min(1600,Math.round(height)))};}
++export function browserPoint(rect,viewport,x,y){
++  const scale=Math.min(rect.width/viewport.width,rect.height/viewport.height),px=(x-rect.left)/scale,py=(y-rect.top)/scale;
++  if(px<0||py<0||px>=viewport.width||py>=viewport.height)return null;
++  return {x:Math.floor(px),y:Math.floor(py)};
++}
++export class BrowserScheduler {
++  constructor({request,onState,onError=()=>{},onBusy=()=>{},resizeDelay=180,pollDelay=1200}){Object.assign(this,{request,onState,onError,onBusy,resizeDelay,pollDelay});this.actions=[];this.active=false;this.closed=false;this.version=0;this.stats={requests:0,resizeRequests:0,discardedFrames:0,maxConcurrent:0};}
++  setActive(value){this.active=value;clearTimeout(this.pollTimer);if(value){this.frameWanted=true;this.poll();this.pump();}}
++  setDragging(value){this.dragging=value;if(!value)this.pump();}
++  poll(){this.pollTimer=setTimeout(()=>{if(!this.active||this.closed)return;this.frameWanted=true;this.pump();this.poll();},this.pollDelay);}
++  resize(width,height){
++    const size=browserViewport(width,height),key=`${size.width}x${size.height}`;if(key===this.desiredKey)return;
++    this.desired=size;this.desiredKey=key;this.version++;this.resizing=true;clearTimeout(this.resizeTimer);
++    this.resizeTimer=setTimeout(()=>{this.resizing=false;this.pump();},this.resizeDelay);
++    return true;
++  }
++  perform(args){
++    if(this.closed)return Promise.reject(Error('BROWSER_VIEW_CLOSED'));
++    if(this.actions.length>=64)return Promise.reject(Error('BROWSER_INPUT_QUEUE_BUSY'));
++    const promise=new Promise((resolve,reject)=>{this.actions.push({args,settlers:[{resolve,reject}]});});this.onBusy(true);this.pump();return promise;
++  }
++  nextAction(){
++    const entry=this.actions.shift();
++    // Typing bursts and wheel bursts can be composed, never replayed or moved across another action.
++    while(entry&&['text','wheel'].includes(entry.args.action)&&this.actions[0]?.args.action===entry.args.action){
++      const next=this.actions[0];
++      if(entry.args.action==='text'){if((entry.args.text??'').length+(next.args.text??'').length>16384)break;entry.args={...entry.args,text:(entry.args.text??'')+(next.args.text??'')};}
++      else entry.args={...next.args,deltaX:(entry.args.deltaX??0)+(next.args.deltaX??0),deltaY:(entry.args.deltaY??0)+(next.args.deltaY??0)};
++      this.actions.shift();entry.settlers.push(...next.settlers);
++    }
++    return entry;
++  }
++  async pump(){
++    if(this.closed||!this.active||this.inFlight||this.resizing||this.dragging)return;
++    let entry,resize=false;
++    if(this.desiredKey&&this.desiredKey!==this.appliedKey){entry={args:{action:'resize',...this.desired},settlers:[]};resize=true;}
++    else entry=this.nextAction();
++    if(!entry){if(!this.frameWanted)return;entry={args:{action:'state'},settlers:[]};}
++    this.frameWanted=false;this.inFlight=true;const version=this.version,key=this.desiredKey;this.controller=new AbortController();
++    this.stats.requests++;if(resize)this.stats.resizeRequests++;this.stats.maxConcurrent=Math.max(1,this.stats.maxConcurrent);
++    try{
++      const data=await this.request({...entry.args,frame:true},this.controller.signal);
++      if(!this.closed){
++        if(version===this.version){if(resize)this.appliedKey=key;this.onState(data);}
++        else this.stats.discardedFrames++;
++      }
++      for(const s of entry.settlers)s.resolve(data);
++    }catch(error){if(!this.closed&&version===this.version)this.onError(error);for(const s of entry.settlers)s.reject(error);if(resize&&version===this.version)this.appliedKey=key;}
++    finally{this.inFlight=false;this.onBusy(this.actions.length>0);this.pump();}
++  }
++  dispose(){this.closed=true;this.active=false;clearTimeout(this.resizeTimer);clearTimeout(this.pollTimer);this.controller?.abort();for(const e of this.actions)for(const s of e.settlers)s.reject(Error('BROWSER_VIEW_CLOSED'));this.actions=[];}
++}
+diff --git a/plugins/naumi-enterprise/assets/browser.css b/plugins/naumi-enterprise/assets/browser.css
+new file mode 100644
+index 0000000..1735f6d
+--- /dev/null
++++ b/plugins/naumi-enterprise/assets/browser.css
+@@ -0,0 +1,13 @@
++.naumi-browser{height:100%;min-height:0;display:flex;flex-direction:column;background:#fff;color:#1c2433;font-family:Inter,"PingFang SC","Microsoft YaHei",sans-serif}
++.naumi-browser-toolbar{display:flex;align-items:center;gap:4px;padding:9px 10px;border-bottom:1px solid #e8ebf0;background:#fff;flex-shrink:0}
++.naumi-browser-tool,.naumi-browser-go{border:0;background:transparent;border-radius:7px;color:#607087;cursor:pointer;height:30px;min-width:28px;font-size:17px;display:inline-flex;align-items:center;justify-content:center}
++.naumi-browser-tool:hover,.naumi-browser-go:hover{background:#edf2fc;color:#3660d4}.naumi-browser-tool:disabled{opacity:.35;cursor:default}
++.naumi-browser-toolbar input{min-width:0;flex:1;height:32px;border:1px solid #e3e8f0;background:#f6f8fc;border-radius:8px;padding:0 10px;font-size:12px;color:#34415a;outline:none}
++.naumi-browser-toolbar input:focus{border-color:#7197ed;box-shadow:0 0 0 3px #edf2ff}.naumi-browser-surface{flex:1;min-height:0;overflow:hidden;position:relative;background:#fff}
++.naumi-browser-screen{position:absolute;inset:0;outline:none;overflow:hidden;cursor:default;touch-action:none}.naumi-browser-screen:focus-visible{box-shadow:inset 0 0 0 2px #7197ed}.naumi-browser-screen img{width:100%;height:100%;display:block;user-select:none;pointer-events:none}
++.naumi-browser-start{height:100%;display:grid;place-content:center;color:#8793a6;font-size:13px}.naumi-browser-status{display:flex;align-items:center;gap:7px;padding:6px 12px;border-top:1px solid #edf0f5;font-size:11px;color:#8a95a7;white-space:nowrap;min-height:26px}.naumi-browser-status span{overflow:hidden;text-overflow:ellipsis}.naumi-browser-status i{width:5px;height:5px;border-radius:50%;background:#b4bdcd;flex:none}.naumi-browser-status i[data-connected=true]{background:#34ad7c}.naumi-browser-busy{margin-left:auto;color:#5279d9}
++.naumi-browser-error{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;background:#fff4ec;color:#985f31;font-size:12px}.naumi-browser-error button{background:none;border:0;color:#3a67ce;cursor:pointer;white-space:nowrap}.naumi-browser-open{border:1px solid #e4e9f2;background:#fff;color:#516079;display:inline-flex;align-items:center;gap:6px;border-radius:7px;padding:5px 9px;font-size:12px;cursor:pointer}.naumi-browser-open:hover{background:#f1f5ff;color:#365fd2}.naumi-browser-pages{display:flex;gap:4px;padding:5px 9px;overflow:auto;border-bottom:1px solid #edf0f5}.naumi-browser-pages button{border:0;background:#f4f6fa;color:#5a6b87;padding:5px 8px;border-radius:5px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}.naumi-browser-pages .selected{background:#eaf0ff;color:#3660d4}
++
++.naumi-browser-keyboard{position:absolute;left:4px;top:4px;width:1px;height:1px;opacity:0;resize:none;padding:0;border:0;pointer-events:none}
++.naumi-browser-screen img{object-fit:contain;object-position:left top}
++.naumi-browser-screen{contain:strict}.naumi-browser-surface[data-resizing]{cursor:progress}.naumi-browser-surface[data-resizing] .naumi-browser-screen{pointer-events:none}
+diff --git a/plugins/naumi-enterprise/browser-bridge.mjs b/plugins/naumi-enterprise/browser-bridge.mjs
+new file mode 100644
+index 0000000..2d9e2d3
+--- /dev/null
++++ b/plugins/naumi-enterprise/browser-bridge.mjs
+@@ -0,0 +1,62 @@
++/** Executed inside ego-lite's embedded Node runtime; no external browser or CDP port. */
++export async function operate(input,cache=new Map()){
++  try{
++    let entry=cache.get(input.name);
++    if(!entry){entry={task:await globalThis.taskSpace(input.name),sizes:new Map()};cache.set(input.name,entry);}
++    const task=entry.task;
++    const page=task.page(input.label??'p1');
++    if(input.action==='finish'){await task.finish({keep:[]});cache.delete(input.name);return {ok:true,data:{closed:true}};}
++    const sizeKey=`${input.width}x${input.height}`;
++    const resize=async()=>{await page.cdp('Emulation.setDeviceMetricsOverride',{width:input.width,height:input.height,screenWidth:input.width,screenHeight:input.height,deviceScaleFactor:1,mobile:false});entry.sizes.set(page.label,sizeKey);};
++    if(input.width&&input.height&&entry.sizes.get(page.label)!==sizeKey)await resize();
++    switch(input.action){
++      case 'navigate': await page.goto(input.url,{timeout:25000});break;
++      case 'reload': await page.reload({timeout:25000});break;
++      case 'back': case 'forward': {
++        const h=await page.cdp('Page.getNavigationHistory');const entry=h.entries[h.currentIndex+(input.action==='back'?-1:1)];
++        if(entry)await page.cdp('Page.navigateToHistoryEntry',{entryId:entry.id});break;
++      }
++      case 'resize': break;
++      case 'click': if(input.selector)await page.click(input.selector);else await page.mouse.click(input.x,input.y,{label:'Naumi browser user click'});break;
++      case 'fill': await page.fill(input.selector,input.text);break;
++      case 'press': await page.keyboard.press(input.key);break;
++      case 'text': await page.keyboard.insertText(input.text??'');break;
++      case 'wheel': await page.cdp('Input.dispatchMouseEvent',{type:'mouseWheel',x:Math.max(0,input.x??20),y:Math.max(0,input.y??20),deltaX:Math.max(-3000,Math.min(3000,input.deltaX??0)),deltaY:Math.max(-3000,Math.min(3000,input.deltaY??0))});break;
++      case 'dialog': if(input.text==='accept')await page.acceptDialog();else await page.dismissDialog();break;
++    }
++    let info=await page.info();
++    if(input.width&&input.height&&(info.w!==input.width||info.h!==input.height)){await resize();info=await page.info();}
++    const history=await page.cdp('Page.getNavigationHistory').catch(()=>({entries:[],currentIndex:0}));
++    const data={spaceId:task.spaceId,label:page.label,url:info.url,title:info.title,width:info.w,height:info.h,canGoBack:history.currentIndex>0,canGoForward:history.currentIndex<history.entries.length-1};
++    if(input.action==='snapshot')data.snapshot=await page.snapshot();
++    if(input.action==='tabs')data.tabs=(await task.tabs()).map(t=>({label:t.label??null,title:t.title,url:t.url,active:t.active,openedBy:t.openedBy}));
++    if(input.frame){const scale=Math.min(1,1440/info.w,1000/info.h);const frame=await page.cdp('Page.captureScreenshot',{format:'jpeg',quality:68,fromSurface:true,captureBeyondViewport:false,clip:{x:info.sx??0,y:info.sy??0,width:info.w,height:info.h,scale}});data.image=frame.data;}
++    return {ok:true,data};
++  }catch(error){return {ok:false,error:typeof error?.code==='string'?error.code:'EGO_OPERATION_FAILED'};}
++}
++
++export async function run(input){console.log('NAUMI_BROWSER_RESULT='+JSON.stringify(await operate(input)));}
++
++/** Persistent embedded SDK/CDP connection. Private loopback transport, never exposed to web content. */
++export async function serve({readyPath,token,ownerPid}){
++  const {createServer}=await import('node:http'),{writeFile}=await import('node:fs/promises'),{timingSafeEqual}=await import('node:crypto');
++  const cache=new Map(),queues=new Map();let closeWorker,closing=false;
++  const closed=new Promise(resolve=>{closeWorker=resolve;});
++  const server=createServer(async(req,res)=>{
++    const auth=Buffer.from(req.headers.authorization??''),expected=Buffer.from('Bearer '+token);
++    if(req.headers.origin||auth.length!==expected.length||!timingSafeEqual(auth,expected)){res.writeHead(403).end();return;}
++    if(req.method!=='POST'){res.writeHead(405).end();return;}
++    if(req.url==='/shutdown'){res.writeHead(200).end('{}');closing=true;setTimeout(async()=>{await Promise.allSettled(queues.values());server.closeAllConnections();server.close(closeWorker);},25);return;}
++    if(closing){res.writeHead(503).end();return;}
++    if(req.url!=='/op'){res.writeHead(404).end();return;}
++    let input;try{let body='',size=0;for await(const chunk of req){size+=chunk.length;if(size>65536){res.writeHead(413).end();return;}body+=chunk;}input=JSON.parse(body);}catch{res.writeHead(400).end();return;}
++    if(!/^Naumi-[a-f0-9]{20}$/.test(input.name??'')){res.writeHead(400).end();return;}
++    const prior=queues.get(input.name)??Promise.resolve(),job=prior.catch(()=>{}).then(()=>operate(input,cache));queues.set(input.name,job);
++    try{const result=await job;if(!res.destroyed){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(result));}}
++    finally{if(queues.get(input.name)===job)queues.delete(input.name);}
++  });
++  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
++  await writeFile(readyPath,JSON.stringify({port:server.address().port}));
++  const lease=setInterval(()=>{try{process.kill(ownerPid,0);}catch(error){if(error.code==='ESRCH'){closing=true;server.closeAllConnections();server.close(closeWorker);}}},2000);
++  try{await closed;}finally{clearInterval(lease);}
++}
+diff --git a/plugins/naumi-enterprise/browser-runtime.js b/plugins/naumi-enterprise/browser-runtime.js
+new file mode 100644
+index 0000000..96a8f71
+--- /dev/null
++++ b/plugins/naumi-enterprise/browser-runtime.js
+@@ -0,0 +1,96 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import {fileURLToPath,pathToFileURL} from 'node:url';
++import {createHash,randomBytes,randomUUID} from 'node:crypto';
++import {spawn} from 'node:child_process';
++
++export const BROWSER_LOCK=JSON.parse(fs.readFileSync(new URL('./third-party/ego-lite/runtime-lock.json',import.meta.url),'utf8'));
++const digest=x=>createHash('sha256').update(x).digest('hex');
++const verified=new Map();
++export function resolveBrowserRuntime({root,platform=process.platform,arch=process.arch}={}) {
++  if(platform!=='win32'||arch!=='x64')throw Error('EGO_PLATFORM_NOT_PACKAGED');
++  if(!root){
++    let cursor=fileURLToPath(new URL('.',import.meta.url));
++    while(!fs.existsSync(path.join(cursor,'runtime/ego-lite/win32-x64/Application/ego.exe'))){const up=path.dirname(cursor);if(up===cursor)throw Error('EGO_RUNTIME_NOT_INSTALLED');cursor=up;}
++    root=cursor;
++  }
++  const app=path.resolve(root,'runtime/ego-lite/win32-x64/Application');
++  for(const [relative,expected]of Object.entries(BROWSER_LOCK.binaries)){
++    const file=path.join(app,relative);if(!fs.existsSync(file))throw Error('EGO_RUNTIME_INCOMPLETE');
++    const stat=fs.statSync(file),stamp=`${stat.size}:${stat.mtimeMs}`;
++    if(verified.get(file)!==stamp){if(digest(fs.readFileSync(file))!==expected)throw Error('EGO_RUNTIME_CHECKSUM_MISMATCH');verified.set(file,stamp);}
++  }
++  return {root,app,command:path.join(app,BROWSER_LOCK.browserVersion,'ego-browser.exe'),version:BROWSER_LOCK.browserVersion};
++}
++
++export const BROWSER_ACTIONS=['state','navigate','back','forward','reload','resize','click','fill','press','text','wheel','snapshot','tabs','select','dialog','finish'];
++export function browserURL(value){
++  if(typeof value!=='string'||value.length>8192)throw Error('INVALID_BROWSER_URL');
++  const input=value.trim();if(input==='about:blank')return input;
++  const url=new URL(/^[a-z][a-z\d+.-]*:/i.test(input)&&!/^localhost:\d/i.test(input)?input:(/^(?:localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/i.test(input)?'http://':'https://')+input);
++  if(!['http:','https:'].includes(url.protocol)||url.username||url.password)throw Error('INVALID_BROWSER_URL');
++  return url.href;
++}
++export function validateBrowserInput(input){
++  if(!input||typeof input!=='object'||!BROWSER_ACTIONS.includes(input.action))throw Error('INVALID_BROWSER_ACTION');
++  const out={action:input.action};
++  for(const key of ['selector','text','key','label'])if(input[key]!==undefined){if(typeof input[key]!=='string'||input[key].length>(key==='text'?16384:4096))throw Error('INVALID_BROWSER_'+key.toUpperCase());out[key]=input[key];}
++  for(const key of ['x','y','deltaX','deltaY','width','height','modifiers'])if(input[key]!==undefined){if(!Number.isFinite(input[key]))throw Error('INVALID_BROWSER_NUMBER');out[key]=input[key];}
++  if(input.action==='navigate')out.url=browserURL(input.url);
++  if(input.action==='resize'&&(!Number.isInteger(out.width)||out.width<200||out.width>2560||!Number.isInteger(out.height)||out.height<120||out.height>1600))throw Error('INVALID_BROWSER_VIEWPORT');
++  if(input.action==='click'&&!out.selector&&(!(out.x>=0&&out.x<=2560)||!(out.y>=0&&out.y<=1600)))throw Error('INVALID_BROWSER_POINT');
++  if(input.action==='fill'&&(!out.selector||out.text===undefined))throw Error('INVALID_BROWSER_FILL');
++  if(input.action==='press'&&(!out.key||out.key.length>64))throw Error('INVALID_BROWSER_KEY');
++  if(input.action==='select'&&!/^p\d+$/.test(out.label??''))throw Error('INVALID_BROWSER_PAGE');
++  if(input.action==='dialog'){if(!['accept','dismiss'].includes(input.text))throw Error('INVALID_BROWSER_DIALOG');}
++  out.frame=input.frame===true;return out;
++}
++
++/** Structured operations only; never interpolate page/script text into shell syntax. */
++export class EgoBrowserRuntime {
++  constructor({runtime,spawnProcess=spawn}={}){this.runtime=runtime;this.spawnProcess=spawnProcess;this.queues=new Map();this.pages=new Map();this.viewports=new Map();this.children=new Set();this.closed=false;this.metrics={workerStarts:0,requests:0};}
++  status(){try{const r=this.runtime??resolveBrowserRuntime();return {status:'installed',version:r.version,engine:'ego-lite',presentation:'interactive-stream'};}catch(e){return {status:'not_installed',error:e.message,engine:'ego-lite'};}}
++  async perform(scope,input,{signal}={}){
++    if(this.closed)throw Error('EGO_RUNTIME_DISPOSED');
++    if(typeof scope!=='string'||!scope||scope.length>200)throw Error('INVALID_BROWSER_SCOPE');
++    const args=validateBrowserInput(input),name='Naumi-'+digest(scope).slice(0,20);
++    const before=this.queues.get(scope)??Promise.resolve();
++    const job=before.catch(()=>{}).then(async()=>{if(this.closed)throw Error('EGO_RUNTIME_DISPOSED');signal?.throwIfAborted();if(args.action==='resize')this.viewports.set(scope,{width:args.width,height:args.height});const data=await this.run({name,label:this.pages.get(scope)??'p1',...this.viewports.get(scope),...args},signal);if(data.label)this.pages.set(scope,data.label);if(data.closed){this.pages.delete(scope);this.viewports.delete(scope);}return data;});
++    this.queues.set(scope,job);try{return await job;}finally{if(this.queues.get(scope)===job)this.queues.delete(scope);}
++  }
++  async ensureWorker(){
++    if(this.workerPromise)return this.workerPromise;
++    const promise=(async()=>{
++      const r=this.runtime??resolveBrowserRuntime(),token=randomBytes(32).toString('hex');
++      const readyPath=path.join(r.root,'.dsh/ego-lite-backup','worker-'+randomUUID()+'.json');fs.mkdirSync(path.dirname(readyPath),{recursive:true});
++      const module=pathToFileURL(fileURLToPath(new URL('./browser-bridge.mjs',import.meta.url))).href;
++      const code='await (await import('+JSON.stringify(module)+')).serve('+JSON.stringify({readyPath,token,ownerPid:process.pid})+')';
++      const child=this.spawnProcess(r.command,['nodejs','-e',code],{cwd:r.app,windowsHide:true,shell:false,stdio:['ignore','pipe','pipe']});
++      this.children.add(child);this.metrics.workerStarts++;let exited=false;
++      const clear=()=>{exited=true;this.children.delete(child);if(this.worker?.child===child){this.worker=null;this.workerPromise=null;}};
++      child.on('error',clear);child.on('close',clear);child.stdout.resume();child.stderr.resume();
++      try{
++        const deadline=Date.now()+15000;
++        while(!fs.existsSync(readyPath)){
++          if(exited)throw Error('EGO_WORKER_START_FAILED');if(this.closed)throw Error('EGO_RUNTIME_DISPOSED');if(Date.now()>deadline)throw Error('EGO_WORKER_START_TIMEOUT');
++          await new Promise(resolve=>setTimeout(resolve,30));
++        }
++        const {port}=JSON.parse(fs.readFileSync(readyPath,'utf8'));if(!Number.isInteger(port)||port<1||port>65535)throw Error('EGO_WORKER_INVALID_PORT');
++        this.worker={url:'http://127.0.0.1:'+port,token,child};return this.worker;
++      }catch(e){child.kill();throw e;}finally{if(fs.existsSync(readyPath))fs.unlinkSync(readyPath);}
++    })();
++    this.workerPromise=promise;try{return await promise;}catch(e){if(this.workerPromise===promise)this.workerPromise=null;throw e;}
++  }
++  async run(input,signal){
++    const worker=await this.ensureWorker();signal?.throwIfAborted();this.metrics.requests++;
++    let response;
++    try{response=await fetch(worker.url+'/op',{method:'POST',headers:{Authorization:'Bearer '+worker.token,'Content-Type':'application/json'},body:JSON.stringify(input),signal:AbortSignal.any([...(signal?[signal]:[]),AbortSignal.timeout(45000)])});}
++    catch(e){if(signal?.aborted)throw signal.reason;if(e.name==='TimeoutError')throw Error('EGO_OPERATION_TIMEOUT_NO_REPLAY');throw Error('EGO_WORKER_CONNECTION_LOST_NO_REPLAY');}
++    const result=await response.json();if(!response.ok||!result.ok)throw Error(result.error??'EGO_OPERATION_FAILED');return result.data;
++  }
++  async dispose(){
++    this.closed=true;await Promise.allSettled(this.queues.values());
++    if(this.worker)await fetch(this.worker.url+'/shutdown',{method:'POST',headers:{Authorization:'Bearer '+this.worker.token},signal:AbortSignal.timeout(1000)}).catch(()=>{});
++    for(const child of this.children)child.kill();this.worker=null;this.workerPromise=null;
++  }
++}
+diff --git a/plugins/naumi-enterprise/browser-skills/naumi-browser/SKILL.md b/plugins/naumi-enterprise/browser-skills/naumi-browser/SKILL.md
+new file mode 100644
+index 0000000..392077c
+--- /dev/null
++++ b/plugins/naumi-enterprise/browser-skills/naumi-browser/SKILL.md
+@@ -0,0 +1,20 @@
++---
++name: naumi-browser
++description: Naumi内置ego-lite浏览器。用户要求打开网页、查询站点、表单操作或浏览器测试时使用，工具与当前会话右侧栏共享同一真实页面。
++---
++
++# Naumi 浏览器
++
++使用内置naumi_browser工具，action=state检查状态，action=snapshot读取当前页面结构，然后用selector执行click/fill/press。navigate接受http(s)网址。每次写操作后用snapshot确认实际结果；超时或结果不明时不要原样重放提交。
++
++同一Naumi会话共享一个ego TaskSpace，右侧栏是该页面的实时交互视图。不要另建浏览器进程、切换到其他用户Space或读取无关个人资料。浏览器已有网站登录态不等于企业业务权限。登录、验证码、支付及其他需人工确认的步骤交给用户在右侧栏或原生ego窗口完成。
++
++打开网站的示例参数：
++
++```json
++{"action":"navigate","url":"https://example.com"}
++```
++
++页面变化后重新snapshot再选择当前ref或稳定selector。用tabs查看当前Space页面，用select及label切换。操作仅限用户当前任务，不自动安装扩展、导入其他浏览器数据或改变系统默认浏览器。截图、Cookie和表单内容不写入交付证据，不向无关服务上传。
++
++CLI维护入口为安装根目录下的node scripts/ego-browser.mjs，status不读取页面数据；skill打印与安装版本匹配的上游完整指引。工具不支持任意shell/JS，缺少功能时保留原始错误，不绕开既有审批。
+diff --git a/plugins/naumi-enterprise/browser.js b/plugins/naumi-enterprise/browser.js
+new file mode 100644
+index 0000000..72689f7
+--- /dev/null
++++ b/plugins/naumi-enterprise/browser.js
+@@ -0,0 +1,38 @@
++import {defineTool} from '@deepseek-ai/dsh-tools';
++import * as filesystemSkills from '@deepseek-ai/dsh-skill-filesystem';
++import {fileURLToPath} from 'node:url';
++import {EgoBrowserRuntime,BROWSER_ACTIONS} from './browser-runtime.js';
++
++export function createBrowserTool(runtime){
++  return defineTool({name:'naumi_browser',description:'Operate the same ego-lite page displayed in this Naumi session’s right sidebar. Read the naumi-browser skill first. Observe with snapshot before semantic click/fill. Never replay an uncertain write. No arbitrary JavaScript or shell execution.',
++    parameters:{action:{type:'string',enum:BROWSER_ACTIONS,required:true},url:{type:'string'},selector:{type:'string'},text:{type:'string'},key:{type:'string'},label:{type:'string'},x:{type:'number'},y:{type:'number'},deltaX:{type:'number'},deltaY:{type:'number'}},
++    output:{schema:{type:'json'},render:(_args,data)=>[{type:'text',text:JSON.stringify(data)}]},
++    async execute(args,exec){const sessionId=exec.agent?.id;if(!sessionId)throw Error('BROWSER_SESSION_REQUIRED');return runtime.perform(sessionId,{...args,frame:false},{signal:exec.signal});}
++  });
++}
++
++export function installEgoBrowser(ctx,{runtime=new EgoBrowserRuntime()}={}){
++  let toolRegistered=false;
++  ctx.effect(()=>()=>runtime.dispose());
++  ctx.inject(['skills'],scope=>{scope.plugin(filesystemSkills,{providerName:'naumi-browser',includeDefaultRoots:false,watch:false,customSkillDirs:[],bundledSkillDir:fileURLToPath(new URL('./browser-skills',import.meta.url))});});
++  ctx.inject(['tools'],scope=>scope.effect(()=>{const dispose=scope.tools.register(createBrowserTool(runtime));toolRegistered=true;return()=>{toolRegistered=false;dispose();};}));
++  ctx.effect(()=>ctx.webServer.register({kind:'exact',path:'/naumi/browser',handler:async(req,res)=>{
++    res.setHeader('Cache-Control','private, no-store');res.setHeader('Content-Type','application/json; charset=utf-8');res.setHeader('X-Content-Type-Options','nosniff');
++    const send=(status,data)=>{if(!res.destroyed){res.writeHead(status);res.end(JSON.stringify(data));}};
++    const admission=ctx.connection.admit(req);
++    if('rejection'in admission){send(admission.rejection,{error:'HARNESS_AUTH_REQUIRED'});return;}
++    if(admission.peer.principal.kind!=='owner'){send(403,{error:'HARNESS_OWNER_REQUIRED'});return;}
++    if(req.method==='GET'){send(200,{...runtime.status(),toolRegistered});return;}
++    if(req.method!=='POST'){res.setHeader('Allow','GET, POST');send(405,{error:'METHOD_NOT_ALLOWED'});return;}
++    if(req.headers['x-naumi-browser']!=='1'){send(403,{error:'BROWSER_SAME_ORIGIN_REQUIRED'});return;}
++    if(req.headers.origin){let origin;try{origin=new URL(req.headers.origin).origin;}catch{}if(origin!==`http://${req.headers.host}`&&origin!==`https://${req.headers.host}`){send(403,{error:'BROWSER_SAME_ORIGIN_REQUIRED'});return;}}
++    const controller=new AbortController(),closed=()=>{if(!res.writableEnded)controller.abort(Error('BROWSER_CLIENT_CLOSED'));};res.on('close',closed);
++    try{
++      let raw='',size=0;for await(const chunk of req){size+=chunk.length;if(size>65536){send(413,{error:'BROWSER_BODY_TOO_LARGE'});return;}raw+=chunk.toString();}
++      let body;try{body=JSON.parse(raw);}catch{send(400,{error:'INVALID_BROWSER_JSON'});return;}
++      if(typeof body.sessionId!=='string'||!body.sessionId||body.sessionId.length>200){send(400,{error:'BROWSER_SESSION_REQUIRED'});return;}
++      const result=await runtime.perform(body.sessionId,body,{signal:controller.signal});send(200,result);
++    }catch(error){const code=String(error.message);send(/^(?:INVALID_|BROWSER_SESSION)/.test(code)?400:503,{error:/^[A-Z][A-Z0-9_]{2,80}$/.test(code)?code:'EGO_OPERATION_FAILED'});}
++    finally{res.off('close',closed);}
++  }}));
++}
+diff --git a/plugins/naumi-enterprise/client.js b/plugins/naumi-enterprise/client.js
+index 45a4122..07ef126 100644
+--- a/plugins/naumi-enterprise/client.js
++++ b/plugins/naumi-enterprise/client.js
+@@ -111,6 +111,7 @@ window.__ModuleLoader__.load({id:'@naumi/dsh-enterprise',factory(require){
+     const config=window.__NAUMI__;
+     if(!config)throw Error('Naumi host configuration missing');
+     installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);
++    ctx.inject(['sidebarRight','sidebarRightTabs'],scope=>scope.effect(()=>{let dispose,closed=false;void import('/naumi/assets/browser-client.js').then(m=>{if(!closed)dispose=m.installBrowserUI(scope,React,Icon);}).catch(e=>console.error('Naumi browser UI:',e));return()=>{closed=true;dispose?.();};}));
+     ctx.effect(()=>{
+       const language=ctx.locale.addLanguage({id:'zh-Naumi',label:'简体中文 · Naumi',fallback:'zh'});
+       const dictionary=ctx.locale.register('conversation','zh-Naumi',{'hero.headline':'AI 协作','hero.preview':''});
+diff --git a/plugins/naumi-enterprise/host.js b/plugins/naumi-enterprise/host.js
+index 6bd80d3..ece3de3 100644
+--- a/plugins/naumi-enterprise/host.js
++++ b/plugins/naumi-enterprise/host.js
+@@ -2,13 +2,15 @@ import {readFile} from 'node:fs/promises';
+ import {fileURLToPath} from 'node:url';
+ import {businessCookie,projectWorkspace,validateOrigin} from './domain.js';
+ import {installAgentDesktop} from './agent-desktop.js';
++import {installEgoBrowser} from './browser.js';
+ export const inject=['webServer','connection'];
+ /** Supported plugin routes, index branding and an authenticated read-only business adapter. */
+ export function apply(ctx,config) {
+   installAgentDesktop(ctx);
++  installEgoBrowser(ctx);
+   const collaborationOrigin=validateOrigin(config.collaborationOrigin);
+   const designOrigin=validateOrigin(config.designOrigin);
+-  const assets=new Map([['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml']]);
++  const assets=new Map([['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml'],['browser-client.js','text/javascript; charset=utf-8'],['browser-scheduler.js','text/javascript; charset=utf-8'],['browser.css','text/css; charset=utf-8']]);
+   ctx.effect(()=>ctx.webServer.register({kind:'prefix',path:'/naumi/assets',handler:async(req,res)=>{
+     const name=new URL(req.url,'http://localhost').pathname.split('/').at(-1);
+     if(!['GET','HEAD'].includes(req.method)||!assets.has(name)){res.writeHead(404).end();return;}
+@@ -35,7 +37,7 @@ export function apply(ctx,config) {
+   }}));
+   ctx.on('webserver/index-inject',table=>{
+     table.push({kind:'global',name:'__NAUMI__',value:{collaborationOrigin,designOrigin,version:'0.1.0'}});
+-    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
++    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/browser.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
+   });
+   ctx.effect(()=>ctx.webServer.tapIndex(html=>html.replace(/<title>[^<]*<\/title>/i,'<title>Naumi · 企业协作</title>').replace(/<link[^>]+rel="(?:shortcut )?icon"[^>]*href="(?!\/naumi\/)[^"]*"[^>]*>/g,'')));
+ }
+diff --git a/plugins/naumi-enterprise/package.json b/plugins/naumi-enterprise/package.json
+index 2d342c9..cc96fab 100644
+--- a/plugins/naumi-enterprise/package.json
++++ b/plugins/naumi-enterprise/package.json
+@@ -4,10 +4,50 @@
+   "description": "Naumi 企业协作工作空间",
+   "type": "module",
+   "main": "host.js",
+-  "exports": {".": "./host.js", "./client": "./client.js", "./package.json": "./package.json", "./cordis.patch.yml": "./cordis.patch.yml"},
+-  "files": ["host.js", "domain.js", "client.js", "assets", "cordis.patch.yml", "agent-desktop.js", "desktop-runtime.js", "skills", "third-party"],
+-  "dsh": {"bundle": {"patch": "./cordis.patch.yml"}, "client": {"platform": "web", "inject": ["@deepseek-ai/dsh-client-ui-renderer", "@deepseek-ai/dsh-client-ui-layout", "@deepseek-ai/dsh-client-ui-sidebar", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-workspace"]}},
+-  "engines": {"node": ">=24.9", "dsh": "0.2.2-rc.1"},
+-  "dependencies": {"agent-desktop":"1.3.1"},
+-  "peerDependencies": {"@deepseek-ai/cordis": "~4.1.0"}
++  "exports": {
++    ".": "./host.js",
++    "./client": "./client.js",
++    "./package.json": "./package.json",
++    "./cordis.patch.yml": "./cordis.patch.yml"
++  },
++  "files": [
++    "host.js",
++    "domain.js",
++    "client.js",
++    "assets",
++    "cordis.patch.yml",
++    "agent-desktop.js",
++    "desktop-runtime.js",
++    "skills",
++    "third-party",
++    "browser.js",
++    "browser-runtime.js",
++    "browser-bridge.mjs",
++    "browser-skills"
++  ],
++  "dsh": {
++    "bundle": {
++      "patch": "./cordis.patch.yml"
++    },
++    "client": {
++      "platform": "web",
++      "inject": [
++        "@deepseek-ai/dsh-client-ui-renderer",
++        "@deepseek-ai/dsh-client-ui-layout",
++        "@deepseek-ai/dsh-client-ui-sidebar",
++        "@deepseek-ai/dsh-client-ui-conversation",
++        "@deepseek-ai/dsh-client-ui-workspace"
++      ]
++    }
++  },
++  "engines": {
++    "node": ">=24.9",
++    "dsh": "0.2.2-rc.1"
++  },
++  "dependencies": {
++    "agent-desktop": "1.3.1"
++  },
++  "peerDependencies": {
++    "@deepseek-ai/cordis": "~4.1.0"
++  }
+ }
+diff --git a/plugins/naumi-enterprise/third-party/ego-lite/LICENSE b/plugins/naumi-enterprise/third-party/ego-lite/LICENSE
+new file mode 100644
+index 0000000..ba089d2
+--- /dev/null
++++ b/plugins/naumi-enterprise/third-party/ego-lite/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 CitroLabs
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/plugins/naumi-enterprise/third-party/ego-lite/NOTICE.md b/plugins/naumi-enterprise/third-party/ego-lite/NOTICE.md
+new file mode 100644
+index 0000000..d777b19
+--- /dev/null
++++ b/plugins/naumi-enterprise/third-party/ego-lite/NOTICE.md
+@@ -0,0 +1,3 @@
++# ego-lite
++
++Open-source SDK/skill: https://github.com/citrolabs/ego-lite, commit bacaece43900e8ca68eea3b6f1663835ea38df9e, MIT (LICENSE included). Browser binary is a separate upstream distribution, version 0.6.3.14, copyright Citro Labs; it is not relicensed under this repository's MIT license. Original browser binaries remain unmodified. Browser guide is obtained from the installed runtime (skill v2.2.1), not assumed from the repository entry skill (2.2.0).
+diff --git a/plugins/naumi-enterprise/third-party/ego-lite/runtime-lock.json b/plugins/naumi-enterprise/third-party/ego-lite/runtime-lock.json
+new file mode 100644
+index 0000000..4e09956
+--- /dev/null
++++ b/plugins/naumi-enterprise/third-party/ego-lite/runtime-lock.json
+@@ -0,0 +1,17 @@
++{
++  "browserVersion": "0.6.3.14",
++  "chromiumVersion": "156.0.8078.96",
++  "skillVersion": "2.2.1",
++  "sourceCommit": "bacaece43900e8ca68eea3b6f1663835ea38df9e",
++  "platform": "win32",
++  "arch": "x64",
++  "installer": {
++    "url": "https://cdn.ego.app/setup/windows/x64/egoliteSetup-Y7MbxKIuhzFB.exe",
++    "sha256": "b2e5881312201d2b03c306c1446d4ce996b92fa45611a9f60b224a1082cc5a65"
++  },
++  "binaries": {
++    "ego.exe": "789bb080cf5c6dc976e965c2772da43f2afc51e0c4bbe8f141d377d1461dfafa",
++    "0.6.3.14/ego-browser.exe": "c48f58b575fd93d3edd79952d5167f725bed5ca1191b4d607b9b318a79067a90",
++    "0.6.3.14/chrome.dll": "085c97da0f05a29b2cb5124560ea4b096e8b3bb76b0c87b3d51025bf2920b47f"
++  }
++}
+diff --git a/scripts/ego-browser.mjs b/scripts/ego-browser.mjs
+new file mode 100644
+index 0000000..6a0857b
+--- /dev/null
++++ b/scripts/ego-browser.mjs
+@@ -0,0 +1,7 @@
++import {spawn} from 'node:child_process';
++import {EgoBrowserRuntime,resolveBrowserRuntime} from '../plugins/naumi-enterprise/browser-runtime.js';
++const [command,...args]=process.argv.slice(2);
++if(command==='status'){const state=new EgoBrowserRuntime().status();console.log(JSON.stringify(state));process.exitCode=state.status==='installed'?0:1;}
++else if(command==='skill'||command==='version'){
++  const runtime=resolveBrowserRuntime(),child=spawn(runtime.command,[command==='version'?'--version':'skill',...args],{stdio:'inherit',windowsHide:true,shell:false});child.on('error',e=>{console.error(e.message);process.exitCode=1;});child.on('exit',code=>{process.exitCode=code??1;});
++}else{console.error('Usage: node scripts/ego-browser.mjs status|skill|version');process.exitCode=2;}
+diff --git a/scripts/package-ego-browser.mjs b/scripts/package-ego-browser.mjs
+new file mode 100644
+index 0000000..a6ce62f
+--- /dev/null
++++ b/scripts/package-ego-browser.mjs
+@@ -0,0 +1,21 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import {spawnSync} from 'node:child_process';
++import {createHash} from 'node:crypto';
++import {resolveBrowserRuntime} from '../plugins/naumi-enterprise/browser-runtime.js';
++const runtime=resolveBrowserRuntime(),archive=path.join(runtime.root,`runtime/ego-lite-win32-x64-${runtime.version}.zip`);
++const code=`import sys,zipfile,pathlib
++root=pathlib.Path(sys.argv[1]);dest=pathlib.Path(sys.argv[2]);files=sorted(root.rglob('*'))
++with zipfile.ZipFile(dest,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=6) as z:
++ for p in files:
++  if p.is_symlink(): raise RuntimeError('Runtime symlinks are not packaged')
++  if p.is_file():
++   if p.name in ('Cookies','History','Login Data','Preferences','Local State'): raise RuntimeError('Personal profile in runtime')
++   z.write(p,'Application/'+p.relative_to(root).as_posix())
++with zipfile.ZipFile(dest) as z:
++ assert z.testzip() is None
++ print('EGO_OFFLINE_ARCHIVE files='+str(len(z.namelist()))+' crc=pass personal_profile=0')`;
++const result=spawnSync('python',['-c',code,runtime.app,archive],{stdio:'inherit',windowsHide:true,shell:false});if(result.status!==0)throw Error('EGO_ARCHIVE_BUILD_FAILED');
++const hash=createHash('sha256');for await(const chunk of fs.createReadStream(archive))hash.update(chunk);const sha256=hash.digest('hex');fs.writeFileSync(archive+'.sha256',sha256+'\n');
++fs.writeFileSync('evidence/ego-lite/OFFLINE_PACKAGE.json',JSON.stringify({archive:path.relative(runtime.root,archive).replaceAll('\\','/'),version:runtime.version,sha256,bytes:fs.statSync(archive).size,personalProfileIncluded:false},null,2)+'\n');
++console.log('EGO_OFFLINE_ARCHIVE sha256='+sha256+' bytes='+fs.statSync(archive).size);
+diff --git a/scripts/setup-ego-browser.ps1 b/scripts/setup-ego-browser.ps1
+new file mode 100644
+index 0000000..cd82e4c
+--- /dev/null
++++ b/scripts/setup-ego-browser.ps1
+@@ -0,0 +1,36 @@
++param([string]$SourceApplication)
++$ErrorActionPreference='Stop'
++$root=Split-Path $PSScriptRoot -Parent
++$lock=Get-Content -LiteralPath (Join-Path $root 'plugins/naumi-enterprise/third-party/ego-lite/runtime-lock.json') -Raw | ConvertFrom-Json
++$target=Join-Path $root 'runtime/ego-lite/win32-x64/Application'
++if(![Environment]::Is64BitOperatingSystem -or !$IsWindows){throw 'EGO_PLATFORM_NOT_PACKAGED'}
++Push-Location $root
++try {
++  if(!(Test-Path -LiteralPath (Join-Path $target 'ego.exe'))){
++    $archive=Join-Path $root "runtime/ego-lite-win32-x64-$($lock.browserVersion).zip"
++    if(Test-Path -LiteralPath $archive){
++      $expected=(Get-Content -LiteralPath "$archive.sha256" -Raw).Trim()
++      if((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLower() -ne $expected){throw 'EGO_ARCHIVE_CHECKSUM_MISMATCH'}
++      Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $root 'runtime/ego-lite/win32-x64')
++    }else{
++      if(!$SourceApplication){$SourceApplication=Join-Path $env:LOCALAPPDATA 'Citro Labs/ego lite/Application'}
++      if(!(Test-Path -LiteralPath (Join-Path $SourceApplication 'ego.exe'))){
++        $cache=Join-Path $root '.dsh/ego-lite-backup';New-Item -ItemType Directory -Force $cache | Out-Null
++        $installer=Join-Path $cache "egolite-$($lock.browserVersion)-setup.exe"
++        if(!(Test-Path -LiteralPath $installer)){Invoke-WebRequest $lock.installer.url -OutFile $installer}
++        if((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLower() -ne $lock.installer.sha256){throw 'EGO_INSTALLER_CHECKSUM_MISMATCH'}
++        $signature=Get-AuthenticodeSignature -LiteralPath $installer
++        if($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'CITRO LABS'){throw 'EGO_INSTALLER_SIGNATURE_INVALID'}
++        $tag='--tag=appguid={712B23BF-E734-4038-BE42-D5736B6D9570}&browser=4&usagestats=0&appname=ego%20lite&needsadmin=false&ap=-arch_x64-statsdef_0&installdataindex=empty'
++        $p=Start-Process -FilePath $installer -ArgumentList @('--install','--silent',$tag) -WindowStyle Hidden -Wait -PassThru
++        if($p.ExitCode){throw "EGO_INSTALLER_EXIT_$($p.ExitCode)"}
++      }
++      New-Item -ItemType Directory -Force $target | Out-Null
++      Copy-Item -LiteralPath (Join-Path $SourceApplication 'ego.exe') -Destination $target
++      Copy-Item -LiteralPath (Join-Path $SourceApplication $lock.browserVersion) -Destination $target -Recurse
++    }
++  }
++  node scripts/ego-browser.mjs status
++  if($LASTEXITCODE){throw 'EGO_RUNTIME_VERIFICATION_FAILED'}
++  Write-Output "EGO_RUNTIME_READY version=$($lock.browserVersion) personal_profile_bundled=0"
++}finally{Pop-Location}
+diff --git a/scripts/setup-naumi.ps1 b/scripts/setup-naumi.ps1
+index 136b712..ed2481f 100644
+--- a/scripts/setup-naumi.ps1
++++ b/scripts/setup-naumi.ps1
+@@ -4,6 +4,7 @@ Push-Location $root
+ try {
+     $env:DSH_HOME = Join-Path $root '.dsh'
+     $env:DSH_TELEMETRY_MODE = 'DISABLED'
++    & (Join-Path $PSScriptRoot 'setup-ego-browser.ps1')
+     node scripts/agent-desktop.mjs version
+     if ($LASTEXITCODE) { throw 'Bundled desktop runtime verification failed; run npm ci before installing the profile' }
+     node scripts/build-naumi-layout.mjs
+diff --git a/scripts/verify-ego-browser-live.mjs b/scripts/verify-ego-browser-live.mjs
+new file mode 100644
+index 0000000..2dce5b6
+--- /dev/null
++++ b/scripts/verify-ego-browser-live.mjs
+@@ -0,0 +1,14 @@
++import fs from 'node:fs';
++import assert from 'node:assert/strict';
++import {connect} from './harness-rpc.mjs';
++const logs=['logs/server.out.log','logs/server.err.log'].map(p=>fs.readFileSync(p,'utf8')).join('\n');
++const launch=[...logs.matchAll(/http:\/\/127\.0\.0\.1:3080\/?\?token=[A-Za-z0-9_~.%-]+/g)].at(-1)?.[0];assert(launch);
++const exchange=await fetch(launch,{redirect:'manual'}),cookie=exchange.headers.getSetCookie().map(x=>x.split(';')[0]).join('; '),headers={cookie};
++const readiness=await (await fetch('http://127.0.0.1:3080/naumi/browser',{headers})).json();assert.equal(readiness.status,'installed');assert.equal(readiness.toolRegistered,true);
++const unauthorized=(await fetch('http://127.0.0.1:3080/naumi/browser')).status;assert.equal(unauthorized,401);
++const csrf=(await fetch('http://127.0.0.1:3080/naumi/browser',{method:'POST',headers:{...headers,'X-Naumi-Browser':'1',Origin:'https://evil.test'}})).status;assert.equal(csrf,403);
++const desktop=await (await fetch('http://127.0.0.1:3080/naumi/desktop',{headers})).json();assert.equal(desktop.status,'ready');assert.equal(desktop.toolCount,75);
++const rpc=await connect(),sessions=await rpc('session/list',{_request:{}}),skills=await rpc('skills/list',{request:{sessionId:sessions.items[0].sessionId}});assert(skills.skills.some(s=>s.name==='naumi-browser'));assert(skills.skills.some(s=>s.name==='naumi-desktop'));
++const models=await rpc('session/modelCatalog');assert.equal(models.groups.length,9);
++fs.writeFileSync('evidence/ego-lite/LIVE_CHECK.json',JSON.stringify({readiness,unauthorized,csrf,desktopTools:desktop.toolCount,browserSkillVisible:true,desktopSkillVisible:true,modelGroups:models.groups.length,paidGenerationCalls:0,at:new Date().toISOString()},null,2)+'\n');
++console.log('EGO_LIVE installed=1 tool_registered=1 skill_visible=1 desktop_tools=75 model_groups=9 unauthorized=401 csrf=403');
+diff --git a/scripts/verify-ego-browser-performance.mjs b/scripts/verify-ego-browser-performance.mjs
+new file mode 100644
+index 0000000..6ff3230
+--- /dev/null
++++ b/scripts/verify-ego-browser-performance.mjs
+@@ -0,0 +1,22 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import {pathToFileURL} from 'node:url';
++import {spawn} from 'node:child_process';
++import assert from 'node:assert/strict';
++import {EgoBrowserRuntime,resolveBrowserRuntime} from '../plugins/naumi-enterprise/browser-runtime.js';
++const oldDir='evidence/ego-lite/performance-original';
++
++const {EgoBrowserRuntime:Original}=await import(pathToFileURL(path.resolve(oldDir,'browser-runtime.js')));
++const runtime=resolveBrowserRuntime(),results={};
++for(const [name,Type]of [['baseline',Original],['modified',EgoBrowserRuntime]]){
++  let starts=0;const engine=new Type({runtime,spawnProcess:(...args)=>{starts++;return spawn(...args);}}),scope='naumi-browser-performance-20261116';
++  try{
++    await engine.perform(scope,{action:'resize',width:800,height:600});await engine.perform(scope,{action:'navigate',url:'about:blank'});
++    const samples=[];let data;
++    for(let i=0;i<8;i++){const start=performance.now();data=await engine.perform(scope,{action:'state',frame:true});samples.push(performance.now()-start);}
++    results[name]={rounds:8,processStarts:starts,medianFrameMs:Math.round([...samples].sort((a,b)=>a-b)[4]),totalFrameMs:Math.round(samples.reduce((a,b)=>a+b,0)),observedWidth:data.width,observedHeight:data.height};
++  }finally{await engine.perform(scope,{action:'finish'});await engine.dispose();}
++}
++assert.equal(results.modified.processStarts,1);assert.equal(results.modified.observedWidth,800);assert.equal(results.modified.observedHeight,600);assert(results.modified.medianFrameMs<results.baseline.medianFrameMs);
++fs.writeFileSync('evidence/ego-lite/PERFORMANCE_CHECK.json',JSON.stringify(results,null,2)+'\n');
++console.log('EGO_PERFORMANCE baseline_processes='+results.baseline.processStarts+' modified_processes='+results.modified.processStarts+' baseline_median_ms='+results.baseline.medianFrameMs+' modified_median_ms='+results.modified.medianFrameMs+' viewport=800x600');
+diff --git a/scripts/verify-ego-browser-state.mjs b/scripts/verify-ego-browser-state.mjs
+new file mode 100644
+index 0000000..06d608a
+--- /dev/null
++++ b/scripts/verify-ego-browser-state.mjs
+@@ -0,0 +1,51 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import crypto from 'node:crypto';
++import assert from 'node:assert/strict';
++import {spawnSync} from 'node:child_process';
++import {resolveBrowserRuntime} from '../plugins/naumi-enterprise/browser-runtime.js';
++const dir='evidence/ego-lite',baseline=JSON.parse(fs.readFileSync(dir+'/baseline.json','utf8'));
++const hash=b=>crypto.createHash('sha256').update(b).digest('hex'),hashFile=p=>hash(fs.readFileSync(p));
++const portableHash=file=>hash(fs.readFileSync(file,'utf8').replace(/\r\n/g,'\n'));
++const stamp=file=>({sha256:hashFile(file),lfSha256:portableHash(file)});
++const preserve=()=>{for(const [file,sha]of Object.entries(baseline.preserved))assert.equal(hashFile(file),sha,'Protected file changed: '+file);};
++const modes=process.argv.slice(2),mode=modes[0];
++for(const [file,data]of Object.entries(baseline.sources))assert.equal(hashFile(dir+'/'+data.backup),data.sha256,'Original changed: '+file);
++if(mode==='baseline'){
++ assert(!fs.readFileSync(dir+'/'+baseline.sources['plugins/naumi-enterprise/host.js'].backup,'utf8').includes('installEgoBrowser'));
++ console.log('BASELINE ego_browser=0 sidebar_browser=0 protected_files=8');
++}else if(mode==='modified'){
++ preserve();assert.equal(resolveBrowserRuntime().version,'0.6.3.14');assert(fs.readFileSync('plugins/naumi-enterprise/host.js','utf8').includes('installEgoBrowser')); assert.equal(JSON.parse(fs.readFileSync('package.json')).dependencies['agent-desktop'],'1.3.1');
++ const modified=Object.fromEntries([...Object.keys(baseline.sources),...baseline.added].map(file=>[file,stamp(file)]));fs.writeFileSync(dir+'/modified-hashes.json',JSON.stringify(modified,null,2));
++ console.log('MODIFIED ego_browser=0.6.3.14 sidebar_browser=1 native_tool=1 protected_files=8');
++}else if(mode==='rollback-test'){
++ preserve();const fixture='.dsh/ego-lite-backup/rollback-test';fs.mkdirSync(fixture,{recursive:true});const active={};
++ for(const file of [...Object.keys(baseline.sources),...baseline.added]){const target=path.join(fixture,file);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(file,target);active[file]=hashFile(file);}
++ // Exercise the real rollback branch in a disposable copy, including installed plugin files.
++ const fixtureEvidence=path.join(fixture,dir);fs.mkdirSync(fixtureEvidence,{recursive:true});
++ fs.copyFileSync(dir+'/baseline.json',path.join(fixtureEvidence,'baseline.json'));
++ fs.writeFileSync(path.join(fixtureEvidence,'modified-hashes.json'),JSON.stringify(Object.fromEntries(Object.keys(active).map(file=>[file,stamp(file)])),null,2));
++ for(const data of Object.values(baseline.sources)){const target=path.join(fixtureEvidence,data.backup);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(dir+'/'+data.backup,target);}
++ for(const file of Object.keys(active).filter(f=>f.startsWith('plugins/naumi-enterprise/'))){const target=path.join(fixture,file.replace('plugins/naumi-enterprise/','.dsh/profiles/web/node_modules/@naumi/dsh-enterprise/'));fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(file,target);}
++ const rollback=spawnSync(process.execPath,['scripts/verify-ego-browser-state.mjs','rollback'],{cwd:fixture,encoding:'utf8',windowsHide:true});
++ assert.equal(rollback.status,0,rollback.stderr);assert(rollback.stdout.includes('prior_sources_restored=1'));
++ for(const [file,data]of Object.entries(baseline.sources))assert.equal(hashFile(path.join(fixture,file)),data.sha256);
++ for(const file of baseline.added){assert(!fs.existsSync(path.join(fixture,file)));if(file.startsWith('plugins/naumi-enterprise/'))assert(!fs.existsSync(path.join(fixture,file.replace('plugins/naumi-enterprise/','.dsh/profiles/web/node_modules/@naumi/dsh-enterprise/'))));}
++ assert.equal(JSON.parse(fs.readFileSync(path.join(fixture,'package.json'))).dependencies['agent-desktop'],'1.3.1');
++ assert(!fs.readFileSync(path.join(fixture,'plugins/naumi-enterprise/host.js'),'utf8').includes('installEgoBrowser'));assert(fs.readFileSync(path.join(fixture,'plugins/naumi-enterprise/host.js'),'utf8').includes('installAgentDesktop'));
++ for(const [file,sha]of Object.entries(active))assert.equal(hashFile(file),sha);
++ console.log(`ROLLBACK originals_restored=${Object.keys(baseline.sources).length} browser_disabled_in_copy=1 desktop_preserved=1 active_still_integrated=1`);
++}else if(mode==='rollback'){
++ // Build and validate the complete target list before changing any file. No recursive deletion.
++ const modified=JSON.parse(fs.readFileSync(dir+'/modified-hashes.json','utf8'));
++ const destinations=file=>file.startsWith('plugins/naumi-enterprise/')?[file,file.replace('plugins/naumi-enterprise/','.dsh/profiles/web/node_modules/@naumi/dsh-enterprise/')]:[file];
++ for(const [file,expected]of Object.entries(modified))for(const dest of destinations(file))if(fs.existsSync(dest)){
++   const original=baseline.sources[file];
++   const exact=[expected.sha256,original?.sha256].includes(hashFile(dest));
++   const normalized=[expected.lfSha256,original?portableHash(dir+'/'+original.backup):undefined].includes(portableHash(dest));
++   assert(exact||normalized,'Later edits detected: '+dest);
++ }
++ for(const [file,data]of Object.entries(baseline.sources))for(const dest of destinations(file))if(dest===file||fs.existsSync(dest)){fs.mkdirSync(path.dirname(dest),{recursive:true});fs.writeFileSync(dest,fs.readFileSync(dir+'/'+data.backup));}
++ for(const file of baseline.added)for(const dest of destinations(file))if(fs.existsSync(dest))fs.unlinkSync(dest);
++ console.log('ROLLBACK prior_sources_restored=1 browser_autoload_disabled=1 desktop_preserved=1 private_data_untouched=1 restart_required=1');
++}else throw Error('Use baseline, modified, rollback-test or rollback');
+diff --git a/scripts/verify-ego-browser-ui.mjs b/scripts/verify-ego-browser-ui.mjs
+new file mode 100644
+index 0000000..f3a56bd
+--- /dev/null
++++ b/scripts/verify-ego-browser-ui.mjs
+@@ -0,0 +1,57 @@
++import fs from 'node:fs';
++import http from 'node:http';
++import assert from 'node:assert/strict';
++import {pathToFileURL} from 'node:url';
++import {connect} from './harness-rpc.mjs';
++const {chromium}=await import(pathToFileURL(process.env.NAUMI_PLAYWRIGHT_MODULE??'E:/Workspace/naumi/node_modules/playwright/index.mjs').href);
++const logs=['logs/server.out.log','logs/server.err.log'].map(p=>fs.readFileSync(p,'utf8')).join('\n');
++const launch=[...logs.matchAll(/http:\/\/127\.0\.0\.1:3080\/?\?token=[A-Za-z0-9_~.%-]+/g)].at(-1)[0];
++const rpc=await connect(),sessions=await rpc('session/list',{_request:{}}),session=sessions.items.find(s=>s.projections?.values?.title==='你好，介绍你的能力');assert(session);
++const server=http.createServer((req,res)=>{res.setHeader('X-Frame-Options','DENY');res.setHeader('Content-Type','text/html; charset=utf-8');res.end('<!doctype html><meta charset="utf-8"><title>Naumi browser sidebar</title><style>body{font:18px system-ui;margin:0;background:#f7f9fc;color:#243b60}main{padding:28px}input,button{font:inherit;padding:10px;margin:4px;border:1px solid #c5d0e5;border-radius:8px;background:white}h1{font-size:26px}</style><main><h1>Naumi Browser</h1><input id="name" aria-label="Fixture name"><button id="save" onclick="document.querySelector(\'#result\').textContent=document.querySelector(\'#name\').value">Apply</button><p id="result"></p></main>');});
++await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;
++const browser=await chromium.launch({headless:true}),context=await browser.newContext({viewport:{width:1600,height:1000},colorScheme:'light'}),page=await context.newPage(),errors=[],checks={};
++page.on('pageerror',e=>errors.push(e.message));
++const check=(name,ok)=>{assert(ok,name);checks[name]=true;console.log('EGO_UI_PASS '+name);};
++const op=args=>page.evaluate(async body=>{const r=await fetch('/naumi/browser',{method:'POST',headers:{'Content-Type':'application/json','X-Naumi-Browser':'1'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw Error(d.error);return d;},{sessionId:session.sessionId,...args});
++try{
++  await page.goto(launch,{waitUntil:'domcontentloaded'});
++  const group=page.locator('[data-slot="sidebar.workspaces"] [role="treeitem"]').filter({hasText:'默认工作区'}).first();await group.waitFor();if(await group.getAttribute('aria-expanded')==='false')await group.click();
++  await page.locator('[data-slot="sidebar.workspaces"] [role="treeitem"]').filter({hasText:session.projections.values.title}).click();
++  await page.getByRole('button',{name:'打开内置浏览器',exact:true}).click();
++  await page.locator('[data-naumi-browser]').waitFor();check('native_right_sidebar',await page.locator('[data-slot="rightbar"] [data-naumi-browser]').count()===1);
++  await page.locator('.naumi-browser-screen img').waitFor();await page.locator('input[aria-label="浏览器地址"]').fill(origin);await page.getByRole('button',{name:'前往',exact:true}).click();
++  await page.waitForFunction(()=>document.querySelector('.naumi-browser-status')?.textContent.includes('Naumi browser sidebar'));
++  check('actual_ego_page_rendered',await page.locator('.naumi-browser-screen img').evaluate(i=>i.naturalWidth>300));
++  check('no_site_iframe',await page.locator('[data-naumi-browser] iframe').count()===0);
++  const snapshot=await op({action:'snapshot'});check('agent_and_sidebar_same_page',snapshot.snapshot.includes('Naumi Browser'));
++  const surface=page.locator('.naumi-browser-screen'),box=await surface.boundingBox();
++  await page.mouse.click(box.x+130,box.y+140);await page.locator('.naumi-browser-keyboard').pressSequentially('Naumi UI');
++  await page.waitForFunction(()=>!document.querySelector('.naumi-browser-busy'));
++  await op({action:'click',selector:'#save'});
++  const typed=await op({action:'snapshot'});if(!typed.snapshot.includes('Naumi UI'))fs.writeFileSync('.dsh/ego-lite-backup/keyboard-failure.json',JSON.stringify({snapshot:typed.snapshot,width:typed.width,height:typed.height,image:await surface.locator('img').evaluate(i=>({w:i.naturalWidth,h:i.naturalHeight,cw:i.clientWidth,ch:i.clientHeight}))},null,2));check('sidebar_mouse_keyboard',typed.snapshot.includes('Naumi UI'));
++  // Composition events follow the same path used by the employee's IME.
++  await op({action:'click',selector:'#name'});await op({action:'press',key:'Control+a'});
++  await page.locator('.naumi-browser-keyboard').evaluate(el=>{el.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));el.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'中文侧栏'}));});
++  await page.waitForFunction(()=>!document.querySelector('.naumi-browser-busy'));await op({action:'click',selector:'#save'});check('sidebar_chinese_composition',(await op({action:'snapshot'})).snapshot.includes('中文侧栏'));
++  const model=page.locator('[data-slot="conversation.input.model"] button');check('original_model_still_visible',await model.isVisible());
++  const resizeCalls=[];page.on('request',r=>{if(new URL(r.url()).pathname==='/naumi/browser'&&r.method()==='POST'){const data=r.postDataJSON();if(data.action==='resize')resizeCalls.push({width:data.width,height:data.height});}});
++  await page.evaluate(()=>{window.__egoPerf={active:true,times:[],last:performance.now()};const sample=t=>{const p=window.__egoPerf;if(!p.active)return;p.times.push(t-p.last);p.last=t;requestAnimationFrame(sample);};requestAnimationFrame(sample);});
++  const handle=page.locator('[data-side="rightbar"]');const hb=await handle.boundingBox();assert(hb);await page.mouse.move(hb.x+hb.width/2,400);await page.mouse.down();
++  for(let i=1;i<=55;i++)await page.mouse.move(hb.x+hb.width/2+250*i/55,400);
++  await new Promise(r=>setTimeout(r,260));check('drag_does_not_enqueue_resizes',resizeCalls.length===0);await page.mouse.up();
++  await page.waitForFunction(()=>{const i=document.querySelector('.naumi-browser-screen img');return i&&Math.abs(i.naturalWidth-i.clientWidth)<2;});
++  const dragPerformance=await page.evaluate(()=>{const p=window.__egoPerf;p.active=false;const times=p.times.filter(x=>x>0).sort((a,b)=>a-b);return{frames:times.length,p95Ms:Math.round(times[Math.floor(times.length*.95)]??0),maxMs:Math.round(times.at(-1)??0)};});
++  check('drag_final_viewport_once',resizeCalls.length===1);check('drag_layout_responsive',dragPerformance.p95Ms<100);
++  fs.writeFileSync('evidence/ego-lite/RESIZE_CHECK.json',JSON.stringify({...dragPerformance,pointerMoves:55,resizeRequests:resizeCalls.length,finalViewport:resizeCalls.at(-1)},null,2)+'\n');
++  const requests=[];page.on('request',r=>{if(new URL(r.url()).pathname==='/naumi/browser'&&r.method()==='POST')requests.push(Date.now());});
++  await page.locator('[data-slot="rightbar"] button[aria-label="收起右侧边栏"]').click();const before=requests.length;await new Promise(r=>setTimeout(r,1800));check('hidden_sidebar_stops_polling',requests.length<=before+1);
++  await page.getByRole('button',{name:'打开内置浏览器',exact:true}).click();await page.locator('.naumi-browser-screen img').waitFor();check('collapse_restore_keeps_page',(await op({action:'snapshot'})).snapshot.includes('中文侧栏'));
++  await page.screenshot({path:'evidence/ego-lite/sidebar-desktop.png',animations:'disabled'});
++  await page.setViewportSize({width:390,height:844});await page.waitForFunction(()=>{const b=document.querySelector('[data-naumi-browser]')?.getBoundingClientRect(),i=document.querySelector('.naumi-browser-screen img');return b&&b.left>=0&&b.right<=innerWidth+1&&i&&Math.abs(i.naturalWidth-i.clientWidth)<2;});check('mobile_sidebar_fits',true);await page.screenshot({path:'evidence/ego-lite/sidebar-mobile.png',animations:'disabled'});
++  check('no_frontend_errors',errors.length===0);
++  const skill=await rpc('skills/list',{request:{sessionId:session.sessionId}});check('bundled_skill_visible',skill.skills.some(s=>s.name==='naumi-browser'));
++  const catalog=await rpc('session/modelCatalog');check('nine_model_groups',catalog.groups.length===9);
++  fs.writeFileSync('evidence/ego-lite/UI_CHECK.json',JSON.stringify({checks,errors,at:new Date().toISOString()},null,2)+'\n');
++  console.log('EGO_UI_RESULT checks='+Object.keys(checks).length+' pass='+Object.keys(checks).length+' errors=0');
++}catch(e){fs.writeFileSync('.dsh/ego-lite-backup/ui-failure.txt',String(e.stack));await page.screenshot({path:'evidence/ego-lite/ui-failure.png'});throw e;}
++finally{await op({action:'finish'}).catch(()=>{});await context.close();await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r));}
+diff --git a/scripts/verify-ego-browser.mjs b/scripts/verify-ego-browser.mjs
+new file mode 100644
+index 0000000..f41dfe0
+--- /dev/null
++++ b/scripts/verify-ego-browser.mjs
+@@ -0,0 +1,26 @@
++import fs from 'node:fs';
++import http from 'node:http';
++import assert from 'node:assert/strict';
++import {EgoBrowserRuntime,resolveBrowserRuntime} from '../plugins/naumi-enterprise/browser-runtime.js';
++const runtime=new EgoBrowserRuntime(),scope='naumi-browser-e2e-20261116';
++const server=http.createServer((req,res)=>{
++  res.setHeader('X-Frame-Options','DENY');res.setHeader('Content-Security-Policy',"frame-ancestors 'none'");res.setHeader('Content-Type','text/html; charset=utf-8');
++  if(req.url==='/cookie'){res.setHeader('Set-Cookie','naumi_ego_fixture=accepted; HttpOnly; SameSite=Lax; Path=/');res.end('<title>Cookie saved</title><h1>Cookie saved</h1>');return;}
++  if(req.url==='/protected'){res.end(`<title>Session check</title><h1>${req.headers.cookie?.includes('naumi_ego_fixture=accepted')?'LOGIN_RETAINED':'LOGIN_MISSING'}</h1>`);return;}
++  if(req.url==='/second'){res.end('<title>Second page</title><h1>Second page</h1>');return;}
++  res.end('<!doctype html><html><meta charset="utf-8"><title>Naumi Browser Fixture</title><style>body{font:20px system-ui;background:#f6f8fc;padding:35px;color:#243550}button,input{font:inherit;padding:12px;margin:8px}h1{font-size:28px}</style><h1>Naumi Browser Fixture</h1><label>Name <input id="name"></label><button id="apply" onclick="document.querySelector(\'#result\').textContent=document.querySelector(\'#name\').value;document.querySelector(\'#count\').textContent=++window.count">Apply</button><p id="result"></p><p id="count">0</p><a href="/second">Next page</a><script>window.count=0</script></html>');
++});
++await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;
++const op=args=>runtime.perform(scope,args),checks={};
++try{
++  resolveBrowserRuntime();await op({action:'resize',width:900,height:650});
++  await op({action:'navigate',url:origin});await op({action:'fill',selector:'#name',text:'Naumi 企业浏览器'});await op({action:'click',selector:'#apply'});
++  const shot=await op({action:'snapshot',frame:true});assert(shot.snapshot.includes('Naumi 企业浏览器'));assert(shot.snapshot.includes('1'));assert(shot.image.length>1000);checks.semantic_input=true;checks.frame_denied_site_works=true;
++  fs.writeFileSync('evidence/ego-lite/fixture-page.jpg',Buffer.from(shot.image,'base64'));
++  await op({action:'click',selector:'#name'});await op({action:'press',key:'Control+a'});await op({action:'text',text:'中文键盘输入'});await op({action:'click',selector:'#apply'});assert((await op({action:'snapshot'})).snapshot.includes('中文键盘输入'));checks.keyboard=true;
++  await op({action:'navigate',url:origin+'/second'});await op({action:'back'});assert((await op({action:'state'})).title==='Naumi Browser Fixture');await op({action:'forward'});assert((await op({action:'state'})).title==='Second page');checks.history=true;
++  await op({action:'navigate',url:origin+'/cookie'});await op({action:'navigate',url:origin+'/protected'});await op({action:'reload'});assert((await op({action:'snapshot'})).snapshot.includes('LOGIN_RETAINED'));checks.httpOnly_cookie_retained=true;
++  const tabs=await op({action:'tabs'});assert(tabs.tabs.some(x=>x.label==='p1'));checks.space_pages=true;
++  fs.writeFileSync('evidence/ego-lite/RUNTIME_CHECK.json',JSON.stringify({engine:'ego-lite',version:'0.6.3.14',checks,realBrowser:true,paidGenerationCalls:0,at:new Date().toISOString()},null,2)+'\n');
++  console.log('EGO_RUNTIME real_browser=1 semantic_input=1 keyboard=1 history=1 cookie_retained=1 frame_denied_site=1 checks='+Object.keys(checks).length);
++}finally{await op({action:'finish'});await runtime.dispose();server.closeAllConnections();await new Promise(r=>server.close(r));}
+diff --git a/tests/ego-browser-scheduler.test.mjs b/tests/ego-browser-scheduler.test.mjs
+new file mode 100644
+index 0000000..14f8ecf
+--- /dev/null
++++ b/tests/ego-browser-scheduler.test.mjs
+@@ -0,0 +1,26 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import {BrowserScheduler,browserViewport,browserPoint} from '../plugins/naumi-enterprise/assets/browser-scheduler.js';
++const delay=ms=>new Promise(r=>setTimeout(r,ms));
++test('continuous resize sends only final viewport, no poll backlog',async()=>{
++  const calls=[],s=new BrowserScheduler({request:async a=>{calls.push(a);return a;},onState:()=>{},resizeDelay:25,pollDelay:10});
++  s.resize(600,700);s.setActive(true);for(let i=0;i<25;i++){s.resize(600+i,700);await delay(2);}assert.equal(calls.length,0);await delay(35);s.dispose();assert.equal(calls.filter(c=>c.action==='resize').length,1);assert.equal(calls[0].width,624);assert(s.stats.requests<=3);
++});
++test('stale frame never replaces latest-size picture',async()=>{
++  let finish;const states=[],calls=[];const s=new BrowserScheduler({request:a=>{calls.push(a);if(calls.length===1)return new Promise(r=>{finish=r;});return Promise.resolve(a);},onState:d=>states.push(d),resizeDelay:5,pollDelay:10000});
++  s.resize(500,700);s.setActive(true);await delay(10);s.resize(800,700);finish({width:500});await delay(15);s.dispose();assert(!states.some(x=>x.width===500));assert(states.some(x=>x.width===800));assert.equal(s.stats.discardedFrames,1);
++});
++test('typing bursts compose without dropping characters or replaying actions',async()=>{
++  const calls=[],s=new BrowserScheduler({request:async a=>{calls.push(a);await delay(8);return a;},onState:()=>{},pollDelay:10000});s.setActive(true);
++  await Promise.all([...('Naumi中文')].map(text=>s.perform({action:'text',text})));s.dispose();assert.equal(calls.filter(x=>x.action==='text').map(x=>x.text).join(''),'Naumi中文');assert.equal(calls.filter(x=>x.action==='text').length,1);
++});
++test('mutations retain order across coalesced input groups',async()=>{
++  const calls=[],s=new BrowserScheduler({request:async a=>{calls.push(a);await delay(3);return a;},onState:()=>{},pollDelay:10000});s.setActive(true);
++  await Promise.all([s.perform({action:'text',text:'a'}),s.perform({action:'click',x:1,y:1}),s.perform({action:'text',text:'b'})]);s.dispose();assert.deepEqual(calls.filter(x=>x.action!=='state').map(x=>x.action),['text','click','text']);
++});
++test('hidden panel stops passive requests and disposal clears pending work',async()=>{
++  const calls=[],s=new BrowserScheduler({request:async a=>{calls.push(a);return a;},onState:()=>{},pollDelay:5});s.setActive(true);await delay(9);s.setActive(false);const n=calls.length;await delay(15);assert.equal(calls.length,n);const pending=s.perform({action:'click',x:1,y:1});s.dispose();await assert.rejects(pending,/CLOSED/);
++});
++test('contain-fit coordinate mapping rejects letterbox padding and preserves ratios',()=>{
++  const rect={left:10,top:10,width:400,height:600},viewport={width:800,height:600};assert.deepEqual(browserPoint(rect,viewport,210,160),{x:400,y:300});assert.equal(browserPoint(rect,viewport,210,510),null);assert.deepEqual(browserViewport(390,700),{width:390,height:700});assert.deepEqual(browserViewport(10,20),{width:200,height:120});
++});
+diff --git a/tests/ego-browser.test.mjs b/tests/ego-browser.test.mjs
+new file mode 100644
+index 0000000..f1656d6
+--- /dev/null
++++ b/tests/ego-browser.test.mjs
+@@ -0,0 +1,61 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import {Readable,PassThrough} from 'node:stream';
++import {EventEmitter} from 'node:events';
++import http from 'node:http';
++import fs from 'node:fs';
++import {browserURL,validateBrowserInput,EgoBrowserRuntime,resolveBrowserRuntime,BROWSER_LOCK} from '../plugins/naumi-enterprise/browser-runtime.js';
++import {installEgoBrowser,createBrowserTool} from '../plugins/naumi-enterprise/browser.js';
++
++test('browser accepts HTTP(S), loopback and blank but no executable URLs/credentials',()=>{
++  assert.equal(browserURL('localhost:3112/workbench'),'http://localhost:3112/workbench');assert.equal(browserURL('example.com'),'https://example.com/');assert.equal(browserURL('about:blank'),'about:blank');
++  for(const url of ['javascript:alert(1)','file:///C:/a','data:text/html,x','https://u:p@example.com','blob:https://x'])assert.throws(()=>browserURL(url));
++});
++test('structured action validation rejects arbitrary script, large text and bad viewport',()=>{
++  assert.throws(()=>validateBrowserInput({action:'evaluate',code:'x'}));assert.throws(()=>validateBrowserInput({action:'text',text:'x'.repeat(17000)}));assert.throws(()=>validateBrowserInput({action:'resize',width:1,height:600}));assert.throws(()=>validateBrowserInput({action:'click',x:NaN,y:0}));
++  const v=validateBrowserInput({action:'navigate',url:'https://example.com',code:'evil',frame:true});assert.equal(v.code,undefined);assert.equal(v.frame,true);
++});
++test('runtime is pinned, packaged, verified and explicitly platform-bounded',()=>{
++  assert.equal(BROWSER_LOCK.browserVersion,'0.6.3.14');assert.equal(BROWSER_LOCK.skillVersion,'2.2.1');assert.throws(()=>resolveBrowserRuntime({platform:'linux'}),/PLATFORM/);assert.throws(()=>resolveBrowserRuntime({root:'NONEXISTING_TEST_RUNTIME'}),/INCOMPLETE/);
++  assert(!fs.readFileSync('plugins/naumi-enterprise/browser-runtime.js','utf8').includes('npx '));
++});
++function harness(admission={peer:{principal:{kind:'owner'}}}){
++  const routes=new Map(),calls=[],plugins=[],effects=[];
++  const runtime={status:()=>({status:'installed',engine:'ego-lite'}),perform:async(...args)=>{calls.push(args);return {title:'fixture'};},dispose:async()=>{}};
++  const ctx={connection:{admit:()=>admission},webServer:{register:r=>{routes.set(r.path,r.handler);return()=>routes.delete(r.path);}},effect:f=>{effects.push(f());},inject:(names,fn)=>{if(names[0]==='tools')fn({effect:f=>f(),tools:{register:t=>{calls.push(['register',t.name]);return()=>{};}}});else fn({plugin:(...args)=>plugins.push(args)});}};
++  installEgoBrowser(ctx,{runtime});return {handler:routes.get('/naumi/browser'),calls,plugins,runtime};
++}
++async function req(h,{method='GET',body='',headers={}}={}){
++  const request=Readable.from([Buffer.from(body)]);request.method=method;request.headers={host:'127.0.0.1:3080',...headers};
++  const response=new EventEmitter();Object.assign(response,{headers:{},setHeader(k,v){this.headers[k]=v;},writeHead(s){this.status=s;},end(b){this.body=JSON.parse(b);this.writableEnded=true;}});await h.handler(request,response);return response;
++}
++test('browser endpoint requires Harness owner, not merely upstream website login',async()=>{
++  for(const admission of [{rejection:401},{peer:{principal:{kind:'guest'}}}]){const r=await req(harness(admission));assert([401,403].includes(r.status));}
++  const r=await req(harness());assert.equal(r.status,200);assert.equal(r.body.title,undefined);
++});
++test('mutation endpoint rejects cross-origin and missing browser-intent header',async()=>{
++  const h=harness();assert.equal((await req(h,{method:'POST'})).status,403);
++  assert.equal((await req(h,{method:'POST',headers:{'x-naumi-browser':'1',origin:'https://evil.test'}})).status,403);
++  assert.equal((await req(h,{method:'DELETE'})).status,405);assert.equal(h.calls.length,1);
++});
++test('bounded JSON body and session identity fail before touching browser',async()=>{
++  const h=harness(),headers={'x-naumi-browser':'1'};
++  assert.equal((await req(h,{method:'POST',body:'{',headers})).status,400);assert.equal((await req(h,{method:'POST',body:'x'.repeat(65537),headers})).status,413);assert.equal((await req(h,{method:'POST',body:'{}',headers})).status,400);
++  const r=await req(h,{method:'POST',headers,body:JSON.stringify({sessionId:'session-1',action:'state'})});assert.equal(r.status,200);assert.equal(h.calls.at(-1)[0],'session-1');
++});
++test('native tool uses executor agent identity, excludes images and shares session view',async()=>{
++  const seen=[],tool=createBrowserTool({perform:async(...args)=>{seen.push(args);return {ok:true};}}),signal=new AbortController().signal;
++  await assert.rejects(tool.execute({action:'state'},{signal}),/SESSION_REQUIRED/);
++  await tool.execute({action:'snapshot'},{agent:{id:'real-session'},signal});assert.equal(seen[0][0],'real-session');assert.equal(seen[0][1].frame,false);assert.equal(seen[0][2].signal,signal);
++});
++test('separate filesystem skill provider never overrides model settings or desktop provider',()=>{
++  const h=harness();assert.equal(h.plugins[0][1].providerName,'naumi-browser');assert.equal(h.plugins[0][1].includeDefaultRoots,false);assert(h.plugins[0][1].bundledSkillDir.endsWith('browser-skills'));
++});
++test('persistent worker JSON transport is lossless and same-scope mutations serialize',async()=>{
++  let active=0,max=0;const server=http.createServer((req,res)=>{assert.equal(req.headers.authorization,'Bearer fixture');active++;max=Math.max(max,active);setTimeout(()=>{active--;res.end(JSON.stringify({ok:true,data:{title:'中文',label:'p1'}}));},5);});
++  await new Promise(r=>server.listen(0,'127.0.0.1',r));const runtime=new EgoBrowserRuntime();runtime.ensureWorker=async()=>({url:'http://127.0.0.1:'+server.address().port,token:'fixture'});
++  try{const results=await Promise.all([runtime.perform('a',{action:'state'}),runtime.perform('a',{action:'state'})]);assert.equal(max,1);assert.equal(results[0].title,'中文');await runtime.dispose();await assert.rejects(runtime.perform('a',{action:'state'}),/DISPOSED/);}finally{server.closeAllConnections();await new Promise(r=>server.close(r));}
++});
++test('UI is real-engine presentation, uses native slots, preserves browser/model separation',()=>{
++  const s=fs.readFileSync('plugins/naumi-enterprise/assets/browser-client.js','utf8');assert(s.includes("kind:'browser'"));assert(s.includes("sidebar.right.pane.tab"));assert(!s.includes('<iframe'));assert(s.includes('onCompositionEnd'));assert(s.includes('scheduler.current.dispose()'));assert(s.includes('tab.visible'));assert(!/setModel\(|setPermission\(/.test(s));
++});
+diff --git a/tests/naumi-context-ui.test.mjs b/tests/naumi-context-ui.test.mjs
+index a4dde51..b8b0a2f 100644
+--- a/tests/naumi-context-ui.test.mjs
++++ b/tests/naumi-context-ui.test.mjs
+@@ -45,7 +45,7 @@ test('parent/child slot owners cannot accidentally be relocated as leaves',()=>{
+ });
+ test('all preexisting enterprise front-end code is byte-equivalent apart from one UI install call',()=>{
+  const start=source.indexOf('window.__ModuleLoader__.load');
+- const restored=source.slice(start).replace("    installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);\n",'');
++ const restored=source.slice(start).split('\n').filter(line=>!line.includes("void import('/naumi/assets/browser-client.js')")).join('\n').replace("    installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);\n",'');
+  assert.equal(restored.replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'));
+ });
+ test('new UI layer has no new network, credential, model, permission or persistence writes',()=>{
+diff --git a/tests/naumi-enterprise.test.mjs b/tests/naumi-enterprise.test.mjs
+index a08d65a..74d63c8 100644
+--- a/tests/naumi-enterprise.test.mjs
++++ b/tests/naumi-enterprise.test.mjs
+@@ -32,7 +32,7 @@ async function invoke(route,{cookie='',method='GET',url='/naumi/workspace'}={}){
+ test('bridge rejects unauthenticated Harness before any upstream call',async()=>{const {routes}=harness({rejection:401});const r=await invoke(routes.get('/naumi/workspace'));assert.equal(r.status,401);assert.match(r.body,/HARNESS_AUTH_REQUIRED/);});
+ test('bridge rejects non-owner API peers',async()=>{const {routes}=harness({peer:{principal:{kind:'guest'}}});assert.equal((await invoke(routes.get('/naumi/workspace'))).status,403);});
+ test('no business credential reports login state instead of fabricating data',async()=>{const {routes}=harness();const r=await invoke(routes.get('/naumi/workspace'));assert.equal(r.status,401);assert.equal(JSON.parse(r.body).error,'COLLABORATION_LOGIN_REQUIRED');});
+-test('all write methods are rejected; no business command proxy exists',async()=>{const {routes}=harness();for(const method of ['POST','PUT','DELETE'])assert.equal((await invoke(routes.get('/naumi/workspace'),{method})).status,405);assert.equal(routes.size,2);});
++test('all write methods are rejected; no business command proxy exists',async()=>{const {routes}=harness();for(const method of ['POST','PUT','DELETE'])assert.equal((await invoke(routes.get('/naumi/workspace'),{method})).status,405);assert.deepEqual([...routes.keys()].sort(),['/naumi/assets','/naumi/browser','/naumi/workspace']);});
+ test('authenticated projection uses fixed endpoint, only scoped Cookie and no-store',async()=>{
+   const previous=global.fetch;let seen;
+   global.fetch=async(url,options)=>{seen={url,options};return Response.json(sample);};

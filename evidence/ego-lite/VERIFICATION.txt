@@ -1,0 +1,98 @@
+Naumi ego-lite sidebar integration and resize performance verification
+Date: 2026-11-16
+ROOT: E:/Workspace/deepseek-harness-local
+Changed branch/fields: host.apply -> installEgoBrowser; sidebarRightTabs kind=browser / priority=extension; native tool naumi_browser; independent skill naumi-browser; browser version=0.6.3.14 / skill=2.2.1.
+Performance changes: per-frame CLI -> one persistent embedded SDK/CDP worker; BrowserScheduler.inFlight<=1; resize latest-only, pointer-drag pause, resizeDelay=180ms; versioned stale-frame discard; contain aspect ratio and exact pointer mapping; CSS-pixel viewport with bounded JPEG capture.
+Protected: 8 original hashes, including existing model/profile config, package-lock, business domain/style, original desktop modules and left layout.
+
+FOUR ARTIFACT PATHS
+MODIFIED_FILE: E:/Workspace/deepseek-harness-local/evidence/ego-lite/MODIFIED_FILE.zip
+DIFF_FILE: E:/Workspace/deepseek-harness-local/evidence/ego-lite/DIFF_FILE.patch
+VERIFICATION: E:/Workspace/deepseek-harness-local/evidence/ego-lite/VERIFICATION.txt
+ROLLBACK: E:/Workspace/deepseek-harness-local/evidence/ego-lite/ROLLBACK.sh
+
+BASELINE
+command: node scripts/verify-ego-browser-state.mjs baseline
+input: preserved original source files and SHA256 in baseline.json + original/
+literal output: BASELINE ego_browser=0 sidebar_browser=0 protected_files=8
+exit status: 0
+Original module test command, before integration: node --test tests/naumi-enterprise.test.mjs tests/naumi-context-ui.test.mjs tests/agent-desktop.test.mjs
+literal result summary:
+ℹ tests 36
+ℹ pass 36
+ℹ fail 0
+exit status: 0
+full output: baseline-tests.txt
+
+MODIFIED
+command: node scripts/verify-ego-browser-state.mjs modified
+input: current sources, verified packaged browser runtime, original protected files
+literal output: MODIFIED ego_browser=0.6.3.14 sidebar_browser=1 native_tool=1 protected_files=8
+exit status: 0
+module command: node --test tests/naumi-enterprise.test.mjs tests/naumi-context-ui.test.mjs tests/agent-desktop.test.mjs tests/ego-browser.test.mjs tests/ego-browser-scheduler.test.mjs
+literal result summary:
+ℹ tests 52
+ℹ pass 52
+ℹ fail 0
+exit status: 0
+full output: modified-tests.txt
+
+native command: node scripts/verify-ego-browser.mjs
+input: real ego-lite Windows x64 runtime; own local fixture with X-Frame-Options DENY; synthetic Chinese text and HttpOnly fixture cookie
+literal output: EGO_RUNTIME real_browser=1 semantic_input=1 keyboard=1 history=1 cookie_retained=1 frame_denied_site=1 checks=6
+exit status: 0
+report: RUNTIME_CHECK.json
+
+sidebar command: node scripts/verify-ego-browser-ui.mjs
+input: authenticated Harness, isolated Chromium 1600x1000 / 390x844, synthetic browser fixture, native right-sidebar drag handle (55 pointer moves)
+literal final output: EGO_UI_RESULT checks=16 pass=16 errors=0
+exit status: 0
+report: UI_CHECK.json; RESIZE_CHECK.json
+Dragging result: 0 resize calls during drag; 1 final resize after release; final viewport 469x870; animation-frame P95=17ms, max=17ms. Fixture-local measurement, not a fleet-wide frame-rate claim.
+Aspect result: screenshot dimensions settle to surface CSS dimensions; contain never stretches image; pointer mapping excludes letterbox padding. Mobile width fits. Hidden panel stops polling. Chinese input and collapse/restore passed.
+
+live command: node scripts/verify-ego-browser-live.mjs
+input: running authenticated local host; metadata-only reads, unauthorized and cross-origin rejection probes
+literal output: EGO_LIVE installed=1 tool_registered=1 skill_visible=1 desktop_tools=75 model_groups=9 unauthorized=401 csrf=403
+exit status: 0
+report: LIVE_CHECK.json
+Service restarted successfully: PID 19532, authenticated HTTP 200. Existing 75 desktop tools and 9 model groups retained.
+
+existing context UI command: node scripts/verify-agent-desktop-ui.mjs
+input: isolated Chromium, existing demo session; no model send or business write
+literal final output: BROWSER_RESULT checks=27 pass=27 errors=0
+exit status: 0
+report copied to: CONTEXT_REGRESSION.json; prior task report restored unchanged
+
+performance command: node scripts/verify-ego-browser-performance.mjs
+input: archived pre-optimization runtime in performance-original/ and current runtime; same 8 blank-page frame reads at 800x600
+literal output: EGO_PERFORMANCE baseline_processes=10 modified_processes=1 baseline_median_ms=194 modified_median_ms=69 viewport=800x600
+exit status: 0
+report: PERFORMANCE_CHECK.json
+This is an actual local baseline/modified comparison, not estimated performance. Baseline source snapshots are preserved byte-for-byte and are never loaded by the active service.
+
+ROLLBACK
+command: node scripts/verify-ego-browser-state.mjs rollback-test
+executed shell entry: D:/DEV/Git/bin/bash.exe -c './evidence/ego-lite/ROLLBACK.sh rollback-test'
+input: disposable source + installed profile copy, original snapshots and guarded modified hashes; actual rollback branch executed inside copy
+literal output: ROLLBACK originals_restored=7 browser_disabled_in_copy=1 desktop_preserved=1 active_still_integrated=1
+exit status: 0
+restored behavior/status: seven original file hashes restored, browser autoload/UI hook removed, added browser module files removed from source and installed-profile copy. Agent-desktop integration remains. Active working files stay modified and integrated.
+Actual branch output inside copy: ROLLBACK prior_sources_restored=1 browser_autoload_disabled=1 desktop_preserved=1 private_data_untouched=1 restart_required=1
+actual branch exit status: 0
+Real rollback, NOT executed on active directory: bash evidence/ego-lite/ROLLBACK.sh rollback
+Restart Naumi and refresh the workbench after real rollback. Browser installation, offline runtime archive and personal browser profiles remain; this rollback does not uninstall the browser or delete browsing data. Later source edits are guarded, LF/CRLF-only checkout changes accepted.
+
+PACKAGING
+command: npm pack --ignore-scripts --dry-run --json (cwd plugins/naumi-enterprise)
+exit status: 0
+report: PACK_CHECK.json
+Pure runtime archive, separate from module ZIP: E:/Workspace/deepseek-harness-local/runtime/ego-lite-win32-x64-0.6.3.14.zip
+runtime archive: 738 files, 293684260 bytes, CRC reopened/pass
+runtime SHA256: 139b82c01274ea5acc8e4485c64b70059d3177694e5afcf3a099f8a17d4f4cb2
+No User Data, cookies, passwords, browser history or personal configs are packaged. The large runtime remains local/ignored by Git; source includes reproducible setup/package scripts and manifest. Full employee installer, macOS/Linux builds, enterprise login and server-issued API configuration are separate modules.
+
+RESEARCH AND CORRECTIONS
+Open SDK source commit: bacaece43900e8ca68eea3b6f1663835ea38df9e; MIT SDK LICENSE included. Browser binary is a separate Citro Labs distribution, unmodified and not relicensed as MIT. Signed installer SHA256 matched official metadata; signer CITRO LABS PTE. LIMITED / Authenticode Valid. Current-user installation, usage-stats=0, no default-browser setting or Chrome data import; user completed first-run onboarding.
+Initial integration tests exposed an intentional third HTTP route count change; business writes remain rejected, exact allowlist updated. Skill root changed from custom to bundled host root after live discovery check. Per-round emulation/reset, premature keyboard-busy clearing and screenshot stretching were corrected before final acceptance. The user's drag-stall report led to the persistent worker + bounded scheduler change above.
+All verification writes were restricted to synthetic fixture pages; no paid model generation and no real enterprise business commands were submitted.

@@ -45,7 +45,7 @@ test('parent/child slot owners cannot accidentally be relocated as leaves',()=>{
 });
 test('all preexisting enterprise front-end code is byte-equivalent apart from one UI install call',()=>{
  const start=source.indexOf('window.__ModuleLoader__.load');
- const restored=source.slice(start).replace("    installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);\n",'');
+ const restored=source.slice(start).split('\n').filter(line=>!line.includes("void import('/naumi/assets/browser-client.js')")).join('\n').replace("    installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);\n",'');
  assert.equal(restored.replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'));
 });
 test('new UI layer has no new network, credential, model, permission or persistence writes',()=>{

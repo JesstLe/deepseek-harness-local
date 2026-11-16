@@ -4,6 +4,7 @@ Push-Location $root
 try {
     $env:DSH_HOME = Join-Path $root '.dsh'
     $env:DSH_TELEMETRY_MODE = 'DISABLED'
+    & (Join-Path $PSScriptRoot 'setup-ego-browser.ps1')
     node scripts/agent-desktop.mjs version
     if ($LASTEXITCODE) { throw 'Bundled desktop runtime verification failed; run npm ci before installing the profile' }
     node scripts/build-naumi-layout.mjs

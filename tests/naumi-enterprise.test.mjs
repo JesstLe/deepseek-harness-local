@@ -32,7 +32,7 @@ async function invoke(route,{cookie='',method='GET',url='/naumi/workspace'}={}){
 test('bridge rejects unauthenticated Harness before any upstream call',async()=>{const {routes}=harness({rejection:401});const r=await invoke(routes.get('/naumi/workspace'));assert.equal(r.status,401);assert.match(r.body,/HARNESS_AUTH_REQUIRED/);});
 test('bridge rejects non-owner API peers',async()=>{const {routes}=harness({peer:{principal:{kind:'guest'}}});assert.equal((await invoke(routes.get('/naumi/workspace'))).status,403);});
 test('no business credential reports login state instead of fabricating data',async()=>{const {routes}=harness();const r=await invoke(routes.get('/naumi/workspace'));assert.equal(r.status,401);assert.equal(JSON.parse(r.body).error,'COLLABORATION_LOGIN_REQUIRED');});
-test('all write methods are rejected; no business command proxy exists',async()=>{const {routes}=harness();for(const method of ['POST','PUT','DELETE'])assert.equal((await invoke(routes.get('/naumi/workspace'),{method})).status,405);assert.equal(routes.size,2);});
+test('all write methods are rejected; no business command proxy exists',async()=>{const {routes}=harness();for(const method of ['POST','PUT','DELETE'])assert.equal((await invoke(routes.get('/naumi/workspace'),{method})).status,405);assert.deepEqual([...routes.keys()].sort(),['/naumi/assets','/naumi/browser','/naumi/workspace']);});
 test('authenticated projection uses fixed endpoint, only scoped Cookie and no-store',async()=>{
   const previous=global.fetch;let seen;
   global.fetch=async(url,options)=>{seen={url,options};return Response.json(sample);};

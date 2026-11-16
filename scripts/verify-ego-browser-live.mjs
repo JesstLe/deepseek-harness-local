@@ -1,0 +1,14 @@
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+import {connect} from './harness-rpc.mjs';
+const logs=['logs/server.out.log','logs/server.err.log'].map(p=>fs.readFileSync(p,'utf8')).join('\n');
+const launch=[...logs.matchAll(/http:\/\/127\.0\.0\.1:3080\/?\?token=[A-Za-z0-9_~.%-]+/g)].at(-1)?.[0];assert(launch);
+const exchange=await fetch(launch,{redirect:'manual'}),cookie=exchange.headers.getSetCookie().map(x=>x.split(';')[0]).join('; '),headers={cookie};
+const readiness=await (await fetch('http://127.0.0.1:3080/naumi/browser',{headers})).json();assert.equal(readiness.status,'installed');assert.equal(readiness.toolRegistered,true);
+const unauthorized=(await fetch('http://127.0.0.1:3080/naumi/browser')).status;assert.equal(unauthorized,401);
+const csrf=(await fetch('http://127.0.0.1:3080/naumi/browser',{method:'POST',headers:{...headers,'X-Naumi-Browser':'1',Origin:'https://evil.test'}})).status;assert.equal(csrf,403);
+const desktop=await (await fetch('http://127.0.0.1:3080/naumi/desktop',{headers})).json();assert.equal(desktop.status,'ready');assert.equal(desktop.toolCount,75);
+const rpc=await connect(),sessions=await rpc('session/list',{_request:{}}),skills=await rpc('skills/list',{request:{sessionId:sessions.items[0].sessionId}});assert(skills.skills.some(s=>s.name==='naumi-browser'));assert(skills.skills.some(s=>s.name==='naumi-desktop'));
+const models=await rpc('session/modelCatalog');assert.equal(models.groups.length,9);
+fs.writeFileSync('evidence/ego-lite/LIVE_CHECK.json',JSON.stringify({readiness,unauthorized,csrf,desktopTools:desktop.toolCount,browserSkillVisible:true,desktopSkillVisible:true,modelGroups:models.groups.length,paidGenerationCalls:0,at:new Date().toISOString()},null,2)+'\n');
+console.log('EGO_LIVE installed=1 tool_registered=1 skill_visible=1 desktop_tools=75 model_groups=9 unauthorized=401 csrf=403');
