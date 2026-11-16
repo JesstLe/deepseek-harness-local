@@ -8,7 +8,7 @@
 
 - 当前基线 `66c432b`，52 项原有测试通过；原工作区与配置未切换。
 - 独立工作树 `E:/Workspace/naumi-desktop-build`。
-- 使用 Harness 0.2.2-rc.1 官方 BrowserBody / ElectronWebViewImpl；源包保持不变，派生包仅替换模块注册标识和产品专属桥接名称两处，完整字节等价测试覆盖其余代码。
+- 使用 Harness 0.2.2-rc.1 官方 BrowserBody / ElectronWebViewImpl；源包保持不变，派生包仅替换模块注册标识、产品专属桥接名称、CSS 标识和 CSS 所有者四处，完整字节等价测试覆盖其余代码。
 - 官方主进程租约接口参考代码固定到 `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`，保留 MIT 许可。
 - 品牌源为现有 `plugins/naumi-enterprise/assets/symbol.svg`，生成 7 尺寸 ICO 与 512px PNG。
 

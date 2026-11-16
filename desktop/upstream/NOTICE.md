@@ -5,9 +5,9 @@ DeepSeek Harness, tag `dsh-v0.2.2-rc.1`, commit
 `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`, under the MIT license in `LICENSE`.
 
 Naumi derives `@naumi/dsh-sidebar-browser` from the installed
-`@deepseek-ai/dsh-client-ui-sidebar-browser` 0.2.2-rc.1 client. Two checked
-substitutions change its module registration id and preload carrier to
-`naumiDesktop`. ElectronWebViewImpl, BrowserBody, navigation and docking are
+`@deepseek-ai/dsh-client-ui-sidebar-browser` 0.2.2-rc.1 client. Four checked
+substitutions change its module registration id, preload carrier to
+`naumiDesktop`, CSS identity and CSS ownership. ElectronWebViewImpl, BrowserBody, navigation and docking are
 otherwise byte-identical. The installed upstream package is unchanged.
 `app/guests.cjs` adapts the upstream main-process lease protocol. Differences:
 persistent local-account/workspace partitions, session/tab association for the
