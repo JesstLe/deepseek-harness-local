@@ -93,11 +93,11 @@ export function createBotTools(ctx,directory){
   ];
 }
 
-export function installBots(ctx,{directory}={}){
+export function installBots(ctx,{directory,collaborationOrigin}={}){
   return ctx.inject(['agents','agentTeams','agentPresets','sessions','sessionPersistence','tools','systemPrompt'],scope=>{
     const store=directory??new BotDirectory(path.join(process.env.DSH_HOME??path.join(os.homedir(),'.dsh'),'naumi','bots.json'));
     const taskRuntime=installBotTasks(scope,store);
-    const employeeRuntime=installEmployees(scope,store);
+    const employeeRuntime=installEmployees(scope,store,{collaborationOrigin});
     const installed=new Map(),streams=new Set();
     const install=agent=>{
       if(installed.has(agent)||!scope.agentTeams.tryMembership(agent))return;const disposers=[];

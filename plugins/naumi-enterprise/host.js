@@ -11,10 +11,10 @@ export function apply(ctx,config) {
   installAgentDesktop(ctx);
   installEgoBrowser(ctx);
   installTeamProfile(ctx);
-  installBots(ctx);
+  installBots(ctx,{collaborationOrigin:config.collaborationOrigin});
   const collaborationOrigin=validateOrigin(config.collaborationOrigin);
   const designOrigin=validateOrigin(config.designOrigin);
-  const assets=new Map([['employee-center.js','text/javascript; charset=utf-8'],['employee-center-model.js','text/javascript; charset=utf-8'],['employee-center.css','text/css; charset=utf-8'],['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml'],['browser-client.js','text/javascript; charset=utf-8'],['browser-native-client.js','text/javascript; charset=utf-8'],['browser-native.css','text/css; charset=utf-8'],['browser-scheduler.js','text/javascript; charset=utf-8'],['browser.css','text/css; charset=utf-8'],['team-panel.css','text/css; charset=utf-8'],['team-panel.js','text/javascript; charset=utf-8'],['team-panel-model.js','text/javascript; charset=utf-8'],['bot-sidebar.js','text/javascript; charset=utf-8'],['bot-sidebar-model.js','text/javascript; charset=utf-8'],['bot-sidebar.css','text/css; charset=utf-8']]);
+  const assets=new Map([['employee-sync-panel.js','text/javascript; charset=utf-8'],['employee-center.js','text/javascript; charset=utf-8'],['employee-center-model.js','text/javascript; charset=utf-8'],['employee-center.css','text/css; charset=utf-8'],['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml'],['browser-client.js','text/javascript; charset=utf-8'],['browser-native-client.js','text/javascript; charset=utf-8'],['browser-native.css','text/css; charset=utf-8'],['browser-scheduler.js','text/javascript; charset=utf-8'],['browser.css','text/css; charset=utf-8'],['team-panel.css','text/css; charset=utf-8'],['team-panel.js','text/javascript; charset=utf-8'],['team-panel-model.js','text/javascript; charset=utf-8'],['bot-sidebar.js','text/javascript; charset=utf-8'],['bot-sidebar-model.js','text/javascript; charset=utf-8'],['bot-sidebar.css','text/css; charset=utf-8']]);
   ctx.effect(()=>ctx.webServer.register({kind:'prefix',path:'/naumi/assets',handler:async(req,res)=>{
     const name=new URL(req.url,'http://localhost').pathname.split('/').at(-1);
     if(!['GET','HEAD'].includes(req.method)||!assets.has(name)){res.writeHead(404).end();return;}

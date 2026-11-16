@@ -8,7 +8,7 @@
 | PRD | 全量需求、架构边界、验收矩阵与阶段 | v1.0 已完成 | `NAUMI_DIGITAL_EMPLOYEE_PRD.md` |
 | M1 | 本地档案、记忆、动态设定、巡检 | 本地基础模块已实现并接入 | SQLite/owner HTTP/Agent 工具/事件/注入/心跳；156 项测试通过；真实跨会话记忆验证；详见下表 |
 | M2 | 员工管理 UI、目标、交付与验收 | 已实现并接入本地；M3 企业权威待接 | 166 项回归；20 项真实壳/SQLite 交互检查；实际本地页面和刷新恢复通过；文本交付版本与本机 owner 验收 |
-| M3 | 企业组织、同步、离线授权 | 未实现 | 需服务端实现与实际部署 |
+| M3 | 企业组织、同步、离线授权 | 核心已实现并接入本地企业服务，退出项未全完成 | 206 企业端/166 Harness 回归、真实双设备/DPAPI/HTTP、实际 Next.js 协议与只读 UI；MEM-007、企业工作权威待补齐 |
 | M4 | 主动规则、预算、分布式执行与故障切换 | 未实现 | 需模型网关、租约与故障注入 |
 | M5 | 开箱即用员工安装包 | 待后续功能集成后重建 | 不复用旧 EXE 冒充新功能包 |
 
@@ -50,4 +50,8 @@
 - 证据：`evidence/employee-center/module-tests.log`、`UI_VERIFICATION.json`、`LIVE_UI_VERIFICATION.json`、`VERIFICATION.txt`。
 - 界面验证为真实 Harness 壳 + 隔离 SQLite/HTTP 工作数据；实际运行版另做只读页面/接口核对，未造真实员工业务数据。
 - M2 交付物目前为文本正文。企业图片/视频资产系统及组织审批权威将在 M3 集成；不把 local-owner 验收说成服务器已批准。
-- 总目标 active，接续 M3：复用 naumi-co 现有 Actor/withTenant/资源授权，不另造不受租户约束的服务端入口。
+- 总目标 active。M3 已核对实际 3112 进程，复用 naumi-design-ops 现有 Actor/withTenant/项目授权；旧 naumi-co 只读。核心同步已实现，详细接续见 EMPLOYEE_SYNC_M3.md。
+
+## M3 核心进度
+
+已接入员工/设备分离权限、Ed25519 签名授权、显式私人同步、共享提案/人工审批、CAS 冲突/tombstone、DPAPI 与加密缓存、企业页。实际现有设备未登记，未自动上传。206/206 企业端、166/166 Harness、5 项隔离真实栈 UI、实际 Next.js test 企业协议和只读已部署界面通过。MEM-007 与企业工作/资产权威衔接仍未退出，M4/M5 待推进。
