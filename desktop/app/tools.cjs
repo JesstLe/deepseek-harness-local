@@ -54,7 +54,7 @@ class BrowserTools {
   return info(entry);
  }
 }
-async function startBridge({home,guests,window}){
+async function startBridge({home,guests,window,enterprise}){
  const token=randomBytes(32).toString('hex'),runtime=new BrowserTools(guests,window);
  const file=path.join(home,'naumi-desktop-bridge.json');
  const server=http.createServer(async(req,res)=>{
@@ -63,12 +63,19 @@ async function startBridge({home,guests,window}){
   const received=Buffer.from(req.headers.authorization??''),expected=Buffer.from('Bearer '+token);
   if(req.headers.origin||received.length!==expected.length||!timingSafeEqual(received,expected)){send(403,{error:'NATIVE_BROWSER_AUTH_REQUIRED'});return;}
   if(req.method==='GET'&&req.url==='/health'){send(200,{ok:true,protocolVersion:1,pid:process.pid,engine:'chromium'});return;}
+  if(req.method==='POST'&&req.url==='/enterprise/request'){
+   if(!enterprise){send(503,{error:'ENTERPRISE_SESSION_NOT_CONFIGURED'});return;}
+   const controller=new AbortController(),abort=()=>{if(!res.writableEnded)controller.abort();};res.on('close',abort);
+   try{let bytes=0;const chunks=[];for await(const data of req){bytes+=data.length;if(bytes>2*1024*1024+4096){send(413,{error:'ENTERPRISE_BODY_TOO_LARGE'});return;}chunks.push(data);}const input=JSON.parse(Buffer.concat(chunks).toString('utf8'));send(200,{ok:true,data:await enterprise.perform(input,{signal:controller.signal})});}
+   catch(error){send(502,{ok:false,error:/^ENTERPRISE_[A-Z_]+$/.test(error.message)?error.message:'ENTERPRISE_REQUEST_INVALID'});}
+   finally{res.off('close',abort);}return;
+  }
   if(req.method!=='POST'||req.url!=='/op'){send(404,{error:'NOT_FOUND'});return;}
   try{let body='',bytes=0;for await(const data of req){bytes+=data.length;if(bytes>65536){send(413,{error:'BODY_TOO_LARGE'});return;}body+=data.toString();}const {sessionId,input}=JSON.parse(body);send(200,{ok:true,data:await runtime.perform(sessionId,input)});}
   catch(error){send(400,{ok:false,error:/^[A-Z_0-9]{3,80}$/.test(error.message)?error.message:'NATIVE_BROWSER_OPERATION_FAILED_NO_REPLAY'});}
  });
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
- fs.mkdirSync(home,{recursive:true});fs.writeFileSync(file,JSON.stringify({version:1,port:server.address().port,token,pid:process.pid}),{mode:0o600});
+ fs.mkdirSync(home,{recursive:true});fs.writeFileSync(file,JSON.stringify({version:1,port:server.address().port,token,pid:process.pid,...(enterprise?{enterprise:enterprise.descriptor()}:{})}),{mode:0o600});
  return {runtime,close:async()=>{server.closeAllConnections();await new Promise(r=>server.close(r));try{if(JSON.parse(fs.readFileSync(file,'utf8')).token===token)fs.unlinkSync(file);}catch{}}};
 }
 module.exports={BrowserTools,startBridge,snapshotScript};

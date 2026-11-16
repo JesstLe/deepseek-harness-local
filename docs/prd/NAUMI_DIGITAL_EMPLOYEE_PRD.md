@@ -355,3 +355,11 @@ HBT-003/004、CAP-001、BUD-001、LOC-004/005/006、EMP-002/003 扩展；独立�
 - profileVersion1/identityProtocol1、私有工作区first-use事务、受管依赖journal/4阶段硬退出恢复、既有配置/真实SQLite/浏览器数据保留、实际bootstrap回执再导航、Windows worker独立生命周期、认证停机与退出重入门已验收。
 - 293模块、268副本基线、正式npm72文件/ASAR3模块/resource6份源码一致性、真实双桌面profile/原生浏览器/正常重启/主进程硬杀原PID接回/实际退出通过；UNKNOWN数据为明确样例，真实模型与执行账本的强杀证据仍见M4，不混淆层级。
 - 证据evidence/desktop-lifecycle/VERIFICATION.txt，细粒度INS-01~16见DESKTOP_LIFECYCLE_M5_2.md。未退出项：远程企业首次连接/归属边界、业务schema与安装版本迁移/回退、NSIS真实安装链、签名与依赖、真实员工/模型使用。总目标active。
+
+## M5.3 首次企业连接与桌面会话桥增量（2026-11-17）
+
+- 桌面实例协议2把HMAC绑定实际listener port、规范homeHash和企业origin；身份metadata保留v1 UUID/key，旧活worker拒绝自动降级附着，复制/搬迁home不隐式换身份或删除数据。
+- 员工首次连接页配置HTTPS企业origin（本机loopback可HTTP），同profile禁止隐式跨企业切换。企业登录使用独立持久session；有限Bearer loopback桥只允许workspace GET、digital-employees GET/POST，不导出Cookie/Set-Cookie，不代理设备签名API。
+- 组织/设备登记的proof、签名离线授权、企业RBAC和原设备通道继续权威；首次连接不会自动登记或上传私人记忆。企业会话过期、权限拒绝、未知网络结果不由应用自动回放mutation；POST携带原始operationId，原企业事务回执去重覆盖Chromium可能的网络重传，并以同一UUID核对未知结果。
+- CAP-001：GUI桥出现/重启触发能力刷新；干净系统PATH下DPAPI改用固定绝对系统PowerShell。Windows回执rename短暂占用有界重试并保留原权威文件。
+- 315项集中模块回归通过。独立双profile Electron、候选正式包/hash、原生浏览器/主进程硬杀接回及副本回滚最终结果按evidence/desktop-enterprise/VERIFICATION.txt记录。真实远程HTTPS员工授权、模型/供应商业务、NSIS安装/升级/卸载、业务schema/已安装版本回退及签名审查仍分别验收，不以本地fixture替代。

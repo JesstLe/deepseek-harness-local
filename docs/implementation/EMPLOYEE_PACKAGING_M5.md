@@ -64,3 +64,7 @@
 293项集中回归、268项副本原行为、72文件正式插件包、3个ASAR关键模块及6份resource源码hash一致性通过。真实unpacked桌面双profile/同Logo不误附着/动态端口、独立工作区、原生浏览器cookie持久化与跨profile不泄漏、正常重启、实际Electron主进程硬杀后原backend PID接回、接回后认证停机通过。原人物设定/记忆/schema1和UNKNOWN样例保留。处理了首用工作区隐式Documents依赖、引导URL就绪竞态、Windows非detached job、退出重入与Host压缩层丢弃end回调等真机问题。
 
 源码和故障矩阵详见 `DESKTOP_LIFECYCLE_M5_2.md`；证据 `evidence/desktop-lifecycle/VERIFICATION.txt`。实际3080未替换，员工/设备/上传/AI规则未自动操作。依赖链接回退不是已安装程序跨schema降级；远程企业session桥/首次连接、NSIS安装升级卸载、业务数据迁移/版本回退、签名与供应链、真实员工与模型验收仍继续，完整目标active。
+
+## M5.3 企业首次连接与归属
+
+新增首次企业origin配置、独立Electron企业session与有限业务请求桥；Cookie不拷贝到localhost，原设备签名/同步/运行门保留。实例协议2绑定listener port/homeHash/企业origin，拒绝relay和隐式home克隆，保留旧identity UUID/key。修复干净PATH下DPAPI shell发现和Windows回执短暂占用。315项本地回归通过；正式npm包73文件、候选产物/双profile登录/原生浏览器与故障恢复/副本回滚最终证据统一见evidence/desktop-enterprise/VERIFICATION.txt与DESKTOP_ENTERPRISE_M5_3.md。下一NSIS真实安装、已安装版本/业务数据迁移回退、签名/依赖和真实员工业务验收；完整目标active。

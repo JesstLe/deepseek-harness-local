@@ -27,6 +27,7 @@ export class EmployeeDeviceVault {
 function dpapi(value,decode){
   if(process.platform!=='win32')throw Error('EMP_OS_VAULT_REQUIRED');
   const program=`Add-Type -AssemblyName System.Security; $s=[Console]::In.ReadToEnd(); $b=${decode?'[Convert]::FromBase64String($s)':'[Text.Encoding]::UTF8.GetBytes($s)'}; $r=[Security.Cryptography.ProtectedData]::${decode?'Unprotect':'Protect'}($b,[Text.Encoding]::UTF8.GetBytes('Naumi.employee.device.v1'),[Security.Cryptography.DataProtectionScope]::CurrentUser); [Console]::Out.Write(${decode?'[Text.Encoding]::UTF8.GetString($r)':'[Convert]::ToBase64String($r)'})`;
-  const result=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(program,'utf16le').toString('base64')],{input:value,encoding:'utf8',windowsHide:true,timeout:15000,maxBuffer:2*1024*1024});
+  const shell=path.join(process.env.SystemRoot??'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe');
+  const result=spawnSync(shell,['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(program,'utf16le').toString('base64')],{input:value,encoding:'utf8',windowsHide:true,timeout:15000,maxBuffer:2*1024*1024});
   if(result.status!==0||!result.stdout)throw Error('EMP_OS_VAULT_UNAVAILABLE');return result.stdout.trim();
 }

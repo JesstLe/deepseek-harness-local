@@ -3,7 +3,7 @@ const fs=require('node:fs'),path=require('node:path'),{createHash}=require('node
 const sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 function verifyStagedRuntime(root=path.resolve(__dirname,'../..')){
  const target=path.join(root,'runtime/desktop-backend'),manifest=JSON.parse(fs.readFileSync(path.join(target,'runtime-manifest.json'))),inventory=path.join(target,'runtime-files.json');
- if(manifest.schemaVersion!==2||manifest.desktop?.profileVersion!==1||manifest.desktop?.identityProtocol!==1||manifest.dingtalk?.version!=='1.0.68'||manifest.inventorySHA256!==sha(inventory))throw Error('STAGED_MANIFEST_INVALID');
+ if(manifest.schemaVersion!==2||manifest.desktop?.profileVersion!==1||manifest.desktop?.identityProtocol!==2||manifest.dingtalk?.version!=='1.0.68'||manifest.inventorySHA256!==sha(inventory))throw Error('STAGED_MANIFEST_INVALID');
  if(manifest.version!==JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json'))).version)throw Error('STAGED_VERSION_STALE');
  const files=JSON.parse(fs.readFileSync(inventory)),expected=new Set(['runtime-manifest.json','runtime-files.json']);
  for(const item of files){

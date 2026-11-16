@@ -1,21 +1,21 @@
 import {_electron as electron} from '../node_modules/playwright/index.mjs';
 import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import assert from 'node:assert/strict';import {createRequire} from 'node:module';import {fileURLToPath} from 'node:url';import {DatabaseSync} from 'node:sqlite';
 import {EmployeeStore} from '../../plugins/naumi-enterprise/employee-store.js';
-const root=fileURLToPath(new URL('../..',import.meta.url)),e=path.join(root,'evidence/desktop-lifecycle'),exe=path.join(root,'runtime/naumi-desktop-release/win-unpacked/Naumi.exe'),require=createRequire(import.meta.url),{probeIdentity}=require('../app/backend.cjs');
+const root=fileURLToPath(new URL('../..',import.meta.url)),e=path.resolve(process.env.NAUMI_LIFECYCLE_EVIDENCE??path.join(root,'evidence/desktop-lifecycle')),exe=path.join(root,'runtime/naumi-desktop-release/win-unpacked/Naumi.exe'),require=createRequire(import.meta.url),{probeIdentity}=require('../app/backend.cjs');
 const base=path.join(root,'.dsh/desktop-lifecycle-'+Date.now()),userA=path.join(base,'employee A'),userB=path.join(base,'employee B');fs.mkdirSync(e,{recursive:true});
 let foreignPosts=0;const logo=fs.readFileSync(path.join(root,'plugins/naumi-enterprise/assets/symbol.svg'));
 const fixture=http.createServer((q,r)=>{if(q.method==='POST')foreignPosts++;if(q.url==='/page'){r.setHeader('X-Frame-Options','DENY');r.setHeader('Content-Type','text/html');r.end('<title>Naumi Lifecycle Fixture</title><h1>Naumi</h1><input aria-label="Lifecycle input">');}else{r.setHeader('Content-Type','image/svg+xml');r.end(logo);}});await new Promise(r=>fixture.listen(0,'127.0.0.1',r));const preferred='http://127.0.0.1:'+fixture.address().port;
 const alive=pid=>{try{process.kill(pid,0);return true;}catch{return false;}};
 const handles=new Set();
 async function launch(userData){
- const env={...process.env,NAUMI_USER_DATA:userData,NAUMI_HOST_URL:preferred,NAUMI_TEST:'1',NAUMI_TEST_HIDDEN:'1'};
+ const env={...process.env,NAUMI_USER_DATA:userData,NAUMI_HOST_URL:preferred,NAUMI_ENTERPRISE_ORIGIN:preferred,NAUMI_TEST:'1',NAUMI_TEST_HIDDEN:'1'};
  for(const key of ['NAUMI_ROOT','NAUMI_DSH_HOME','NAUMI_NODE','ELECTRON_RUN_AS_NODE','NAUMI_DESKTOP_INSTANCE_ID','NAUMI_DESKTOP_BUNDLE_ID'])delete env[key];
  env.PATH=process.env.SystemRoot+'\\System32;'+process.env.SystemRoot;
  const app=await electron.launch({executablePath:exe,args:[],env,timeout:90000});handles.add(app);const page=await app.firstWindow();page.on('pageerror',error=>console.log('DESKTOP_PAGE_ERROR '+error.message));page.on('console',message=>{if(message.type()==='error')console.log('DESKTOP_CONSOLE '+message.text().replace(/token=[^&\s]+/g,'token=REDACTED'));});
  await Promise.race([page.waitForURL(/^http:\/\/127\.0\.0\.1:/,{timeout:120000}),page.waitForURL('**/startup.html?error=**',{timeout:120000}).then(()=>{throw Error('LIFECYCLE_STARTUP '+new URL(page.url()).searchParams.get('error'));})]);
  await page.getByRole('button',{name:'工作台',exact:true}).first().waitFor();
  const deadline=Date.now()+15000;let info;
- while(Date.now()<deadline){info=await app.evaluate(()=>{const t=globalThis.__naumiTest;if(!t)return null;return {shellPid:process.pid,home:t.settings.home,workspace:t.settings.workspace,url:t.settings.url,id:t.settings.identity.id,bundleId:t.settings.runtime.bundleId,verified:t.backend.instanceVerified,owned:t.backend.owned,reattached:t.backend.reattached??false};});if(info)break;await new Promise(r=>setTimeout(r,40));}
+ while(Date.now()<deadline){info=await app.evaluate(()=>{const t=globalThis.__naumiTest;if(!t)return null;return {shellPid:process.pid,home:t.settings.home,workspace:t.settings.workspace,url:t.settings.url,enterpriseOrigin:t.settings.enterpriseOrigin,id:t.settings.identity.id,bundleId:t.settings.runtime.bundleId,verified:t.backend.instanceVerified,owned:t.backend.owned,reattached:t.backend.reattached??false};});if(info)break;await new Promise(r=>setTimeout(r,40));}
  assert(info?.verified&&info.owned);assert.equal(info.workspace,path.join(info.home,'workspace'));fs.accessSync(info.workspace,fs.constants.W_OK);assert.notEqual(info.url,preferred);const receipt=JSON.parse(fs.readFileSync(path.join(info.home,'desktop-backend.json')));return {app,page,info,pid:receipt.pid};
 }
 async function waitGone(pid){const deadline=Date.now()+10000;while(Date.now()<deadline){if(!alive(pid))return;await new Promise(r=>setTimeout(r,40));}throw Error('PROCESS_EXIT_TIMEOUT');}

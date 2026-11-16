@@ -3,6 +3,7 @@ import {z} from 'zod';
 import {EmployeeSync} from './employee-sync.js';
 import {businessCookie} from './domain.js';
 import {EmployeeEnterpriseWork,enterpriseWorkCommand} from './employee-enterprise-work.js';
+import {DesktopEnterpriseTransport} from './desktop-enterprise.js';
 
 const command=z.discriminatedUnion('action',[
   z.object({action:z.literal('enroll'),name:z.string().trim().min(1).max(100)}).strict(),
@@ -17,7 +18,8 @@ const command=z.discriminatedUnion('action',[
 ]);
 export function installEmployeeSync(scope,directory,data,{origin,sync:provided}={}){
   if(!origin&&!provided)return null;
-  const sync=provided??new EmployeeSync({file:path.join(path.dirname(directory.file),'employee-sync.sqlite'),store:data,directory,origin});
+  const transport=new DesktopEnterpriseTransport({origin});
+  const sync=provided??new EmployeeSync({file:path.join(path.dirname(directory.file),'employee-sync.sqlite'),store:data,directory,origin,...(transport.standalone?{sessionRequest:(url,options)=>{const u=new URL(url);if(u.origin!==origin)throw Error('ENTERPRISE_REQUEST_FORBIDDEN');return transport.fetch(u.pathname,options);}}:{})});
   sync.enterpriseWork=new EmployeeEnterpriseWork(sync);
   scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/employee-sync',handler:async(req,res)=>{
     res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Type','application/json; charset=utf-8');
@@ -27,7 +29,7 @@ export function installEmployeeSync(scope,directory,data,{origin,sync:provided}=
     try{
       const q=new URL(req.url,'http://localhost').searchParams;
       if(req.method==='GET'){
-        if(q.get('view')==='catalog'){const cookie=businessCookie(req.headers.cookie);if(!cookie){send(401,{error:'COLLABORATION_LOGIN_REQUIRED'});return;}send(200,await sync.catalog(cookie));}
+        if(q.get('view')==='catalog'){const cookie=businessCookie(req.headers.cookie);if(!cookie&&!transport.standalone){send(401,{error:'COLLABORATION_LOGIN_REQUIRED'});return;}send(200,await sync.catalog(cookie));}
         else if(q.get('view')==='shared')send(200,sync.sharedMemories());
         else if(q.get('view')==='operations')send(200,sync.enterpriseWork.operations(z.string().min(1).max(200).parse(q.get('botId'))));
         else send(200,sync.status());return;
@@ -37,7 +39,7 @@ export function installEmployeeSync(scope,directory,data,{origin,sync:provided}=
       const chunks=[];let size=0;for await(const c of req){size+=c.length;if(size>30*1024*1024){send(413,{error:'EMP_REQUEST_TOO_LARGE'});return;}chunks.push(c);}
       let p;try{p=command.parse(JSON.parse(Buffer.concat(chunks).toString('utf8')));}catch{send(400,{error:'EMP_INVALID_REQUEST'});return;}
       const cookie=businessCookie(req.headers.cookie);
-      if(['enroll','bind','manage'].includes(p.action)&&!cookie){send(401,{error:'COLLABORATION_LOGIN_REQUIRED'});return;}
+      if(['enroll','bind','manage'].includes(p.action)&&!cookie&&!transport.standalone){send(401,{error:'COLLABORATION_LOGIN_REQUIRED'});return;}
       let result;
       if(p.action==='enroll')result=await sync.enroll(cookie,p.name);
       if(p.action==='bind')result=await sync.bind(p.botId,p.employeeId,cookie);
@@ -49,7 +51,7 @@ export function installEmployeeSync(scope,directory,data,{origin,sync:provided}=
       if(p.action==='business_retry')result=await sync.enterpriseWork.retry(p.botId,p.operationId);
       if(p.action==='execution_acquire'){const binding=await sync.enterpriseWork.binding(p.botId);result=await sync.enterpriseWork.leases.ensure(p.botId,binding.employeeId,p.taskId);}
       send(200,result);
-    }catch(e){const code=/^[A-Z_]+$/.test(e.message)?e.message:'EMP_CONTROL_UNAVAILABLE';send(/CONFLICT|REVISION|REPLAY/.test(code)?409:/REQUIRED|REVOKED|FORBIDDEN|APPROVAL/.test(code)?403:/UNAVAILABLE/.test(code)?503:400,{error:code});}
+    }catch(e){const code=/^[A-Z_]+$/.test(e.message)?e.message:'EMP_CONTROL_UNAVAILABLE';send(e.status===401?401:/UNAVAILABLE|NO_REPLAY|BRIDGE/.test(code)?503:/CONFLICT|REVISION|REPLAY/.test(code)?409:/REQUIRED|REVOKED|FORBIDDEN|APPROVAL/.test(code)?403:400,{error:code});}
   }}));
   sync.start();return sync;
 }

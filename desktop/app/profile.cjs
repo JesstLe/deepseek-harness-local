@@ -4,16 +4,26 @@ const samePath=(a,b)=>path.resolve(a).toLowerCase()===path.resolve(b).toLowerCas
 const exists=p=>{try{fs.lstatSync(p);return true;}catch(e){if(e.code==='ENOENT')return false;throw e;}};
 function regular(p){if(exists(p)&&(!fs.lstatSync(p).isFile()||fs.lstatSync(p).isSymbolicLink()))throw Error('PROFILE_METADATA_INVALID');}
 function read(p){regular(p);try{return JSON.parse(fs.readFileSync(p,'utf8'));}catch{throw Error('PROFILE_METADATA_INVALID');}}
-function atomic(p,value){regular(p);const temp=p+'.'+randomUUID()+'.tmp';try{const fd=fs.openSync(temp,'wx',0o600);try{fs.writeFileSync(fd,JSON.stringify(value,null,2)+'\n');fs.fsyncSync(fd);}finally{fs.closeSync(fd);}fs.renameSync(temp,p);}finally{if(exists(temp))fs.unlinkSync(temp);}}
+function replaceMetadata(from,to){
+ // Windows scanners/readers can temporarily deny delete sharing. Keep the fsynced candidate
+ // intact and retry only the atomic rename; never delete the prior authoritative receipt.
+ for(let attempt=0;;attempt++){try{fs.renameSync(from,to);return;}catch(error){if(process.platform!=='win32'||!['EPERM','EBUSY','EACCES'].includes(error.code)||attempt>=7)throw error;Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,Math.min(10*2**attempt,200));}}
+}
+function atomic(p,value){regular(p);const temp=p+'.'+randomUUID()+'.tmp';try{const fd=fs.openSync(temp,'wx',0o600);try{fs.writeFileSync(fd,JSON.stringify(value,null,2)+'\n');fs.fsyncSync(fd);}finally{fs.closeSync(fd);}replaceMetadata(temp,p);}finally{if(exists(temp))fs.unlinkSync(temp);}}
 function directory(p){if(exists(p)&&(!fs.lstatSync(p).isDirectory()||fs.lstatSync(p).isSymbolicLink()))throw Error('PROFILE_DIRECTORY_UNMANAGED');fs.mkdirSync(p,{recursive:true});}
 function identity(home){
  directory(home);const file=path.join(home,'desktop-instance.json');
  if(!exists(file))atomic(file,{version:1,id:randomUUID(),key:randomBytes(32).toString('hex')});
- const value=read(file);if(value.version!==1||!/^[0-9a-f-]{36}$/.test(value.id)||!/^[0-9a-f]{64}$/.test(value.key))throw Error('PROFILE_IDENTITY_INVALID');return value;
+ const value=read(file);if(value.version!==1||!/^[0-9a-f-]{36}$/.test(value.id)||!/^[0-9a-f]{64}$/.test(value.key))throw Error('PROFILE_IDENTITY_INVALID');
+ const homeHash=homeBinding(home);
+ if(value.homeHash!==undefined&&value.homeHash!==homeHash)throw Error('PROFILE_HOME_RELOCATION_REQUIRES_MIGRATION');
+ // Additive v1 metadata migration. Preserve the original UUID/key and every employee record.
+ if(value.homeHash===undefined){value.homeHash=homeHash;atomic(file,value);}return value;
 }
+function homeBinding(home){let canonical=fs.realpathSync.native(home);if(process.platform==='win32')canonical=canonical.toLowerCase();return createHash('sha256').update('naumi-home-v1\0'+canonical).digest('hex');}
 function runtimeReference(root){
  root=path.resolve(root);const manifest=read(path.join(root,'runtime-manifest.json'));
- if(manifest.product!=='Naumi'||manifest.schemaVersion!==2||manifest.desktop?.profileVersion!==1||manifest.desktop?.identityProtocol!==1||!/^[a-f0-9]{64}$/.test(manifest.inventorySHA256))throw Error('RUNTIME_DESKTOP_CONTRACT_UNSUPPORTED');
+ if(manifest.product!=='Naumi'||manifest.schemaVersion!==2||manifest.desktop?.profileVersion!==1||manifest.desktop?.identityProtocol!==2||!/^[a-f0-9]{64}$/.test(manifest.inventorySHA256))throw Error('RUNTIME_DESKTOP_CONTRACT_UNSUPPORTED');
  if(createHash('sha256').update(fs.readFileSync(path.join(root,'runtime-files.json'))).digest('hex')!==manifest.inventorySHA256)throw Error('RUNTIME_INVENTORY_INVALID');
  if(createHash('sha256').update(fs.readFileSync(path.join(root,'node.exe'))).digest('hex')!==manifest.nodeSHA256)throw Error('RUNTIME_NODE_INVALID');
  if(!fs.statSync(path.join(root,'node_modules')).isDirectory())throw Error('RUNTIME_DEPENDENCIES_MISSING');
@@ -66,4 +76,4 @@ function runtimeReceipt(home,id){
  const file=path.join(home,'desktop-backend.json');if(!exists(file))return null;const r=read(file);
  if(r.version!==1||r.ownerId!==id||!Number.isInteger(r.port)||r.port<1||r.port>65535||!['starting','ready'].includes(r.phase)||!(r.pid===null&&r.phase==='starting'||Number.isInteger(r.pid)&&r.pid>0)||!/^[a-f0-9]{64}$/.test(r.bundleId)||!/^[a-f0-9-]{36}$/.test(r.runId))throw Error('PROFILE_BACKEND_RECEIPT_INVALID');return r;
 }
-module.exports={identity,runtimeReference,prepareProfile,recoverProfile,runtimeReceipt,atomic,samePath,exists,profileState};
+module.exports={identity,homeBinding,runtimeReference,prepareProfile,recoverProfile,runtimeReceipt,atomic,samePath,exists,profileState};

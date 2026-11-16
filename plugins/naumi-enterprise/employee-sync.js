@@ -23,8 +23,8 @@ export function verifyEmployeeAuthorization(packet,{publicKey,kid,issuer,deviceI
 }
 
 export class EmployeeSync {
-  constructor({file,store,directory,origin,vault,fetch:request=globalThis.fetch,clock=()=>Date.now()}){
-    this.store=store;this.directory=directory;this.origin=new URL(origin).origin;this.request=request;this.clock=clock;
+  constructor({file,store,directory,origin,vault,fetch:request=globalThis.fetch,sessionRequest,clock=()=>Date.now()}){
+    this.store=store;this.directory=directory;this.origin=new URL(origin).origin;this.request=request;this.sessionRequest=sessionRequest;this.clock=clock;
     const u=new URL(origin);if(u.username||u.password||u.pathname!=='/'||u.search||u.hash||u.protocol!=='https:'&&!(u.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(u.hostname)))fail('EMP_SYNC_ORIGIN_INVALID');
     fs.mkdirSync(path.dirname(file),{recursive:true});this.vault=vault??new EmployeeDeviceVault(file+'.device');this.db=new DatabaseSync(file);
     if(![0,1].includes(this.db.prepare('PRAGMA user_version').get().user_version)){this.db.close();fail('EMP_SYNC_SCHEMA_UNSUPPORTED');}
@@ -58,13 +58,14 @@ export class EmployeeSync {
     this.set('highWater',Math.max(now,highWater));return claims;
   }
   async manager(action,cookie){
-    const result=await this.http('/api/digital-employees',{method:'POST',headers:{cookie,'Content-Type':'application/json'},body:JSON.stringify(action)});
+    const result=await this.http('/api/digital-employees',{method:'POST',headers:{cookie,'Content-Type':'application/json'},body:JSON.stringify(action)},true);
     return result.result;
   }
-  async http(endpoint,options={}){
-    const r=await this.request(this.origin+endpoint,{...options,redirect:'error',signal:AbortSignal.any([...(options.signal?[options.signal]:[]),AbortSignal.timeout(15000)])});
+  async http(endpoint,options={},session=false){
+    const request=session&&this.sessionRequest?this.sessionRequest:this.request;
+    const r=await request(this.origin+endpoint,{...options,redirect:'error',signal:AbortSignal.any([...(options.signal?[options.signal]:[]),AbortSignal.timeout(15000)])});
     const text=await r.text();if(text.length>8*1024*1024)fail('EMP_SYNC_RESPONSE_TOO_LARGE');let value;try{value=JSON.parse(text);}catch{fail('EMP_SYNC_RESPONSE_INVALID');}
-    if(!r.ok){const code=value.code??'EMP_SYNC_UNAVAILABLE';if(['DEVICE_REVOKED','MEMBER_INACTIVE','TENANT_INACTIVE','ACCESS_PENDING','DEVICE_REENROLLMENT_REQUIRED'].includes(code)){this.set('revoked',true);this.db.exec('DELETE FROM shared_cache');}const error=Error(code);error.status=r.status;throw error;}
+    if(!r.ok){const code=session&&r.status===401?'COLLABORATION_LOGIN_REQUIRED':value.code??'EMP_SYNC_UNAVAILABLE';if(['DEVICE_REVOKED','MEMBER_INACTIVE','TENANT_INACTIVE','ACCESS_PENDING','DEVICE_REENROLLMENT_REQUIRED'].includes(code)){this.set('revoked',true);this.db.exec('DELETE FROM shared_cache');}const error=Error(code);error.status=r.status;throw error;}
     return value;
   }
   async enroll(cookie,name){
@@ -93,7 +94,7 @@ export class EmployeeSync {
     const response=await this.http('/api/digital-employees/device',{method:'POST',headers:{'Content-Type':'application/json','x-naumi-device-signature':signature},body:canonical(p),signal});
     this.accept(response);return response;
   }
-  async catalog(cookie){return this.http('/api/digital-employees',{headers:{cookie}});}
+  async catalog(cookie){return this.http('/api/digital-employees',{headers:{cookie}},true);}
   async bind(botId,employeeId,cookie){this.bot(botId);const r=await this.manager({action:'device.bind',operationId:randomUUID(),deviceId:this.deviceId,employeeId,localBotId:botId},cookie);this.accept(r);return this.status();}
   localBot(id){return this.directory.list().bots.find(b=>b.id===id);}
   bot(id){const b=this.localBot(id);if(!b||b.status!=='active')fail('EMP_BOT_NOT_FOUND');return b;}

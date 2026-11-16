@@ -34,8 +34,8 @@ async function probeIdentity(settings,{fetcher=fetch}={}){
  try{
   const r=await fetcher(settings.url+'/naumi/desktop-instance',{redirect:'error',headers:{'x-naumi-desktop-challenge':nonce},signal:AbortSignal.timeout(1500)});if(!r.ok)return null;
   const reader=r.body.getReader();let bytes=0,text='';for(;;){const {done,value}=await reader.read();if(done)break;bytes+=value.length;if(bytes>4096){await reader.cancel();return null;}text+=Buffer.from(value).toString('utf8');}
-  const v=JSON.parse(text);if(v.version!==1||v.id!==settings.identity.id||!Number.isInteger(v.pid)||v.pid<1||!/^[a-f0-9]{64}$/.test(v.bundleId)||!/^[a-f0-9]{64}$/.test(v.proof))return null;
-  const proof=createHmac('sha256',settings.identity.key).update([nonce,v.id,v.pid,v.bundleId].join('|')).digest();
+  const v=JSON.parse(text);if(v.version!==2||v.id!==settings.identity.id||v.homeHash!==settings.identity.homeHash||v.enterpriseOrigin!==(settings.enterpriseOrigin??'')||v.port!==Number(new URL(settings.url).port)||!Number.isInteger(v.pid)||v.pid<1||!/^[a-f0-9]{64}$/.test(v.bundleId)||!/^[a-f0-9]{64}$/.test(v.proof))return null;
+  const proof=createHmac('sha256',settings.identity.key).update([2,nonce,v.id,v.pid,v.bundleId,v.homeHash,v.port,v.enterpriseOrigin].join('|')).digest();
   return timingSafeEqual(proof,Buffer.from(v.proof,'hex'))?v:null;
  }catch{return null;}
 }
@@ -52,7 +52,7 @@ async function stopInstance(settings,pid,bundleId,{timeoutMs=10000}={}){
  if(!alive(pid))return;
  const remote=await probeIdentity(settings);if(!remote){if(!alive(pid))return;throw Error('BACKEND_STOP_UNKNOWN');}
  if(remote.pid!==pid||remote.bundleId!==bundleId)throw Error('BACKEND_STOP_IDENTITY_CHANGED');
- const nonce=randomBytes(32).toString('hex'),proof=createHmac('sha256',settings.identity.key).update(['stop',nonce,settings.identity.id,pid,bundleId].join('|')).digest('hex');
+ const nonce=randomBytes(32).toString('hex'),proof=createHmac('sha256',settings.identity.key).update([2,'stop',nonce,settings.identity.id,pid,bundleId,settings.identity.homeHash,Number(new URL(settings.url).port),settings.enterpriseOrigin??''].join('|')).digest('hex');
  try{const r=await fetch(settings.url+'/naumi/desktop-instance',{method:'POST',redirect:'error',headers:{'x-naumi-desktop-challenge':nonce,'x-naumi-desktop-stop':proof},signal:AbortSignal.timeout(2000)});if(!r.ok)throw Error('STOP');await r.arrayBuffer();}catch{if(!alive(pid))return;throw Error('BACKEND_STOP_UNKNOWN');}
  const deadline=Date.now()+timeoutMs;while(Date.now()<deadline){if(!alive(pid))return;await delay(50);}throw Error('BACKEND_STOP_UNKNOWN');
 }
@@ -91,9 +91,9 @@ async function ensureBackend(settings,{fetcher=fetch,startTimeoutMs=90000,pollMs
  const entry=path.join(settings.root,'node_modules/@deepseek-ai/dsh/lib/bin.js');if(!fs.existsSync(entry))throw Error('BACKEND_RUNTIME_MISSING');
  fs.mkdirSync(settings.logDir,{recursive:true});
  const target=new URL(settings.url),runId=randomUUID(),env={...process.env,PATH:path.join(settings.root,'bin')+path.delimiter+settings.root+path.delimiter+(process.env.PATH??''),DSH_HOME:settings.home,DSH_TELEMETRY_MODE:'DISABLED'};
- delete env.ELECTRON_RUN_AS_NODE;delete env.NAUMI_DESKTOP_INSTANCE_ID;delete env.NAUMI_DESKTOP_BUNDLE_ID;
+ delete env.ELECTRON_RUN_AS_NODE;delete env.NAUMI_DESKTOP_INSTANCE_ID;delete env.NAUMI_DESKTOP_BUNDLE_ID;delete env.NAUMI_ENTERPRISE_ORIGIN;
  const base={pid:null,port:Number(target.port),bundleId:settings.runtime?.bundleId,phase:'starting',runId};
- if(settings.isolated){env.NAUMI_DESKTOP_INSTANCE_ID=settings.identity.id;env.NAUMI_DESKTOP_BUNDLE_ID=settings.runtime.bundleId;}
+ if(settings.isolated){env.NAUMI_DESKTOP_INSTANCE_ID=settings.identity.id;env.NAUMI_DESKTOP_BUNDLE_ID=settings.runtime.bundleId;if(settings.enterpriseOrigin)env.NAUMI_ENTERPRISE_ORIGIN=settings.enterpriseOrigin;}
  let out,err;try{out=fs.openSync(path.join(settings.logDir,'server.out.log'),'w');err=fs.openSync(path.join(settings.logDir,'server.err.log'),'w');}catch(e){if(out!==undefined)fs.closeSync(out);throw e;}
  let child;
  // Windows libuv's non-detached child job dies with the GUI. Standalone workers have an

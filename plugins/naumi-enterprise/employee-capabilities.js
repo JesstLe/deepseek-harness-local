@@ -25,6 +25,9 @@ export class EmployeeCapabilities{
     save('enterprise',{installed:!!this.sync,connected:null,reasonCode:this.sync?'ENTERPRISE_CONNECTIVITY_NOT_PROBED':'ENTERPRISE_NOT_CONFIGURED'});
   }
   read(botId){
+    // Backend starts before the GUI bridge. Refresh immediately when the descriptor arrives/restarts.
+    let stamp=null;try{const d=this.browser.descriptor?.();stamp=d?`${d.pid}:${d.port}`:null;}catch{}
+    if(stamp!==this.bridgeStamp){this.bridgeStamp=stamp;void this.refresh().catch(()=>{});}
     const records=[...this.values.values()].map(v=>({...v,stale:this.clock()-Date.parse(v.lastChecked)>v.staleAfterMs}));
     const enterprise=records.find(r=>r.id==='enterprise');
     if(enterprise&&this.sync){

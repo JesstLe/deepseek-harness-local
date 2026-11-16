@@ -7,6 +7,7 @@ import {installTeamProfile} from './team-profile.js';
 import {installBots} from './bots.js';
 import {installDingTalk} from './dingtalk.js';
 import {installDesktopIdentity} from './desktop-identity.js';
+import {desktopCollaborationOrigin,DesktopEnterpriseTransport} from './desktop-enterprise.js';
 export const inject=['webServer','connection'];
 /** Supported plugin routes, index branding and an authenticated read-only business adapter. */
 export function apply(ctx,config) {
@@ -15,8 +16,9 @@ export function apply(ctx,config) {
   installEgoBrowser(ctx);
   installDingTalk(ctx);
   installTeamProfile(ctx);
-  installBots(ctx,{collaborationOrigin:config.collaborationOrigin});
-  const collaborationOrigin=validateOrigin(config.collaborationOrigin);
+  const collaborationOrigin=validateOrigin(desktopCollaborationOrigin(config.collaborationOrigin));
+  const enterpriseTransport=new DesktopEnterpriseTransport({origin:collaborationOrigin});
+  installBots(ctx,{collaborationOrigin});
   const designOrigin=validateOrigin(config.designOrigin);
   const assets=new Map([['employee-enterprise-work.js','text/javascript; charset=utf-8'],['employee-memory-maintenance.js','text/javascript; charset=utf-8'],['employee-sync-panel.js','text/javascript; charset=utf-8'],['employee-center.js','text/javascript; charset=utf-8'],['employee-center-model.js','text/javascript; charset=utf-8'],['employee-center.css','text/css; charset=utf-8'],['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml'],['browser-client.js','text/javascript; charset=utf-8'],['browser-native-client.js','text/javascript; charset=utf-8'],['browser-native.css','text/css; charset=utf-8'],['browser-scheduler.js','text/javascript; charset=utf-8'],['browser.css','text/css; charset=utf-8'],['team-panel.css','text/css; charset=utf-8'],['team-panel.js','text/javascript; charset=utf-8'],['team-panel-model.js','text/javascript; charset=utf-8'],['bot-sidebar.js','text/javascript; charset=utf-8'],['bot-sidebar-model.js','text/javascript; charset=utf-8'],['bot-sidebar.css','text/css; charset=utf-8']]);
   assets.set('employee-runtime-panel.js','text/javascript; charset=utf-8');
@@ -36,11 +38,12 @@ export function apply(ctx,config) {
     if(admission.peer.principal.kind!=='owner'){respond(403,{error:'HARNESS_OWNER_REQUIRED'});return;}
     if(req.method!=='GET'){res.setHeader('Allow','GET');respond(405,{error:'READ_ONLY'});return;}
     const cookie=businessCookie(req.headers.cookie);
-    if(!cookie){respond(401,{error:'COLLABORATION_LOGIN_REQUIRED',loginUrl:collaborationOrigin+'/login'});return;}
+    if(!cookie&&!enterpriseTransport.standalone){respond(401,{error:'COLLABORATION_LOGIN_REQUIRED',loginUrl:collaborationOrigin+'/login'});return;}
     const controller=new AbortController();
     const onClose=()=>{if(!res.writableEnded)controller.abort();};res.on('close',onClose);
     try {
-      const upstream=await fetch(collaborationOrigin+'/api/workspace',{redirect:'manual',headers:{cookie,accept:'application/json'},signal:AbortSignal.any([controller.signal,AbortSignal.timeout(12000)])});
+      const options={redirect:'manual',headers:{cookie,accept:'application/json'},signal:AbortSignal.any([controller.signal,AbortSignal.timeout(12000)])};
+      const upstream=enterpriseTransport.standalone?await enterpriseTransport.fetch('/api/workspace',options):await fetch(collaborationOrigin+'/api/workspace',options);
       if(!upstream.ok){respond([401,403].includes(upstream.status)?upstream.status:502,{error:upstream.status===401?'COLLABORATION_LOGIN_REQUIRED':upstream.status===403?'COLLABORATION_ACCESS_PENDING':'COLLABORATION_UNAVAILABLE',loginUrl:collaborationOrigin+'/login'});return;}
       const data=projectWorkspace(await upstream.json());respond(200,data);
     } catch(error){if(!res.destroyed)respond(502,{error:error?.name==='TimeoutError'?'COLLABORATION_TIMEOUT':'COLLABORATION_UNAVAILABLE'});}
