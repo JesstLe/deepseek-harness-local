@@ -10,7 +10,7 @@ export function apply(ctx,config) {
   installEgoBrowser(ctx);
   const collaborationOrigin=validateOrigin(config.collaborationOrigin);
   const designOrigin=validateOrigin(config.designOrigin);
-  const assets=new Map([['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml'],['browser-client.js','text/javascript; charset=utf-8'],['browser-scheduler.js','text/javascript; charset=utf-8'],['browser.css','text/css; charset=utf-8']]);
+  const assets=new Map([['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml'],['browser-client.js','text/javascript; charset=utf-8'],['browser-native-client.js','text/javascript; charset=utf-8'],['browser-native.css','text/css; charset=utf-8'],['browser-scheduler.js','text/javascript; charset=utf-8'],['browser.css','text/css; charset=utf-8']]);
   ctx.effect(()=>ctx.webServer.register({kind:'prefix',path:'/naumi/assets',handler:async(req,res)=>{
     const name=new URL(req.url,'http://localhost').pathname.split('/').at(-1);
     if(!['GET','HEAD'].includes(req.method)||!assets.has(name)){res.writeHead(404).end();return;}
@@ -37,7 +37,7 @@ export function apply(ctx,config) {
   }}));
   ctx.on('webserver/index-inject',table=>{
     table.push({kind:'global',name:'__NAUMI__',value:{collaborationOrigin,designOrigin,version:'0.1.0'}});
-    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/browser.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
+    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/browser.css"><link rel="stylesheet" href="/naumi/assets/browser-native.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
   });
   ctx.effect(()=>ctx.webServer.tapIndex(html=>html.replace(/<title>[^<]*<\/title>/i,'<title>Naumi · 企业协作</title>').replace(/<link[^>]+rel="(?:shortcut )?icon"[^>]*href="(?!\/naumi\/)[^"]*"[^>]*>/g,'')));
 }
