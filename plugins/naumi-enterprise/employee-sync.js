@@ -8,7 +8,7 @@ import {assertPublicText,PROFILE_FIELDS} from './employee-store.js';
 const canonical=v=>JSON.stringify(v,(_k,x)=>x&&typeof x==='object'&&!Array.isArray(x)?Object.fromEntries(Object.entries(x).sort(([a],[b])=>a.localeCompare(b))):x);
 const hash=v=>createHash('sha256').update(canonical(v)).digest('hex');
 const fail=code=>{throw Error(code);};
-const payload=(value,kind)=>Object.fromEntries((kind==='profile'?[...PROFILE_FIELDS,'autoLearning','lockedFields']:['kind','text','status','pinned','expiresAt','proposedProfile']).map(k=>[k,value[k]]));
+const payload=(value,kind)=>Object.fromEntries((kind==='profile'?[...PROFILE_FIELDS,'autoLearning','lockedFields']:['kind','text','status','pinned','expiresAt','proposedProfile','mergedFrom','mergedInto','importSource']).map(k=>[k,value[k]]));
 const keyHash=pem=>createHash('sha256').update(createPublicKey(pem).export({type:'spki',format:'der'})).digest('hex');
 export function verifyEmployeeAuthorization(packet,{publicKey,kid,issuer,deviceId,tenantId,key,now=Date.now(),highWater=0}={}){
   if(!packet||packet.kid!==kid||typeof packet.payload!=='string'||packet.payload.length>1000000)fail('EMP_AUTH_SIGNATURE_INVALID');

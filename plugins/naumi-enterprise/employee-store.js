@@ -14,7 +14,7 @@ const memoryInput=z.object({kind:z.enum(memoryKinds),text:z.string().trim().min(
 const memoryPatch=z.object({text:z.string().trim().min(1).max(4000).optional(),status:z.enum(['candidate','active','rejected','deleted']).optional(),pinned:z.boolean().optional(),expiresAt:stamp.nullable().optional()}).strict();
 const fail=code=>{throw Error(code);},clone=value=>structuredClone(value);
 const serial=value=>JSON.stringify(value,(_key,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b))):v);
-const sensitive=/(?:\b(?:sk|rk)-[a-z0-9_-]{16,}|\bBearer\s+[a-z0-9._~-]{12,}|(?:api[_ -]?key|access[_ -]?token|密码|口令)\s*[:：=]\s*\S{6,})/iu;
+const sensitive=/(?:\b(?:sk|rk)-[a-z0-9_-]{16,}|\bBearer\s+[a-z0-9._~-]{12,}|(?:api[_ -]?key|access[_ -]?token|password|token|密码|口令)\s*[:：=]\s*\S{6,})/iu;
 export function assertPublicText(value){if(sensitive.test(value))fail('EMP_SECRET_PATTERN');}
 function assertFields(patch){for(const value of Object.values(patch))if(typeof value==='string')assertPublicText(value);}
 

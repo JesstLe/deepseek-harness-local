@@ -5,6 +5,7 @@ import {EmployeeStore,profilePatch,memoryKinds} from './employee-store.js';
 import {EmployeeService,EmployeeHeartbeat} from './employee-service.js';
 import {installEmployeeWork} from './employee-work.js';
 import {installEmployeeSync} from './employee-sync-http.js';
+import {EmployeeMemoryMaintenance,maintenanceCommands} from './employee-memory-maintenance.js';
 
 export function createEmployeeTools(service,{sync}={}){
   const output={schema:{type:'json'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]};
@@ -25,6 +26,7 @@ export function createEmployeeTools(service,{sync}={}){
 
 const str=z.string().min(1).max(200),rev=z.number().int().nonnegative(),op=z.string().min(1).max(200),expires=z.string().datetime().nullable();
 const commands=z.discriminatedUnion('action',[
+  ...maintenanceCommands.options.map(schema=>schema.extend({botId:str,operationId:op})),
   z.object({action:z.literal('profile_update'),botId:str,expectedRevision:rev,operationId:op,patch:profilePatch}).strict(),
   z.object({action:z.literal('profile_restore'),botId:str,expectedRevision:rev,operationId:op,targetRevision:z.number().int().positive()}).strict(),
   z.object({action:z.literal('memory_create'),botId:str,operationId:op,kind:z.enum(memoryKinds),text:z.string().trim().min(1).max(4000),status:z.enum(['candidate','active']).optional(),pinned:z.boolean().optional(),expiresAt:expires.optional()}).strict(),
@@ -37,7 +39,7 @@ export function installEmployees(ctx,directory,{store,onReady,heartbeatOptions={
     const data=store??new EmployeeStore(path.join(path.dirname(directory.file),'employees.sqlite'));
     const workRuntime=installEmployeeWork(scope,directory,data);
     const syncRuntime=installEmployeeSync(scope,directory,data,{origin:collaborationOrigin,sync});
-    const service=new EmployeeService(scope,directory,data),installed=new Map();
+    const service=new EmployeeService(scope,directory,data),maintenance=new EmployeeMemoryMaintenance(data),installed=new Map();
     const heartbeat=new EmployeeHeartbeat({agents:scope.agents,directory,store:data,...heartbeatOptions,onError:()=>scope.logger.warn('EMP_HEARTBEAT_SCAN_FAILED')});
     const install=agent=>{
       if(installed.has(agent)||!scope.agentTeams.tryMembership(agent))return;const disposers=[];
@@ -75,6 +77,7 @@ export function installEmployees(ctx,directory,{store,onReady,heartbeatOptions={
           else if(view==='timeline')value=data.timeline(botId,{before:q.has('before')?Number(q.get('before')):Number.MAX_SAFE_INTEGER,limit:q.has('limit')?Number(q.get('limit')):30});
           else if(view==='export')value=data.export(botId);
           else if(view==='heartbeat')value=heartbeat.read();
+          else if(view==='maintenance')value=maintenance.preview(botId);
           else{send(400,{error:'EMP_INVALID_VIEW'});return;}
           send(200,value);return;
         }
@@ -82,7 +85,11 @@ export function installEmployees(ctx,directory,{store,onReady,heartbeatOptions={
         if(req.headers['x-naumi-employees']!=='1'||req.headers.origin&&![`http://${req.headers.host}`,`https://${req.headers.host}`].includes(req.headers.origin)){send(403,{error:'EMP_SAME_ORIGIN_REQUIRED'});return;}
         let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>32768){send(413,{error:'EMP_REQUEST_TOO_LARGE'});return;}chunks.push(Buffer.from(chunk));}
         let command;try{command=commands.parse(JSON.parse(Buffer.concat(chunks).toString('utf8')));}catch{send(400,{error:'EMP_INVALID_REQUEST'});return;}
-        send(200,service.owner(command));
+        if(maintenanceCommands.options.some(schema=>schema.shape.action.value===command.action)){
+          service.bot(command.botId,{write:true});const {action,botId,operationId,...args}=command;
+          const methods={memory_merge:'merge',memory_expire:'expire',memory_import:'import'};
+          send(200,action==='memory_import_preview'?maintenance.previewImport(botId,args.records):maintenance[methods[action]](botId,{...args,operationId}));
+        }else send(200,service.owner(command));
       }catch(error){const code=error instanceof z.ZodError?'EMP_INVALID_REQUEST':/^EMP_[A-Z_]+$/.test(error.message)?error.message:'EMP_STORAGE_UNAVAILABLE';
         send(/CONFLICT/.test(code)?409:/NOT_FOUND/.test(code)?404:/REQUIRED|LOCKED|ARCHIVED|DISABLED/.test(code)?403:/STORAGE|SCHEMA/.test(code)?503:400,{error:code});}
     }}));
