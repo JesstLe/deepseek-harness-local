@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {z} from 'zod';
 import {defineTool} from '@deepseek-ai/dsh-tools';
+import {EmployeeExecutionLeases} from './employee-execution-leases.js';
 const uuid=z.string().uuid(),task={taskId:uuid},source=z.object({sessionId:z.string().min(1).max(200).optional(),localDeliveryId:z.string().max(200).optional()}).strict();
 const canonical=v=>JSON.stringify(v,(_k,x)=>x&&typeof x==='object'&&!Array.isArray(x)?Object.fromEntries(Object.entries(x).sort(([a],[b])=>a.localeCompare(b))):x);
 const digest=v=>createHash('sha256').update(canonical(v)).digest('hex');
@@ -15,7 +16,7 @@ export const enterpriseWorkCommand=z.discriminatedUnion('action',[
 export class EmployeeEnterpriseWork {
  constructor(sync){this.sync=sync;this.db=sync.db;this.vault=sync.vault;
    this.db.exec('CREATE TABLE IF NOT EXISTS enterprise_operations(operation_id TEXT PRIMARY KEY,bot_id TEXT NOT NULL,employee_id TEXT NOT NULL,task_id TEXT NOT NULL,action TEXT NOT NULL,digest TEXT NOT NULL,state TEXT NOT NULL,encrypted TEXT NOT NULL,updated_at TEXT NOT NULL)');
-   this.db.prepare("UPDATE enterprise_operations SET state='unknown' WHERE state='pending'").run();this.flights=new Map();
+   this.db.prepare("UPDATE enterprise_operations SET state='unknown' WHERE state='pending'").run();this.flights=new Map();this.leases=new EmployeeExecutionLeases(sync);
  }
  async binding(botId){if(this.closed)fail('WORK_BRIDGE_CLOSED');this.sync.bot(botId);await this.sync.device({action:'authorize'});const binding=this.sync.offlineClaims().bindings.find(b=>b.localBotId===botId);if(!binding)fail('EMP_DEVICE_BINDING_REQUIRED');return binding;}
  operations(botId){this.sync.bot(botId);return this.db.prepare('SELECT operation_id,task_id,action,state,updated_at,encrypted FROM enterprise_operations WHERE bot_id=? ORDER BY updated_at DESC LIMIT 100').all(botId).map(r=>({operationId:r.operation_id,taskId:r.task_id,action:r.action,state:r.state,updatedAt:r.updated_at,result:this.vault.unseal(r.encrypted).result??null,error:this.vault.unseal(r.encrypted).error??null}));}
@@ -48,8 +49,10 @@ export class EmployeeEnterpriseWork {
    if(!row){this.db.prepare('INSERT INTO enterprise_operations VALUES(?,?,?,?,?,?,?,?,?)').run(body.operationId,botId,employeeId,body.taskId,body.action,hash,'pending',this.vault.seal({request:body}),new Date(this.sync.clock()).toISOString());row=this.db.prepare('SELECT * FROM enterprise_operations WHERE operation_id=?').get(body.operationId);}
    else this.save(row,'pending',{request:body});
    try{
-     const response=await this.sync.device(body);if(response.status!=='acknowledged'||response.operationId!==body.operationId)fail('WORK_ACK_INVALID');
-     this.save(row,'acknowledged',{request:this.compact(body),result:response.result});return {operationId:body.operationId,status:'acknowledged',result:response.result};
+     const execution=await this.leases.ensure(botId,employeeId,body.taskId);
+     this.save(row,'pending',{request:body,lastExecution:execution});
+     const response=await this.sync.device({...body,execution});if(response.status!=='acknowledged'||response.operationId!==body.operationId)fail('WORK_ACK_INVALID');
+     this.save(row,'acknowledged',{request:this.compact(body),lastExecution:execution,result:response.result});return {operationId:body.operationId,status:'acknowledged',result:response.result};
    }catch(e){
      const definite=Number.isInteger(e.status)&&e.status>=400&&e.status<500;
      this.save(row,definite?'rejected':'unknown',{request:body,error:/^[A-Z_]+$/.test(e.message)?e.message:'WORK_RESULT_UNKNOWN'});
@@ -69,7 +72,7 @@ export class EmployeeEnterpriseWork {
      catch(e){if(!['EMP_SECRET_PATTERN','EMP_MEMORY_CAPACITY'].includes(e.message))throw e;}
    }
  }
- async close(){this.closed=true;await Promise.allSettled([...this.flights.values()]);}
+ async close(){this.closed=true;await Promise.allSettled([...this.flights.values()]);await this.leases.close();}
 }
 
 export function createEnterpriseWorkTools(service,sync){

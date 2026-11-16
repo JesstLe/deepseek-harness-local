@@ -1,5 +1,5 @@
 import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {pathToFileURL} from 'node:url';import {botLiveApi} from './bot-live-api.mjs';
-const e='E:/Workspace/naumi-design-ops-digital-employees/evidence/enterprise-work',api=await botLiveApi(),bots=await api.json('/naumi/bots');assert(bots.bots.length);
+const e=process.env.NAUMI_EVIDENCE_ROOT??'E:/Workspace/naumi-design-ops-digital-employees/evidence/enterprise-work',api=await botLiveApi(),bots=await api.json('/naumi/bots');assert(bots.bots.length);
 const status=await api.json('/naumi/employee-sync'),operations=await api.json('/naumi/employee-sync?view=operations&botId='+encodeURIComponent(bots.bots[0].id));assert.equal(status.registered,false);assert.equal(status.enabled,false);assert(Array.isArray(operations));
 const anonymous=await fetch(api.base+'/naumi/employee-sync?view=operations&botId='+encodeURIComponent(bots.bots[0].id));assert.equal(anonymous.status,401);
 const {chromium}=await import(pathToFileURL('E:/Workspace/naumi/node_modules/playwright/index.mjs').href),browser=await chromium.launch({headless:true}),page=await browser.newPage({viewport:{width:1440,height:1000},colorScheme:'light'}),errors=[];page.on('pageerror',err=>errors.push(err.message));

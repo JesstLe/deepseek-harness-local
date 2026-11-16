@@ -13,6 +13,7 @@ const command=z.discriminatedUnion('action',[
   z.object({action:z.literal('manage'),command:z.record(z.string(),z.unknown())}).strict(),
   z.object({action:z.literal('business'),botId:z.string().min(1).max(200),command:enterpriseWorkCommand}).strict(),
   z.object({action:z.literal('business_retry'),botId:z.string().min(1).max(200),operationId:z.string().uuid()}).strict(),
+  z.object({action:z.literal('execution_acquire'),botId:z.string().min(1).max(200),taskId:z.string().uuid()}).strict(),
 ]);
 export function installEmployeeSync(scope,directory,data,{origin,sync:provided}={}){
   if(!origin&&!provided)return null;
@@ -46,6 +47,7 @@ export function installEmployeeSync(scope,directory,data,{origin,sync:provided}=
       if(p.action==='manage')result=await sync.manager(p.command,cookie);
       if(p.action==='business')result=await sync.enterpriseWork.command(p.botId,p.command);
       if(p.action==='business_retry')result=await sync.enterpriseWork.retry(p.botId,p.operationId);
+      if(p.action==='execution_acquire'){const binding=await sync.enterpriseWork.binding(p.botId);result=await sync.enterpriseWork.leases.ensure(p.botId,binding.employeeId,p.taskId);}
       send(200,result);
     }catch(e){const code=/^[A-Z_]+$/.test(e.message)?e.message:'EMP_CONTROL_UNAVAILABLE';send(/CONFLICT|REVISION|REPLAY/.test(code)?409:/REQUIRED|REVOKED|FORBIDDEN|APPROVAL/.test(code)?403:/UNAVAILABLE/.test(code)?503:400,{error:code});}
   }}));

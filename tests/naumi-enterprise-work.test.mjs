@@ -4,7 +4,9 @@ import {EmployeeStore} from '../plugins/naumi-enterprise/employee-store.js';impo
 async function fixture(){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-business-unit-')),db=new DatabaseSync(path.join(dir,'sync.sqlite')),store=new EmployeeStore(path.join(dir,'employees.sqlite')),botId='bot-'+randomUUID(),employeeId=randomUUID(),calls=[];
  const vault=new EmployeeDeviceVault(path.join(dir,'device.dpapi'));const replies=new Map();let mode='ack',hold;
- const sync={db,store,vault,clock:()=>Date.now(),bot:id=>{if(id!==botId)throw Error('EMP_BOT_NOT_FOUND');},offlineClaims:()=>({bindings:[{localBotId:botId,employeeId}]}),device:async body=>{calls.push(structuredClone(body));if(body.action==='authorize')return {};
+ const deviceId=randomUUID();const sync={db,store,vault,deviceId,clock:()=>Date.now(),bot:id=>{if(id!==botId)throw Error('EMP_BOT_NOT_FOUND');},offlineClaims:()=>({bindings:[{localBotId:botId,employeeId}]}),device:async body=>{calls.push(structuredClone(body));if(body.action==='authorize')return {};
+   if(body.action==='execution.inspect')return {execution:{taskId:body.taskId,employeeId:body.employeeId,state:'idle',ownerDeviceId:null,fencingToken:'0'}};
+   if(body.action==='execution.acquire')return {execution:{taskId:body.taskId,employeeId:body.employeeId,ownerDeviceId:deviceId,attemptId:body.attemptId,fencingToken:'1',state:'owned',leaseExpiresAt:new Date(Date.now()+120000).toISOString(),placement:'local-bound',revision:1}};
    if(body.action==='work.receipt')return replies.has(body.operationId)?{status:'acknowledged',operationId:body.operationId,result:replies.get(body.operationId)}:{status:'not_found',operationId:body.operationId};
    if(body.action==='work.read')return {tasks:[{reviews:[{id:'review-fixture',outcome:'accepted',reason:'固定验收流程'}]}]};
    if(mode==='hold')await new Promise(resolve=>{hold=resolve;});
