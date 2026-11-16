@@ -1,0 +1,47 @@
+Naumi browser display repair — 2026-11-16
+Branch: fix/naumi-browser-style-20261116
+Changed fields: CSS tagId and tag.dataset.plugin now belong to @naumi/dsh-sidebar-browser. Browser CSS content, rendering/navigation callbacks and execution/permission logic are otherwise unchanged.
+
+Four artifacts (deployed checkout after the evidence commit):
+MODIFIED_FILE: E:\Workspace\deepseek-harness-local\evidence\browser-style\MODIFIED_FILE.zip
+DIFF_FILE: E:\Workspace\deepseek-harness-local\evidence\browser-style\DIFF_FILE.patch
+VERIFICATION: E:\Workspace\deepseek-harness-local\evidence\browser-style\VERIFICATION.txt
+ROLLBACK: E:\Workspace\deepseek-harness-local\evidence\browser-style\ROLLBACK.sh
+
+Test working directory: E:\Workspace\naumi-browser-style-fix
+BASELINE command: node desktop/scripts/verify-browser-style.mjs baseline
+Input: baseline mode; original 24d4baa browser module before modification. Execute the actual component and the upstream loader's style-disposal operation.
+Literal output: BASELINE cleanup=upstream toolbar=block owned_styles=0 defect_reproduced=1
+Exit status: 0
+Observed: buttons wrap and placeholder text overlaps; baseline.png reproduces the supplied screenshot.
+
+MODIFIED command: node desktop/scripts/verify-browser-style.mjs modified
+Input: modified mode; generated browser module with product-owned CSS identity and ownership.
+Literal output: MODIFIED cleanup=upstream toolbar=flex owned_styles=1 widths=3 hmr=PASS
+Exit status: 0
+Observed: 320/550/800px single-row toolbar; input widths 168/398/648px; hide/restore and style teardown/re-materialization preserve one owned style. modified.png reopened and visually checked.
+
+ROLLBACK command: node scripts/verify-browser-style-recovery.mjs rollback-test
+Input: rollback-test; explicit generated source copy (path recorded in rollback-check.json), Git Bash invokes the real ROLLBACK.sh.
+Literal output: ROLLBACK original_hashes=7 css_owner=upstream active_unchanged=1
+Exit status: 0
+Restored status: 7 original SHA256 values match, CSS owner returns to upstream (the reproduced baseline behavior), added source files are absent from the rollback copy; active modified source remains unchanged. No live user data or configuration is rolled back.
+
+Module command: node --test tests/*.test.mjs desktop/tests/*.test.cjs
+Result: tests 62, pass 62, fail 0; exit 0.
+ZIP reopen: MODIFIED_FILE_REOPEN entries=11 hashes=PASS
+Runtime: only client.js and UPSTREAM.json synchronized into the active profile. Listener PID was observed as 17912 before sync and 24280 later; this task did not invoke a service restart or desktop shutdown. Protected login/configuration files stayed unchanged.
+Live acceptance: existing Naumi window opened its Browser panel and displayed one-row controls, bounded address field and a centered empty-state label. Shared preview observed the style owner @naumi/dsh-sidebar-browser through the live hot update. Current desktop presentation was inspected through Windows UI; it still uses the existing carrier, which this styling change does not replace.
+Protected checks: config/local.json, home/profile patch YAML, credentials, enterprise UI source and logo source remain unchanged (protected-after.json).
+Packaged browser files synchronized into four existing runtime package directories (runtime-sync.json). The refreshed installer build/integrity result is recorded separately below.
+
+
+Installer command: node node_modules/electron-builder/cli.js --win --x64 --prepackaged E:/Workspace/naumi-desktop-build/runtime/naumi-desktop-release/win-unpacked
+Installer build exit status: 0
+Installer payload verification: INSTALLER_VERIFY browser_source_match=1 archive_integrity=PASS
+Installer verification exit status: 0
+Installer: E:\Workspace\deepseek-harness-local\runtime\naumi-desktop-release\Naumi-Setup-0.2.0-browser-style-x64.exe
+Installer SHA256: 63937fa86ea337b621c2fb7d115f0464a2d9171f3b9caf76277fabd94200c27c
+Payload browser SHA256: 37d2bbcd786404009d9ff92238ae39e0cd1db5332ebce2a509b82f6e1a1c83ec
+Existing checkout module rerun: 62 passed, 0 failed; exit status 0.
+
