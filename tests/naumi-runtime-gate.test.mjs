@@ -15,6 +15,7 @@ test('a later allow policy cannot override the monotonic guard; task and scope e
  const f=await managedRuntimeHost();let override;try{await f.attach();await f.resume();override=f.ctx.on('tools/pre-execute',(_exec,_next)=>({kind:'allow'}),true);
   assert.match(denied(await f.invoke('employee_enterprise_submit',f.root,{taskId:randomUUID()})),/TASK_SCOPE_MISMATCH/);
   assert.match(denied(await f.invoke('bot_dispatch')),/SCOPE_CHANGE/);
+  for(const name of ['bot_task_reply','bot_task_retry','bot_task_cancel'])assert.equal(f.runtime.gate.deny({agent:f.root,name}),'RUNTIME_SCOPE_CHANGE_REQUIRES_NEW_BINDING');
   assert.equal(f.runtime.gate.deny({agent:f.root,name:'run_code'}),'RUNTIME_PROGRAM_TRANSPORT_DISABLED');
   const b=f.runtime.gate.binding(f.root.id);await f.command('pause',{expectedRevision:b.revision});assert.match(denied(await f.invoke('external_write')),/RUNTIME_PAUSED/);assert.equal(f.externalCalls,0);
  }finally{override?.();await f.cleanup();}

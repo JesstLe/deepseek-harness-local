@@ -31,7 +31,7 @@ managed_session 与工具收据先落 employees.sqlite。只存身份/策略/工
 - `llm/stream` 在真实provider入口及chunk边界再检查；已开始的AgentLoop请求进入host观察器，许可撤销用 `hook` 原因取消，保留原收件箱，不假冒用户取消。
 - `tools/pre-execute` 解决团队/fork父链，`ToolsService.guard` 作为审批后的单调拒绝，`tools/execute` 派发前再检查并跟踪外部调用。后续插件返回allow不能覆盖guard。
 - **受管会话使用原生逐工具执行器**。研究确认原Node PTC运行器允许直接文件/网络/子进程操作，不只调用SDK，因此不能将run_code当作无副作用外壳。managed run_code明确拒绝；Native工具逐个检查。原模型选择、原权限不提升，普通未绑定会话保留原执行器。
-- 真实团队成员及可追溯fork继承根绑定。独立bot_dispatch/身份变更/调度在受管任务内不用于逃逸；普通本机跨Bot协作保持。未来主动编排器须为不同企业子任务配置各自受管根，不能把临时成员冒充另一个员工。
+- 真实团队成员及可追溯fork继承根绑定。独立bot_dispatch、bot_task_reply/retry/cancel、身份变更/调度在受管任务内不用于逃逸；普通本机跨Bot协作保持。未来主动编排器须为不同企业子任务配置各自受管根，不能把临时成员冒充另一个员工。
 
 ## 到期、在途与重启
 
