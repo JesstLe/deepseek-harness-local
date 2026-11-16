@@ -6,7 +6,7 @@ import {spawnSync} from 'node:child_process';
 const root=path.resolve(import.meta.dirname,'..');process.chdir(root);
 const dir='evidence/naumi-team-panel',hash=p=>crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 const baseline=JSON.parse(fs.readFileSync(dir+'/baseline.json','utf8').replace(/^\uFEFF/,''));
-const added=['plugins/naumi-enterprise/team-profile.js','plugins/naumi-enterprise/assets/team-panel.js','plugins/naumi-enterprise/assets/team-panel-model.js','plugins/naumi-enterprise/assets/team-panel.css','tests/naumi-team-panel.test.mjs'];
+const added=['plugins/naumi-enterprise/team-profile.js','plugins/naumi-enterprise/assets/team-panel.js','plugins/naumi-enterprise/assets/team-panel-model.js','plugins/naumi-enterprise/assets/team-panel.css','tests/naumi-team-panel.test.mjs','plugins/naumi-enterprise/bots.js','plugins/naumi-enterprise/assets/bot-sidebar.js','plugins/naumi-enterprise/assets/bot-sidebar-model.js','plugins/naumi-enterprise/assets/bot-sidebar.css','tests/naumi-bots.test.mjs'];
 const mode=process.argv[2];
 for(const item of baseline.files)assert.equal(hash(dir+'/original/'+item.path),item.sha256,'Original changed: '+item.path);
 const checkPreserved=()=>{if(!baseline.preserved)return;for(const item of baseline.preserved)assert.equal(hash(item.path),item.sha256,'Unrelated file changed: '+item.path);};
@@ -18,8 +18,8 @@ if(mode==='baseline'){
   checkPreserved();
   const files=[...baseline.files.map(f=>({path:f.path,original:f.sha256,modified:hash(f.path)})),...added.map(p=>({path:p,original:null,modified:hash(p)}))];
   for(const item of files)assert.notEqual(item.original,item.modified,'File not modified: '+item.path);
-  fs.writeFileSync(dir+'/files.json',JSON.stringify({baseline:baseline.commit,branch:'feat/naumi-team-panel-20261116',fields:['naumiTeamProfile.name','naumiTeamProfile.revision','naumiTeamProfile.updatedAt'],files},null,2)+'\n');
-  console.log('MODIFIED agent_owned_name=1 activity_library=1 native_actions=1 preserved_files='+baseline.preserved.length+' files='+files.length);
+  fs.writeFileSync(dir+'/files.json',JSON.stringify({baseline:baseline.commit,branch:'feat/naumi-team-panel-20261116',fields:['naumiTeamProfile.name','naumiTeamProfile.revision','naumiTeamProfile.updatedAt','bots.id','bots.name','bots.sessionIds','naumi.navigationMode.v1'],files},null,2)+'\n');
+  console.log('MODIFIED agent_owned_name=1 activity_library=1 native_actions=1 thread_bot_modes=1 preserved_files='+baseline.preserved.length+' files='+files.length);
 }else if(mode==='rollback-test'){
   const manifest=JSON.parse(fs.readFileSync(dir+'/files.json','utf8')),before=manifest.files.map(x=>[x.path,hash(x.path)]);
   const target=path.resolve('.dsh/team-panel-rollback-'+Date.now());fs.mkdirSync(target,{recursive:true});

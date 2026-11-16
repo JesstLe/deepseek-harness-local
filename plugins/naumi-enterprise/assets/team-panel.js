@@ -1,4 +1,5 @@
 import {naumiMonitorReadings,naumiPortalOptions,teamTaskGroups,teamSchedules,scheduleTime,scheduleToggleRequest,memberState,teamInitials,readEnvironment} from './team-panel-model.js';
+import {botCatalog,botForSession,botTone} from './bot-sidebar-model.js';
 
 /** A presentation adapter over native Team, Schedule and resource actions. */
 export function installTeamPanel(ctx,React,createPortal,Icon){
@@ -81,15 +82,16 @@ export function installTeamPanel(ctx,React,createPortal,Icon){
     },[visible,refresh]);
     const desktop=value?.desktop?.value,browser=value?.browser?.value;
     const desktopLabel=!value?'检测中':value.desktop.state!=='ready'?'读取失败':desktop.status==='ready'?'工具就绪':'未就绪';
-    const browserLabel=!value?'检测中':value.browser.state!=='ready'?'读取失败':browser.status==='installed'?'已安装':'未安装';
+    const browserLabel=!value?'检测中':value.browser.state!=='ready'?'读取失败':browser.presentation==='native-webview'&&browser.status==='connected'?'原生模式':browser.status==='installed'?'已安装':browser.status==='disconnected'?'连接异常':'未安装';
     return h('section',{className:'naumi-context-section naumi-environment'},h('div',{className:'naumi-context-heading'},h('h3',null,'工作环境'),h('button',{type:'button',className:'naumi-text-action','aria-label':'刷新工作环境',disabled:!value,onClick:()=>setRefresh(v=>v+1)},'刷新')),
       h('div',{className:'naumi-environment-card'},h('button',{type:'button',className:'naumi-resource-row',onClick:()=>ctx.layout.selectPanel('plugins')},h('span',{className:'naumi-environment-icon'},h(Icon,{name:'grid',size:18})),h('span',{className:'naumi-environment-name'},'本机电脑'),h('span',{className:'naumi-environment-status'},desktopLabel)),
-        h('button',{type:'button',className:'naumi-resource-row',disabled:browser?.status!=='installed',onClick:()=>ctx.get('sidebarRight').openTab('browser')},h('span',{className:'naumi-environment-icon'},h(Icon,{name:'link',size:18})),h('span',{className:'naumi-environment-name'},'浏览器'),h('span',{className:'naumi-environment-status'},browserLabel))));
+        h('button',{type:'button',className:'naumi-resource-row',disabled:!['installed','connected'].includes(browser?.status),onClick:()=>ctx.get('sidebarRight').openTab('browser')},h('span',{className:'naumi-environment-icon'},h(Icon,{name:'link',size:18})),h('span',{className:'naumi-environment-name'},'浏览器'),h('span',{className:'naumi-environment-status'},browserLabel))));
   }
   function ContextPanel({sessionId,useSession,useSessions,useSessionStatus,useProjection,useInput,useAccess}){
     const leadId=useSession(s=>s.subagent?.address.parentSessionId)??sessionId;
     const team=useSessions(s=>s.projectionsBySession[leadId]?.values.agentTeam);
     const profile=useSessions(s=>s.projectionsBySession[leadId]?.values.naumiTeamProfile);
+    const catalogSource=botCatalog(),catalog=useSyncExternalStore(catalogSource.subscribe,catalogSource.getSnapshot,catalogSource.getSnapshot),bot=botForSession(catalog.bots,leadId);
     const status=useSessionStatus(s=>s.get(sessionId));
     const input=useInput(s=>s),stats=useProjection('sessionStats'),usage=useProjection('tokenUsage'),pressure=useProjection('contextPressure');
     const readings=naumiMonitorReadings(stats,usage,pressure),groups=useMemo(()=>teamTaskGroups(team),[team]);
@@ -116,11 +118,11 @@ export function installTeamPanel(ctx,React,createPortal,Icon){
     const openMember=member=>act(()=>{const native=originals.get('agent-team')?.inject?.(sessionId);if(!native?.openTeammate)throw Error('团队入口尚未就绪');native.openTeammate(sessionId,member.id);})();
     const close=()=>{setPreference(false);toggleRef.current?.focus();};
     const focusInput=()=>rootRef.current?.querySelector('[contenteditable="true"]')?.focus();
-    const name=profile?.name||'智能体团队',members=team?.members??[],tabId=kind=>`naumi-${sessionId}-${kind}`;
+    const name=bot?.name||profile?.name||'智能体团队',members=team?.members??[],tabId=kind=>`naumi-${sessionId}-${kind}`;
     const side=geometry&&h('aside',{className:'naumi-context-panel'+(!room?' drawer':''),hidden:!open,'aria-label':'智能体团队','data-naumi-context-session':sessionId,'data-team-id':leadId,onKeyDown:e=>{if(e.key==='Escape'&&!room&&!e.defaultPrevented){e.preventDefault();close();}},style:{left:geometry.left+geometry.width-width,top:geometry.top,width,height:geometry.height}},
       h('header',{className:'naumi-context-head'},h('span',null,'团队'),h('button',{type:'button',className:'naumi-context-icon','aria-label':'收起智能体团队',onClick:close},'×')),
       h('div',{className:'naumi-context-scroll'},
-        h('section',{className:'naumi-team-identity'},h('div',{className:'naumi-team-avatar','aria-hidden':true},profile?.name?teamInitials(profile.name):h('img',{src:'/naumi/assets/symbol.svg',alt:'',width:32,height:32})),h('h2',{'data-team-name':true},name),
+        h('section',{className:'naumi-team-identity'},h('div',{className:'naumi-team-avatar'+(bot?' naumi-bot-avatar '+botTone(bot.id):''),'aria-hidden':true},bot?h(Icon,{name:bot.kind==='team'?'layers':'spark',size:30}):profile?.name?teamInitials(profile.name):h('img',{src:'/naumi/assets/symbol.svg',alt:'',width:32,height:32})),h('h2',{'data-team-name':true},name),
           h('details',{className:'naumi-team-roster',key:leadId},h('summary',null,h('span',{className:'naumi-team-faces','aria-hidden':true},members.slice(0,4).map(m=>h('span',{key:m.id},teamInitials(m.name)))),h('span',null,team?`${members.length} 位成员`:'成员待同步'),h('span',{className:'naumi-roster-chevron','aria-hidden':true},'⌄')),
             members.map(member=>h(Member,{key:member.id,member,sessionId,useSessions,useSessionStatus,onError:setError})),h('div',{className:'naumi-roster-actions'},h('div',{className:'naumi-team-native',ref:refs.team}),h('div',{className:'naumi-child-native',ref:refs.children})))),
         (team?.failure||profile?.failure)&&h('p',{className:'naumi-context-error',role:'alert'},team?.failure??profile.failure),

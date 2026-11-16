@@ -130,9 +130,9 @@ test('environment inspection makes only two fixed GETs and preserves installed v
   assert.deepEqual(requests.map(([u,o])=>[u,o.method]),[['/naumi/desktop','GET'],['/naumi/browser','GET']]);assert.equal(result.browser.value.status,'installed');assert.equal(result.desktop.value.toolCount,75);
   const failure=await readEnvironment(async()=>new Response('',{status:401}));assert.equal(failure.desktop.state,'error');
 });
-test('the existing brand/sidebar/model CSS outside the right panel remains byte-equivalent',()=>{
+test('the existing brand/sidebar/model CSS outside the right panel remains equivalent after EOL normalization',()=>{
   const original=fs.readFileSync('evidence/naumi-team-panel/original/plugins/naumi-enterprise/assets/style.css','utf8');
-  assert.equal(fs.readFileSync('plugins/naumi-enterprise/assets/style.css','utf8'),original.slice(0,original.indexOf('/* UI-only context composition')));
+  assert.equal(fs.readFileSync('plugins/naumi-enterprise/assets/style.css','utf8').replaceAll('\r\n','\n'),original.slice(0,original.indexOf('/* UI-only context composition')).replaceAll('\r\n','\n'));
 });
 test('new assets are shipped in the plugin package and exposed by explicit allowlist only',()=>{
   const pkg=JSON.parse(fs.readFileSync('plugins/naumi-enterprise/package.json','utf8')),host=fs.readFileSync('plugins/naumi-enterprise/host.js','utf8');

@@ -5,6 +5,11 @@ function installNaumiContextUI(ctx,React,createPortal,Icon){
     void import('/naumi/assets/team-panel.js').then(module=>{if(!closed)dispose=module.installTeamPanel(ctx,React,createPortal,Icon);}).catch(error=>console.error('Naumi team panel:',error));
     return()=>{closed=true;dispose?.();};
   });
+  ctx.inject(['remote'],scope=>scope.effect(()=>{
+    let dispose,closed=false;
+    void import('/naumi/assets/bot-sidebar.js').then(module=>{if(!closed)dispose=module.installBotSidebar(scope,React,Icon,createPortal);}).catch(error=>console.error('Naumi navigation:',error));
+    return()=>{closed=true;dispose?.();};
+  }));
 }
 window.__ModuleLoader__.load({id:'@naumi/dsh-enterprise',factory(require){
   const React=require('react');
