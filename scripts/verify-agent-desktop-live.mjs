@@ -1,0 +1,15 @@
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+import {connect} from './harness-rpc.mjs';
+const logs=['logs/server.out.log','logs/server.err.log'].map(p=>fs.readFileSync(p,'utf8')).join('\n');
+const launch=[...logs.matchAll(/http:\/\/127\.0\.0\.1:3080\/?\?token=[A-Za-z0-9_~.%-]+/g)].at(-1)?.[0];assert(launch);
+const exchange=await fetch(launch,{redirect:'manual'});const cookie=exchange.headers.getSetCookie().map(x=>x.split(';')[0]).join('; ');
+const ready=await fetch('http://127.0.0.1:3080/naumi/desktop',{headers:{cookie}});assert.equal(ready.status,200);const state=await ready.json();assert.equal(state.version,'1.3.1');assert.equal(state.status,'ready');assert(state.toolCount>=1);assert.equal(state.physicalInputDefault,false);
+assert.equal((await fetch('http://127.0.0.1:3080/naumi/desktop')).status,401);
+assert.equal((await fetch('http://127.0.0.1:3080/naumi/desktop',{method:'POST',headers:{cookie}})).status,405);
+const rpc=await connect();const sessions=await rpc('session/list',{_request:{}});const chosen=sessions.items.find(x=>x.cwd&&!x.archived)??sessions.items[0];assert(chosen);
+const skills=await rpc('skills/list',{request:{sessionId:chosen.sessionId}});assert(skills.skills.some(s=>s.name==='naumi-desktop'));
+const catalog=await rpc('session/modelCatalog');assert.equal(catalog.groups.length,9);
+const report={readiness:state,unauthorizedStatus:401,writeStatus:405,skillVisible:true,modelGroups:catalog.groups.length,paidGenerationCalls:0,at:new Date().toISOString()};
+fs.writeFileSync('evidence/agent-desktop/LIVE_CHECK.json',JSON.stringify(report,null,2));
+console.log(`DESKTOP_LIVE ready=1 tools=${state.toolCount} skill_visible=1 model_groups=${catalog.groups.length} unauthorized=401 write=405`);

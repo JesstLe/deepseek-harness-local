@@ -1,0 +1,1057 @@
+diff --git a/docs/implementation/AGENT_DESKTOP.md b/docs/implementation/AGENT_DESKTOP.md
+new file mode 100644
+index 0000000..cf9bd66
+--- /dev/null
++++ b/docs/implementation/AGENT_DESKTOP.md
+@@ -0,0 +1,60 @@
++# agent-desktop 集成记录
++
++## 目标
++
++作为Naumi内置桌面操作能力提供，员工无需全局npm、手动MCP配置或另选模型。使用上游原生二进制和Harness既有MCP/skill桥接，不改模型、业务接口、权限和UI布局。
++
++## 版本与来源
++
++- 上游：https://github.com/vercel-labs/agent-desktop
++- npm固定版本：`agent-desktop@1.3.1`，Apache-2.0。协议JSON envelope版本2.6与发行版本1.3.1不是同一概念。
++- 本次检查npm包包含win32/darwin/linux、x64/arm64二进制及SHA256旁车文件。安装采用`--ignore-scripts`，不运行postinstall下载/全局链接/技能安装；直接调用已打包的原生文件。
++- GitHub公开API限流；以npm发布元数据、发布包与v1.3.1许可证为本次版本依据，而不是把main文档当作锁定产物。
++
++## 接线
++
++- 根package.json/lock固定CLI依赖。
++- Naumi现有bundle的host入口调用`installAgentDesktop`；只有tools/skills服务就绪后加载。
++- `desktop-runtime.js`按包位置解析当前平台二进制，检查版本和SHA256，不依赖工作区绝对路径、用户PATH或npx下载。
++- 通过现有`@deepseek-ai/dsh-mcp-client`启用`naumi_desktop`命名空间，stdio默认headless，session命名空间naumi，不自动添加--headed/--force/trace。
++- 通过单独filesystem skill provider提供`naumi-desktop`使用指引，不覆盖员工/项目原有技能。
++- `scripts/agent-desktop.mjs`为管理员和排障提供本地CLI入口，原样传参，不经过shell拼接。
++
++## 员工发行
++
++发行产物需包含根runtime依赖及Naumi插件files中的新模块、skills和third-party。原生二进制已在npm包内，不要求员工首次启动联网下载。Windows本机验收不代表macOS/Linux或完整员工安装包已经验收；操作系统可能仍需要个人授权。自有企业登录与API下发保持后续独立模块。
++
++## 验收结果（2026-11-16）
++
++- Windows x64原生CLI version/status通过，二进制SHA256为`a7ef5e539fb97287a35eb9ed49d3803b4d6bd705bc4106eb28617229f9be679e`。
++- 真实Harness MCP桥接注册75个工具，实际调用desktop_status、desktop_skills_get(platform)成功，dispose后工具数0。
++- 本地服务已重启，`http://127.0.0.1:3080` HTTP 200；认证GET /naumi/desktop返回ready、75工具；未认证401、写请求405。
++- 真实会话skills/list可见naumi-desktop；模型目录仍为9组；原UI、业务domain、权限配置及profile配置7份文件哈希不变。
++- 模块测试36/36通过（原26项+新增10项）；实际Chromium桌面/移动端27/27通过，无前端错误、无模型生成请求，模型选择和草稿均不变。
++- 首次沿用旧UI测试时，可选的“未分组”节点不存在，定位超时。新增本模块UI回归脚本仅在该节点存在时折叠，完整重跑27项通过；未为测试改动产品UI或会话数据。
++- 插件npm pack dry-run核对15个发行文件，包含适配模块、内置skill、平台指引和Apache许可证。
++- 回滚通过真实rollback分支在隔离副本执行，验证恢复7份源文件、删除集成入口及同步副本；当前运行目录仍保持集成。
++
++## 交付与复验
++
++`evidence/agent-desktop/`保存原始文件与SHA256、MCP/HTTP/浏览器报告、变更补丁、离线组件ZIP、VERIFICATION.txt及ROLLBACK.sh。ZIP是本模块交付包，不是员工完整安装程序。固定版本npm tarball放在ZIP的vendor目录，可供后续安装包构建使用。
++
++复验命令：
++
++```powershell
++node --test tests/naumi-enterprise.test.mjs tests/naumi-context-ui.test.mjs tests/agent-desktop.test.mjs
++node scripts/verify-agent-desktop.mjs
++node scripts/verify-agent-desktop-live.mjs
++node scripts/verify-agent-desktop-ui.mjs
++node scripts/verify-agent-desktop-state.mjs modified
++node scripts/verify-agent-desktop-state.mjs rollback-test
++```
++
++真实回滚入口为`bash evidence/agent-desktop/ROLLBACK.sh rollback`，会校验后续编辑、恢复当前目录和已安装profile的插件文件；恢复后重启Naumi。不带参数默认只在副本测试，不影响运行实例。不会删除企业数据、会话或npm缓存。
++
++## 后续独立模块
++
++- 完整员工安装包、签名、升级与干净机器验收尚未制作。
++- 企业统一登录、服务端URL/API key下发仍是后续设计，不写入当前安装资产。
++- 当前实际运行覆盖Windows x64；六平台/架构矩阵只覆盖路径/校验解析fixture，不代表macOS/Linux桌面验收。
++- 75个已注册工具不代表全部应用、全部写操作已验收。本次仅调用状态与指引，没有操作员工业务桌面，没有模型付费请求。
+diff --git a/package-lock.json b/package-lock.json
+index 4baf4ca..4f7e388 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -8,7 +8,8 @@
+       "name": "deepseek-harness-local",
+       "version": "1.0.0",
+       "dependencies": {
+-        "@deepseek-ai/dsh": "0.2.2-rc.1"
++        "@deepseek-ai/dsh": "0.2.2-rc.1",
++        "agent-desktop": "1.3.1"
+       }
+     },
+     "node_modules/@agentclientprotocol/sdk": {
+@@ -8044,6 +8045,28 @@
+         "node": ">= 20"
+       }
+     },
++    "node_modules/agent-desktop": {
++      "version": "1.3.1",
++      "resolved": "https://registry.npmjs.org/agent-desktop/-/agent-desktop-1.3.1.tgz",
++      "integrity": "sha512-5pBKkFkdB/VIAWRfqoA8lYp5/fenfxUHI15Pc4k8Nn2LmLxxo1PkAb0WLypknyOCczuIwuzFp/rZHGGawEV+hw==",
++      "cpu": [
++        "arm64",
++        "x64"
++      ],
++      "hasInstallScript": true,
++      "license": "Apache-2.0",
++      "os": [
++        "darwin",
++        "win32",
++        "linux"
++      ],
++      "bin": {
++        "agent-desktop": "bin/agent-desktop"
++      },
++      "engines": {
++        "node": ">=18"
++      }
++    },
+     "node_modules/ajv": {
+       "version": "8.20.0",
+       "resolved": "https://registry.npmjs.org/ajv/-/ajv-8.20.0.tgz",
+diff --git a/package.json b/package.json
+index b835f50..442fcdb 100644
+--- a/package.json
++++ b/package.json
+@@ -10,10 +10,13 @@
+     "naumi:build": "node scripts/build-naumi-layout.mjs",
+     "naumi:sync": "node scripts/sync-naumi.mjs",
+     "naumi:test": "node --test tests/naumi-enterprise.test.mjs",
+-    "naumi:install": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/setup-naumi.ps1"
++    "naumi:install": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/setup-naumi.ps1",
++    "desktop:status": "node scripts/agent-desktop.mjs status",
++    "desktop:verify": "node scripts/verify-agent-desktop.mjs"
+   },
+   "dependencies": {
+-    "@deepseek-ai/dsh": "0.2.2-rc.1"
++    "@deepseek-ai/dsh": "0.2.2-rc.1",
++    "agent-desktop": "1.3.1"
+   },
+   "allowScripts": {
+     "@deepseek-ai/dsh-subprocess-local@0.2.2-rc.1": true,
+diff --git a/plugins/naumi-enterprise/agent-desktop.js b/plugins/naumi-enterprise/agent-desktop.js
+new file mode 100644
+index 0000000..c672215
+--- /dev/null
++++ b/plugins/naumi-enterprise/agent-desktop.js
+@@ -0,0 +1,25 @@
++import * as mcpClient from '@deepseek-ai/dsh-mcp-client';
++import * as filesystemSkills from '@deepseek-ai/dsh-skill-filesystem';
++import {desktopMcpConfig,desktopSkillConfig} from './desktop-runtime.js';
++
++/** Add desktop tools through existing Harness bridges; do not change execution/permission policy. */
++export function installAgentDesktop(ctx) {
++  let mcp;
++  try{mcp=desktopMcpConfig();}
++  catch(error){ctx.logger?.warn('Naumi desktop integration not ready: '+error.message);return()=>{};}
++  return ctx.inject(['tools','skills'],scope=>{
++    scope.plugin(mcpClient,mcp);
++    scope.plugin(filesystemSkills,desktopSkillConfig());
++    scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/desktop',handler:async(req,res)=>{
++      res.setHeader('Cache-Control','private, no-store');res.setHeader('Content-Type','application/json; charset=utf-8');
++      const send=(status,body)=>{res.writeHead(status);res.end(JSON.stringify(body));};
++      const admission=scope.connection.admit(req);
++      if('rejection'in admission){send(admission.rejection,{error:'HARNESS_AUTH_REQUIRED'});return;}
++      if(admission.peer.principal.kind!=='owner'){send(403,{error:'HARNESS_OWNER_REQUIRED'});return;}
++      if(req.method!=='GET'){res.setHeader('Allow','GET');send(405,{error:'READ_ONLY'});return;}
++      const tools=scope.tools.definitions().filter(t=>t.name.startsWith('mcp__naumi_desktop__'));
++      const ready=tools.some(t=>t.name==='mcp__naumi_desktop__desktop_status');
++      send(ready?200:503,{status:ready?'ready':'connecting',version:'1.3.1',transport:'stdio',namespace:'naumi_desktop',toolCount:tools.length,physicalInputDefault:false});
++    }}));
++  });
++}
+diff --git a/plugins/naumi-enterprise/desktop-runtime.js b/plugins/naumi-enterprise/desktop-runtime.js
+new file mode 100644
+index 0000000..862db3d
+--- /dev/null
++++ b/plugins/naumi-enterprise/desktop-runtime.js
+@@ -0,0 +1,40 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import {createRequire} from 'node:module';
++import {fileURLToPath} from 'node:url';
++import {createHash} from 'node:crypto';
++
++export const AGENT_DESKTOP_VERSION='1.3.1';
++export const DESKTOP_SERVER_NAME='naumi_desktop';
++const require=createRequire(import.meta.url);
++/** Resolve packaged native artifacts, never npx/PATH or a network download. */
++export function resolveDesktopRuntime({manifestPath=require.resolve('agent-desktop/package.json'),platform=process.platform,arch=process.arch,readFile=fs.readFileSync,exists=fs.existsSync}={}) {
++  const manifest=JSON.parse(readFile(manifestPath,'utf8'));
++  if(manifest.version!==AGENT_DESKTOP_VERSION)throw Error(`agent-desktop version mismatch: expected ${AGENT_DESKTOP_VERSION}`);
++  if(!['win32','darwin','linux'].includes(platform)||!['x64','arm64'].includes(arch))throw Error('Unsupported agent-desktop platform: '+platform+'-'+arch);
++  const bin=path.join(path.dirname(manifestPath),'bin');
++  const command=path.join(bin,`agent-desktop-${platform}-${arch}${platform==='win32'?'.exe':''}`);
++  const checks=[];
++  const verify=file=>{
++    if(!exists(file)||!exists(file+'.sha256'))throw Error('Missing packaged agent-desktop artifact: '+path.basename(file));
++    const actual=createHash('sha256').update(readFile(file)).digest('hex');
++    const expected=readFile(file+'.sha256','utf8').trim();
++    if(!/^[a-f0-9]{64}$/.test(expected)||expected!==actual)throw Error('agent-desktop checksum mismatch: '+path.basename(file));
++    checks.push({file:path.basename(file),sha256:actual});
++  };
++  verify(command);
++  const env={};
++  if(platform==='darwin'){
++    const helper=path.join(bin,`agent-desktop-macos-helper-${platform}-${arch}`);verify(helper);env.AGENT_DESKTOP_MACOS_HELPER_PATH=helper;
++  }
++  if(platform==='linux')verify(path.join(bin,`agent-desktop-linux-clipboard-owner-${platform}-${arch}`));
++  return {version:manifest.version,platform,arch,command,env,checks};
++}
++
++export function desktopMcpConfig(runtime=resolveDesktopRuntime()) {
++  return {serverName:DESKTOP_SERVER_NAME,transport:'stdio',command:runtime.command,args:['mcp','--session','naumi'],env:runtime.env,cwd:path.dirname(runtime.command),toolCallTimeoutMs:60000,failOnStartupError:false,maxInstructionBytes:32768,reconnect:{enabled:true,initialDelayMs:500,maxDelayMs:30000,maxAttempts:10}};
++}
++
++export function desktopSkillConfig() {
++  return {providerName:'naumi-desktop',includeDefaultRoots:false,customSkillDirs:[fileURLToPath(new URL('./skills',import.meta.url))],watch:false};
++}
+diff --git a/plugins/naumi-enterprise/host.js b/plugins/naumi-enterprise/host.js
+index 17b414e..6bd80d3 100644
+--- a/plugins/naumi-enterprise/host.js
++++ b/plugins/naumi-enterprise/host.js
+@@ -1,9 +1,11 @@
+ import {readFile} from 'node:fs/promises';
+ import {fileURLToPath} from 'node:url';
+ import {businessCookie,projectWorkspace,validateOrigin} from './domain.js';
++import {installAgentDesktop} from './agent-desktop.js';
+ export const inject=['webServer','connection'];
+ /** Supported plugin routes, index branding and an authenticated read-only business adapter. */
+ export function apply(ctx,config) {
++  installAgentDesktop(ctx);
+   const collaborationOrigin=validateOrigin(config.collaborationOrigin);
+   const designOrigin=validateOrigin(config.designOrigin);
+   const assets=new Map([['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml']]);
+diff --git a/plugins/naumi-enterprise/package.json b/plugins/naumi-enterprise/package.json
+index 8b29193..2d342c9 100644
+--- a/plugins/naumi-enterprise/package.json
++++ b/plugins/naumi-enterprise/package.json
+@@ -5,8 +5,9 @@
+   "type": "module",
+   "main": "host.js",
+   "exports": {".": "./host.js", "./client": "./client.js", "./package.json": "./package.json", "./cordis.patch.yml": "./cordis.patch.yml"},
+-  "files": ["host.js", "domain.js", "client.js", "assets", "cordis.patch.yml"],
++  "files": ["host.js", "domain.js", "client.js", "assets", "cordis.patch.yml", "agent-desktop.js", "desktop-runtime.js", "skills", "third-party"],
+   "dsh": {"bundle": {"patch": "./cordis.patch.yml"}, "client": {"platform": "web", "inject": ["@deepseek-ai/dsh-client-ui-renderer", "@deepseek-ai/dsh-client-ui-layout", "@deepseek-ai/dsh-client-ui-sidebar", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-workspace"]}},
+   "engines": {"node": ">=24.9", "dsh": "0.2.2-rc.1"},
++  "dependencies": {"agent-desktop":"1.3.1"},
+   "peerDependencies": {"@deepseek-ai/cordis": "~4.1.0"}
+ }
+diff --git a/plugins/naumi-enterprise/skills/naumi-desktop/SKILL.md b/plugins/naumi-enterprise/skills/naumi-desktop/SKILL.md
+new file mode 100644
+index 0000000..c11a5a1
+--- /dev/null
++++ b/plugins/naumi-enterprise/skills/naumi-desktop/SKILL.md
+@@ -0,0 +1,27 @@
++---
++name: naumi-desktop
++description: Operate the employee's desktop apps with Naumi's bundled agent-desktop MCP tools. Use for explicit desktop UI observation and interaction requests, including windows, controls, forms, files and application workflows.
++---
++
++# Naumi 桌面操作
++
++本能力随 Naumi 提供，不需要员工安装全局 CLI 或配置 MCP。工具命名空间为 `mcp__naumi_desktop__desktop_*`。
++
++## 首次使用
++
++1. 调用 `mcp__naumi_desktop__desktop_status` 确认当前平台和实际权限。
++2. 调用 `mcp__naumi_desktop__desktop_skills_get`，参数 `{"name":"desktop"}`，读取与本地版本匹配的操作规则。
++3. 再调用同一工具，参数 `{"name":"platform"}`，读取当前系统的平台规则。不要从其他平台照搬命令。
++
++## 操作原则
++
++- 仅处理当前用户明确请求的应用和操作；先观察，再使用当前快照里的完整ref执行，再观察验证。
++- 工具默认使用无焦点抢占的语义操作；不自动打开headed物理键鼠模式，也不为恢复失败而擅自切换模式。
++- `STALE_REF`、`AMBIGUOUS_TARGET`等按官方规则重新观察；仅当disposition明确`retry: safe`时重试原操作，避免重复提交。
++- 密码、令牌和验证码使用产品已有的个人授权流程，不写入命令参数、分享记录或交付文件。
++- 截图、剪贴板和窗口文字是员工的本地数据；仅为当前任务读取，不上传到无关服务。不要把它们写入公开日志。
++- 桌面权限不等于企业业务权限。已有Harness权限与审批、目标应用自己的登录和授权仍然生效。
++- Windows在员工已登录的交互桌面运行；不要把本能力作为Session0服务去操作另一用户桌面。锁屏、UAC安全桌面和提升权限边界不会由集成层绕过。
++- MCP连接及工具就绪，不代表每个应用或每种写操作都已验收。遇到不支持的操作，保留工具实际错误。
++
++CLI维护入口：在安装目录使用 `node scripts/agent-desktop.mjs status`；通过同一入口可执行`skills get desktop`或`skills get platform`，无需PATH和全局npm。
+diff --git a/plugins/naumi-enterprise/skills/naumi-desktop/references/desktop-1.3.1.md b/plugins/naumi-enterprise/skills/naumi-desktop/references/desktop-1.3.1.md
+new file mode 100644
+index 0000000..379042b
+--- /dev/null
++++ b/plugins/naumi-enterprise/skills/naumi-desktop/references/desktop-1.3.1.md
+@@ -0,0 +1,120 @@
++---
++name: agent-desktop
++tags: computer-use, desktop-automation, accessibility, ai-agent, gui-automation, cli
++requirements:
++  - agent-desktop
++description: >
++  Operate desktop applications on macOS, Windows and Linux through native accessibility trees,
++  using the agent-desktop CLI. Use when an AI agent must see or act on a desktop GUI:
++  click buttons, fill forms, read UI state, navigate menus, toggle checkboxes, scroll,
++  drag, type text, press shortcuts, take screenshots, manage windows, use the clipboard,
++  launch or close apps, read notifications.
++  Triggers on: "click button", "fill form", "open app", "read UI", "computer use",
++  "operate desktop", "accessibility tree", "snapshot app", "type into field", "navigate menu",
++  "toggle checkbox", "take screenshot", "desktop automation", "agent-desktop",
++  or any desktop GUI task on macOS, Windows or Linux.
++---
++
++# agent-desktop
++
++agent-desktop is a CLI that reads and operates desktop apps through the OS accessibility tree. Every command prints one JSON envelope (`ok`, `data` or `error`). It is a tool, not an agent: the observe, act and verify loop runs in you.
++
++## Shell syntax
++
++Examples use a POSIX shell. In PowerShell, quote every ref (`'@s8f3k2p9:e1'`), because a bare `@token` is the splatting operator. Use `$env:NAME = 'value'` instead of `export`, and `| ConvertFrom-Json` instead of `$(...)` and `jq`. The Windows skill has the PowerShell forms.
++
++## First run
++
++1. Run `agent-desktop status`. It reports the platform, permissions and `supported_surfaces`.
++2. Run `agent-desktop skills get platform`. It loads the skill for the OS the binary runs on (macOS, Windows or Linux).
++3. For flags and syntax, run `agent-desktop <command> --help`. This skill does not repeat flag lists.
++
++## The loop
++
++Use `find` when you know the role or exact name. Otherwise map the app first and drill into one region.
++
++```
++agent-desktop snapshot --skeleton --app "Notes" -i --compact   # shallow map, children_count on cut branches
++agent-desktop snapshot --root @s8f3k2p9:e3 -i --compact        # drill into one region
++agent-desktop click @s8f3k2p9:e12                              # act on a qualified ref
++agent-desktop snapshot --root @s8f3k2p9:e3 -i --compact        # verify: re-read the same region
++```
++
++- A small app needs no skeleton. Take a full `snapshot -i`.
++- `-i` keeps interactive nodes only, so a row's static-text label is dropped. To tell which row a repeated button belongs to, drill that row's container with `--root` and leave out `-i`. On Windows and Linux that reads the row but does not make its button actionable: a button repeated in other rows is a twin in the window and its ref is refused (see Refs).
++- A `--root` drill adds its refs to the same snapshot id. Refs outside the drilled subtree, and the drilled root itself, stay valid; refs that were already inside it are replaced, so an old ref there returns `STALE_REF`.
++- Never skeleton a surface (`--surface menu`, `sheet`, `alert`). A surface is already focused.
++- An action that opens a menu, sheet or alert lists it in `data.surfaces`. Target that overlay next.
++- After an async step, use `wait` (see `commands-system.md`). A fixed sleep is a race.
++
++## Refs
++
++- Output refs are qualified: `@<snapshot_id>:e<N>`, for example `@s8f3k2p9:e1`. Pass them to later commands as they are.
++- Refs are valid for one snapshot. After any UI change, re-drill the affected region or take a new snapshot.
++- Only addressable elements get refs. Static text and inert containers do not.
++- A command re-identifies the element before it acts. On macOS the ref carries the element's own address, so identical twins each keep their ref. On Windows and Linux a ref resolves only when it was the only element in the window its snapshot captured with its role, native id, name and description, counted even below a skeleton or depth cut, and exactly one live element still matches. Identical twins there have no ref path: only `--headed mouse-click --xy X,Y` can choose one, it takes the foreground, and a Linux Wayland session refuses it.
++- `STALE_REF`: the element is gone or no longer matches. `details.kind` is `saved_ref_absent`, or `retained_object_stale` on macOS. Take a fresh snapshot and use the new ref.
++- `AMBIGUOUS_TARGET`: an identical element appeared (`saved_ref_ambiguous`), or the ref was not proven unique at capture (`identity_not_unique`). Repeating the ref or re-snapshotting identical twins gives the same refusal; act on a control that is unique in the window. `identity_not_unique` also follows a snapshot that could not read the whole window in time: retake it with a larger `--timeout-ms`.
++- `TIMEOUT` with `details.kind: resolution_identity_unknown`: a live read did not answer, so identity is unproven. Nothing was sent; retry.
++- `SNAPSHOT_NOT_FOUND`: the snapshot id expired. Snapshot again.
++
++## Delivery and retry
++
++Action results carry `data.disposition` and errors carry `error.disposition`, each with `delivery` and `retry`. Observation commands such as `snapshot` have none on success; their errors, and every `INVALID_ARGS` refusal, carry `not_delivered` and `retry: safe`.
++
++- Retry or substitute an action only when `disposition.retry` is `safe`. Only `not_delivered` is safe.
++- Any other delivery value means the action may have landed. A repeat can click, type or submit twice, and `toggle` can undo itself.
++- On a result that is not safe, read the live state (`get`, `is`, or a fresh snapshot) and decide from that. `details.post_state` helps when present.
++- Branch on `error.code` and `error.disposition`. Message and suggestion text can change.
++- `details.retryable: false` means waiting cannot change the outcome. Try a different approach.
++
++## Headless and headed
++
++Ref actions are headless by default. They use semantic accessibility calls and do not take focus, move the cursor, synthesize keys or use the clipboard. If no semantic path exists, the action fails closed. Use the global `--headed` flag only when the user explicitly permits physical input, such as double-click, hover, drag, or focus. Never switch to headed mode to recover from a headless failure. Raw coordinates (`--xy`) never imply focus. Which actions need `--headed` differs by OS: read the platform skill.
++
++## Sandboxes
++
++A sandbox is a desktop a provider manages on your machine. The provider is `macos`: a macOS VM on an Apple Silicon Mac running macOS 13 or later. Linux and Windows have no provider; to run agent-desktop in a container you manage yourself there, follow `agent-browser.dev/desktop/guides/docker-container`.
++
++```sh
++agent-desktop sandbox install                          # report the provider's state
++agent-desktop sandbox install macos                    # compile and sign the VM host, then report ready
++```
++
++```sh
++agent-desktop sandbox create demo --provider macos --set from=base   # clone a set-up sandbox; or --set ipsw=latest to install
++agent-desktop sandbox start demo                       # start it headless; add --window to show its desktop
++agent-desktop sandbox status demo                      # state, message and next command
++agent-desktop sandbox list                             # every sandbox and its state
++agent-desktop sandbox exec demo -- status              # run a command in the guest
++agent-desktop sandbox stop demo                        # stop the sandbox
++agent-desktop sandbox rm demo                          # remove it
++```
++
++Names are 1–32 lowercase letters, digits or hyphens, starting with a letter or digit. `exec` returns the guest's envelope and exit status; a provider failure returns a host error. `rm` refuses a sandbox reported as `running`; stop it first. `create` needs exactly one source: `--set from=<sandbox>`, `--set ipsw=latest` or `--set ipsw=<path>`. `start` answers `working` until the guest answers; wait for `status` to report `running` before `exec`.
++
++Read `state`, `message` and optional `next`; `ok: true` alone does not mean the sandbox is ready.
++
++- `unavailable`: satisfy the host requirements in `message` and `next`.
++- `missing`: install the provider.
++- `ready`: create a sandbox.
++- `working`: repeat the command in `next` until the work finishes.
++- `needs_setup`: have a person complete guest setup, then check status.
++- `running`: run guest commands, or stop before removal.
++- `stopped`: start the sandbox to use it, or remove it.
++- `broken`: follow `next`; a broken sandbox may need removal.
++
++A sandbox separates the desktop, not the network or the host. Sandboxes on one host share a virtual network, and a guest can reach the host's network services; keep one trust level per host. Each sandbox has its own pinned SSH host key, so a guest cannot answer for another sandbox. The SSH key under `<state root>/sandboxes/<name>/` is the guest credential, and in the guest Accessibility belongs to `sshd-keygen-wrapper` for the whole user session.
++
++Cloning a configured macOS VM has been tested end to end. Installing the first VM from a macOS image is experimental and has not been verified end to end. Provider setup steps and limits are in the docs: `agent-browser.dev/desktop/sandboxes/macos`.
++
++## References
++
++Load one only when you need it: `agent-desktop skills get desktop <reference>`.
++
++| Reference | Open it when |
++|-----------|--------------|
++| `commands-observation` | You need `snapshot`, `find`, `get`, `is`, `screenshot`, `list-surfaces` semantics, partial trees, or the `--root` rules |
++| `commands-interaction` | You choose between click, type, set-value, select, toggle, scroll, press and mouse commands, or you debug an action error |
++| `commands-system` | You launch or close apps, manage windows, use the clipboard, `wait`, `batch`, sessions, multi-agent cursors, tracing, or load skills |
++| `workflows` | You want worked patterns (forms, menus, dialogs, waiting for a new window, scroll-find, drag) and the anti-patterns list |
+diff --git a/plugins/naumi-enterprise/skills/naumi-desktop/references/platform-1.3.1.md b/plugins/naumi-enterprise/skills/naumi-desktop/references/platform-1.3.1.md
+new file mode 100644
+index 0000000..9f4e764
+--- /dev/null
++++ b/plugins/naumi-enterprise/skills/naumi-desktop/references/platform-1.3.1.md
+@@ -0,0 +1,112 @@
++---
++name: agent-desktop-windows
++tags: windows-automation, accessibility, uia, ai-agent, gui-automation, cli
++requirements:
++  - agent-desktop
++description: >
++  Windows platform guide for the agent-desktop CLI. Lists per command group
++  what works on Windows and what refuses, the first-contact gotchas
++  (PowerShell ref quoting, minimized windows, headed-only input), and where
++  to find shell surfaces, notifications, the cursor overlay, UIPI elevation,
++  Chromium/Electron settle behavior and troubleshooting.
++  Triggers on: "windows desktop automation", "UIA tree", "automate Windows app",
++  "agent-desktop on Windows", "elevated window input blocked", "E_ACCESSDENIED",
++  or any Windows GUI interaction task.
++---
++
++# agent-desktop-windows
++
++This file covers only what differs on Windows. The observe-act loop, refs, JSON
++envelope, sessions and tracing are the same on every platform.
++
++Requires Windows 10 1809+ / Windows Server 2019+ (x64 or ARM64). Run it in the
++interactive desktop session of the signed-in user. Session 0 (services and
++SYSTEM tasks), Server Core, the secure desktop (UAC prompts, the sign-in
++screen), a locked desktop and another user's session are not supported:
++observation, actions and capture there fail or return nothing.
++
++## Capability Table
++
++| Group | Commands | Status on Windows |
++|-------|----------|-------------------|
++| Observation | `snapshot`, `find`, `get`, `is`, `screenshot` | Works. Surfaces are `window`, `focused`, a Chromium modal as `sheet`, and an open application menu as `menu` |
++| Surfaces | `list-surfaces` | Works. Lists `window`, `focused` and `sheet` per process, plus `menu` with `item_count` while a menu is open |
++| Shell surfaces | `open-system-surface` | Works for `start-menu`, `taskbar`, `system-tray`, `system-tray-overflow` and `action-center`, and returns the window `snapshot --surface <kind>` reads. `quick-settings` returns `INVALID_ARGS` naming `action-center` |
++| Ref interaction | `click`, `right-click`, `type`, `set-value`, `clear`, `select`, `toggle`, `check`, `uncheck`, `expand`, `collapse`, `scroll`, `scroll-to` | Works, semantic in headless and `--headed` mode. `right-click` and `type` need `--headed` and return `POLICY_DENIED` headless |
++| Multi-click and focus | `double-click`, `triple-click`, `focus` | Works with global `--headed` only |
++| Keyboard and mouse | `press`, `hover`, `drag`, `mouse-click`, `mouse-move`, `mouse-wheel` | Works. Cursor-moving input needs `--headed`. First Contact covers `press --app` |
++| Held input | `key-down`, `key-up`, `mouse-down`, `mouse-up` | Fails closed on every platform with `ACTION_NOT_SUPPORTED`. A headless `mouse-down` or `mouse-up` returns `POLICY_DENIED` first |
++| App and window | `launch`, `close-app`, `list-windows`, `list-apps`, `focus-window`, `resize-window`, `move-window`, `minimize`, `maximize`, `restore` | Works. First Contact covers the name `launch` takes |
++| Displays | `list-displays` | Works |
++| Clipboard | `clipboard-get`, `clipboard-set`, `clipboard-clear` | Works; typed text and image content |
++| Wait | `wait` | Works for ms, `--element`, `--window`, `--text`, `--menu`, `--menu-closed`, `--event` and `--notification` |
++| Notifications | `list-notifications`, `dismiss-notification`, `dismiss-all-notifications`, `notification-action` | Works over the Action Center. Pass `--headed` when the center is closed |
++| Cursor overlay | `cursor-overlay` | Works. `enable` returns `data.rendered: true` only after the renderer acknowledges over its pipe. See `references/shell-and-overlay.md` |
++| System | `status`, `permissions`, `version`, `batch`, `skills`, `session`, `trace` | Works |
++
++## First Contact
++
++- **Quote every ref in PowerShell.** PowerShell reads a bare `@token` as its
++  splatting operator and deletes the argument before the binary sees it, so
++  `set-value @s8f3k2p9:e1 hi` fails `INVALID_ARGS`. Write
++  `set-value '@s8f3k2p9:e1' hi`. cmd.exe and bash need no quoting.
++- **A window behind another window is drivable. A minimized one is not.**
++  Every element of a minimized window reports `offscreen` and ref actions
++  fail. Run `restore --app <image>` and snapshot again. Do not use
++  `focus-window` by reflex: it steals the user's foreground.
++- **No permission dialog exists.** `permissions` reports `automation` as
++  `not_required`. Elevation boundaries are the only access control.
++- **Chromium and Electron apps read thin before they settle.** Pass a longer
++  `--timeout-ms` to `snapshot` instead of concluding the tree is empty.
++- **Blocked shortcuts.** `alt+f4`, `win+l`, `win+d`, `alt+tab`, `win+r`,
++  `win+x`, `win+e`, `ctrl+shift+esc` and their modifier supersets are refused
++  without `--force`. In combos, `cmd` and `meta` are the Windows key, so
++  `meta+c` is a shell shortcut. Write `ctrl+c` to copy.
++- **`type` needs `--headed`.** It is keystroke synthesis through `SendInput`,
++  so a strict-headless `type` returns `POLICY_DENIED`. Use `set-value`, or pass
++  `--headed`. It ends `delivered_unverified` (`verification_scope:
++  "unavailable"`) when the field exposes no readable Text selection, and can
++  verify when one is readable: confirm with a fresh `get`.
++- **`press --app` writes to the foreground queue** with no per-process
++  targeting. A headless press to a non-frontmost app fails closed. A
++  non-interactive caller (service, scheduled task, CI job) gets
++  `delivered_unverified`.
++- **`launch` takes an absolute path or a bare name** under System32 or the
++  Windows directory, with or without `.exe` (`notepad` or `notepad.exe`), not
++  a display name. Use `list-apps` to find a running app.
++- **Notifications:** `list-notifications` with the Action Center closed needs
++  `--headed`. Single-item `dismiss-notification` and `notification-action` need
++  `--headed` and `--expected-app` or `--expected-title` for the entry at INDEX.
++- **Surfaces:** an open or context menu is the `menu` surface. Windows does
++  not advertise a `menubar` surface.
++- **Commands that raise shell chrome take the foreground.** Strict headless
++  refuses them with `POLICY_DENIED` before anything is raised.
++- **Stateful actions run once, then verify by re-reading.** `delivered_verified`
++  means the readback matched. `ACTION_FAILED` with
++  `details.kind: "post_action_verification"` means the action landed but the
++  readback differs: read `details.post_state` and do not retry. A `set-value`
++  the app reformats reads as failed. See `references/troubleshooting.md`.
++- **Unsigned binary warnings are expected.** See `references/troubleshooting.md`.
++
++## What differs on Windows
++
++- Sandboxes are not available on Windows yet. To run agent-desktop in a container you manage yourself, see `agent-browser.dev/desktop/guides/docker-container`.
++
++- Ref actions are semantic UI Automation calls in headless and `--headed` mode, except `right-click`, `double-click`, `triple-click`, `type` and `focus`, which are physical or take focus and need `--headed`.
++- A ref resolves only when it was the only element in the window its snapshot captured with its role, native id, name and description, and exactly one live element still matches. Uniqueness counts the whole window, not the shallow tree a `--skeleton` or `--max-depth` snapshot presents, so a twin below the cut still refuses the ref. Identical twins, such as several identical `Delete` buttons, are refused with `AMBIGUOUS_TARGET`, `details.kind: identity_not_unique`, before anything reaches the app; a live second match is `saved_ref_ambiguous`, and a removed element is `STALE_REF`, `saved_ref_absent`. Take a fresh snapshot after a list changes, and use `--headed mouse-click --xy` when you must pick one of two identical controls.
++- The cursor overlay plays its per-action travel only for headless semantic actions. A `--headed` action moves the real cursor instead.
++
++## References
++
++- `references/shell-and-overlay.md`: open it for `open-system-surface`, tray
++  and taskbar surfaces, notifications, the cursor overlay, hosted (UWP) window
++  identity and menu detection coverage.
++- `references/permissions-and-elevation.md`: integrity levels, UIPI, blocked
++  combos, protected processes, the cross-process interaction lease.
++- `references/chromium-and-electron.md`: settle timing, covered-window hazard,
++  WPF wrong-provider trap, unnamed web content.
++- `references/troubleshooting.md`: symptom-to-cause map, action verification
++  outcomes, saving a document headless, install warnings.
++
++Read any file from the binary:
++`agent-desktop skills get agent-desktop-windows references/troubleshooting.md`.
+diff --git a/plugins/naumi-enterprise/third-party/agent-desktop/LICENSE b/plugins/naumi-enterprise/third-party/agent-desktop/LICENSE
+new file mode 100644
+index 0000000..d645695
+--- /dev/null
++++ b/plugins/naumi-enterprise/third-party/agent-desktop/LICENSE
+@@ -0,0 +1,202 @@
++
++                                 Apache License
++                           Version 2.0, January 2004
++                        http://www.apache.org/licenses/
++
++   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
++
++   1. Definitions.
++
++      "License" shall mean the terms and conditions for use, reproduction,
++      and distribution as defined by Sections 1 through 9 of this document.
++
++      "Licensor" shall mean the copyright owner or entity authorized by
++      the copyright owner that is granting the License.
++
++      "Legal Entity" shall mean the union of the acting entity and all
++      other entities that control, are controlled by, or are under common
++      control with that entity. For the purposes of this definition,
++      "control" means (i) the power, direct or indirect, to cause the
++      direction or management of such entity, whether by contract or
++      otherwise, or (ii) ownership of fifty percent (50%) or more of the
++      outstanding shares, or (iii) beneficial ownership of such entity.
++
++      "You" (or "Your") shall mean an individual or Legal Entity
++      exercising permissions granted by this License.
++
++      "Source" form shall mean the preferred form for making modifications,
++      including but not limited to software source code, documentation
++      source, and configuration files.
++
++      "Object" form shall mean any form resulting from mechanical
++      transformation or translation of a Source form, including but
++      not limited to compiled object code, generated documentation,
++      and conversions to other media types.
++
++      "Work" shall mean the work of authorship, whether in Source or
++      Object form, made available under the License, as indicated by a
++      copyright notice that is included in or attached to the work
++      (an example is provided in the Appendix below).
++
++      "Derivative Works" shall mean any work, whether in Source or Object
++      form, that is based on (or derived from) the Work and for which the
++      editorial revisions, annotations, elaborations, or other modifications
++      represent, as a whole, an original work of authorship. For the purposes
++      of this License, Derivative Works shall not include works that remain
++      separable from, or merely link (or bind by name) to the interfaces of,
++      the Work and Derivative Works thereof.
++
++      "Contribution" shall mean any work of authorship, including
++      the original version of the Work and any modifications or additions
++      to that Work or Derivative Works thereof, that is intentionally
++      submitted to Licensor for inclusion in the Work by the copyright owner
++      or by an individual or Legal Entity authorized to submit on behalf of
++      the copyright owner. For the purposes of this definition, "submitted"
++      means any form of electronic, verbal, or written communication sent
++      to the Licensor or its representatives, including but not limited to
++      communication on electronic mailing lists, source code control systems,
++      and issue tracking systems that are managed by, or on behalf of, the
++      Licensor for the purpose of discussing and improving the Work, but
++      excluding communication that is conspicuously marked or otherwise
++      designated in writing by the copyright owner as "Not a Contribution."
++
++      "Contributor" shall mean Licensor and any individual or Legal Entity
++      on behalf of whom a Contribution has been received by Licensor and
++      subsequently incorporated within the Work.
++
++   2. Grant of Copyright License. Subject to the terms and conditions of
++      this License, each Contributor hereby grants to You a perpetual,
++      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++      copyright license to reproduce, prepare Derivative Works of,
++      publicly display, publicly perform, sublicense, and distribute the
++      Work and such Derivative Works in Source or Object form.
++
++   3. Grant of Patent License. Subject to the terms and conditions of
++      this License, each Contributor hereby grants to You a perpetual,
++      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++      (except as stated in this section) patent license to make, have made,
++      use, offer to sell, sell, import, and otherwise transfer the Work,
++      where such license applies only to those patent claims licensable
++      by such Contributor that are necessarily infringed by their
++      Contribution(s) alone or by combination of their Contribution(s)
++      with the Work to which such Contribution(s) was submitted. If You
++      institute patent litigation against any entity (including a
++      cross-claim or counterclaim in a lawsuit) alleging that the Work
++      or a Contribution incorporated within the Work constitutes direct
++      or contributory patent infringement, then any patent licenses
++      granted to You under this License for that Work shall terminate
++      as of the date such litigation is filed.
++
++   4. Redistribution. You may reproduce and distribute copies of the
++      Work or Derivative Works thereof in any medium, with or without
++      modifications, and in Source or Object form, provided that You
++      meet the following conditions:
++
++      (a) You must give any other recipients of the Work or
++          Derivative Works a copy of this License; and
++
++      (b) You must cause any modified files to carry prominent notices
++          stating that You changed the files; and
++
++      (c) You must retain, in the Source form of any Derivative Works
++          that You distribute, all copyright, patent, trademark, and
++          attribution notices from the Source form of the Work,
++          excluding those notices that do not pertain to any part of
++          the Derivative Works; and
++
++      (d) If the Work includes a "NOTICE" text file as part of its
++          distribution, then any Derivative Works that You distribute must
++          include a readable copy of the attribution notices contained
++          within such NOTICE file, excluding those notices that do not
++          pertain to any part of the Derivative Works, in at least one
++          of the following places: within a NOTICE text file distributed
++          as part of the Derivative Works; within the Source form or
++          documentation, if provided along with the Derivative Works; or,
++          within a display generated by the Derivative Works, if and
++          wherever such third-party notices normally appear. The contents
++          of the NOTICE file are for informational purposes only and
++          do not modify the License. You may add Your own attribution
++          notices within Derivative Works that You distribute, alongside
++          or as an addendum to the NOTICE text from the Work, provided
++          that such additional attribution notices cannot be construed
++          as modifying the License.
++
++      You may add Your own copyright statement to Your modifications and
++      may provide additional or different license terms and conditions
++      for use, reproduction, or distribution of Your modifications, or
++      for any such Derivative Works as a whole, provided Your use,
++      reproduction, and distribution of the Work otherwise complies with
++      the conditions stated in this License.
++
++   5. Submission of Contributions. Unless You explicitly state otherwise,
++      any Contribution intentionally submitted for inclusion in the Work
++      by You to the Licensor shall be under the terms and conditions of
++      this License, without any additional terms or conditions.
++      Notwithstanding the above, nothing herein shall supersede or modify
++      the terms of any separate license agreement you may have executed
++      with Licensor regarding such Contributions.
++
++   6. Trademarks. This License does not grant permission to use the trade
++      names, trademarks, service marks, or product names of the Licensor,
++      except as required for reasonable and customary use in describing the
++      origin of the Work and reproducing the content of the NOTICE file.
++
++   7. Disclaimer of Warranty. Unless required by applicable law or
++      agreed to in writing, Licensor provides the Work (and each
++      Contributor provides its Contributions) on an "AS IS" BASIS,
++      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
++      implied, including, without limitation, any warranties or conditions
++      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
++      PARTICULAR PURPOSE. You are solely responsible for determining the
++      appropriateness of using or redistributing the Work and assume any
++      risks associated with Your exercise of permissions under this License.
++
++   8. Limitation of Liability. In no event and under no legal theory,
++      whether in tort (including negligence), contract, or otherwise,
++      unless required by applicable law (such as deliberate and grossly
++      negligent acts) or agreed to in writing, shall any Contributor be
++      liable to You for damages, including any direct, indirect, special,
++      incidental, or consequential damages of any character arising as a
++      result of this License or out of the use or inability to use the
++      Work (including but not limited to damages for loss of goodwill,
++      work stoppage, computer failure or malfunction, or any and all
++      other commercial damages or losses), even if such Contributor
++      has been advised of the possibility of such damages.
++
++   9. Accepting Warranty or Additional Liability. While redistributing
++      the Work or Derivative Works thereof, You may choose to offer,
++      and charge a fee for, acceptance of support, warranty, indemnity,
++      or other liability obligations and/or rights consistent with this
++      License. However, in accepting such obligations, You may act only
++      on Your own behalf and on Your sole responsibility, not on behalf
++      of any other Contributor, and only if You agree to indemnify,
++      defend, and hold each Contributor harmless for any liability
++      incurred by, or claims asserted against, such Contributor by reason
++      of your accepting any such warranty or additional liability.
++
++   END OF TERMS AND CONDITIONS
++
++   APPENDIX: How to apply the Apache License to your work.
++
++      To apply the Apache License to your work, attach the following
++      boilerplate notice, with the fields enclosed by brackets "[]"
++      replaced with your own identifying information. (Don't include
++      the brackets!)  The text should be enclosed in the appropriate
++      comment syntax for the file format. We also recommend that a
++      file or class name and description of purpose be included on the
++      same "printed page" as the copyright notice for easier
++      identification within third-party archives.
++
++   Copyright [yyyy] [name of copyright owner]
++
++   Licensed under the Apache License, Version 2.0 (the "License");
++   you may not use this file except in compliance with the License.
++   You may obtain a copy of the License at
++
++       http://www.apache.org/licenses/LICENSE-2.0
++
++   Unless required by applicable law or agreed to in writing, software
++   distributed under the License is distributed on an "AS IS" BASIS,
++   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++   See the License for the specific language governing permissions and
++   limitations under the License.
+diff --git a/plugins/naumi-enterprise/third-party/agent-desktop/NOTICE.md b/plugins/naumi-enterprise/third-party/agent-desktop/NOTICE.md
+new file mode 100644
+index 0000000..c97f72a
+--- /dev/null
++++ b/plugins/naumi-enterprise/third-party/agent-desktop/NOTICE.md
+@@ -0,0 +1,6 @@
++# agent-desktop
++
++Vercel Labs agent-desktop 1.3.1
++Source: https://github.com/vercel-labs/agent-desktop
++License: Apache-2.0 (LICENSE included).
++Naumi bundles the unmodified executable from npm and adds a Harness MCP adapter.
+diff --git a/scripts/agent-desktop.mjs b/scripts/agent-desktop.mjs
+new file mode 100644
+index 0000000..9dcb676
+--- /dev/null
++++ b/scripts/agent-desktop.mjs
+@@ -0,0 +1,7 @@
++import {spawn} from 'node:child_process';
++import {resolveDesktopRuntime} from '../plugins/naumi-enterprise/desktop-runtime.js';
++const runtime=resolveDesktopRuntime();
++const args=process.argv.slice(2);
++const child=spawn(runtime.command,args.length?args:['status'],{stdio:'inherit',shell:false,windowsHide:true,env:{...process.env,...runtime.env}});
++child.on('error',error=>{process.stderr.write(error.message+'\n');process.exitCode=1;});
++child.on('exit',(code,signal)=>{process.exitCode=signal?1:code??1;});
+diff --git a/scripts/setup-naumi.ps1 b/scripts/setup-naumi.ps1
+index 8688482..136b712 100644
+--- a/scripts/setup-naumi.ps1
++++ b/scripts/setup-naumi.ps1
+@@ -4,6 +4,8 @@ Push-Location $root
+ try {
+     $env:DSH_HOME = Join-Path $root '.dsh'
+     $env:DSH_TELEMETRY_MODE = 'DISABLED'
++    node scripts/agent-desktop.mjs version
++    if ($LASTEXITCODE) { throw 'Bundled desktop runtime verification failed; run npm ci before installing the profile' }
+     node scripts/build-naumi-layout.mjs
+     if ($LASTEXITCODE) { throw 'Layout preparation failed' }
+     node node_modules/@deepseek-ai/dsh/lib/bin.js web --dump-config | Out-Null
+diff --git a/scripts/sync-naumi.mjs b/scripts/sync-naumi.mjs
+index e6e9762..6615b26 100644
+--- a/scripts/sync-naumi.mjs
++++ b/scripts/sync-naumi.mjs
+@@ -8,9 +8,18 @@ for(const [folder,name]of packages){
+   if(!fs.existsSync(target))throw Error(`Install ${name} into the Web profile first. See NAUMI_CUSTOMIZATION.md.`);
+   for(const file of fs.readdirSync('plugins/'+folder,{recursive:true})){
+     const source=path.join('plugins',folder,file);
+-    if(fs.statSync(source).isFile()){fs.mkdirSync(path.dirname(path.join(target,file)),{recursive:true});fs.copyFileSync(source,path.join(target,file));}
++    if(fs.statSync(source).isFile()){
++      const destination=path.join(target,file);fs.mkdirSync(path.dirname(destination),{recursive:true});
++      if(fs.existsSync(destination)){
++        const a=fs.statSync(source),b=fs.statSync(destination);
++        if(a.dev===b.dev&&a.ino===b.ino)continue;
++        if(fs.readFileSync(source).equals(fs.readFileSync(destination)))continue;
++      }
++      fs.copyFileSync(source,destination);
++    }
+   }
+ }
+ if(!profile.dsh.profile.bundles.includes('@naumi/dsh-enterprise'))profile.dsh.profile.bundles.push('@naumi/dsh-enterprise');
+-fs.writeFileSync(manifest,JSON.stringify(profile,null,2)+'\n');
++const serialized=JSON.stringify(profile,null,2)+'\n';
++if(fs.readFileSync(manifest,'utf8')!==serialized)fs.writeFileSync(manifest,serialized);
+ console.log('NAUMI_SYNC packages=2 bundle_enabled=1');
+diff --git a/scripts/verify-agent-desktop-live.mjs b/scripts/verify-agent-desktop-live.mjs
+new file mode 100644
+index 0000000..2c79185
+--- /dev/null
++++ b/scripts/verify-agent-desktop-live.mjs
+@@ -0,0 +1,15 @@
++import fs from 'node:fs';
++import assert from 'node:assert/strict';
++import {connect} from './harness-rpc.mjs';
++const logs=['logs/server.out.log','logs/server.err.log'].map(p=>fs.readFileSync(p,'utf8')).join('\n');
++const launch=[...logs.matchAll(/http:\/\/127\.0\.0\.1:3080\/?\?token=[A-Za-z0-9_~.%-]+/g)].at(-1)?.[0];assert(launch);
++const exchange=await fetch(launch,{redirect:'manual'});const cookie=exchange.headers.getSetCookie().map(x=>x.split(';')[0]).join('; ');
++const ready=await fetch('http://127.0.0.1:3080/naumi/desktop',{headers:{cookie}});assert.equal(ready.status,200);const state=await ready.json();assert.equal(state.version,'1.3.1');assert.equal(state.status,'ready');assert(state.toolCount>=1);assert.equal(state.physicalInputDefault,false);
++assert.equal((await fetch('http://127.0.0.1:3080/naumi/desktop')).status,401);
++assert.equal((await fetch('http://127.0.0.1:3080/naumi/desktop',{method:'POST',headers:{cookie}})).status,405);
++const rpc=await connect();const sessions=await rpc('session/list',{_request:{}});const chosen=sessions.items.find(x=>x.cwd&&!x.archived)??sessions.items[0];assert(chosen);
++const skills=await rpc('skills/list',{request:{sessionId:chosen.sessionId}});assert(skills.skills.some(s=>s.name==='naumi-desktop'));
++const catalog=await rpc('session/modelCatalog');assert.equal(catalog.groups.length,9);
++const report={readiness:state,unauthorizedStatus:401,writeStatus:405,skillVisible:true,modelGroups:catalog.groups.length,paidGenerationCalls:0,at:new Date().toISOString()};
++fs.writeFileSync('evidence/agent-desktop/LIVE_CHECK.json',JSON.stringify(report,null,2));
++console.log(`DESKTOP_LIVE ready=1 tools=${state.toolCount} skill_visible=1 model_groups=${catalog.groups.length} unauthorized=401 write=405`);
+diff --git a/scripts/verify-agent-desktop-state.mjs b/scripts/verify-agent-desktop-state.mjs
+new file mode 100644
+index 0000000..067e096
+--- /dev/null
++++ b/scripts/verify-agent-desktop-state.mjs
+@@ -0,0 +1,51 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import crypto from 'node:crypto';
++import assert from 'node:assert/strict';
++import {spawnSync} from 'node:child_process';
++import {resolveDesktopRuntime} from '../plugins/naumi-enterprise/desktop-runtime.js';
++const dir='evidence/agent-desktop',baseline=JSON.parse(fs.readFileSync(dir+'/baseline.json','utf8'));
++const hash=b=>crypto.createHash('sha256').update(b).digest('hex'),hashFile=p=>hash(fs.readFileSync(p));
++const portableHash=file=>hash(fs.readFileSync(file,'utf8').replace(/\r\n/g,'\n'));
++const stamp=file=>({sha256:hashFile(file),lfSha256:portableHash(file)});
++const preserve=()=>{for(const [file,sha]of Object.entries(baseline.preserved))assert.equal(hashFile(file),sha,'Protected file changed: '+file);};
++const modes=process.argv.slice(2),mode=modes[0];
++for(const [file,data]of Object.entries(baseline.sources))assert.equal(hashFile(dir+'/'+data.backup),data.sha256,'Original changed: '+file);
++if(mode==='baseline'){
++ assert.equal(JSON.parse(fs.readFileSync(dir+'/'+baseline.sources['package.json'].backup)).dependencies['agent-desktop'],undefined);
++ console.log('BASELINE agent_desktop_dependency=0 embedded_mcp=0 preserved_files=7');
++}else if(mode==='modified'){
++ preserve();assert.equal(resolveDesktopRuntime().version,'1.3.1');assert.equal(JSON.parse(fs.readFileSync('package.json')).dependencies['agent-desktop'],'1.3.1');
++ const modified=Object.fromEntries([...Object.keys(baseline.sources),...baseline.added].map(file=>[file,stamp(file)]));fs.writeFileSync(dir+'/modified-hashes.json',JSON.stringify(modified,null,2));
++ console.log('MODIFIED agent_desktop=1.3.1 embedded_mcp=1 bundled_skill=1 preserved_files=7');
++}else if(mode==='rollback-test'){
++ preserve();const fixture='.dsh/agent-desktop-backup/rollback-test';fs.mkdirSync(fixture,{recursive:true});const active={};
++ for(const file of [...Object.keys(baseline.sources),...baseline.added]){const target=path.join(fixture,file);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(file,target);active[file]=hashFile(file);}
++ // Exercise the real rollback branch in a disposable copy, including installed plugin files.
++ const fixtureEvidence=path.join(fixture,dir);fs.mkdirSync(fixtureEvidence,{recursive:true});
++ fs.copyFileSync(dir+'/baseline.json',path.join(fixtureEvidence,'baseline.json'));
++ fs.writeFileSync(path.join(fixtureEvidence,'modified-hashes.json'),JSON.stringify(Object.fromEntries(Object.keys(active).map(file=>[file,stamp(file)])),null,2));
++ for(const data of Object.values(baseline.sources)){const target=path.join(fixtureEvidence,data.backup);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(dir+'/'+data.backup,target);}
++ for(const file of Object.keys(active).filter(f=>f.startsWith('plugins/naumi-enterprise/'))){const target=path.join(fixture,file.replace('plugins/naumi-enterprise/','.dsh/profiles/web/node_modules/@naumi/dsh-enterprise/'));fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(file,target);}
++ const rollback=spawnSync(process.execPath,['scripts/verify-agent-desktop-state.mjs','rollback'],{cwd:fixture,encoding:'utf8',windowsHide:true});
++ assert.equal(rollback.status,0,rollback.stderr);assert(rollback.stdout.includes('prior_sources_restored=1'));
++ for(const [file,data]of Object.entries(baseline.sources))assert.equal(hashFile(path.join(fixture,file)),data.sha256);
++ for(const file of baseline.added){assert(!fs.existsSync(path.join(fixture,file)));if(file.startsWith('plugins/naumi-enterprise/'))assert(!fs.existsSync(path.join(fixture,file.replace('plugins/naumi-enterprise/','.dsh/profiles/web/node_modules/@naumi/dsh-enterprise/'))));}
++ assert.equal(JSON.parse(fs.readFileSync(path.join(fixture,'package.json'))).dependencies['agent-desktop'],undefined);
++ assert(!fs.readFileSync(path.join(fixture,'plugins/naumi-enterprise/host.js'),'utf8').includes('installAgentDesktop'));
++ for(const [file,sha]of Object.entries(active))assert.equal(hashFile(file),sha);
++ console.log(`ROLLBACK originals_restored=${Object.keys(baseline.sources).length} desktop_disabled_in_copy=1 active_still_integrated=1`);
++}else if(mode==='rollback'){
++ // Build and validate the complete target list before changing any file. No recursive deletion.
++ const modified=JSON.parse(fs.readFileSync(dir+'/modified-hashes.json','utf8'));
++ const destinations=file=>file.startsWith('plugins/naumi-enterprise/')?[file,file.replace('plugins/naumi-enterprise/','.dsh/profiles/web/node_modules/@naumi/dsh-enterprise/')]:[file];
++ for(const [file,expected]of Object.entries(modified))for(const dest of destinations(file))if(fs.existsSync(dest)){
++   const original=baseline.sources[file];
++   const exact=[expected.sha256,original?.sha256].includes(hashFile(dest));
++   const normalized=[expected.lfSha256,original?portableHash(dir+'/'+original.backup):undefined].includes(portableHash(dest));
++   assert(exact||normalized,'Later edits detected: '+dest);
++ }
++ for(const [file,data]of Object.entries(baseline.sources))for(const dest of destinations(file))if(dest===file||fs.existsSync(dest)){fs.mkdirSync(path.dirname(dest),{recursive:true});fs.writeFileSync(dest,fs.readFileSync(dir+'/'+data.backup));}
++ for(const file of baseline.added)for(const dest of destinations(file))if(fs.existsSync(dest))fs.unlinkSync(dest);
++ console.log('ROLLBACK prior_sources_restored=1 desktop_autoload_disabled=1 private_data_untouched=1 restart_required=1');
++}else throw Error('Use baseline, modified, rollback-test or rollback');
+diff --git a/scripts/verify-agent-desktop-ui.mjs b/scripts/verify-agent-desktop-ui.mjs
+new file mode 100644
+index 0000000..29809cf
+--- /dev/null
++++ b/scripts/verify-agent-desktop-ui.mjs
+@@ -0,0 +1,105 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import assert from 'node:assert/strict';
++import {pathToFileURL} from 'node:url';
++const root=path.resolve(import.meta.dirname,'..');process.chdir(root);
++const modulePath=process.env.NAUMI_PLAYWRIGHT_MODULE??'E:/Workspace/naumi/node_modules/playwright/index.mjs';
++const {chromium}=await import(pathToFileURL(modulePath).href);
++const logs=['logs/server.out.log','logs/server.err.log'].map(p=>fs.readFileSync(p,'utf8')).join('\n');
++const urls=[...logs.matchAll(/http:\/\/127\.0\.0\.1:3080\/?\?token=[A-Za-z0-9_~.%-]+/g)];
++assert(urls.length,'Harness authenticated launch URL is required');
++const title=process.env.NAUMI_UI_TEST_SESSION??'你好，介绍你的能力';
++const browser=await chromium.launch({headless:true});
++const context=await browser.newContext({viewport:{width:1440,height:960},colorScheme:'light'});
++const page=await context.newPage(),errors=[],requests=[];
++page.on('pageerror',e=>errors.push(e.message));
++page.on('request',r=>{const u=new URL(r.url());if(u.origin==='http://127.0.0.1:3080')requests.push({method:r.method(),path:u.pathname});});
++const result={environment:'isolated local Chromium; no enterprise cookie',checks:{}};
++const check=(name,value)=>{result.checks[name]=value;assert(value,name);console.log('BROWSER_PASS '+name);};
++const selectParent=async()=>{
++ const workspace=page.locator('[data-slot="sidebar.workspaces"] [role="treeitem"]').filter({hasText:'默认工作区'}).first();
++ await workspace.waitFor();if(await workspace.getAttribute('aria-expanded')==='false')await workspace.click();
++ await page.locator('[data-slot="sidebar.workspaces"] [role="treeitem"]').filter({hasText:title}).click();await page.locator('.naumi-context-files button').first().waitFor();
++};
++const closeDialog=async()=>{await page.keyboard.press('Escape');};
++try{
++ await page.goto(urls.at(-1)[0],{waitUntil:'domcontentloaded'});
++ await selectParent();
++ const model=page.locator('[data-slot="conversation.input.model"] button');
++ const modelBefore=await model.getAttribute('aria-label');
++ const draftBefore=await page.locator('[contenteditable="true"]').innerText();
++ check('single_original_model_selector',await model.count()===1);
++ check('trajectory_hidden',await page.locator('[role=tab]').filter({hasText:'轨迹'}).isHidden());
++ check('native_team_members_present',await page.locator('.naumi-member').count()>0);
++ check('native_deliverables_present',await page.locator('.naumi-context-files button').count()===2);
++ await model.click();await page.locator('[role="menu"]').waitFor();
++ check('native_model_menu',await page.locator('[role="menu"]').innerText().then(s=>s.includes('推理等级')));
++ await page.locator('[role="menu"] [role="menuitem"], [role="menu"] button').first().click();
++ await page.locator('input[placeholder="搜索模型…"]').waitFor();
++ const catalog=await page.locator('[role="menu"]').innerText();
++ result.modelGroups=(catalog.match(/^CC · /gm)??[]).length+(catalog.includes('DeepSeek 账号')?1:0);
++ check('nine_model_groups_preserved',result.modelGroups===9);await closeDialog();
++ await page.locator('[data-slot="conversation.input.permission"] button').click();
++ check('native_permission_menu',await page.getByText('工作区内修改',{exact:true}).last().isVisible());await closeDialog();
++ await page.locator('.naumi-team-native button').click();await page.locator('[data-team-panel]').waitFor();
++ check('native_team_tasks_dialog',await page.locator('[data-team-panel]').innerText().then(s=>s.includes('共享任务')));await closeDialog();
++ await page.locator('.naumi-advanced summary').click();
++ check('native_preset_in_advanced',await page.locator('.naumi-preset-native').innerText().then(s=>s.includes('标准模式')));
++ await page.locator('.naumi-advanced summary').click();
++ await page.locator('.naumi-native-stat-details summary').click();
++ await page.locator('.naumi-native-stat-details button').first().click();
++ await page.locator('[data-session-stats-details]').waitFor();check('native_stats_detail',true);await closeDialog();
++ await page.locator('.naumi-native-stat-details summary').click();
++ await page.locator('.naumi-context-capacity button').click();
++ check('native_context_detail',await page.getByRole('dialog').innerText().then(s=>s.includes('系统提示词')));await closeDialog();
++ const member=page.locator('.naumi-member:not(:disabled)').first();const name=await member.locator('.naumi-member-name').innerText();
++ await member.click();await page.waitForFunction(n=>document.querySelector('.naumi-member:disabled .naumi-member-name')?.textContent.includes(n),name);
++ check('native_member_navigation',true);await selectParent();
++ await page.locator('.naumi-context-files button').filter({hasText:'README.md'}).click();
++ await page.locator('[data-slot="rightbar"]').getByText('dupefind',{exact:true}).first().waitFor();
++ check('native_file_preview',true);
++ await page.locator('[data-slot="rightbar"] button[aria-label="收起右侧边栏"]').click();
++ if(await page.locator('.naumi-context-panel').isHidden())await page.locator('.naumi-context-toggle').click();
++ await page.locator('.naumi-resource-row').filter({hasText:'工作区文件'}).click();
++ await page.locator('[data-slot="rightbar"]').getByText('team-demo',{exact:true}).first().waitFor();check('native_workspace_files',true);
++ await page.locator('[data-slot="rightbar"] button[aria-label="全屏"]').click();
++ check('native_fullscreen_not_covered',await page.evaluate(()=>!document.elementFromPoint(innerWidth-80,160)?.closest('.naumi-context-panel')));
++ await page.locator('[data-slot="rightbar"] button[aria-label="退出全屏"]').click();
++ await page.locator('[data-slot="rightbar"] button[aria-label="收起右侧边栏"]').click();
++ if(await page.locator('.naumi-context-panel').isHidden())await page.locator('.naumi-context-toggle').click();
++ await page.locator('.naumi-context-head button').click();check('collapse_retains_model',await model.isVisible()&&await page.locator('.naumi-context-panel').isHidden());
++ await page.locator('.naumi-context-toggle').click();
++ await page.locator('.naumi-resource-row').filter({hasText:'工具与 MCP'}).click();
++ await page.waitForFunction(()=>!document.querySelector('.naumi-context-panel'));check('business_panel_has_no_context_overlay',true);await selectParent();
++ const ungrouped=page.locator('[data-slot="sidebar.workspaces"] [role="treeitem"]').filter({hasText:/^未分组$/});if(await ungrouped.count()&&await ungrouped.getAttribute('aria-expanded')==='true')await ungrouped.click();
++ await page.locator('[data-conversation-scroll]').evaluate(e=>e.scrollTop=e.scrollHeight);
++ await page.screenshot({path:'evidence/agent-desktop/live-desktop.png',animations:'disabled'});
++ const desktop=await page.evaluate(()=>{const p=document.querySelector('.naumi-context-panel').getBoundingClientRect(),m=document.querySelector('[data-slot="conversation.input.model"] button').getBoundingClientRect(),c=document.querySelector('[data-composer-seat]').getBoundingClientRect(),s=document.querySelector('[data-conversation-scroll]');return {panelFits:p.right<=innerWidth+1,modelInsideComposer:m.left>=c.left&&m.right<=c.right,composerBottom:Math.abs(c.bottom-innerHeight)<3,noHorizontalOverflow:s.scrollWidth<=s.clientWidth+1};});
++ for(const [name,value]of Object.entries(desktop))check('desktop_'+name,value);
++ await page.setViewportSize({width:390,height:844});
++ await page.waitForFunction(()=>document.querySelector('[data-naumi-context-root]')?.getBoundingClientRect().right<=innerWidth+1);
++ // Keep the original left drawer's own behavior; close it with its native control when open.
++ const closeLeft=page.locator('[data-slot="sidebar"] button[aria-label="收起侧边栏"]');if(await closeLeft.isVisible())await closeLeft.click();
++ if(await page.locator('.naumi-context-panel').isVisible())await page.locator('.naumi-context-head button').click();
++ await page.waitForFunction(()=>{const e=document.querySelector('[data-slot="conversation.input.model"] button');const r=e?.getBoundingClientRect();return r&&r.right<=innerWidth+1&&e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));});
++ check('mobile_original_model_accessible',await model.isVisible());
++ await page.locator('.naumi-context-toggle').click();
++ await page.waitForFunction(()=>{const r=document.querySelector('.naumi-context-panel')?.getBoundingClientRect();return r&&r.width>0&&r.left>=0&&r.right<=innerWidth+1;});
++ await page.waitForFunction(()=>{const panel=document.querySelector('.naumi-context-panel'),e=panel?.querySelector('.naumi-member-name'),r=e?.getBoundingClientRect();return r&&panel.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));});
++ check('mobile_context_drawer_fits',true);await page.screenshot({path:'evidence/agent-desktop/live-mobile.png',animations:'disabled'});
++ await page.locator('.naumi-context-head button').click();
++ await page.setViewportSize({width:1440,height:960});
++ check('model_selection_unchanged',await model.getAttribute('aria-label')===modelBefore);
++ check('draft_unchanged',await page.locator('[contenteditable="true"]').innerText()===draftBefore);
++ check('no_frontend_errors',errors.length===0);
++ result.credentialReadPaths=[...new Set(requests.filter(r=>/credential/i.test(r.path)).map(r=>r.method+' '+r.path))];
++ check('no_generation_requests',!requests.some(r=>/\/api\/(?:session\/(?:prompt|send|submit)|credentials\/set|settings\/replace)(?:\/|$)/i.test(r.path)));
++ result.errors=errors;result.completedAt=new Date().toISOString();
++ fs.writeFileSync('evidence/agent-desktop/UI_REGRESSION.json',JSON.stringify(result,null,2));
++ console.log('BROWSER_RESULT checks='+Object.keys(result.checks).length+' pass='+Object.values(result.checks).filter(Boolean).length+' errors=0');
++}catch(error){
++ result.error=String(error.message).replace(/token=[^\s"']+/g,'token=[redacted]');result.pageErrors=errors;
++ fs.writeFileSync('.dsh/agent-desktop-backup/browser-failure.json',JSON.stringify(result,null,2));
++ await page.screenshot({path:'evidence/agent-desktop/live-failure.png'}).catch(()=>{});
++ console.error(result.error);process.exitCode=1;
++}finally{await context.close();await browser.close();}
+diff --git a/scripts/verify-agent-desktop.mjs b/scripts/verify-agent-desktop.mjs
+new file mode 100644
+index 0000000..5d5565b
+--- /dev/null
++++ b/scripts/verify-agent-desktop.mjs
+@@ -0,0 +1,26 @@
++import fs from 'node:fs';
++import assert from 'node:assert/strict';
++import {execFileSync} from 'node:child_process';
++import {Context} from '@deepseek-ai/cordis';
++import * as mcpClient from '@deepseek-ai/dsh-mcp-client';
++import {resolveDesktopRuntime,desktopMcpConfig} from '../plugins/naumi-enterprise/desktop-runtime.js';
++const runtime=resolveDesktopRuntime(),report={version:runtime.version,platform:runtime.platform,arch:runtime.arch,artifacts:runtime.checks};
++const envelope=JSON.parse(execFileSync(runtime.command,['status'],{encoding:'utf8',windowsHide:true}));assert.equal(envelope.ok,true);assert.equal(envelope.data.version,'1.3.1');
++report.platformStatus={platform:envelope.data.platform,permissions:envelope.data.permissions,tracing:envelope.data.tracing};
++console.log('DESKTOP_CLI version=1.3.1 checksum=pass platform='+runtime.platform+' status=ok');
++const ctx=new Context(),definitions=new Map();
++ctx.provide('tools');ctx.set('tools',{register(def){definitions.set(def.name,def);return()=>definitions.delete(def.name);}});
++try{
++ await ctx.plugin(mcpClient,{...desktopMcpConfig(runtime),failOnStartupError:true});
++ report.toolCount=definitions.size;report.toolNames=[...definitions.keys()];
++ for(const name of ['desktop_status','desktop_snapshot','desktop_click','desktop_skills_get'])assert(definitions.has('mcp__naumi_desktop__'+name));
++ const exec={signal:new AbortController().signal};
++ const status=await definitions.get('mcp__naumi_desktop__desktop_status').execute({},exec);
++ const data=status.structuredContent??JSON.parse(status.content.find(x=>x.type==='text').text);assert.equal(data.ok,true);
++ const guide=await definitions.get('mcp__naumi_desktop__desktop_skills_get').execute({name:'platform'},exec);
++ const g=guide.structuredContent??JSON.parse(guide.content.find(x=>x.type==='text').text);assert.equal(g.ok,true);assert(g.data.content.length>1000);
++ report.bridgeStatus='pass';report.platformGuide='pass';
++ console.log('DESKTOP_MCP tools='+definitions.size+' native_status=ok platform_guide=ok harness_bridge=ok');
++}finally{await ctx.fiber.dispose();}
++assert.equal(definitions.size,0);console.log('DESKTOP_DISPOSE tools_remaining=0');
++report.dispose='pass';fs.writeFileSync('evidence/agent-desktop/MCP_CHECK.json',JSON.stringify(report,null,2));
+diff --git a/tests/agent-desktop.test.mjs b/tests/agent-desktop.test.mjs
+new file mode 100644
+index 0000000..39061ae
+--- /dev/null
++++ b/tests/agent-desktop.test.mjs
+@@ -0,0 +1,32 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import path from 'node:path';
++import os from 'node:os';
++import {createHash} from 'node:crypto';
++import {resolveDesktopRuntime,desktopMcpConfig,desktopSkillConfig,AGENT_DESKTOP_VERSION} from '../plugins/naumi-enterprise/desktop-runtime.js';
++import {installAgentDesktop} from '../plugins/naumi-enterprise/agent-desktop.js';
++const digest=x=>createHash('sha256').update(x).digest('hex');
++function fake(platform='win32',arch='x64',version=AGENT_DESKTOP_VERSION){
++ const manifest=path.resolve('TEST_INSTALL','agent-desktop','package.json');const files=new Map([[manifest,JSON.stringify({version})]]);const bin=path.join(path.dirname(manifest),'bin');
++ const add=name=>{const p=path.join(bin,name),bytes=Buffer.from(name);files.set(p,bytes);files.set(p+'.sha256',digest(bytes));};
++ add(`agent-desktop-${platform}-${arch}${platform==='win32'?'.exe':''}`);
++ if(platform==='darwin')add(`agent-desktop-macos-helper-${platform}-${arch}`);
++ if(platform==='linux')add(`agent-desktop-linux-clipboard-owner-${platform}-${arch}`);
++ return {files,options:{manifestPath:manifest,platform,arch,exists:p=>files.has(p),readFile:(p,encoding)=>{if(!files.has(p))throw Error('Missing fixture '+p);const b=Buffer.from(files.get(p));return encoding?b.toString(encoding):b;}}};
++}
++test('pinned packaged executable resolves without PATH or shell',()=>{const f=fake();const r=resolveDesktopRuntime(f.options);assert(r.command.endsWith('agent-desktop-win32-x64.exe'));assert.equal(r.checks.length,1);assert.deepEqual(r.env,{});});
++test('six supported platform/architecture combinations include required helpers',()=>{for(const p of ['win32','darwin','linux'])for(const a of ['x64','arm64']){const r=resolveDesktopRuntime(fake(p,a).options);assert.equal(r.checks.length,p==='win32'?1:2);if(p==='darwin')assert(path.isAbsolute(r.env.AGENT_DESKTOP_MACOS_HELPER_PATH));}});
++test('version drift and unsupported platform fail explicitly',()=>{assert.throws(()=>resolveDesktopRuntime(fake('win32','x64','999').options),/version mismatch/);assert.throws(()=>resolveDesktopRuntime(fake('sunos').options),/Unsupported/);});
++test('missing or tampered executable and missing helper fail before spawn',()=>{for(const scenario of ['checksum','missing','helper']){const f=fake(scenario==='helper'?'linux':'win32');const key=[...f.files.keys()].find(p=>p.endsWith('.sha256'));if(scenario==='checksum')f.files.set(key,'0'.repeat(64));else if(scenario==='missing')f.files.delete(key);else f.files.delete([...f.files.keys()].find(p=>p.includes('clipboard-owner')&&!p.endsWith('.sha256')));assert.throws(()=>resolveDesktopRuntime(f.options),/checksum|Missing/);}});
++test('MCP config is stdio, stable namespace, no automatic physical input or trace',()=>{const r=resolveDesktopRuntime(fake().options),c=desktopMcpConfig(r);assert.equal(c.command,r.command);assert.equal(c.serverName,'naumi_desktop');assert.deepEqual(c.args,['mcp','--session','naumi']);assert(!c.args.some(x=>/headed|force|trace/.test(x)));assert.equal(c.reconnect.enabled,true);assert.deepEqual(c.env,{});});
++test('bundled skill provider adds one isolated root, not an override of employee skills',()=>{const c=desktopSkillConfig();assert.equal(c.providerName,'naumi-desktop');assert.equal(c.includeDefaultRoots,false);assert.equal(c.watch,false);assert.equal(c.customSkillDirs.length,1);assert(path.isAbsolute(c.customSkillDirs[0]));assert(fs.existsSync(path.join(c.customSkillDirs[0],'naumi-desktop','SKILL.md')));});
++function host(admission={peer:{principal:{kind:'owner'}}},names=['mcp__naumi_desktop__desktop_status']){
++ const plugins=[],routes=new Map(),scope={plugin:(...a)=>plugins.push(a),effect:fn=>fn(),tools:{definitions:()=>names.map(name=>({name}))},connection:{admit:()=>admission},webServer:{register:r=>{routes.set(r.path,r.handler);return()=>routes.delete(r.path);}}};
++ const ctx={inject:(names,fn)=>{assert.deepEqual(names,['tools','skills']);fn(scope);return()=>{};}};installAgentDesktop(ctx);return {plugins,routes};
++}
++async function request(handler,method='GET'){const r={headers:{},setHeader(k,v){this.headers[k]=v;},writeHead(s){this.status=s;return this;},end(b){this.body=JSON.parse(b);}};await handler({method,headers:{}},r);return r;}
++test('integration mounts only existing MCP and filesystem-skill plugins',()=>{const h=host();assert.equal(h.plugins.length,2);assert.equal(h.plugins[0][1].serverName,'naumi_desktop');assert.equal(h.plugins[1][1].providerName,'naumi-desktop');});
++test('readiness requires owner admission and never exposes paths or desktop content',async()=>{const h=host(),r=await request(h.routes.get('/naumi/desktop'));assert.equal(r.status,200);assert.equal(r.body.toolCount,1);assert(!JSON.stringify(r.body).includes(os.homedir()));for(const admission of [{rejection:401},{peer:{principal:{kind:'guest'}}}]){const s=host(admission);const a=await request(s.routes.get('/naumi/desktop'));assert([401,403].includes(a.status));}});
++test('readiness is read-only and honest while tools are not registered',async()=>{const h=host(undefined,[]);assert.equal((await request(h.routes.get('/naumi/desktop'))).status,503);assert.equal((await request(h.routes.get('/naumi/desktop'),'POST')).status,405);});
++test('root and plugin use exact dependency versions; no lifetime install downloads',()=>{for(const p of ['package.json','plugins/naumi-enterprise/package.json'])assert.equal(JSON.parse(fs.readFileSync(p)).dependencies['agent-desktop'],'1.3.1');const source=fs.readFileSync('plugins/naumi-enterprise/desktop-runtime.js','utf8');assert(!/\bfetch\s*\(|execSync\(|npx\s+-y/.test(source));assert(fs.readFileSync('plugins/naumi-enterprise/third-party/agent-desktop/LICENSE','utf8').includes('Apache License'));});
+diff --git a/tests/naumi-enterprise.test.mjs b/tests/naumi-enterprise.test.mjs
+index ec52d53..a08d65a 100644
+--- a/tests/naumi-enterprise.test.mjs
++++ b/tests/naumi-enterprise.test.mjs
+@@ -21,7 +21,7 @@ test('origin config refuses URL path, auth, non-http protocols and query',()=>{
+ function harness(admission={peer:{principal:{kind:'owner'}}}){
+   const routes=new Map(),injections=[];
+   const disposers=[];
+-  const ctx={effect:fn=>{disposers.push(fn());},connection:{admit:()=>admission},webServer:{register:r=>{routes.set(r.path,r.handler);return()=>routes.delete(r.path);},tapIndex:fn=>{ctx.index=fn;return()=>{};}},on:(name,fn)=>{injections.push(fn);return()=>{};}};
++  const ctx={inject:()=>()=>{},effect:fn=>{disposers.push(fn());},connection:{admit:()=>admission},webServer:{register:r=>{routes.set(r.path,r.handler);return()=>routes.delete(r.path);},tapIndex:fn=>{ctx.index=fn;return()=>{};}},on:(name,fn)=>{injections.push(fn);return()=>{};}};
+   apply(ctx,{collaborationOrigin:'http://127.0.0.1:3112',designOrigin:'https://47.105.59.142'});
+   return{ctx,routes,injections,disposers};
+ }

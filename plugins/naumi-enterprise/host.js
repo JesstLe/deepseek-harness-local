@@ -1,9 +1,11 @@
 import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {businessCookie,projectWorkspace,validateOrigin} from './domain.js';
+import {installAgentDesktop} from './agent-desktop.js';
 export const inject=['webServer','connection'];
 /** Supported plugin routes, index branding and an authenticated read-only business adapter. */
 export function apply(ctx,config) {
+  installAgentDesktop(ctx);
   const collaborationOrigin=validateOrigin(config.collaborationOrigin);
   const designOrigin=validateOrigin(config.designOrigin);
   const assets=new Map([['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml']]);

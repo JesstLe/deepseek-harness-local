@@ -1,0 +1,85 @@
+Naumi agent-desktop integration verification — 2026-11-16
+ROOT: E:/Workspace/deepseek-harness-local
+Changed branch/fields: host.apply -> installAgentDesktop(ctx); dependency agent-desktop=1.3.1 (root + plugin); MCP serverName=naumi_desktop, transport=stdio, args=[mcp,--session,naumi]; extra skill provider=naumi-desktop; authenticated GET /naumi/desktop.
+Unchanged: model configuration/groups (9), existing UI/layout, enterprise domain and permissions. Seven protected local files retain original SHA256. Original sources and hashes: baseline.json + original/.
+
+FOUR ARTIFACT PATHS
+MODIFIED_FILE: E:/Workspace/deepseek-harness-local/evidence/agent-desktop/MODIFIED_FILE.zip
+DIFF_FILE: E:/Workspace/deepseek-harness-local/evidence/agent-desktop/DIFF_FILE.patch
+VERIFICATION: E:/Workspace/deepseek-harness-local/evidence/agent-desktop/VERIFICATION.txt
+ROLLBACK: E:/Workspace/deepseek-harness-local/evidence/agent-desktop/ROLLBACK.sh
+
+BASELINE
+command: node scripts/verify-agent-desktop-state.mjs baseline
+input: preserved original sources + SHA256 in baseline.json; no credentials
+literal output: BASELINE agent_desktop_dependency=0 embedded_mcp=0 preserved_files=7
+exit status: 0
+original module test command (executed before modifications): node --test tests/naumi-enterprise.test.mjs tests/naumi-context-ui.test.mjs
+literal result summary:
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+exit status: 0
+full output: baseline-tests.txt
+
+MODIFIED
+command: node scripts/verify-agent-desktop-state.mjs modified
+input: current source files, installed pinned native runtime, protected local files
+literal output: MODIFIED agent_desktop=1.3.1 embedded_mcp=1 bundled_skill=1 preserved_files=7
+exit status: 0
+module test command: node --test tests/naumi-enterprise.test.mjs tests/naumi-context-ui.test.mjs tests/agent-desktop.test.mjs
+literal result summary:
+ℹ tests 36
+ℹ suites 0
+ℹ pass 36
+ℹ fail 0
+exit status: 0
+full output: modified-tests.txt
+
+native bridge command: node scripts/verify-agent-desktop.mjs
+input: actual Windows x64 binary; desktop_status {}; desktop_skills_get {"name":"platform"}
+literal output:
+DESKTOP_CLI version=1.3.1 checksum=pass platform=win32 status=ok
+DESKTOP_MCP tools=75 native_status=ok platform_guide=ok harness_bridge=ok
+DESKTOP_DISPOSE tools_remaining=0
+exit status: 0
+native binary SHA256: a7ef5e539fb97287a35eb9ed49d3803b4d6bd705bc4106eb28617229f9be679e
+report: MCP_CHECK.json
+
+live command: node scripts/verify-agent-desktop-live.mjs
+input: running local host 127.0.0.1:3080, authenticated read-only readiness and catalog calls; no generation
+literal output: DESKTOP_LIVE ready=1 tools=75 skill_visible=1 model_groups=9 unauthorized=401 write=405
+exit status: 0
+report: LIVE_CHECK.json
+service: PID 46104 at restart; HTTP 200
+
+UI command: node scripts/verify-agent-desktop-ui.mjs
+input: existing local demo session, isolated Chromium 1440x960 / 390x844; no business cookie
+literal final output: BROWSER_RESULT checks=27 pass=27 errors=0
+exit status: 0
+report: UI_REGRESSION.json
+The old UI script initially timed out at optional missing 未分组; the new module-specific script skips collapsing that optional absent group. No product UI changes were needed. All 27 checks reran, selection/draft unchanged, no generation requests.
+
+pack completeness command: npm pack --ignore-scripts --dry-run --json (cwd plugins/naumi-enterprise)
+literal result fields: "entryCount": 15, "bundled": []
+exit status: 0
+report: PACK_CHECK.json
+The separate exact npm dependency is included as vendor/agent-desktop-1.3.1.tgz in MODIFIED_FILE.zip.
+upstream integrity: sha512-5pBKkFkdB/VIAWRfqoA8lYp5/fenfxUHI15Pc4k8Nn2LmLxxo1PkAb0WLypknyOCczuIwuzFp/rZHGGawEV+hw==
+
+ROLLBACK
+command: node scripts/verify-agent-desktop-state.mjs rollback-test
+equivalent executed shell command: D:/DEV/Git/bin/bash.exe -c './evidence/agent-desktop/ROLLBACK.sh rollback-test'
+input: isolated copy .dsh/agent-desktop-backup/rollback-test, original snapshots, copied installed profile; real rollback branch spawned inside copy
+literal output: ROLLBACK originals_restored=7 desktop_disabled_in_copy=1 active_still_integrated=1
+exit status: 0
+restored behavior/status: seven source hashes restored, root no agent-desktop dependency, host no desktop autoload; new integration files removed from source and installed profile copy. Active workspace remains integrated and its hashes are unchanged.
+Real rollback (not executed on active workspace): bash evidence/agent-desktop/ROLLBACK.sh rollback
+Real branch literal output verified inside copy: ROLLBACK prior_sources_restored=1 desktop_autoload_disabled=1 private_data_untouched=1 restart_required=1
+real branch exit status inside copy: 0
+Restart Naumi after a real rollback. Runtime dependency/cache may remain inert. No private profile/session/business data is removed. Guard rejects later source edits; LF/CRLF-only Git checkout differences are accepted.
+
+DELIVERY BOUNDARY
+Actual native/runtime acceptance: Windows x64. Six OS/arch path/helper tests are fixtures, not six live desktop environments. Registration of 75 tools does not assert every command/application works. Only status/platform-guide tools were called; no real desktop click/type, no employee-business writes, no model generation. This is a verified integration/source/offline component bundle, not the full employee installer, enterprise login or server-issued API configuration.
+License: Apache-2.0, bundled LICENSE and NOTICE. Upstream binaries unmodified. No passwords, API keys, cookies, logs, desktop captures or personal configs in the delivery ZIP.

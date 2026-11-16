@@ -21,7 +21,7 @@ test('origin config refuses URL path, auth, non-http protocols and query',()=>{
 function harness(admission={peer:{principal:{kind:'owner'}}}){
   const routes=new Map(),injections=[];
   const disposers=[];
-  const ctx={effect:fn=>{disposers.push(fn());},connection:{admit:()=>admission},webServer:{register:r=>{routes.set(r.path,r.handler);return()=>routes.delete(r.path);},tapIndex:fn=>{ctx.index=fn;return()=>{};}},on:(name,fn)=>{injections.push(fn);return()=>{};}};
+  const ctx={inject:()=>()=>{},effect:fn=>{disposers.push(fn());},connection:{admit:()=>admission},webServer:{register:r=>{routes.set(r.path,r.handler);return()=>routes.delete(r.path);},tapIndex:fn=>{ctx.index=fn;return()=>{};}},on:(name,fn)=>{injections.push(fn);return()=>{};}};
   apply(ctx,{collaborationOrigin:'http://127.0.0.1:3112',designOrigin:'https://47.105.59.142'});
   return{ctx,routes,injections,disposers};
 }

@@ -4,6 +4,8 @@ Push-Location $root
 try {
     $env:DSH_HOME = Join-Path $root '.dsh'
     $env:DSH_TELEMETRY_MODE = 'DISABLED'
+    node scripts/agent-desktop.mjs version
+    if ($LASTEXITCODE) { throw 'Bundled desktop runtime verification failed; run npm ci before installing the profile' }
     node scripts/build-naumi-layout.mjs
     if ($LASTEXITCODE) { throw 'Layout preparation failed' }
     node node_modules/@deepseek-ai/dsh/lib/bin.js web --dump-config | Out-Null
