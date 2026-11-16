@@ -4,6 +4,7 @@ import os from 'node:os';
 import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import {defineTool} from '@deepseek-ai/dsh-tools';
+import {installBotTasks} from './bot-tasks.js';
 
 const name=z.string().trim().min(1).max(80).refine(v=>!/[\u0000-\u001f\u007f]/u.test(v));
 const id=z.string().min(1).max(200),revision=z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -41,7 +42,15 @@ export class BotDirectory {
     const fields=z.object({name,kind:z.enum(['agent','team']),purpose:z.string().trim().min(1).max(4000)}).strict().parse(input);
     if(!cwd||!path.isAbsolute(cwd))fail('BOT_WORKSPACE_REQUIRED');
     return this.transact(next=>{
-      if(next.bots.some(b=>b.sessionIds.includes(sessionId)))fail('BOT_SESSION_ALREADY_BOUND');
+      const existing=next.bots.find(b=>b.sessionIds.includes(sessionId));
+      if(existing){
+        if(existing.status==='archived')fail('BOT_ARCHIVED');
+        // A lost tool reply/retry must return the durable identity, not create a second Bot.
+        if(Object.entries(fields).every(([key,value])=>existing[key]===value)
+          &&path.resolve(cwd).toLocaleLowerCase()===path.resolve(existing.cwd).toLocaleLowerCase()
+          &&(agentPreset??undefined)===existing.agentPreset)return {bot:existing,unchanged:true};
+        fail('BOT_SESSION_ALREADY_BOUND');
+      }
       if(next.bots.some(b=>b.status==='active'&&b.name.toLocaleLowerCase()===fields.name.toLocaleLowerCase()))fail('BOT_NAME_EXISTS');
       const time=this.now(),bot=botSchema.parse({id:'bot-'+this.uuid(),...fields,status:'active',revision:1,cwd,...(agentPreset?{agentPreset}:{}),homeSessionId:sessionId,sessionIds:[sessionId],createdAt:time,updatedAt:time});next.bots.push(bot);return {bot};
     });
@@ -77,21 +86,22 @@ export function createBotTools(ctx,directory){
   const output={schema:{type:'json'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]};
   return [
     defineTool({name:'bot_directory',description:'Read the local owner\'s persistent Bot directory and this task\'s Bot. A Bot is a reusable agent or team identity across task Sessions, not a conversation title.',parameters:{},output,execute:(_args,exec)=>{const m=membership(exec);return {...directory.list(),currentBotId:directory.forSession(m.root.id)?.id??null};}}),
-    defineTool({name:'bot_create',description:'Create a persistent Bot for this root task when the user asks to establish a reusable agent or team. The Lead autonomously chooses its name, kind and purpose from the real work, without fixed employee templates. Do not create Bots for every ordinary conversation or temporary teammate.',parameters:{name:{type:'string',required:true},kind:{type:'string',enum:['agent','team'],required:true},purpose:{type:'string',required:true,description:'The reusable responsibility agreed with the user, not claims of unavailable skills or permissions.'}},output,execute:(args,exec)=>{const root=lead(exec);return directory.create({sessionId:root.id,cwd:root.session.header.cwd,agentPreset:ctx.agentPresets?.presetForSession(root.session)??undefined},args);}}),
+    defineTool({name:'bot_create',description:'Create and persist a reusable Bot immediately from the user request. The Lead autonomously chooses its name, kind and purpose; no source search, shell commands, implementation task or fixed employee templates are needed. Identical retries for the same task return the same Bot ID. Success saves identity and binds this task; it does not provision external accounts or start business operations. Do not create Bots for ordinary conversations or temporary teammates.',parameters:{name:{type:'string',required:true},kind:{type:'string',enum:['agent','team'],required:true},purpose:{type:'string',required:true,description:'The reusable responsibility agreed with the user, not claims of unavailable skills or permissions.'}},output,execute:(args,exec)=>{const root=lead(exec);exec.signal?.throwIfAborted();return directory.create({sessionId:root.id,cwd:root.session.header.cwd,agentPreset:ctx.agentPresets.presetForSession(root.session)??undefined},args);}}),
     defineTool({name:'bot_update',description:'Update this task\'s persistent Bot name, responsibility or lifecycle. Lead only; use the Bot revision from bot_directory. Archiving hides the directory entry and prevents new task bindings; it never stops or deletes existing Sessions.',parameters:{expectedRevision:{type:'integer',required:true},name:{type:'string'},purpose:{type:'string'},status:{type:'string',enum:['active','archived']}},output,execute:(args,exec)=>directory.update(lead(exec).id,args)}),
     defineTool({name:'bot_use',description:'Associate this root task with an existing active Bot at the user\'s request. Use bot_directory first. This task must use the Bot\'s working directory and must not already belong to another Bot. No model, permissions or task contents are changed.',parameters:{botId:{type:'string',required:true},expectedRevision:{type:'integer',required:true}},output,execute:(args,exec)=>{const root=lead(exec);return directory.bind(args.botId,root.id,args.expectedRevision,root.session.header.cwd);}}),
   ];
 }
 
 export function installBots(ctx,{directory}={}){
-  return ctx.inject(['agents','agentTeams','sessions','sessionPersistence','tools','systemPrompt'],scope=>{
+  return ctx.inject(['agents','agentTeams','agentPresets','sessions','sessionPersistence','tools','systemPrompt'],scope=>{
     const store=directory??new BotDirectory(path.join(process.env.DSH_HOME??path.join(os.homedir(),'.dsh'),'naumi','bots.json'));
+    const taskRuntime=installBotTasks(scope,store);
     const installed=new Map(),streams=new Set();
     const install=agent=>{
       if(installed.has(agent)||!scope.agentTeams.tryMembership(agent))return;const disposers=[];
       try{
         for(const tool of createBotTools(scope,store))disposers.push(agent.ctx.tools.register(tool));
-        disposers.push(agent.ctx.systemPrompt.section({name:'naumi:bots',order:agent.ctx.systemPrompt.getSectionOrder('TEAM_POLICY')+2,text:'Naumi has Thread and Bot navigation modes over the same Session engine. Only establish a persistent Bot when the user requests a reusable agent/team; use bot_create and choose its name and responsibilities yourself from that request. Never promote every temporary teammate or ordinary chat into a Bot. Use bot_directory / bot_update / bot_use to manage the real directory. The name is not a model tool address. Starting a new task for an existing Bot creates another Session linked to the same Bot ID. Do not claim cross-session memory beyond the Bot purpose and the actually available linked resources/history.'}));
+        disposers.push(agent.ctx.systemPrompt.section({name:'naumi:bots',order:agent.ctx.systemPrompt.getSectionOrder('TEAM_POLICY')+2,text:'Naumi has Thread and Bot navigation modes over the same Session engine. Only establish a persistent Bot when the user requests a reusable agent/team; use bot_create directly and choose its name and responsibilities yourself from that request. Creating a Bot is an existing product operation, not a software development task: do not search source code, run shell commands or edit internal files to create it. If creation fails, check bot_directory once for a saved identity, report the actual failure and stop this creation attempt; do not improvise a file-based replacement. A successful bot_create completes identity creation; report it concisely and wait for the user task, without additional setup interviews or claiming that external integrations were provisioned. Never promote every temporary teammate or ordinary chat into a Bot. Use bot_directory / bot_update / bot_use to manage the real directory. The name is not a model tool address. Starting a new task for an existing Bot creates another Session linked to the same Bot ID. Do not claim cross-session memory beyond the Bot purpose and the actually available linked resources/history.'}));
         disposers.push(agent.ctx.systemPrompt.context({name:'naumi:bot-identity',order:agent.ctx.systemPrompt.getContextOrder('TEAM_IDENTITY')+1,required:true,text:()=>{try{const m=scope.agentTeams.membership(agent),bot=store.forSession(m.root.id);return bot?`Persistent Naumi Bot: ${JSON.stringify({id:bot.id,name:bot.name,kind:bot.kind,purpose:bot.purpose,status:bot.status})}\nThis is the identity for this task; preserve its stable ID across tasks. Use bot_update for name/purpose changes, not a conversation-title rename.`:'';}catch{return '';}}}));
         installed.set(agent,()=>{for(const dispose of disposers.reverse())dispose();});
       }catch(error){for(const dispose of disposers.reverse())dispose();throw error;}
@@ -100,6 +110,7 @@ export function installBots(ctx,{directory}={}){
     for(const agent of scope.agents.list())install(agent);
     const admit=(req,res)=>{
       res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');
+      res.setHeader('X-Naumi-Bots-Contract','2');
       const admission=scope.connection.admit(req);if('rejection'in admission){res.writeHead(admission.rejection).end();return false;}
       if(admission.peer.principal.kind!=='owner'){res.writeHead(403).end();return false;}return true;
     };
@@ -126,6 +137,6 @@ export function installBots(ctx,{directory}={}){
       const heartbeat=setInterval(()=>{if(!res.destroyed)res.write(': keepalive\n\n');},25000);heartbeat.unref?.();
       res.on('close',()=>{clearInterval(heartbeat);unsubscribe();streams.delete(res);});
     }}));
-    scope.effect(()=>async()=>{for(const dispose of installed.values())dispose();installed.clear();for(const res of streams)res.end();streams.clear();await store.close();});
+    scope.effect(()=>async()=>{await taskRuntime.dispose();for(const dispose of installed.values())dispose();installed.clear();for(const res of streams)res.end();streams.clear();await store.close();});
   });
 }

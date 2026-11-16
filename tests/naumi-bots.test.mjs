@@ -11,7 +11,7 @@ import {navigationMode,botSessions,botTarget,botSelected,currentSessionId,botAct
 function fixture(options={}){
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-bots-')),file=path.join(dir,'bots.json');let counter=0;
   const store=new BotDirectory(file,{uuid:()=>String(++counter),now:()=>new Date('2026-11-16T09:00:00Z').toISOString(),...options});
-  const root={id:'session-1',session:{header:{cwd:dir}}},member={id:'member-1'},other={id:'other'},ctx={agentTeams:{membership:agent=>agent===root?{root,id:root.id,role:'lead'}:agent===member?{root,id:root.id,role:'teammate'}:(()=>{throw Error('INVALID_AGENT');})()}};
+  const root={id:'session-1',session:{header:{cwd:dir}}},member={id:'member-1'},other={id:'other'},ctx={agentPresets:{presetForSession:()=>null},agentTeams:{membership:agent=>agent===root?{root,id:root.id,role:'lead'}:agent===member?{root,id:root.id,role:'teammate'}:(()=>{throw Error('INVALID_AGENT');})()}};
   const cleanup=async()=>{await store.close();assert(path.resolve(dir).startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(dir,{recursive:true,force:true});};
   const create=(name='Agent 自主选择的团队名')=>store.create({sessionId:root.id,cwd:dir},{name,kind:'team',purpose:'根据用户的实际需求整理资料与复核结果'});
   return {dir,file,store,root,member,other,ctx,cleanup,create};
@@ -32,7 +32,7 @@ test('parallel updates are serialized with one CAS conflict',async()=>{
   const f=fixture();try{await f.create();const values=await Promise.allSettled([f.store.update('session-1',{name:'甲',expectedRevision:1}),f.store.update('session-1',{name:'乙',expectedRevision:1})]);assert.equal(values.filter(v=>v.status==='fulfilled').length,1);assert.match(values.find(v=>v.status==='rejected').reason.message,/BOT_CONFLICT/);}finally{await f.cleanup();}
 });
 test('name, purpose, kind, revision and root binding validation have no partial writes',async()=>{
-  const f=fixture();try{assert.throws(()=>f.store.create({sessionId:'s',cwd:f.dir},{name:'',kind:'team',purpose:'task'}));assert.throws(()=>f.store.create({sessionId:'s',cwd:f.dir},{name:'Name',kind:'bad',purpose:'task'}));const bot=await f.create();await assert.rejects(f.create(),/BOT_SESSION_ALREADY_BOUND/);await assert.rejects(f.store.bind(bot.id,'new',1,path.dirname(f.dir)),/BOT_WORKSPACE_MISMATCH/);await assert.rejects(f.store.update('session-1',{expectedRevision:99,name:'New'}),/BOT_CONFLICT/);assert.equal(f.store.list().revision,1);}finally{await f.cleanup();}
+  const f=fixture();try{assert.throws(()=>f.store.create({sessionId:'s',cwd:f.dir},{name:'',kind:'team',purpose:'task'}));assert.throws(()=>f.store.create({sessionId:'s',cwd:f.dir},{name:'Name',kind:'bad',purpose:'task'}));const bot=await f.create();await assert.rejects(f.create('不同的名称'),/BOT_SESSION_ALREADY_BOUND/);await assert.rejects(f.store.bind(bot.id,'new',1,path.dirname(f.dir)),/BOT_WORKSPACE_MISMATCH/);await assert.rejects(f.store.update('session-1',{expectedRevision:99,name:'New'}),/BOT_CONFLICT/);assert.equal(f.store.list().revision,1);}finally{await f.cleanup();}
 });
 test('a Session cannot be stolen by another Bot; duplicate active names are rejected',async()=>{
   const f=fixture();try{const first=await f.create();await assert.rejects(f.store.create({sessionId:'s2',cwd:f.dir},{name:first.name,kind:'agent',purpose:'task'}),/BOT_NAME_EXISTS/);const second=await f.store.create({sessionId:'s2',cwd:f.dir},{name:'另一位智能体',kind:'agent',purpose:'不同职责'});await assert.rejects(f.store.bind(first.id,'s2',1,f.dir),/BOT_SESSION_ALREADY_BOUND/);assert.equal(f.store.forSession('s2').id,second.id);}finally{await f.cleanup();}
@@ -71,7 +71,7 @@ test('new task uses original workspace/preset creation only, without model, prom
 
 async function routesFixture(){
   const f=fixture(),routes=new Map(),effects=[];
-  const scope={...f.ctx,agentTeams:{...f.ctx.agentTeams,tryMembership:()=>undefined},agents:{list:()=>[]},sessions:{get:id=>({header:{id,cwd:f.dir,...(id==='child'?{origin:'subagent'}:{})}})},sessionPersistence:{stat:async()=>undefined},connection:{admit:()=>({peer:{principal:{kind:'owner'}}})},on:()=>{},effect:fn=>effects.push(fn()),webServer:{register:route=>{routes.set(route.path,route.handler);return()=>{};}}};
+  const scope={...f.ctx,inject:()=>({dispose:async()=>{}}),agentTeams:{...f.ctx.agentTeams,tryMembership:()=>undefined},agents:{list:()=>[]},sessions:{get:id=>({header:{id,cwd:f.dir,...(id==='child'?{origin:'subagent'}:{})}})},sessionPersistence:{stat:async()=>undefined},connection:{admit:()=>({peer:{principal:{kind:'owner'}}})},on:()=>{},effect:fn=>effects.push(fn()),webServer:{register:route=>{routes.set(route.path,route.handler);return()=>{};}}};
   installBots({inject:(_deps,fn)=>fn(scope)},{directory:f.store});
   const call=async({method='GET',body,headers={},admission}={})=>{
     if(admission)scope.connection.admit=()=>admission;
@@ -82,7 +82,7 @@ async function routesFixture(){
   return {...f,scope,routes,call};
 }
 test('directory HTTP is owner-only and forbids undeclared writes and cross-origin binding',async()=>{
-  const f=await routesFixture();try{assert.equal((await f.call()).status,200);assert.equal((await f.call({method:'DELETE'})).status,405);assert.equal((await f.call({method:'POST',body:{}})).status,403);assert.equal((await f.call({method:'POST',body:{},headers:{'x-naumi-bots':'1',origin:'https://foreign'}})).status,403);assert.equal((await f.call({admission:{peer:{principal:{kind:'guest'}}}})).status,403);assert.equal((await f.call({admission:{rejection:401}})).status,401);}finally{await f.cleanup();}
+  const f=await routesFixture();try{const response=await f.call();assert.equal(response.status,200);assert.equal(response.headers['X-Naumi-Bots-Contract'],'2');assert.equal((await f.call({method:'DELETE'})).status,405);assert.equal((await f.call({method:'POST',body:{}})).status,403);assert.equal((await f.call({method:'POST',body:{},headers:{'x-naumi-bots':'1',origin:'https://foreign'}})).status,403);assert.equal((await f.call({admission:{peer:{principal:{kind:'guest'}}}})).status,403);assert.equal((await f.call({admission:{rejection:401}})).status,401);}finally{await f.cleanup();}
 });
 test('browser can bind a real root task, but cannot rename Bots or bind subagents',async()=>{
   const f=await routesFixture();try{const bot=await f.create(),headers={'x-naumi-bots':'1',origin:'http://127.0.0.1:3080'};

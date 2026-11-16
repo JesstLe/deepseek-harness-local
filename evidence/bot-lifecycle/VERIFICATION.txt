@@ -1,0 +1,33 @@
+Naumi Bot creation dependency fix — historical stage completed before cross-Bot routing.
+Branch: fix/naumi-bot-lifecycle-20261116
+Changed: installBots injects agentPresets; bot_create reads the real preset; identical creation retries reuse the same persisted Bot; cancellation and bounded creation instructions added.
+Original SHA256: 9dd3df7c9f179afc890a52d5d6b256b7f1d6a706fa30e86adbfeb307ff62d45a
+Modified SHA256: ee5ca3e0c5139b31dea1a671a9b57a91e1ae7095f275899a92664f17c24dce0d
+
+MODIFIED_FILE=E:/Workspace/naumi-bot-lifecycle-fix/evidence/bot-lifecycle/MODIFIED_FILE.js
+DIFF_FILE=E:/Workspace/naumi-bot-lifecycle-fix/evidence/bot-lifecycle/DIFF_FILE.patch
+VERIFICATION=E:/Workspace/naumi-bot-lifecycle-fix/evidence/bot-lifecycle/VERIFICATION.txt
+ROLLBACK=E:/Workspace/naumi-bot-lifecycle-fix/evidence/bot-lifecycle/ROLLBACK.sh
+Working directory: E:/Workspace/naumi-bot-lifecycle-fix
+Shared input: {"name":"运营助手","kind":"agent","purpose":"运营规划与复盘"}
+
+BASELINE command: node scripts/verify-bot-lifecycle.mjs evidence/bot-lifecycle/original/bots.js baseline
+Literal output: BASELINE reproduced=1 bots=0 error=cannot get property "agentPresets" without inject
+Exit: 0 (expected failure reproduced).
+
+MODIFIED command: node scripts/verify-bot-lifecycle.mjs evidence/bot-lifecycle/MODIFIED_FILE.js modified
+Literal output: MODIFIED created=1 preset=standard retry=same-id revision=1 persistence=PASS local-under-3s=PASS
+Exit: 0.
+
+ROLLBACK restore: NAUMI_NODE_EXE=D:/DEV/NodeJS/node.exe; executable evidence/bot-lifecycle/ROLLBACK.sh E:/Workspace/naumi-bot-lifecycle-fix/evidence/bot-lifecycle/rollback-copy/bots.js (Git Bash).
+Literal output: ROLLBACK_COPY restored=1 original_hash=PASS behavior=legacy module_restart_required=1
+ROLLBACK verification command: node scripts/verify-bot-lifecycle.mjs evidence/bot-lifecycle/rollback-copy/bots.js rollback
+Literal output: ROLLBACK reproduced=1 bots=0 error=cannot get property "agentPresets" without inject
+Exit: 0 for both commands.
+Restored behavior/status: original dependency exception and zero saved Bots, on the separate rollback copy only. MODIFIED_FILE remains fixed.
+
+The actual failing session called bot_create after 7100ms; it returned the missing-inject error after 4ms. A retry failed again. The whole old turn made 33 tool calls over 309360ms.
+62 module tests passed at this stage. 25 local operations had p50=2.870ms, p95=5.324ms, max=6.955ms (no model calls).
+Deployment changed only bots.js and loaded X-Naumi-Bots-Contract: 2 after an idle-service restart.
+Later live user operations created 运营助手 / 自媒体内容运营 / 项目主管 in roughly 2.7 / 3.6 / 6.1 seconds to persistence; real tool execution was 18 / 11 / 6ms respectively.
+Cross-Bot communication now builds on this fixed module; its separate evidence/rollback lives in ../bot-communication. Rolling back communication retains this creation fix.

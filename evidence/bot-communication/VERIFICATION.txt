@@ -1,0 +1,93 @@
+Naumi Bot-to-Bot task communication — 2026-11-16
+
+BRANCH: fix/naumi-bot-lifecycle-20261116
+BASE COMMIT: 7ec7fe95eeb2b9c3b6469fbe2ac0302652c41996
+CHANGED BRANCH/FIELDS:
+  installBots.taskRuntime; package.json.files / peerDependencies;
+  bot_dispatch, bot_task_list, bot_task_get, bot_task_wait, bot_task_reply,
+  bot_task_cancel, bot_task_retry;
+  task.status / revision / attempt / messageId / targetBotId / targetSessionId;
+  durable outbox.delivered / attempt / taskStatus.
+  Team membership implementation, UI, global model defaults and login configuration are unchanged.
+
+ARTIFACT PATHS:
+MODIFIED_FILE=E:/Workspace/naumi-bot-lifecycle-fix/evidence/bot-communication/MODIFIED_FILE.zip
+DIFF_FILE=E:/Workspace/naumi-bot-lifecycle-fix/evidence/bot-communication/DIFF_FILE.patch
+VERIFICATION=E:/Workspace/naumi-bot-lifecycle-fix/evidence/bot-communication/VERIFICATION.txt
+ROLLBACK=E:/Workspace/naumi-bot-lifecycle-fix/evidence/bot-communication/ROLLBACK.sh
+Original/modified SHA256 for every runtime file: E:/Workspace/naumi-bot-lifecycle-fix/evidence/bot-communication/hashes.json
+Original bots.js SHA256: ee5ca3e0c5139b31dea1a671a9b57a91e1ae7095f275899a92664f17c24dce0d
+Original package.json SHA256: 35d5a0c13659abced63b58e952f24d395c3d9cf76411c93b0a217878c406060c
+
+All relative commands below run in:
+E:/Workspace/naumi-bot-lifecycle-fix
+
+BASELINE
+Command: node scripts/verify-bot-communication.mjs baseline
+Input: original/bots.js through a real Cordis container; bot_create({"name":"验证 Bot","kind":"agent","purpose":"验证身份创建仍有效"}). Inspect registered tools.
+Literal output:
+BASELINE directory_tools=4 create=PASS bot_dispatch=ABSENT result_return=ABSENT
+Exit status: 0 (the missing cross-Bot capability was reproduced; existing identity creation works).
+
+MODIFIED
+Command: node scripts/verify-bot-communication.mjs modified
+Input: POST /naumi/bot-tasks with {"action":"dispatch","sourceSessionId":"host-source","targetBotId":"bot-2","task":"返回验证文本","idempotencyKey":"verification-1"}; repeat the same request; settle target with "真实会话格式交付".
+Environment: real Cordis Context, real Session schemas, real atomic files and loopback HTTP; deterministic Agent driver adapters, not a paid model run.
+Literal output:
+MODIFIED dispatch=PASS target_bot=reused session=linked result_return=PASS duplicate_delivery=0
+Exit status: 0.
+
+ROLLBACK
+Command: pwsh -NoProfile -File scripts/verify-bot-communication-rollback.ps1
+Input: a separate copy of the six modified runtime files at E:/Workspace/naumi-bot-lifecycle-fix/evidence/bot-communication/rollback-copy; executable ROLLBACK.sh invokes a SHA256-guarded per-file restore.
+Literal output:
+ROLLBACK_COPY restored=2 removed=4 hashes=PASS bot_creation_fix=retained
+ROLLBACK directory_tools=4 create=PASS bot_dispatch=ABSENT result_return=ABSENT
+Exit status: 0.
+Restored behavior/status: original 4 directory tools and functioning Bot identity creation; cross-Bot dispatch and automatic result return absent, exactly as before this module.
+Rollback was tested only on the separate copy. Live installation and MODIFIED_FILE.zip remain modified. No Bot directory, task ledger, Session record or account credential is deleted. A live rollback requires an idle service and a restart to load restored code.
+
+CONCENTRATED MODULE TESTS
+Command: node --test tests/naumi-bots.test.mjs tests/naumi-bot-runtime.test.mjs tests/naumi-bot-communication.test.mjs tests/naumi-bot-http-runtime.test.mjs tests/naumi-team-panel.test.mjs tests/naumi-enterprise.test.mjs
+Result: tests 90; pass 90; fail 0; cancelled 0; skipped 0; exit status 0.
+Coverage: exact caller/Lead identity; owner/origin checks; preservation of target preset/model/permission;
+concurrent idempotency; distinct root task binding; automatic result relay; feedback/progress;
+CAS cancel/retry; per-Bot scheduling; cycle prevention; atomic write failure; corrupt ledger;
+restart and outbox recovery; stale-attempt messages; interrupted work without automatic replay;
+real Session turn/message matching; native Team and enterprise regression.
+
+LIVE HARNESS ROUND TRIP
+Command: node scripts/verify-bot-communication-live.mjs
+Input: existing 项目主管 -> existing 自媒体内容运营; fixed-text communication test only, no business actions or external tool use.
+Literal output:
+LIVE dispatch=PASS target_bot=reused worker_completed=1 result_return=PASS supervisor_ack=PASS duplicate_tasks=0
+Exit status: 0.
+Real persisted worker result: NAUMI_BOT_LINK_OK_20261116
+Trace: source received agent-message/relay from the exact target Session; source final answer contains the marker; target model is preserved; no temporary teammate; one task and one result receipt.
+Evidence: LIVE_VERIFICATION.json and LIVE_TRACE.json.
+
+LIVE NATURAL-LANGUAGE ROUTING
+Command: node scripts/verify-bot-routing-live.mjs
+Input: ask 项目主管 to have the already-existing 自媒体内容运营 Bot return NAUMI_AGENT_ROUTING_OK_20261116, without creating a substitute Bot/teammate or performing business operations.
+Observed actual tools: bot_directory -> bot_dispatch -> bot_task_wait.
+Literal output:
+LIVE_ROUTING supervisor_bot_dispatch=PASS existing_target=PASS replacement_teammates=0 final_return=PASS test_threads_archived=2
+Exit status: 0.
+Observed start: 2026-11-16T09:47:52.248Z; final confirmation: 2026-11-16T09:47:59.759Z.
+This single fixed-text scenario took about 8 seconds; it is not a bound for arbitrary work/model latency.
+Both live scenarios preserve the same three Bot IDs. Four dedicated test Sessions were archived after becoming idle (stopActivity=false), with logs retained.
+
+DEPLOYMENT / PACKAGE
+Only bots.js, package.json, bot-tasks.js, bot-task-store.js, bot-task-service.js and bot-task-runtime.js changed in the running plugin. Inventory increased from 36 to 40 files; all other source hashes match the pre-deployment inventory.
+The service was restarted only after the session API reported running=0. /naumi/bot-tasks returned HTTP 200 and X-Naumi-Bot-Router: 1.
+Current local implementation is active. No desktop installer EXE was rebuilt in this task.
+Command: node scripts/package-bot-communication.mjs
+Output: PACKAGE diff_apply=PASS files=6 original_hashes=PASS modified_hashes=PASS
+Exit status: 0.
+ZIP reopened: ZIP_VERIFY files=6 hashes=PASS
+npm pack --dry-run: PACK new_modules=4 included=PASS
+
+COMPLETION
+Existing-Bot addressing, durable task dispatch, executor wakeup, result relay, supervisor continuation,
+explicit lifecycle controls, recovery and real model-selected routing are verified.
+No new cross-Bot dashboard was added; existing Bot task history and conversation/tool output remain the presentation surfaces.
