@@ -6,9 +6,8 @@ const browser={
   release:lease=>ipcRenderer.invoke('naumi:browser-release',lease),
   onOpenRequested:(lease,listener)=>subscribe('naumi:browser-open',value=>{if(value?.lease===lease)listener(value.url);})
 };
-contextBridge.exposeInMainWorld('dshDesktop',{protocolVersion:1,browser});
 contextBridge.exposeInMainWorld('naumiDesktop',{
-  version:1,engine:'chromium',
+  version:1,protocolVersion:1,browser,engine:'chromium',
   bindBrowser:value=>ipcRenderer.invoke('naumi:browser-bind',value),
   onBrowserIssue:listener=>subscribe('naumi:browser-issue',listener),
   onToolRequest:listener=>subscribe('naumi:browser-tool-request',listener),

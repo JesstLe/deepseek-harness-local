@@ -2,7 +2,7 @@ import {BrowserScheduler,browserPoint} from './browser-scheduler.js';
 import {installNativeBrowserUI} from './browser-native-client.js';
 /** Ego page presentation inside the native Harness docking system. */
 export function installBrowserUI(ctx,React,Icon){
-  if(window.naumiDesktop?.version===1&&window.dshDesktop?.browser)return installNativeBrowserUI(ctx,React,Icon);
+  if(window.naumiDesktop?.version===1&&window.naumiDesktop?.browser)return installNativeBrowserUI(ctx,React,Icon);
   const {createElement:h,useState,useEffect,useRef}=React,id='@naumi/ego-browser';
   const disposers=[];
   function Browser({sessionId,useTabInfo}){

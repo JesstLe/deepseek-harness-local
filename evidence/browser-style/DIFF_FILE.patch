@@ -1,0 +1,260 @@
+diff --git a/.gitattributes b/.gitattributes
+index 6f2fbb1..d883fae 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -23,6 +23,11 @@ plugins/naumi-ui-layout/UPSTREAM.json text eol=lf
+ /scripts/build-naumi-browser.mjs text eol=lf
+ /scripts/sync-naumi.mjs text eol=lf
+ /scripts/setup-naumi.ps1 text eol=lf
++/evidence/browser-style/** -text whitespace=cr-at-eol
++/tests/naumi-browser-style.test.mjs text eol=lf
++/scripts/verify-browser-style-recovery.mjs text eol=lf
++/docs/implementation/NAUMI_DESKTOP_CHROMIUM.md text eol=lf
++/docs/implementation/BROWSER_STYLE_RECOVERY.md text eol=lf
+ /evidence/deployment.original.json -text whitespace=cr-at-eol
+ /evidence/rollback-test.json -text whitespace=cr-at-eol
+ /evidence/ccswitch/ORIGINAL.yml -text whitespace=cr-at-eol
+diff --git a/desktop/scripts/verify-browser-style.mjs b/desktop/scripts/verify-browser-style.mjs
+new file mode 100644
+index 0000000..fd8eac4
+--- /dev/null
++++ b/desktop/scripts/verify-browser-style.mjs
+@@ -0,0 +1,55 @@
++import {_electron as electron} from '../node_modules/playwright/index.mjs';
++import fs from 'node:fs';
++import path from 'node:path';
++import net from 'node:net';
++import assert from 'node:assert/strict';
++import {fileURLToPath} from 'node:url';
++const root=fileURLToPath(new URL('../..',import.meta.url)),mode=process.argv[2];
++assert(['baseline','modified'].includes(mode));
++const evidence=path.join(root,'evidence/browser-style');fs.mkdirSync(evidence,{recursive:true});
++const bundle=fs.readFileSync(path.join(root,'plugins/naumi-sidebar-browser/client.js'),'utf8'),styleInjection=bundle.slice(bundle.indexOf('const css ='),bundle.indexOf('var Browser_module_css_default'));
++const reserve=net.createServer();await new Promise(r=>reserve.listen(0,'127.0.0.1',r));const port=reserve.address().port;await new Promise(r=>reserve.close(r));
++const env={...process.env,NAUMI_ROOT:root,NAUMI_DSH_HOME:path.join(root,'.dsh/desktop-test/harness'),NAUMI_HOST_URL:`http://127.0.0.1:${port}`,NAUMI_USER_DATA:path.join(root,`.dsh/style-test-${mode}-${Date.now()}`),NAUMI_TEST:'1',NAUMI_TEST_HIDDEN:'1'};delete env.ELECTRON_RUN_AS_NODE;
++const app=await electron.launch({args:[path.join(root,'desktop')],env,timeout:90000});
++const errors=[];let page;
++const measure=()=>page.locator('.SB_kFW_root:visible').last().evaluate(root=>{
++ const toolbar=root.querySelector('form'),input=toolbar.querySelector('input'),rect=e=>{const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom,right:r.right};};
++ return {root:rect(root),toolbar:rect(toolbar),input:rect(input),toolbarDisplay:getComputedStyle(toolbar).display,rootDisplay:getComputedStyle(root).display,buttons:[...toolbar.querySelectorAll('button')].filter(e=>e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden').map(rect),owners:[...document.querySelectorAll('style[data-plugin]')].filter(e=>e.textContent.includes('.SB_kFW_toolbar')).map(e=>({owner:e.dataset.plugin,id:e.dataset.pluginCss}))};
++});
++try{
++ page=await app.firstWindow();page.on('pageerror',e=>errors.push(e.message));
++ await page.waitForURL(env.NAUMI_HOST_URL+'/**',{timeout:120000});
++ await page.addLocatorHandler(page.getByRole('dialog').filter({hasText:'开始使用'}),async dialog=>dialog.getByRole('button',{name:'关闭',exact:true}).click());
++ await page.getByRole('button',{name:'AI 协作',exact:true}).click();
++ await page.locator('button[aria-label="打开右侧边栏"],button[aria-label="收起右侧边栏"]').first().waitFor();
++ const toggle=page.getByRole('button',{name:'打开右侧边栏',exact:true});if(await toggle.isVisible())await toggle.click();
++ await page.getByText('浏览器',{exact:true}).last().click();
++ await page.getByRole('textbox',{name:'输入 HTTP(S) 地址',exact:true}).waitFor();
++ const before=await measure();
++ // Same disposal operation as dsh-client-modules removeOwnedStyles(id).
++ await page.evaluate(()=>{for(const el of document.querySelectorAll('style[data-plugin]'))if(el.getAttribute('data-plugin')==='@deepseek-ai/dsh-client-ui-sidebar-browser')el.remove();});
++ const after=await measure(),cases=[];
++ if(mode==='baseline'){
++   assert(before.owners.some(s=>s.owner==='@deepseek-ai/dsh-client-ui-sidebar-browser'));
++   assert.equal(after.toolbarDisplay,'block');assert.equal(after.owners.length,0);
++   console.log('BASELINE cleanup=upstream toolbar=block owned_styles=0 defect_reproduced=1');
++ }else{
++   assert.equal(after.toolbarDisplay,'flex');assert.equal(after.owners.length,1);assert.equal(after.owners[0].owner,'@naumi/dsh-sidebar-browser');
++   assert.equal(after.owners[0].id,'@naumi/dsh-sidebar-browser/Browser.module.css');
++   await page.getByRole('button',{name:'收起右侧边栏',exact:true}).click();await page.getByRole('button',{name:'打开右侧边栏',exact:true}).click();
++   assert.equal((await measure()).toolbarDisplay,'flex');
++   for(const width of [320,550,800]){
++     await page.locator('.naumi-native-browser:visible').last().evaluate((e,width)=>{e.style.cssText=`position:fixed;left:0;top:0;width:${width}px;height:380px;z-index:999;`;},width);
++     const s=await measure();assert.equal(s.toolbarDisplay,'flex');assert(s.input.width>100);assert(s.toolbar.height<=50);assert(s.buttons.every(b=>b.y>=s.toolbar.y&&b.bottom<=s.toolbar.bottom));assert(s.input.right<=s.toolbar.right);cases.push({width,inputWidth:s.input.width,singleRow:true});
++   }
++   // A Naumi HMR dispose/re-materialize must recreate exactly its own style.
++   await page.evaluate(code=>{for(const e of document.querySelectorAll('style[data-plugin]'))if(e.dataset.plugin==='@naumi/dsh-sidebar-browser')e.remove();new Function(code)();},styleInjection);
++   assert.equal((await measure()).owners.length,1);assert.equal((await measure()).toolbarDisplay,'flex');
++   console.log('MODIFIED cleanup=upstream toolbar=flex owned_styles=1 widths=3 hmr=PASS');
++ }
++ await page.locator('.naumi-native-browser:visible').last().evaluate(e=>{e.style.cssText='position:fixed;left:0;top:0;width:550px;height:380px;z-index:999;';});
++ await page.locator('.naumi-native-browser:visible').last().screenshot({path:path.join(evidence,mode+'.png')});
++ fs.writeFileSync(path.join(evidence,mode+'.json'),JSON.stringify({before,after,cases,errors},null,2)+'\n');
++ assert.deepEqual(errors,[]);
++}catch(error){if(page){console.error('STYLE_TEST_UI '+(await page.locator('body').innerText()).slice(-1800));}throw error;}
++finally{await app.close();}
+diff --git a/desktop/tests/policy.test.cjs b/desktop/tests/policy.test.cjs
+index 3ea6ad6..2f171a9 100644
+--- a/desktop/tests/policy.test.cjs
++++ b/desktop/tests/policy.test.cjs
+@@ -5,4 +5,4 @@ test('browser navigation never enters the host or executable schemes',()=>{for(c
+ test('bindings require explicit scope and visibility',()=>{assert.throws(()=>binding({lease:'a',sessionId:'s'}));assert.deepEqual(binding({lease:'a',sessionId:'s',tabId:'t',visible:false,token:'ignored'}),{lease:'a',sessionId:'s',tabId:'t',visible:false});});
+ test('branding covers executable, installer and shortcuts',()=>{const p=JSON.parse(fs.readFileSync(path.join(__dirname,'../package.json')));assert.equal(p.build.productName,'Naumi');assert.equal(p.build.appId,'com.naumi.desktop');assert.equal(p.build.nsis.shortcutName,'Naumi');for(const k of ['installerIcon','uninstallerIcon','installerHeaderIcon'])assert.match(p.build.nsis[k],/naumi.ico$/);const icon=fs.readFileSync(path.join(__dirname,'../app/assets/naumi.ico'));assert.equal(icon.readUInt16LE(2),1);assert.equal(icon.readUInt16LE(4),7);});
+ test('desktop presentation keeps upstream native module and excludes screenshot loop',()=>{const s=fs.readFileSync(path.join(__dirname,'../../plugins/naumi-enterprise/assets/browser-native-client.js'),'utf8');assert.match(s,/@deepseek-ai\/dsh-client-ui-sidebar-browser/);assert.match(s,/h\(entry.component,props\)/);for(const forbidden of ['captureScreenshot','BrowserScheduler','onWheel','setInterval','resizeBrowser'])assert(!s.includes(forbidden));});
+-test('preload offers product-scoped operations, not full official desktop semantics',()=>{const s=fs.readFileSync(path.join(__dirname,'../app/preload.cjs'),'utf8');assert(!s.includes("exposeInMainWorld('ipc"));assert(!s.includes('executeJavaScript'));assert(!s.includes("exposeInMainWorld('dshDesktop'"));assert.match(s,/protocolVersion:1,browser/);const upstream=fs.readFileSync(path.join(__dirname,'../../node_modules/@deepseek-ai/dsh-client-ui-sidebar-browser/lib/client.js'),'utf8'),built=fs.readFileSync(path.join(__dirname,'../../plugins/naumi-sidebar-browser/client.js'),'utf8');assert.equal(built,upstream.replace('id: "@deepseek-ai/dsh-client-ui-sidebar-browser"','id: "@naumi/dsh-sidebar-browser"').replace('const carrier = globalThis.dshDesktop;','const carrier = globalThis.naumiDesktop;'));});
++test('preload offers product-scoped operations, not full official desktop semantics',()=>{const s=fs.readFileSync(path.join(__dirname,'../app/preload.cjs'),'utf8');assert(!s.includes("exposeInMainWorld('ipc"));assert(!s.includes('executeJavaScript'));assert(!s.includes("exposeInMainWorld('dshDesktop'"));assert.match(s,/protocolVersion:1,browser/);const upstream=fs.readFileSync(path.join(__dirname,'../../node_modules/@deepseek-ai/dsh-client-ui-sidebar-browser/lib/client.js'),'utf8'),built=fs.readFileSync(path.join(__dirname,'../../plugins/naumi-sidebar-browser/client.js'),'utf8');assert.equal(built,upstream.replace('id: "@deepseek-ai/dsh-client-ui-sidebar-browser"','id: "@naumi/dsh-sidebar-browser"').replace('const carrier = globalThis.dshDesktop;','const carrier = globalThis.naumiDesktop;').replace('const tagId = "@deepseek-ai/dsh-client-ui-sidebar-browser/Browser.module.css";','const tagId = "@naumi/dsh-sidebar-browser/Browser.module.css";').replace('tag.dataset.plugin = "@deepseek-ai/dsh-client-ui-sidebar-browser";','tag.dataset.plugin = "@naumi/dsh-sidebar-browser";'));});
+diff --git a/desktop/upstream/NOTICE.md b/desktop/upstream/NOTICE.md
+index b1b1597..1b54e96 100644
+--- a/desktop/upstream/NOTICE.md
++++ b/desktop/upstream/NOTICE.md
+@@ -5,9 +5,9 @@ DeepSeek Harness, tag `dsh-v0.2.2-rc.1`, commit
+ `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`, under the MIT license in `LICENSE`.
+ 
+ Naumi derives `@naumi/dsh-sidebar-browser` from the installed
+-`@deepseek-ai/dsh-client-ui-sidebar-browser` 0.2.2-rc.1 client. Two checked
+-substitutions change its module registration id and preload carrier to
+-`naumiDesktop`. ElectronWebViewImpl, BrowserBody, navigation and docking are
++`@deepseek-ai/dsh-client-ui-sidebar-browser` 0.2.2-rc.1 client. Four checked
++substitutions change its module registration id, preload carrier to
++`naumiDesktop`, CSS identity and CSS ownership. ElectronWebViewImpl, BrowserBody, navigation and docking are
+ otherwise byte-identical. The installed upstream package is unchanged.
+ `app/guests.cjs` adapts the upstream main-process lease protocol. Differences:
+ persistent local-account/workspace partitions, session/tab association for the
+diff --git a/docs/implementation/BROWSER_STYLE_RECOVERY.md b/docs/implementation/BROWSER_STYLE_RECOVERY.md
+new file mode 100644
+index 0000000..5bf2886
+--- /dev/null
++++ b/docs/implementation/BROWSER_STYLE_RECOVERY.md
+@@ -0,0 +1,21 @@
++# 浏览器工具栏样式恢复
++
++2026-11-16，基线 24d4baa，分支 fix/naumi-browser-style-20261116。
++
++## 问题与复现
++
++浏览器派生包已改为 @naumi/dsh-sidebar-browser，但内嵌 CSS 仍标记为上游包的 data-plugin 和 data-plugin-css。真实模块加载器按 data-plugin 认领、记录和卸载样式，因此上游包被移除/刷新时会连带删除 Naumi 的 CSS；如果两包共存，CSS 身份相同还会令派生包跳过自己的样式注入。
++
++隔离桌面端执行真实浏览器组件，再运行加载器的同款 removeOwnedStyles(upstream) 操作：工具栏从 flex 变为 block，样式数归零，重现按钮换行与文字重叠。基线图片和几何数据在 evidence/browser-style。
++
++## 修复
++
++- 构建脚本增加两个严格单次匹配：CSS tagId 与 tag.dataset.plugin 改为 Naumi 包名。
++- 不改 CSS 内容、原生/iframe 导航实现、按钮事件、模型、权限或登录状态。
++- 原生浏览器组件、存储和底层逻辑除四处产品绑定外与固定版本上游字节等价。
++
++## 验收与交付
++
++集中检查：原有模块、独立 CSS 所有权、两包共存后卸载上游、重复卸载/重载不丢失不重复、实际组件 320/550/800px 单行工具栏与输入框边界、收起恢复。
++
++运行版同步与截图核验结果记录在 evidence/browser-style/VERIFICATION.txt；源码副本回滚保留原始 SHA256，恢复测试不触碰活动配置与资料。
+diff --git a/docs/implementation/NAUMI_DESKTOP_CHROMIUM.md b/docs/implementation/NAUMI_DESKTOP_CHROMIUM.md
+index 90a2523..09f7866 100644
+--- a/docs/implementation/NAUMI_DESKTOP_CHROMIUM.md
++++ b/docs/implementation/NAUMI_DESKTOP_CHROMIUM.md
+@@ -8,7 +8,7 @@
+ 
+ - 当前基线 `66c432b`，52 项原有测试通过；原工作区与配置未切换。
+ - 独立工作树 `E:/Workspace/naumi-desktop-build`。
+-- 使用 Harness 0.2.2-rc.1 官方 BrowserBody / ElectronWebViewImpl；源包保持不变，派生包仅替换模块注册标识和产品专属桥接名称两处，完整字节等价测试覆盖其余代码。
++- 使用 Harness 0.2.2-rc.1 官方 BrowserBody / ElectronWebViewImpl；源包保持不变，派生包仅替换模块注册标识、产品专属桥接名称、CSS 标识和 CSS 所有者四处，完整字节等价测试覆盖其余代码。
+ - 官方主进程租约接口参考代码固定到 `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`，保留 MIT 许可。
+ - 品牌源为现有 `plugins/naumi-enterprise/assets/symbol.svg`，生成 7 尺寸 ICO 与 512px PNG。
+ 
+diff --git a/plugins/naumi-sidebar-browser/UPSTREAM.json b/plugins/naumi-sidebar-browser/UPSTREAM.json
+index 05b0407..8a2d1ca 100644
+--- a/plugins/naumi-sidebar-browser/UPSTREAM.json
++++ b/plugins/naumi-sidebar-browser/UPSTREAM.json
+@@ -2,10 +2,12 @@
+   "package": "@deepseek-ai/dsh-client-ui-sidebar-browser",
+   "version": "0.2.2-rc.1",
+   "originalSHA256": "f987b046b8cc7384f009bb1cf09f129faac619fc8562bada82ec64b499f6a7b2",
+-  "modifiedSHA256": "4363c48b2b4f0d8673c04952576b993f566df4d0166667418611463ee080c77a",
++  "modifiedSHA256": "37d2bbcd786404009d9ff92238ae39e0cd1db5332ebce2a509b82f6e1a1c83ec",
+   "changes": [
+     "module registration id",
+-    "product-scoped preload carrier"
++    "product-scoped preload carrier",
++    "product-scoped CSS identity",
++    "product-scoped CSS owner"
+   ],
+   "navigationAndPresentationUnchanged": true
+ }
+diff --git a/plugins/naumi-sidebar-browser/client.js b/plugins/naumi-sidebar-browser/client.js
+index aaf947c..94f712f 100644
+--- a/plugins/naumi-sidebar-browser/client.js
++++ b/plugins/naumi-sidebar-browser/client.js
+@@ -58,10 +58,10 @@ window.__ModuleLoader__.load({
+ 		//#endregion
+ 		//#region \0dsh-css:/home/runner/work/deepseek-harness/deepseek-harness/packages/client/ui-sidebar-browser/src/client/view/Browser.module.css.mjs
+ 		const css = ".SB_kFW_root{height:100%;min-height:0;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-base);flex-direction:column;flex:auto;display:flex}.SB_kFW_toolbar{box-sizing:border-box;border-bottom:.5px solid var(--dsw-alias-border-l3);flex:none;align-items:center;gap:4px;height:38px;padding:5px 6px;display:flex}.SB_kFW_tool{width:28px;height:28px;color:var(--dsw-alias-label-secondary);border-radius:var(--dsw-radius-sm);cursor:pointer;background:0 0;border:0;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}@media (hover:hover){.SB_kFW_tool:hover:not(:disabled){color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}}.SB_kFW_tool:disabled{color:var(--dsw-alias-label-quaternary);cursor:default}.SB_kFW_sandboxOff{color:var(--dsw-alias-state-error-primary);background:color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent)}.SB_kFW_addressBox{flex:auto;min-width:0;position:relative}.SB_kFW_address{box-sizing:border-box;width:100%;height:28px;color:var(--dsw-alias-label-primary);font:var(--dsw-font-xxs-12);background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm);padding:0 34px 0 9px}.SB_kFW_addressGo{visibility:hidden;opacity:0;position:absolute;top:0;right:0}.SB_kFW_addressBox:focus-within .SB_kFW_addressGo{visibility:visible;opacity:1}.SB_kFW_addressUnknown{--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-bg-layer-2)}.SB_kFW_addressUnknown:focus{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-1)}.SB_kFW_addressChanged{color:var(--dsw-alias-label-tertiary);font:var(--dsw-font-xxxs-11);pointer-events:none;background:var(--dsw-alias-bg-layer-2);padding-left:8px;line-height:16px;position:absolute;top:6px;right:8px}.SB_kFW_addressBox:focus-within .SB_kFW_addressChanged{visibility:hidden;opacity:0}.SB_kFW_address:focus{outline:1px solid var(--dsw-alias-state-business-primary);outline-offset:-1px}.SB_kFW_frame{background:var(--dsw-alias-bg-base);border:0;flex:auto;width:100%;min-height:0;display:flex}.SB_kFW_content{flex:auto;min-width:0;min-height:0;display:flex;position:relative}.SB_kFW_viewport{flex:auto;min-width:0;min-height:0;display:flex}.SB_kFW_placeholder{pointer-events:none;display:flex;position:absolute;inset:0}.SB_kFW_restore{text-align:center;flex-direction:column;align-items:center;gap:10px;padding:24px;display:flex;position:absolute;inset:0;overflow:auto}.SB_kFW_restoreLabel{color:var(--dsw-alias-label-tertiary);font:var(--dsw-font-xxs-12);margin:auto 0 0}.SB_kFW_restoreTitle{overflow-wrap:anywhere;max-width:100%;font:var(--dsw-font-xs-13);margin:0;font-weight:500}.SB_kFW_restoreUrl{overflow-wrap:anywhere;max-width:100%;color:var(--dsw-alias-label-secondary);font:var(--dsw-font-xxs-12);margin:0}.SB_kFW_restore>:last-child{flex-shrink:0;margin-bottom:auto}.SB_kFW_webview{-webkit-app-region:no-drag;border:0;flex:auto;width:100%;min-width:0;height:100%;min-height:0;display:flex}html:has([data-dockkit-pointer]) .SB_kFW_webview{pointer-events:none}.SB_kFW_start{min-height:0;color:var(--dsw-alias-label-tertiary);font:var(--dsw-font-xs-13);text-align:center;flex:auto;justify-content:center;align-items:center;padding:24px;display:flex}.SB_kFW_failure{color:var(--dsw-alias-state-error-primary);font:var(--dsw-font-xxxs-11);background:color-mix(in srgb, var(--dsw-alias-state-error-primary) 8%, transparent);flex:none;padding:6px 12px}.SB_kFW_sandboxWarning{color:var(--dsw-alias-label-secondary);font:var(--dsw-font-xxxs-11);background:var(--dsw-alias-state-warn-tertiary);flex:none;padding:6px 12px}.SB_kFW_limit{color:var(--dsw-alias-label-tertiary);font:var(--dsw-font-xxxs-11);text-overflow:ellipsis;white-space:nowrap;border-top:.5px solid var(--dsw-alias-border-l3);flex:none;margin:0;padding:4px 10px;overflow:hidden}.SB_kFW_titleIcon{flex:none;margin-right:4px}";
+-		const tagId = "@deepseek-ai/dsh-client-ui-sidebar-browser/Browser.module.css";
++		const tagId = "@naumi/dsh-sidebar-browser/Browser.module.css";
+ 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
+ 			const tag = document.createElement("style");
+-			tag.dataset.plugin = "@deepseek-ai/dsh-client-ui-sidebar-browser";
++			tag.dataset.plugin = "@naumi/dsh-sidebar-browser";
+ 			tag.dataset.pluginCss = tagId;
+ 			tag.textContent = css;
+ 			document.head.appendChild(tag);
+diff --git a/scripts/build-naumi-browser.mjs b/scripts/build-naumi-browser.mjs
+index ad68dfc..114e055 100644
+--- a/scripts/build-naumi-browser.mjs
++++ b/scripts/build-naumi-browser.mjs
+@@ -1,10 +1,15 @@
+ import fs from 'node:fs';
+ import {createHash} from 'node:crypto';
+ const source=fs.readFileSync('node_modules/@deepseek-ai/dsh-client-ui-sidebar-browser/lib/client.js','utf8');
+-const changes=[['id: "@deepseek-ai/dsh-client-ui-sidebar-browser"','id: "@naumi/dsh-sidebar-browser"'],['const carrier = globalThis.dshDesktop;','const carrier = globalThis.naumiDesktop;']];
++const changes=[
++  ['id: "@deepseek-ai/dsh-client-ui-sidebar-browser"','id: "@naumi/dsh-sidebar-browser"'],
++  ['const carrier = globalThis.dshDesktop;','const carrier = globalThis.naumiDesktop;'],
++  ['const tagId = "@deepseek-ai/dsh-client-ui-sidebar-browser/Browser.module.css";','const tagId = "@naumi/dsh-sidebar-browser/Browser.module.css";'],
++  ['tag.dataset.plugin = "@deepseek-ai/dsh-client-ui-sidebar-browser";','tag.dataset.plugin = "@naumi/dsh-sidebar-browser";'],
++];
+ let built=source;
+ for(const [from,to]of changes){if(built.split(from).length!==2)throw Error('Upstream browser drift: '+from);built=built.replace(from,to);}
+ const hash=x=>createHash('sha256').update(x).digest('hex');
+ fs.writeFileSync('plugins/naumi-sidebar-browser/client.js',built);
+-fs.writeFileSync('plugins/naumi-sidebar-browser/UPSTREAM.json',JSON.stringify({package:'@deepseek-ai/dsh-client-ui-sidebar-browser',version:'0.2.2-rc.1',originalSHA256:hash(source),modifiedSHA256:hash(built),changes:['module registration id','product-scoped preload carrier'],navigationAndPresentationUnchanged:true},null,2)+'\n');
+-console.log('NAUMI_BROWSER substitutions=2 upstream_unchanged=1');
++fs.writeFileSync('plugins/naumi-sidebar-browser/UPSTREAM.json',JSON.stringify({package:'@deepseek-ai/dsh-client-ui-sidebar-browser',version:'0.2.2-rc.1',originalSHA256:hash(source),modifiedSHA256:hash(built),changes:['module registration id','product-scoped preload carrier','product-scoped CSS identity','product-scoped CSS owner'],navigationAndPresentationUnchanged:true},null,2)+'\n');
++console.log('NAUMI_BROWSER substitutions=4 upstream_unchanged=1');
+diff --git a/scripts/verify-browser-style-recovery.mjs b/scripts/verify-browser-style-recovery.mjs
+new file mode 100644
+index 0000000..10fc0e0
+--- /dev/null
++++ b/scripts/verify-browser-style-recovery.mjs
+@@ -0,0 +1,19 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import os from 'node:os';
++import assert from 'node:assert/strict';
++import {createHash} from 'node:crypto';
++import {spawnSync} from 'node:child_process';
++import {fileURLToPath} from 'node:url';
++const root=fileURLToPath(new URL('..',import.meta.url)),dir=path.join(root,'evidence/browser-style');
++const entries=JSON.parse(fs.readFileSync(path.join(dir,'change-manifest.json'),'utf8'));
++const hash=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
++if(process.argv[2]!=='rollback-test')throw Error('Expected rollback-test');
++const copy=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-style-rollback-'));
++for(const e of entries){const p=path.join(copy,e.path);fs.mkdirSync(path.dirname(p),{recursive:true});fs.copyFileSync(path.join(root,e.path),p);}
++const result=spawnSync(process.env.NAUMI_GIT_BASH??'D:/DEV/Git/bin/bash.exe',[path.join(dir,'ROLLBACK.sh'),copy],{encoding:'utf8',windowsHide:true,env:{...process.env,NAUMI_NODE_EXE:process.execPath}});
++assert.equal(result.status,0,result.stderr);
++const source=fs.readFileSync(path.join(copy,'plugins/naumi-sidebar-browser/client.js'),'utf8');assert(source.includes('tag.dataset.plugin = "@deepseek-ai/dsh-client-ui-sidebar-browser";'));
++for(const e of entries){assert.equal(hash(path.join(root,e.path)),e.modifiedSHA256);if(e.originalSHA256)assert.equal(hash(path.join(copy,e.path)),e.originalSHA256);else assert(!fs.existsSync(path.join(copy,e.path)));}
++fs.writeFileSync(path.join(dir,'rollback-check.json'),JSON.stringify({copy,originalFiles:entries.filter(e=>e.originalSHA256).length,restoredCSSOwner:'@deepseek-ai/dsh-client-ui-sidebar-browser',activeUnchanged:true,command:['bash',path.join(dir,'ROLLBACK.sh'),copy],literalOutput:result.stdout.trim(),exitStatus:result.status},null,2)+'\n');
++console.log(`ROLLBACK original_hashes=${entries.filter(e=>e.originalSHA256).length} css_owner=upstream active_unchanged=1`);
+diff --git a/tests/naumi-browser-style.test.mjs b/tests/naumi-browser-style.test.mjs
+new file mode 100644
+index 0000000..f782d3a
+--- /dev/null
++++ b/tests/naumi-browser-style.test.mjs
+@@ -0,0 +1,26 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import vm from 'node:vm';
++const upstream=fs.readFileSync('node_modules/@deepseek-ai/dsh-client-ui-sidebar-browser/lib/client.js','utf8');
++const built=fs.readFileSync('plugins/naumi-sidebar-browser/client.js','utf8');
++const oldOwner='@deepseek-ai/dsh-client-ui-sidebar-browser',owner='@naumi/dsh-sidebar-browser';
++const injection=source=>source.slice(source.indexOf('const css ='),source.indexOf('var Browser_module_css_default'));
++function styleDocument(){
++ const tags=[];
++ const document={head:{appendChild:el=>tags.push(el)},createElement:()=>({dataset:{},textContent:'',remove(){tags.splice(tags.indexOf(this),1);}}),querySelector:selector=>tags.find(t=>t.dataset.pluginCss===JSON.parse(selector.slice('style[data-plugin-css='.length,-1)))??null};
++ return {tags,document,load:source=>vm.runInNewContext(injection(source),{document}),dispose:id=>{for(const tag of [...tags])if(tag.dataset.plugin===id)tag.remove();}};
++}
++test('browser factory claims its own CSS owner and style identity',()=>{
++ const d=styleDocument();d.load(built);assert.equal(d.tags.length,1);assert.equal(d.tags[0].dataset.plugin,owner);assert.equal(d.tags[0].dataset.pluginCss,owner+'/Browser.module.css');
++});
++test('unloading the upstream browser preserves Naumi styles, including preloaded upstream CSS',()=>{
++ const d=styleDocument();d.load(upstream);d.load(built);assert.equal(d.tags.length,2);d.dispose(oldOwner);assert.equal(d.tags.length,1);assert.equal(d.tags[0].dataset.plugin,owner);
++});
++test('own style teardown and repeated materialization do not leak or disappear',()=>{
++ const d=styleDocument();for(let i=0;i<5;i++){d.load(built);d.load(built);assert.equal(d.tags.length,1);d.dispose(owner);assert.equal(d.tags.length,0);}d.load(built);assert.equal(d.tags.length,1);
++});
++test('CSS content and browser logic remain upstream-identical apart from four product bindings',()=>{
++ const restored=built.replace('id: "'+owner+'"','id: "'+oldOwner+'"').replace('const carrier = globalThis.naumiDesktop;','const carrier = globalThis.dshDesktop;').replace('const tagId = "'+owner+'/Browser.module.css";','const tagId = "'+oldOwner+'/Browser.module.css";').replace('tag.dataset.plugin = "'+owner+'";','tag.dataset.plugin = "'+oldOwner+'";');assert.equal(restored,upstream);
++ const a=styleDocument(),b=styleDocument();a.load(upstream);b.load(built);assert.equal(a.tags[0].textContent,b.tags[0].textContent);
++});

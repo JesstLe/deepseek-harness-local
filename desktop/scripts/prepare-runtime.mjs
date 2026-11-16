@@ -7,7 +7,7 @@ fs.mkdirSync(target,{recursive:true});
 // Copy only an allowlisted runtime tree. No home, logs, credentials or personal profile is a source.
 fs.cpSync(path.join(root,'node_modules'),path.join(target,'node_modules'),{recursive:true,dereference:true,filter:source=>!source.split(path.sep).some(x=>['.cache','.bin'].includes(x))});
 fs.cpSync(path.join(root,'plugins'),path.join(target,'plugins'),{recursive:true});
-for(const [source,name]of [['naumi-enterprise','dsh-enterprise'],['naumi-ui-layout','dsh-ui-layout']])fs.cpSync(path.join(root,'plugins',source),path.join(target,'node_modules/@naumi',name),{recursive:true});
+for(const [source,name]of [['naumi-enterprise','dsh-enterprise'],['naumi-ui-layout','dsh-ui-layout'],['naumi-sidebar-browser','dsh-sidebar-browser']])fs.cpSync(path.join(root,'plugins',source),path.join(target,'node_modules/@naumi',name),{recursive:true});
 fs.copyFileSync(process.execPath,path.join(target,'node.exe'));
 const defaults=path.join(target,'defaults');fs.mkdirSync(defaults,{recursive:true});
 fs.writeFileSync(path.join(defaults,'profile.json'),JSON.stringify({name:'naumi-profile-web',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}},null,2));
