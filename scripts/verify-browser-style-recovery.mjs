@@ -11,7 +11,7 @@ const hash=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 if(process.argv[2]!=='rollback-test')throw Error('Expected rollback-test');
 const copy=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-style-rollback-'));
 for(const e of entries){const p=path.join(copy,e.path);fs.mkdirSync(path.dirname(p),{recursive:true});fs.copyFileSync(path.join(root,e.path),p);}
-const result=spawnSync(process.env.NAUMI_GIT_BASH??'D:/DEV/Git/bin/bash.exe',[path.join(dir,'ROLLBACK.sh'),copy],{encoding:'utf8',windowsHide:true});
+const result=spawnSync(process.env.NAUMI_GIT_BASH??'D:/DEV/Git/bin/bash.exe',[path.join(dir,'ROLLBACK.sh'),copy],{encoding:'utf8',windowsHide:true,env:{...process.env,NAUMI_NODE_EXE:process.execPath}});
 assert.equal(result.status,0,result.stderr);
 const source=fs.readFileSync(path.join(copy,'plugins/naumi-sidebar-browser/client.js'),'utf8');assert(source.includes('tag.dataset.plugin = "@deepseek-ai/dsh-client-ui-sidebar-browser";'));
 for(const e of entries){assert.equal(hash(path.join(root,e.path)),e.modifiedSHA256);if(e.originalSHA256)assert.equal(hash(path.join(copy,e.path)),e.originalSHA256);else assert(!fs.existsSync(path.join(copy,e.path)));}
