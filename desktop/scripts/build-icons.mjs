@@ -1,0 +1,18 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {createHash} from 'node:crypto';
+import sharp from 'sharp';
+const root=fileURLToPath(new URL('../..',import.meta.url));
+const source=fs.readFileSync(path.join(root,'plugins/naumi-enterprise/assets/symbol.svg'));
+const dir=path.join(root,'desktop/app/assets');fs.mkdirSync(dir,{recursive:true});
+fs.writeFileSync(path.join(dir,'symbol.svg'),source);
+const sizes=[16,24,32,48,64,128,256];
+const buffers=await Promise.all(sizes.map(size=>sharp(source).resize(size,size).png().toBuffer()));
+const header=Buffer.alloc(6+16*sizes.length);header.writeUInt16LE(1,2);header.writeUInt16LE(sizes.length,4);
+let offset=header.length;
+buffers.forEach((buffer,i)=>{const p=6+i*16;header[p]=sizes[i]===256?0:sizes[i];header[p+1]=header[p];header.writeUInt16LE(1,p+4);header.writeUInt16LE(32,p+6);header.writeUInt32LE(buffer.length,p+8);header.writeUInt32LE(offset,p+12);offset+=buffer.length;});
+fs.writeFileSync(path.join(dir,'naumi.ico'),Buffer.concat([header,...buffers]));
+await sharp(source).resize(512,512).png().toFile(path.join(dir,'naumi.png'));
+fs.writeFileSync(path.join(dir,'brand-manifest.json'),JSON.stringify({source:'plugins/naumi-enterprise/assets/symbol.svg',sha256:createHash('sha256').update(source).digest('hex'),sizes,uses:['window','taskbar','executable','installer','uninstaller','desktop-shortcut','start-menu','startup']},null,2)+'\n');
+console.log('NAUMI_ICONS sizes=7 source_unchanged=1');

@@ -1,17 +1,18 @@
 import {defineTool} from '@deepseek-ai/dsh-tools';
 import * as filesystemSkills from '@deepseek-ai/dsh-skill-filesystem';
 import {fileURLToPath} from 'node:url';
-import {EgoBrowserRuntime,BROWSER_ACTIONS} from './browser-runtime.js';
+import {BROWSER_ACTIONS} from './browser-runtime.js';
+import {NativeBrowserRuntime} from './native-browser-runtime.js';
 
 export function createBrowserTool(runtime){
-  return defineTool({name:'naumi_browser',description:'Operate the same ego-lite page displayed in this Naumi session’s right sidebar. Read the naumi-browser skill first. Observe with snapshot before semantic click/fill. Never replay an uncertain write. No arbitrary JavaScript or shell execution.',
+  return defineTool({name:'naumi_browser',description:'Operate the same page displayed in this Naumi session’s right sidebar. Desktop uses native Chromium; Web uses the legacy ego transport. Read the naumi-browser skill first. Observe with snapshot before semantic click/fill. Never replay an uncertain write. No arbitrary JavaScript or shell execution.',
     parameters:{action:{type:'string',enum:BROWSER_ACTIONS,required:true},url:{type:'string'},selector:{type:'string'},text:{type:'string'},key:{type:'string'},label:{type:'string'},x:{type:'number'},y:{type:'number'},deltaX:{type:'number'},deltaY:{type:'number'}},
     output:{schema:{type:'json'},render:(_args,data)=>[{type:'text',text:JSON.stringify(data)}]},
     async execute(args,exec){const sessionId=exec.agent?.id;if(!sessionId)throw Error('BROWSER_SESSION_REQUIRED');return runtime.perform(sessionId,{...args,frame:false},{signal:exec.signal});}
   });
 }
 
-export function installEgoBrowser(ctx,{runtime=new EgoBrowserRuntime()}={}){
+export function installEgoBrowser(ctx,{runtime=new NativeBrowserRuntime()}={}){
   let toolRegistered=false;
   ctx.effect(()=>()=>runtime.dispose());
   ctx.inject(['skills'],scope=>{scope.plugin(filesystemSkills,{providerName:'naumi-browser',includeDefaultRoots:false,watch:false,customSkillDirs:[],bundledSkillDir:fileURLToPath(new URL('./browser-skills',import.meta.url))});});
