@@ -10,18 +10,24 @@ export class EmployeeExecutionLeases{
  row(botId,taskId,employeeId){let r=this.db.prepare('SELECT * FROM execution_attempts WHERE bot_id=? AND task_id=?').get(botId,taskId);
   if(r&&r.employee_id!==employeeId)fail('EXECUTION_EMPLOYEE_MISMATCH');if(!r){this.db.prepare('INSERT INTO execution_attempts VALUES(?,?,?,?,NULL)').run(botId,taskId,employeeId,randomUUID());r=this.db.prepare('SELECT * FROM execution_attempts WHERE bot_id=? AND task_id=?').get(botId,taskId);}return r;
  }
- async ensure(botId,employeeId,taskId){this.sync.bot(botId);uuid.parse(employeeId);uuid.parse(taskId);const r=this.row(botId,taskId,employeeId),key=botId+'/'+taskId;
+ async ensure(botId,employeeId,taskId,{signal}={}){this.sync.bot(botId);uuid.parse(employeeId);uuid.parse(taskId);const r=this.row(botId,taskId,employeeId),key=botId+'/'+taskId;
   if(this.flights.has(key))return this.flights.get(key);
-  const pending=this.acquire(r).finally(()=>this.flights.delete(key));this.flights.set(key,pending);return pending;
+  const pending=this.acquire(r,{signal}).finally(()=>this.flights.delete(key));this.flights.set(key,pending);return pending;
  }
- async acquire(row){
-  const info=await this.sync.device({action:'execution.inspect',employeeId:row.employee_id,taskId:row.task_id}),cached=this.cached(row.bot_id,row.task_id),current=info.execution;
+ async acquire(row,{signal}={}){
+  const info=await this.sync.device({action:'execution.inspect',employeeId:row.employee_id,taskId:row.task_id},{signal}),cached=this.cached(row.bot_id,row.task_id),current=info.execution;
   if(current?.state==='idle'&&current.ownerDeviceId===null&&BigInt(current.fencingToken)>BigInt(cached?.fencingToken??'0')){this.resetAfterRelease(row.bot_id,row.employee_id,row.task_id,current);row=this.row(row.bot_id,row.task_id,row.employee_id);}
-  const r=await this.sync.device({action:'execution.acquire',employeeId:row.employee_id,taskId:row.task_id,attemptId:row.attempt_id}),g=grant.parse(r.execution);
+  const r=await this.sync.device({action:'execution.acquire',employeeId:row.employee_id,taskId:row.task_id,attemptId:row.attempt_id},{signal});return this.accept(row,r.execution);
+ }
+ accept(row,value){const g=grant.parse(value);
   if(g.ownerDeviceId!==this.sync.deviceId||g.taskId!==row.task_id||g.employeeId!==row.employee_id||g.attemptId!==row.attempt_id)fail('EXECUTION_GRANT_BINDING_INVALID');
   if(Date.parse(g.leaseExpiresAt)<=this.sync.clock())fail('EXECUTION_GRANT_EXPIRED');
   this.db.prepare('UPDATE execution_attempts SET encrypted=? WHERE bot_id=? AND task_id=?').run(this.vault.seal(g),row.bot_id,row.task_id);
   return {attemptId:g.attemptId,fencingToken:g.fencingToken};
+ }
+ async renew(botId,employeeId,taskId,execution,{signal}={}){
+  this.sync.bot(botId);const row=this.row(botId,taskId,employeeId),g=this.cached(botId,taskId);if(!g||row.attempt_id!==execution.attemptId||g.fencingToken!==execution.fencingToken)fail('EXECUTION_FENCE_STALE');
+  const r=await this.sync.device({action:'execution.renew',employeeId,taskId,execution},{signal});return this.accept(row,r.execution);
  }
  cached(botId,taskId){const r=this.db.prepare('SELECT encrypted FROM execution_attempts WHERE bot_id=? AND task_id=?').get(botId,taskId);return r?.encrypted?this.vault.unseal(r.encrypted):null;}
  async uncertain(botId,employeeId,taskId,reason){const r=this.row(botId,taskId,employeeId),g=this.cached(botId,taskId);if(!g)fail('EXECUTION_PERMIT_REQUIRED');return this.sync.device({action:'execution.uncertain',employeeId,taskId,execution:{attemptId:r.attempt_id,fencingToken:g.fencingToken},reason:z.string().trim().min(1).max(1000).parse(reason)});}

@@ -62,7 +62,7 @@ export class EmployeeSync {
     return result.result;
   }
   async http(endpoint,options={}){
-    const r=await this.request(this.origin+endpoint,{...options,redirect:'error',signal:AbortSignal.timeout(15000)});
+    const r=await this.request(this.origin+endpoint,{...options,redirect:'error',signal:AbortSignal.any([...(options.signal?[options.signal]:[]),AbortSignal.timeout(15000)])});
     const text=await r.text();if(text.length>8*1024*1024)fail('EMP_SYNC_RESPONSE_TOO_LARGE');let value;try{value=JSON.parse(text);}catch{fail('EMP_SYNC_RESPONSE_INVALID');}
     if(!r.ok){const code=value.code??'EMP_SYNC_UNAVAILABLE';if(['DEVICE_REVOKED','MEMBER_INACTIVE','TENANT_INACTIVE','ACCESS_PENDING','DEVICE_REENROLLMENT_REQUIRED'].includes(code)){this.set('revoked',true);this.db.exec('DELETE FROM shared_cache');}const error=Error(code);error.status=r.status;throw error;}
     return value;
@@ -86,11 +86,11 @@ export class EmployeeSync {
     for(const row of this.db.prepare('SELECT id,bot_id FROM conflicts').all())if(!bots.has(row.bot_id))this.db.prepare('DELETE FROM conflicts WHERE id=?').run(row.id);
     return claims;
   }
-  async device(body){
+  async device(body,{signal}={}){
     const r=this.registration();if(!r)fail('EMP_DEVICE_NOT_REGISTERED');
     const p={v:1,aud:'naumi-device-api',tenantId:r.tenantId,deviceId:this.deviceId,nonce:randomUUID(),issuedAt:new Date(this.clock()).toISOString(),body};
     const signature=sign(null,Buffer.from(canonical(p)),this.vault.open().privateKey).toString('base64url');
-    const response=await this.http('/api/digital-employees/device',{method:'POST',headers:{'Content-Type':'application/json','x-naumi-device-signature':signature},body:canonical(p)});
+    const response=await this.http('/api/digital-employees/device',{method:'POST',headers:{'Content-Type':'application/json','x-naumi-device-signature':signature},body:canonical(p),signal});
     this.accept(response);return response;
   }
   async catalog(cookie){return this.http('/api/digital-employees',{headers:{cookie}});}

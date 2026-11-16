@@ -316,3 +316,11 @@ HBT-003/004、CAP-001、BUD-001、LOC-004/005/006、EMP-002/003 扩展；独立�
 | LOC-005/006 | 已有租约模块保留，本次补充进程恢复 | 实际租约/设备归属证据仍见EXECUTION_LEASES；本次197回归/12 UI/硬杀/副本回滚与实际3080只读验证见employee-activity证据目录 |
 
 实现记录：`docs/implementation/EMPLOYEE_ACTIVITY_M4.md`；证据：`evidence/proactive-runtime/VERIFICATION.txt`。总目标active，M4/M5未整体退出。
+
+## M4 受管执行准入验收增量（2026-11-16）
+
+- LOC-005/006：从企业交稿端fencing继续接入真实步骤、模型流入口与工具最终guard；在途许可丢失先发取消再保存UNKNOWN，存储异常也不重新开放外部准入。已记录的running工具在真实进程重启后原子改为UNKNOWN，不重放。
+- LOC-001/003：有效签名local.read/draft/infer与明确owner开关支持local_only；离线推理仍取决于可达模型通道。授权过期/绑定改变拒绝新推理，owner历史保留。
+- COL-001：普通跨Bot能力保留；受管任务内独立派单/调度须使用显式的新任务/执行绑定，不能用于逃逸。真实团队/fork继承根准入。
+- 212回归、8界面、真实AgentLoop/工具管线/签名HTTP故障、SIGKILL恢复、20项副本基线测试和实际3080只读接入通过。实现：EMPLOYEE_RUNTIME_GATE_M4.md；证据：evidence/runtime-gate/VERIFICATION.txt。
+- BUD-001/LOC-004、受控主动AI编排及M5仍未退出；本地fixture模型不是独立网关/收费模型/生产企业或新员工安装验收。

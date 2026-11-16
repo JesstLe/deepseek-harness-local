@@ -33,6 +33,7 @@ export class EmployeeEnterpriseWork {
    const p=enterpriseWorkCommand.parse(raw);if(p.action==='work.receipt')return this.receipt(botId,p.operationId);
    const binding=await this.binding(botId);
    if(p.action==='work.read'){const result=await this.sync.device({...p,employeeId:binding.employeeId});this.learnReviewFeedback(botId,result);return result;}
+   if(sessionId)this.sync.runtimeGate?.assertMarker(botId,sessionId,p.taskId);
    const {localDeliveryId,...input}=p,body={...input,employeeId:binding.employeeId,source:source.parse({...sessionId?{sessionId}:{},...localDeliveryId?{localDeliveryId}:{}})};
    const key=p.operationId;
    if(this.flights.has(key)){const row=this.db.prepare('SELECT digest,bot_id FROM enterprise_operations WHERE operation_id=?').get(key);if(row?.digest!==digest(body)||row.bot_id!==botId)fail('WORK_IDEMPOTENCY_CONFLICT');return this.flights.get(key);}
@@ -50,6 +51,7 @@ export class EmployeeEnterpriseWork {
    else this.save(row,'pending',{request:body});
    try{
      const execution=await this.leases.ensure(botId,employeeId,body.taskId);
+     if(body.source?.sessionId)this.sync.runtimeGate?.assertMarker(botId,body.source.sessionId,body.taskId,execution);
      this.save(row,'pending',{request:body,lastExecution:execution});
      const response=await this.sync.device({...body,execution});if(response.status!=='acknowledged'||response.operationId!==body.operationId)fail('WORK_ACK_INVALID');
      this.save(row,'acknowledged',{request:this.compact(body),lastExecution:execution,result:response.result});return {operationId:body.operationId,status:'acknowledged',result:response.result};
