@@ -1,0 +1,362 @@
+diff --git a/plugins/naumi-enterprise/bots.js b/plugins/naumi-enterprise/bots.js
+index 2c29ffa..de65dce 100644
+--- a/plugins/naumi-enterprise/bots.js
++++ b/plugins/naumi-enterprise/bots.js
+@@ -5,6 +5,7 @@ import {randomUUID} from 'node:crypto';
+ import {z} from 'zod';
+ import {defineTool} from '@deepseek-ai/dsh-tools';
+ import {installBotTasks} from './bot-tasks.js';
++import {installEmployees} from './employees.js';
+ 
+ const name=z.string().trim().min(1).max(80).refine(v=>!/[\u0000-\u001f\u007f]/u.test(v));
+ const id=z.string().min(1).max(200),revision=z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+@@ -96,6 +97,7 @@ export function installBots(ctx,{directory}={}){
+   return ctx.inject(['agents','agentTeams','agentPresets','sessions','sessionPersistence','tools','systemPrompt'],scope=>{
+     const store=directory??new BotDirectory(path.join(process.env.DSH_HOME??path.join(os.homedir(),'.dsh'),'naumi','bots.json'));
+     const taskRuntime=installBotTasks(scope,store);
++    const employeeRuntime=installEmployees(scope,store);
+     const installed=new Map(),streams=new Set();
+     const install=agent=>{
+       if(installed.has(agent)||!scope.agentTeams.tryMembership(agent))return;const disposers=[];
+@@ -137,6 +139,6 @@ export function installBots(ctx,{directory}={}){
+       const heartbeat=setInterval(()=>{if(!res.destroyed)res.write(': keepalive\n\n');},25000);heartbeat.unref?.();
+       res.on('close',()=>{clearInterval(heartbeat);unsubscribe();streams.delete(res);});
+     }}));
+-    scope.effect(()=>async()=>{await taskRuntime.dispose();for(const dispose of installed.values())dispose();installed.clear();for(const res of streams)res.end();streams.clear();await store.close();});
++    scope.effect(()=>async()=>{await employeeRuntime.dispose();await taskRuntime.dispose();for(const dispose of installed.values())dispose();installed.clear();for(const res of streams)res.end();streams.clear();await store.close();});
+   });
+ }
+diff --git a/plugins/naumi-enterprise/employee-service.js b/plugins/naumi-enterprise/employee-service.js
+new file mode 100644
+index 0000000..e77cd16
+--- /dev/null
++++ b/plugins/naumi-enterprise/employee-service.js
+@@ -0,0 +1,79 @@
++import {z} from 'zod';
++import {profileFields,assertPublicText} from './employee-store.js';
++
++const fail=code=>{throw Error(code);};
++export class EmployeeService{
++  constructor(ctx,directory,store){Object.assign(this,{ctx,directory,store});}
++  bot(botId,{write=false}={}){const bot=this.directory.list().bots.find(b=>b.id===botId);if(!bot)fail('EMP_BOT_NOT_FOUND');if(write&&bot.status!=='active')fail('EMP_BOT_ARCHIVED');return bot;}
++  caller(agent,write=false){
++    if(!agent)fail('EMP_CALLER_REQUIRED');const member=this.ctx.agentTeams.membership(agent);
++    if(write&&member.role!=='lead')fail('EMP_LEAD_REQUIRED');
++    const bot=this.directory.forSession(member.root.id);if(!bot)fail('EMP_BOT_NOT_BOUND');this.bot(bot.id,{write});return {bot,root:member.root};
++  }
++  async evidence(root,{sourceMessageId,quote}){
++    z.string().min(1).max(200).parse(sourceMessageId);z.string().trim().min(1).max(1000).parse(quote);assertPublicText(quote);
++    const events=root.session.snapshotEvents();
++    const event=events.find(e=>e.type==='user/message'&&e.data.id===sourceMessageId);
++    if(!event||event.data.source?.kind!=='user')fail('EMP_USER_SOURCE_REQUIRED');
++    const text=event.data.content.filter(c=>c.type==='text').map(c=>c.text).join('\n');if(!text.includes(quote))fail('EMP_SOURCE_QUOTE_MISMATCH');
++    // Persist the original source before acknowledging a durable derived candidate.
++    await this.ctx.sessions.flush(root.session);
++    return {kind:'proposal',sessionId:root.id,messageId:sourceMessageId,quote};
++  }
++  profile(agent){const {bot,root}=this.caller(agent);
++    const recentUserSources=root.session.snapshotEvents().filter(e=>e.type==='user/message'&&e.data.source?.kind==='user').slice(-5).map(e=>{
++      const text=e.data.content.filter(c=>c.type==='text').map(c=>c.text).join('\n');
++      try{assertPublicText(text);return {messageId:e.data.id,quote:text.slice(0,1000)};}catch{return {messageId:e.data.id,quote:null,omitted:'credential_pattern'};}
++    });
++    return {botId:bot.id,...this.store.profile(bot.id),syncState:'local_only',recentUserSources};
++  }
++  search(agent,args){const {bot}=this.caller(agent);return this.store.memories(bot.id,args);}
++  async proposeMemory(agent,input){
++    const args=z.object({kind:z.enum(['fact','preference','experience','procedure','relationship']),text:z.string().trim().min(1).max(4000),sourceMessageId:z.string().min(1).max(200),quote:z.string().min(1).max(1000),operationId:z.string().min(1).max(160)}).strict().parse(input);
++    const {bot,root}=this.caller(agent,true);if(!this.store.profile(bot.id).autoLearning)fail('EMP_LEARNING_DISABLED');
++    const actor=await this.evidence(root,args);if(this.caller(agent,true).bot.id!==bot.id)fail('EMP_IDENTITY_CHANGED');if(!this.store.profile(bot.id).autoLearning)fail('EMP_LEARNING_DISABLED');
++    return this.store.createMemory(bot.id,{operationId:args.operationId,kind:args.kind,text:args.text,status:'candidate'},actor);
++  }
++  async proposeProfile(agent,input){
++    const args=z.object({patch:profileFields,sourceMessageId:z.string().min(1).max(200),quote:z.string().min(1).max(1000),operationId:z.string().min(1).max(160)}).strict().parse(input);
++    if(!Object.keys(args.patch).length)fail('EMP_EMPTY_PATCH');
++    const {bot,root}=this.caller(agent,true),profile=this.store.profile(bot.id);
++    if(!profile.autoLearning)fail('EMP_LEARNING_DISABLED');for(const field of Object.keys(args.patch))if(profile.lockedFields.includes(field))fail('EMP_FIELD_LOCKED');
++    const actor=await this.evidence(root,args);if(this.caller(agent,true).bot.id!==bot.id)fail('EMP_IDENTITY_CHANGED');const current=this.store.profile(bot.id);if(!current.autoLearning)fail('EMP_LEARNING_DISABLED');for(const field of Object.keys(args.patch))if(current.lockedFields.includes(field))fail('EMP_FIELD_LOCKED');
++    return this.store.createMemory(bot.id,{operationId:args.operationId,kind:'preference',text:'人物设定候选：'+JSON.stringify(args.patch),status:'candidate'},actor,{proposedProfile:args.patch});
++  }
++  learn(session,message){
++    if(message.source?.kind!=='user')return {learned:false,reason:'not_user'};
++    const agent=this.ctx.agents.get(session.id);if(!agent)return {learned:false,reason:'not_live'};
++    const {root,bot}=this.caller(agent,true);if(root.id!==session.id)return {learned:false,reason:'not_root'};
++    const text=message.content.filter(p=>p.type==='text').map(p=>p.text).join('\n').trim();
++    return this.store.learnExplicit(bot.id,message.id,text,session.id);
++  }
++  owner(command){
++    const {action,botId,...input}=command;this.bot(botId,{write:true});
++    const methods={profile_update:'updateProfile',profile_restore:'restoreProfile',memory_create:'createMemory',memory_update:'updateMemory'};
++    if(!methods[action])fail('EMP_INVALID_ACTION');return this.store[methods[action]](botId,input,{kind:'owner'});
++  }
++}
++
++/** One process scheduler: observation only; no LLM, dispatch, cancellation or autonomous side effect. */
++export class EmployeeHeartbeat{
++  constructor({agents,directory,store,clock=()=>Date.now(),intervalMs=30000,workIntervalMs=300000,onError=()=>{}}){
++    Object.assign(this,{agents,directory,store,clock,intervalMs,workIntervalMs,onError});
++    this.closed=false;this.busy=false;this.value={runtimeState:'starting',sampledAt:null,workSampledAt:null,staleAfterMs:intervalMs*3};
++  }
++  tick(){
++    if(this.closed||this.busy)return;this.busy=true;
++    try{
++      const now=this.clock(),bots=this.directory.list().bots,agents=this.agents.list(),running=agents.filter(a=>a.status==='running');
++      const runningBotIds=new Set(running.map(a=>this.directory.forSession(a.id)?.id).filter(Boolean));
++      this.value={...this.value,runtimeState:'healthy',sampledAt:new Date(now).toISOString(),activeBotCount:bots.filter(b=>b.status==='active').length,
++        runningSessionCount:running.length,runningBotCount:runningBotIds.size,staleAfterMs:this.intervalMs*3};delete this.value.error;
++      if(!this.value.workSampledAt||now-Date.parse(this.value.workSampledAt)>=this.workIntervalMs)this.value={...this.value,workSampledAt:new Date(now).toISOString(),storage:this.store.stats()};
++    }catch(error){this.value={...this.value,runtimeState:'error',error:'EMP_HEARTBEAT_SCAN_FAILED'};this.onError(error);}
++    finally{this.busy=false;}
++  }
++  read(){return {...structuredClone(this.value),stale:!this.value.sampledAt||this.clock()-Date.parse(this.value.sampledAt)>this.value.staleAfterMs,modelCalls:0,actionsStarted:0};}
++  start(){if(this.closed||this.timer)return;this.tick();this.timer=setInterval(()=>this.tick(),this.intervalMs);this.timer.unref?.();}
++  close(){clearInterval(this.timer);this.timer=null;this.closed=true;this.value.runtimeState='stopped';}
++}
+diff --git a/plugins/naumi-enterprise/employee-store.js b/plugins/naumi-enterprise/employee-store.js
+new file mode 100644
+index 0000000..5edfb02
+--- /dev/null
++++ b/plugins/naumi-enterprise/employee-store.js
+@@ -0,0 +1,139 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import {DatabaseSync} from 'node:sqlite';
++import {createHash,randomUUID} from 'node:crypto';
++import {z} from 'zod';
++
++export const PROFILE_FIELDS=['communicationStyle','workStyle','personality','persona'];
++export const profileFields=z.object(Object.fromEntries(PROFILE_FIELDS.map(k=>[k,z.string().trim().max(2000).optional()]))).strict();
++export const profilePatch=profileFields.extend({autoLearning:z.boolean().optional(),lockedFields:z.array(z.enum(PROFILE_FIELDS)).max(4).refine(a=>new Set(a).size===a.length).optional()}).strict();
++export const memoryKinds=['fact','preference','experience','procedure','relationship'];
++const sourceSchema=z.object({kind:z.enum(['owner','user','proposal']),sessionId:z.string().max(200).optional(),messageId:z.string().max(200).optional(),quote:z.string().max(4000).optional(),note:z.string().max(500).optional()}).strict();
++const stamp=z.string().datetime(),expected=z.number().int().nonnegative(),operation=z.string().min(1).max(200);
++const memoryInput=z.object({kind:z.enum(memoryKinds),text:z.string().trim().min(1).max(4000),status:z.enum(['candidate','active']).default('active'),pinned:z.boolean().default(false),expiresAt:stamp.nullable().default(null)}).strict();
++const memoryPatch=z.object({text:z.string().trim().min(1).max(4000).optional(),status:z.enum(['candidate','active','rejected','deleted']).optional(),pinned:z.boolean().optional(),expiresAt:stamp.nullable().optional()}).strict();
++const fail=code=>{throw Error(code);},clone=value=>structuredClone(value);
++const serial=value=>JSON.stringify(value,(_key,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b))):v);
++const sensitive=/(?:\b(?:sk|rk)-[a-z0-9_-]{16,}|\bBearer\s+[a-z0-9._~-]{12,}|(?:api[_ -]?key|access[_ -]?token|密码|口令)\s*[:：=]\s*\S{6,})/iu;
++export function assertPublicText(value){if(sensitive.test(value))fail('EMP_SECRET_PATTERN');}
++function assertFields(patch){for(const value of Object.values(patch))if(typeof value==='string')assertPublicText(value);}
++
++/** Local-only employee continuity. Entities, version history, audit and pending-sync event commit atomically. */
++export class EmployeeStore{
++  constructor(file,{clock=()=>new Date(),beforeCommit}={}){
++    this.file=file;this.clock=clock;this.beforeCommit=beforeCommit;this.closed=false;
++    if(file!==':memory:')fs.mkdirSync(path.dirname(file),{recursive:true});
++    try{
++      this.db=new DatabaseSync(file);this.db.exec('PRAGMA busy_timeout=3000;');
++      const version=this.db.prepare('PRAGMA user_version').get().user_version;
++      if(version!==0&&version!==1)fail('EMP_SCHEMA_UNSUPPORTED');
++      if(version===0&&this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all().length)fail('EMP_SCHEMA_UNSUPPORTED');
++      this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
++      this.db.exec(`BEGIN IMMEDIATE;
++        CREATE TABLE IF NOT EXISTS entities(bot_id TEXT NOT NULL,id TEXT NOT NULL,type TEXT NOT NULL,revision INTEGER NOT NULL,json TEXT NOT NULL,PRIMARY KEY(bot_id,id));
++        CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,event_id TEXT NOT NULL UNIQUE,bot_id TEXT NOT NULL,entity_id TEXT NOT NULL,type TEXT NOT NULL,revision INTEGER NOT NULL,json TEXT NOT NULL,sync_state TEXT NOT NULL DEFAULT 'local_only');
++        CREATE INDEX IF NOT EXISTS events_bot ON events(bot_id,seq);
++        CREATE TABLE IF NOT EXISTS operations(bot_id TEXT NOT NULL,operation_id TEXT NOT NULL,digest TEXT NOT NULL,result TEXT NOT NULL,PRIMARY KEY(bot_id,operation_id));
++        PRAGMA user_version=1;COMMIT;`);
++      if(this.db.prepare('PRAGMA quick_check').get().quick_check!=='ok')fail('EMP_STORAGE_CORRUPT');
++    }catch(error){this.db?.close();throw Error(/^EMP_/.test(error.message)?error.message:'EMP_STORAGE_UNAVAILABLE',{cause:error});}
++  }
++  ready(){if(this.closed)fail('EMP_STORE_CLOSED');}
++  now(){return this.clock().toISOString();}
++  entity(botId,id){this.ready();const row=this.db.prepare('SELECT json FROM entities WHERE bot_id=? AND id=?').get(botId,id);return row?JSON.parse(row.json):null;}
++  profile(botId){return this.entity(botId,'profile')??{id:'profile',botId,revision:0,communicationStyle:'',workStyle:'',personality:'',persona:'',autoLearning:true,lockedFields:[],updatedAt:null};}
++  allMemories(botId){this.ready();return this.db.prepare("SELECT json FROM entities WHERE bot_id=? AND type='memory'").all(botId).map(row=>JSON.parse(row.json));}
++  mutate(botId,operationId,action,payload,actor,fn){
++    this.ready();operation.parse(operationId);actor=sourceSchema.parse(actor);if(actor.quote)assertPublicText(actor.quote);
++    const digest=createHash('sha256').update(serial({action,payload,actor})).digest('hex');
++    this.db.exec('BEGIN IMMEDIATE');
++    try{
++      const old=this.db.prepare('SELECT digest,result FROM operations WHERE bot_id=? AND operation_id=?').get(botId,operationId);
++      if(old){if(old.digest!==digest)fail('EMP_IDEMPOTENCY_CONFLICT');this.db.exec('COMMIT');return JSON.parse(old.result);}
++      if(this.db.prepare('SELECT count(*) AS n FROM operations WHERE bot_id=?').get(botId).n>=100000)fail('EMP_AUDIT_CAPACITY');
++      const result=fn();this.beforeCommit?.();
++      this.db.prepare('INSERT INTO operations VALUES(?,?,?,?)').run(botId,operationId,digest,JSON.stringify(result));
++      this.db.exec('COMMIT');return clone(result);
++    }catch(error){this.db.exec('ROLLBACK');throw error;}
++  }
++  put(value,type,action,actor){
++    this.db.prepare('INSERT INTO entities VALUES(?,?,?,?,?) ON CONFLICT(bot_id,id) DO UPDATE SET revision=excluded.revision,json=excluded.json').run(value.botId,value.id,type,value.revision,JSON.stringify(value));
++    const event={eventId:randomUUID(),domain:'local-owner',botId:value.botId,entityId:value.id,revision:value.revision,action,source:actor,occurredAt:this.now(),value};
++    this.db.prepare('INSERT INTO events(event_id,bot_id,entity_id,type,revision,json) VALUES(?,?,?,?,?,?)').run(event.eventId,value.botId,value.id,type,value.revision,JSON.stringify(event));
++    return value;
++  }
++  updateProfile(botId,{expectedRevision,patch,operationId},actor={kind:'owner'}){
++    expected.parse(expectedRevision);patch=profilePatch.parse(patch);if(!Object.keys(patch).length)fail('EMP_EMPTY_PATCH');assertFields(patch);
++    return this.mutate(botId,operationId,'profile_update',{expectedRevision,patch},actor,()=>this.applyProfile(botId,expectedRevision,patch,actor,'profile_update'));
++  }
++  applyProfile(botId,revision,patch,actor,action){
++    const current=this.profile(botId);if(current.revision!==revision)fail('EMP_CONFLICT');
++    for(const field of PROFILE_FIELDS)if(field in patch&&patch[field]!==current[field]&&current.lockedFields.includes(field))fail('EMP_FIELD_LOCKED');
++    if(Object.entries(patch).every(([k,v])=>serial(current[k])===serial(v)))return current;
++    return this.put({...current,...patch,revision:current.revision+1,updatedAt:this.now()},'profile',action,actor);
++  }
++  restoreProfile(botId,{expectedRevision,targetRevision,operationId},actor={kind:'owner'}){
++    expected.parse(expectedRevision);z.number().int().positive().parse(targetRevision);
++    return this.mutate(botId,operationId,'profile_restore',{expectedRevision,targetRevision},actor,()=>{
++      const row=this.db.prepare("SELECT json FROM events WHERE bot_id=? AND entity_id='profile' AND type='profile' AND revision=?").get(botId,targetRevision);if(!row)fail('EMP_VERSION_NOT_FOUND');
++      const value=JSON.parse(row.json).value,patch=Object.fromEntries([...PROFILE_FIELDS,'autoLearning','lockedFields'].map(k=>[k,value[k]]));
++      return this.applyProfile(botId,expectedRevision,patch,actor,'profile_restore');
++    });
++  }
++  createMemory(botId,{operationId,...input},actor={kind:'owner'},{proposedProfile}={}){
++    input=memoryInput.parse(input);assertPublicText(input.text);if(proposedProfile){proposedProfile=profileFields.parse(proposedProfile);assertFields(proposedProfile);}
++    return this.mutate(botId,operationId,'memory_create',{input,...(proposedProfile?{proposedProfile}:{})},actor,()=>{
++      if(this.allMemories(botId).length>=5000)fail('EMP_MEMORY_CAPACITY');
++      const time=this.now();return this.put({id:'memory-'+randomUUID(),botId,revision:1,...input,source:actor,...(proposedProfile?{proposedProfile}:{}),createdAt:time,updatedAt:time},'memory','memory_create',actor);
++    });
++  }
++  updateMemory(botId,{memoryId,expectedRevision,patch,operationId,profileRevision},actor={kind:'owner'}){
++    expected.parse(expectedRevision);patch=memoryPatch.parse(patch);if(!Object.keys(patch).length)fail('EMP_EMPTY_PATCH');if(patch.text)assertPublicText(patch.text);
++    return this.mutate(botId,operationId,'memory_update',{memoryId,expectedRevision,patch,...(profileRevision===undefined?{}:{profileRevision})},actor,()=>{
++      const value=this.entity(botId,memoryId);if(!value||!memoryId.startsWith('memory-'))fail('EMP_MEMORY_NOT_FOUND');if(value.revision!==expectedRevision)fail('EMP_CONFLICT');if(value.status==='deleted')fail('EMP_MEMORY_DELETED');
++      if(value.proposedProfile&&patch.status==='active'){
++        if(profileRevision===undefined)fail('EMP_PROFILE_REVISION_REQUIRED');this.applyProfile(botId,profileRevision,value.proposedProfile,actor,'profile_candidate_accepted');
++      }
++      if(Object.entries(patch).every(([k,v])=>serial(value[k])===serial(v)))return value;
++      return this.put({...value,...patch,revision:value.revision+1,updatedAt:this.now()},'memory','memory_update',actor);
++    });
++  }
++  learnExplicit(botId,messageId,text,sessionId){
++    const p=this.profile(botId);if(!p.autoLearning)return {learned:false,reason:'learning_disabled'};
++    if(text.length>1000||/[\r\n]/.test(text)||/(这一次|这次|本次|暂时|仅此|以下是|引用|他说|她说)/u.test(text))return {learned:false,reason:'not_explicit'};
++    const custom=text.match(/^记住我的偏好[：:]\s*(.{1,500})[。！!]?$/u),style=text.match(/^以后回复[：:，,\s]*(先给结论|简洁直接|详细解释|少用术语)[。！!]?$/u);
++    if(!custom&&!style)return {learned:false,reason:'not_explicit'};
++    if(style&&p.lockedFields.includes('communicationStyle'))return {learned:false,reason:'field_locked'};
++    assertPublicText(text);const actor={kind:'user',sessionId,messageId,quote:text},content=custom?custom[1]:style[1];
++    return this.mutate(botId,'learn:'+messageId,'explicit_learning',{text,sessionId},actor,()=>{
++      if(this.allMemories(botId).length>=5000)fail('EMP_MEMORY_CAPACITY');const time=this.now();
++      const memory=this.put({id:'memory-'+randomUUID(),botId,revision:1,kind:'preference',text:content,status:'active',pinned:true,expiresAt:null,source:actor,createdAt:time,updatedAt:time},'memory','explicit_learning',actor);
++      // Re-read under the transaction; the same instruction may coexist with unrelated edits.
++      const profile=this.profile(botId);
++      if(style&&!profile.lockedFields.includes('communicationStyle'))this.applyProfile(botId,profile.revision,{communicationStyle:content},actor,'explicit_learning');
++      return {learned:true,memory,profile:this.profile(botId)};
++    });
++  }
++  memories(botId,{query='',status='active',limit=20}={}){
++    z.string().max(300).parse(query);z.enum(['active','candidate','rejected','deleted','all']).parse(status);z.number().int().min(1).max(100).parse(limit);
++    const q=query.trim().toLocaleLowerCase(),tokens=q.split(/\s+/u).filter(Boolean),time=this.clock().getTime();
++    return this.allMemories(botId).filter(m=>(status==='all'||m.status===status)&&(status!=='active'||!m.expiresAt||Date.parse(m.expiresAt)>time))
++      .map(m=>({...m,_score:q?tokens.reduce((n,t)=>n+(m.text.toLocaleLowerCase().includes(t)?1:0),0):1})).filter(m=>m._score>0)
++      .sort((a,b)=>Number(b.pinned)-Number(a.pinned)||b._score-a._score||b.updatedAt.localeCompare(a.updatedAt)||a.id.localeCompare(b.id)).slice(0,limit).map(({_score,...m})=>m);
++  }
++  history(botId,{after=0,limit=50}={}){
++    this.ready();z.number().int().nonnegative().parse(after);z.number().int().min(1).max(100).parse(limit);
++    return this.db.prepare('SELECT seq,json,sync_state FROM events WHERE bot_id=? AND seq>? ORDER BY seq ASC LIMIT ?').all(botId,after,limit).map(r=>({seq:r.seq,...JSON.parse(r.json),syncState:r.sync_state}));
++  }
++  export(botId){return {version:1,domain:'local-owner',syncState:'local_only',profile:this.profile(botId),memories:this.allMemories(botId),exportedAt:this.now()};}
++  context(botId){const p=this.profile(botId),memories=this.memories(botId,{limit:8});
++    const value={profile:Object.fromEntries(PROFILE_FIELDS.map(k=>[k,p[k].slice(0,900)])),memories:memories.map(m=>({id:m.id,kind:m.kind,text:m.text.slice(0,450)}))};
++    while(JSON.stringify(value).length>7800){
++      if(value.memories.length)value.memories.pop();
++      else for(const key of PROFILE_FIELDS)value.profile[key]=value.profile[key].slice(0,Math.floor(value.profile[key].length/2));
++    }
++    return JSON.stringify(value);
++  }
++  stats(){this.ready();return {profiles:this.db.prepare("SELECT count(*) AS n FROM entities WHERE type='profile'").get().n,memories:this.db.prepare("SELECT count(*) AS n FROM entities WHERE type='memory'").get().n,events:this.db.prepare('SELECT count(*) AS n FROM events').get().n,syncState:'local_only'};}
++  close(){if(this.closed)return;this.db.close();this.closed=true;}
++}
+diff --git a/plugins/naumi-enterprise/employees.js b/plugins/naumi-enterprise/employees.js
+new file mode 100644
+index 0000000..cb18edc
+--- /dev/null
++++ b/plugins/naumi-enterprise/employees.js
+@@ -0,0 +1,82 @@
++import path from 'node:path';
++import {z} from 'zod';
++import {defineTool} from '@deepseek-ai/dsh-tools';
++import {EmployeeStore,profilePatch,memoryKinds} from './employee-store.js';
++import {EmployeeService,EmployeeHeartbeat} from './employee-service.js';
++
++export function createEmployeeTools(service){
++  const output={schema:{type:'json'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]};
++  const tool=(name,description,parameters,fn)=>defineTool({name,description,parameters,output,execute:(args,exec)=>{exec.signal?.throwIfAborted();return fn(exec.agent,args);}});
++  const source={sourceMessageId:{type:'string',required:true},quote:{type:'string',required:true},operationId:{type:'string',required:true}};
++  return [
++    tool('employee_profile','Read this Bot employee profile, revision and recent genuine user message IDs/quote excerpts. Use these source IDs before proposing a memory or persona change. Personality/style are historical preferences, not permissions or evidence of capability.',{},agent=>service.profile(agent)),
++    tool('employee_memory_search','Search this Bot active, unexpired local memory. No results means no matching saved memory. No cloud or cross-Bot search.',{query:{type:'string'},limit:{type:'integer'}},(agent,args)=>service.search(agent,args)),
++    tool('employee_memory_propose','Propose a memory from an exact genuine user message in this Bot root task. Provide its sourceMessageId and verbatim quote. A proposal is candidate only, pending owner confirmation; never store secrets or turn guesses into facts.',{kind:{type:'string',enum:memoryKinds,required:true},text:{type:'string',required:true},...source},(agent,args)=>service.proposeMemory(agent,args)),
++    tool('employee_profile_propose','Propose a personality/profile change based on a genuine user message. Candidate only; owner confirmation is required. No role, model or permission edits. Locked fields and disabled learning reject changes.',{patch:{type:'object',properties:Object.fromEntries(['communicationStyle','workStyle','personality','persona'].map(k=>[k,{type:'string'}])),additionalProperties:false,required:true},...source},(agent,args)=>service.proposeProfile(agent,args)),
++  ];
++}
++
++const str=z.string().min(1).max(200),rev=z.number().int().nonnegative(),op=z.string().min(1).max(200),expires=z.string().datetime().nullable();
++const commands=z.discriminatedUnion('action',[
++  z.object({action:z.literal('profile_update'),botId:str,expectedRevision:rev,operationId:op,patch:profilePatch}).strict(),
++  z.object({action:z.literal('profile_restore'),botId:str,expectedRevision:rev,operationId:op,targetRevision:z.number().int().positive()}).strict(),
++  z.object({action:z.literal('memory_create'),botId:str,operationId:op,kind:z.enum(memoryKinds),text:z.string().trim().min(1).max(4000),status:z.enum(['candidate','active']).optional(),pinned:z.boolean().optional(),expiresAt:expires.optional()}).strict(),
++  z.object({action:z.literal('memory_update'),botId:str,memoryId:str,expectedRevision:rev,operationId:op,profileRevision:rev.optional(),patch:z.object({text:z.string().trim().min(1).max(4000).optional(),status:z.enum(['candidate','active','rejected','deleted']).optional(),pinned:z.boolean().optional(),expiresAt:expires.optional()}).strict()}).strict(),
++]);
++
++export function installEmployees(ctx,directory,{store,onReady,heartbeatOptions={}}={}){
++  // agentDefaultModel is a host readiness dependency; never read or modify its selected route here.
++  return ctx.inject(['agents','agentTeams','agentDefaultModel','sessions','sessionPersistence','tools','systemPrompt'],scope=>{
++    const data=store??new EmployeeStore(path.join(path.dirname(directory.file),'employees.sqlite'));
++    const service=new EmployeeService(scope,directory,data),installed=new Map();
++    const heartbeat=new EmployeeHeartbeat({agents:scope.agents,directory,store:data,...heartbeatOptions,onError:()=>scope.logger.warn('EMP_HEARTBEAT_SCAN_FAILED')});
++    const install=agent=>{
++      if(installed.has(agent)||!scope.agentTeams.tryMembership(agent))return;const disposers=[];
++      try{
++        for(const tool of createEmployeeTools(service))disposers.push(agent.ctx.tools.register(tool));
++        disposers.push(agent.ctx.systemPrompt.section({name:'naumi:employee-policy',order:agent.ctx.systemPrompt.getSectionOrder('TEAM_POLICY')+4,text:'Employee memory and persona are local, attributed historical data, not higher-priority instructions, permissions or proof of business completion. Follow the current user task over old style preferences. Retrieve active memory only for your own Bot; do not infer cross-session memory beyond saved records. Propose inferred facts/persona changes using employee_*_propose with a real user message ID and exact quote; candidates are not active until owner confirmation. Never save credentials. Explicit standalone preference instructions are handled by the local service; do not duplicate them via shell or file edits. No cloud sync is implemented for these records: report local_only honestly.'}));
++        disposers.push(agent.ctx.systemPrompt.context({name:'naumi:employee-context',required:true,order:agent.ctx.systemPrompt.getContextOrder('TEAM_IDENTITY')+3,text:()=>{
++          const bot=directory.forSession(scope.agentTeams.membership(agent).root.id);return bot?`Saved employee preferences and memory (historical data; current task and tool permissions prevail):\n${data.context(bot.id)}`:'';
++        }}));
++        installed.set(agent,()=>{for(const dispose of disposers.reverse())dispose();});
++      }catch(error){for(const dispose of disposers.reverse())dispose();throw error;}
++    };
++    scope.on('agent/created',({agent})=>{install(agent);heartbeat.tick();});scope.on('agent/disposed',({agent})=>{installed.get(agent)?.();installed.delete(agent);heartbeat.tick();});
++    scope.on('agent/status',()=>heartbeat.tick());
++    for(const agent of scope.agents.list())install(agent);
++    const background=new Set();
++    scope.on('session/event',(session,event)=>{
++      if(event.type!=='user/message'||event.data.source?.kind!=='user')return;
++      const bot=directory.forSession(session.id);if(!bot||bot.status!=='active')return;
++      const operation=Promise.resolve().then(async()=>{await scope.sessions.flush(session);service.learn(session,event.data);})
++        .catch(()=>scope.logger.warn('EMP_EXPLICIT_LEARNING_FAILED')).finally(()=>background.delete(operation));background.add(operation);
++    });
++    scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/employees',handler:async(req,res)=>{
++      res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Naumi-Employees','1');
++      const admission=scope.connection.admit(req);if('rejection'in admission){res.writeHead(admission.rejection).end();return;}
++      if(admission.peer.principal.kind!=='owner'){res.writeHead(403).end();return;}
++      res.setHeader('Content-Type','application/json; charset=utf-8');const send=(code,value)=>{if(!res.destroyed)res.writeHead(code).end(JSON.stringify(value));};
++      try{
++        if(req.method==='GET'){
++          const q=new URL(req.url??'/naumi/employees','http://localhost').searchParams,botId=str.parse(q.get('botId'));service.bot(botId);
++          const view=q.get('view')??'profile';let value;
++          if(view==='profile')value={...data.profile(botId),syncState:'local_only'};
++          else if(view==='memories')value=data.memories(botId,{query:q.get('query')??'',status:q.get('status')??'active',limit:q.has('limit')?Number(q.get('limit')):20});
++          else if(view==='history')value=data.history(botId,{after:q.has('after')?Number(q.get('after')):0,limit:q.has('limit')?Number(q.get('limit')):50});
++          else if(view==='export')value=data.export(botId);
++          else if(view==='heartbeat')value=heartbeat.read();
++          else{send(400,{error:'EMP_INVALID_VIEW'});return;}
++          send(200,value);return;
++        }
++        if(req.method!=='POST'){res.setHeader('Allow','GET, POST');send(405,{error:'METHOD_NOT_ALLOWED'});return;}
++        if(req.headers['x-naumi-employees']!=='1'||req.headers.origin&&![`http://${req.headers.host}`,`https://${req.headers.host}`].includes(req.headers.origin)){send(403,{error:'EMP_SAME_ORIGIN_REQUIRED'});return;}
++        let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>32768){send(413,{error:'EMP_REQUEST_TOO_LARGE'});return;}chunks.push(Buffer.from(chunk));}
++        let command;try{command=commands.parse(JSON.parse(Buffer.concat(chunks).toString('utf8')));}catch{send(400,{error:'EMP_INVALID_REQUEST'});return;}
++        send(200,service.owner(command));
++      }catch(error){const code=error instanceof z.ZodError?'EMP_INVALID_REQUEST':/^EMP_[A-Z_]+$/.test(error.message)?error.message:'EMP_STORAGE_UNAVAILABLE';
++        send(/CONFLICT/.test(code)?409:/NOT_FOUND/.test(code)?404:/REQUIRED|LOCKED|ARCHIVED|DISABLED/.test(code)?403:/STORAGE|SCHEMA/.test(code)?503:400,{error:code});}
++    }}));
++    heartbeat.start();onReady?.({service,store:data,heartbeat,settled:()=>Promise.all([...background])});
++    scope.effect(()=>async()=>{heartbeat.close();for(const dispose of installed.values())dispose();installed.clear();await Promise.all(background);data.close();});
++  });
++}
+diff --git a/plugins/naumi-enterprise/package.json b/plugins/naumi-enterprise/package.json
+index 487963f..3900bb7 100644
+--- a/plugins/naumi-enterprise/package.json
++++ b/plugins/naumi-enterprise/package.json
+@@ -30,7 +30,10 @@
+     "bot-tasks.js",
+     "bot-task-store.js",
+     "bot-task-service.js",
+-    "bot-task-runtime.js"
++    "bot-task-runtime.js",
++    "employees.js",
++    "employee-store.js",
++    "employee-service.js"
+   ],
+   "dsh": {
+     "bundle": {

@@ -5,6 +5,7 @@ import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import {defineTool} from '@deepseek-ai/dsh-tools';
 import {installBotTasks} from './bot-tasks.js';
+import {installEmployees} from './employees.js';
 
 const name=z.string().trim().min(1).max(80).refine(v=>!/[\u0000-\u001f\u007f]/u.test(v));
 const id=z.string().min(1).max(200),revision=z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -96,6 +97,7 @@ export function installBots(ctx,{directory}={}){
   return ctx.inject(['agents','agentTeams','agentPresets','sessions','sessionPersistence','tools','systemPrompt'],scope=>{
     const store=directory??new BotDirectory(path.join(process.env.DSH_HOME??path.join(os.homedir(),'.dsh'),'naumi','bots.json'));
     const taskRuntime=installBotTasks(scope,store);
+    const employeeRuntime=installEmployees(scope,store);
     const installed=new Map(),streams=new Set();
     const install=agent=>{
       if(installed.has(agent)||!scope.agentTeams.tryMembership(agent))return;const disposers=[];
@@ -137,6 +139,6 @@ export function installBots(ctx,{directory}={}){
       const heartbeat=setInterval(()=>{if(!res.destroyed)res.write(': keepalive\n\n');},25000);heartbeat.unref?.();
       res.on('close',()=>{clearInterval(heartbeat);unsubscribe();streams.delete(res);});
     }}));
-    scope.effect(()=>async()=>{await taskRuntime.dispose();for(const dispose of installed.values())dispose();installed.clear();for(const res of streams)res.end();streams.clear();await store.close();});
+    scope.effect(()=>async()=>{await employeeRuntime.dispose();await taskRuntime.dispose();for(const dispose of installed.values())dispose();installed.clear();for(const res of streams)res.end();streams.clear();await store.close();});
   });
 }

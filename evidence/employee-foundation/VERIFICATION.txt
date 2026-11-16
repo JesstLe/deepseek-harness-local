@@ -1,0 +1,119 @@
+Naumi digital employee PRD and M1 local continuity — 2026-11-16
+Implementation model: GPT-6.1 Sol.
+Branch: fix/naumi-bot-lifecycle-20261116. Base: 290fea07ef5b6e6c9b73d43e6576b91c1a4cc68a.
+
+CHANGED MODULES / FIELDS
+  installBots.employeeRuntime; package.json.files;
+  EmployeeStore SQLite entities / events / operations, schema version=1, WAL;
+  profile.communicationStyle / workStyle / personality / persona / autoLearning / lockedFields / revision;
+  memory.kind / status / source / expiresAt / pinned / proposedProfile / revision;
+  EmployeeHeartbeat.sampledAt / workSampledAt / runtimeState / staleAfterMs;
+  owner API /naumi/employees; tools employee_profile, employee_memory_search,
+  employee_memory_propose, employee_profile_propose.
+  Records have domain=local-owner and syncState=local_only. No enterprise cloud sync or offline grant is claimed.
+
+FOUR VERIFIED ARTIFACTS
+MODIFIED_FILE=E:/Workspace/naumi-bot-lifecycle-fix/evidence/employee-foundation/MODIFIED_FILE.zip
+DIFF_FILE=E:/Workspace/naumi-bot-lifecycle-fix/evidence/employee-foundation/DIFF_FILE.patch
+VERIFICATION=E:/Workspace/naumi-bot-lifecycle-fix/evidence/employee-foundation/VERIFICATION.txt
+ROLLBACK=E:/Workspace/naumi-bot-lifecycle-fix/evidence/employee-foundation/ROLLBACK.sh
+Original file copies and per-file original/modified SHA256: original/ and hashes.json.
+
+PRD AND DELIVERY TRACKING
+E:/Workspace/naumi-bot-lifecycle-fix/docs/prd/NAUMI_DIGITAL_EMPLOYEE_PRD.md
+E:/Workspace/naumi-bot-lifecycle-fix/docs/prd/DIGITAL_EMPLOYEE_DELIVERY.md
+E:/Workspace/naumi-bot-lifecycle-fix/docs/implementation/EMPLOYEE_FOUNDATION.md
+PRD contains uniquely numbered requirements, responsibilities, API/data contracts,
+14 first-stage acceptance cases, five delivery phases, and explicit server/local outage boundaries.
+M1 is the local foundation. M2 UI/acceptance, M3 server/authorization/sync,
+M4 autonomy/distributed execution and M5 final employee installer remain tracked as not implemented.
+
+All relative commands below run in E:/Workspace/naumi-bot-lifecycle-fix.
+
+BASELINE
+Command: node scripts/verify-employee-foundation.mjs baseline
+Input: evidence/employee-foundation/original/bots.js and original/package.json.
+Test: original loader and package do not install or ship employee continuity modules.
+Literal output:
+BASELINE employee_profile=ABSENT local_memory=ABSENT work_heartbeat=ABSENT
+Exit status: 0 (expected missing functionality reproduced).
+
+MODIFIED
+Command: node scripts/verify-employee-foundation.mjs modified
+Input: temporary SQLite file; botId=bot-fixture, sessionId=session-fixture,
+messageId=user-message-1, user text="以后回复先给结论"; reopen database;
+read other-bot; perform a heartbeat with no Agents and no network/model adapter.
+Literal output:
+MODIFIED profile=PASS explicit_memory=PASS reopen=PASS bot_isolation=PASS heartbeat_llm_calls=0
+Exit status: 0.
+
+ROLLBACK
+Command: pwsh -NoProfile -File scripts/verify-employee-rollback.ps1
+Input: separate copy of the five modified plugin files at
+E:/Workspace/naumi-bot-lifecycle-fix/evidence/employee-foundation/rollback-copy.
+The executable ROLLBACK.sh validates every modified hash, restores two original
+files and removes three new modules. A data-preservation sentinel is hash-checked.
+Literal output:
+ROLLBACK_COPY restored=2 removed=3 hashes=PASS employee_data=preserved bot_routing=retained
+ROLLBACK employee_profile=ABSENT local_memory=ABSENT work_heartbeat=ABSENT
+Exit status: 0.
+Restored behavior/status: original Bot creation and cross-Bot routing retained;
+employee profile/memory/heartbeat module absent. Only the separate copy was rolled back.
+Current source, running plugin and MODIFIED_FILE.zip remain modified.
+Rollback does not remove or rewrite employees.sqlite, Session logs, Bot directory,
+task ledger, login state or credentials. A live rollback requires idle-service restart.
+
+CONCENTRATED AND FULL REGRESSION
+Command: node --test tests/*.test.mjs desktop/tests/*.test.cjs
+Input: module fixtures, real SQLite, real Cordis, real Session schemas, loopback HTTP;
+no external business operations.
+Literal final summary:
+tests 156
+pass 156
+fail 0
+cancelled 0
+skipped 0
+Exit status: 0. Full log: full-tests.log.
+Includes actual separate Node-process reopen, two-connection CAS, idempotency,
+locked fields, learning disabled, history restore, candidate review transaction,
+user source/quote verification, relay rejection, Bot isolation, Chinese keyword
+search, secret-pattern samples, bounded JSON context, expiry/deletion, injected
+transaction rollback, unknown/corrupt DB refusal, HTTP admission and timer teardown.
+
+LIVE CONFIGURED MODEL VALIDATION
+Command: node scripts/verify-employee-live.mjs
+Input: existing 项目主管 Bot, two labelled dedicated Sessions; first user message
+"记住我的偏好：EMPLOYEE_CONTINUITY_PROBE_20261116"; second new Session asked to
+call employee_memory_search for the same fixed marker without creating records.
+Observed actual tool: employee_memory_search. Returned final output includes marker.
+The saved memory has real source.kind=user and the exact source Session/message ID.
+Existing persona/profile remained unchanged, existing Bot IDs remained unchanged.
+Literal output:
+LIVE_EMPLOYEE explicit_learning=PASS new_session_retrieval=PASS persona_unchanged=1 heartbeat_llm_calls=0 test_memories=deleted test_sessions=archived
+Exit status: 0. Evidence: LIVE_VERIFICATION.json.
+Only fixed-marker test memory was logically deleted; two idle test Sessions were
+archived (stopActivity=false). Raw logs/audit remain retained as documented.
+
+LOCAL DEPLOYMENT
+Initial idle check: sessions=59 running=0 bots=3 revision=8 contract=2.
+Source changes are restricted to bots.js, package.json and three employee modules.
+No full plugin sync, UI change, model selection change or business login change.
+Installed API: HTTP 200, X-Naumi-Employees: 1.
+Installed heartbeat: healthy, modelCalls=0, actionsStarted=0.
+SQLite local persistence and fixed-marker tombstone survive service restart.
+Source and installed module hashes match hashes.json after final bounded-context patch.
+No desktop installer EXE was rebuilt; npm pack dry-run includes all three new modules.
+
+PACKAGE / RESTORE CHECKS
+Command: node scripts/package-employee-foundation.mjs
+Literal output: PACKAGE modules=5 diff_apply=PASS original_hashes=preserved
+Exit status: 0.
+MODIFIED_FILE.zip contains exactly five plugin files and is reopened and hash-checked.
+ROLLBACK.sh executable mode is retained in Git as 100755.
+
+HONEST LIMITS
+This is local-owner M1, not tenant RBAC, server sync, signed offline access,
+autonomous work rules, full employee management UI, task business acceptance or a new EXE.
+The no-server local module test is not a deployed enterprise server outage drill.
+General persona changes are owner-reviewed candidates. Automatic learning currently
+recognizes only the documented explicit standalone preference syntax, not all conversation semantics.
