@@ -9,13 +9,14 @@ app.setName('Naumi');app.setAppUserModelId('com.naumi.desktop');
 if(process.env.NAUMI_USER_DATA)app.setPath('userData',path.resolve(process.env.NAUMI_USER_DATA));
 if(process.env.NAUMI_TEST_HIDDEN==='1'){app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');app.commandLine.appendSwitch('disable-renderer-backgrounding');}
 const locked=app.requestSingleInstanceLock();
-let window,guests,bridge,backend,settings,quitting=false,booting=false;
+let window,primarySession,guests,bridge,backend,settings,quitting=false,booting=false;
 if(!locked){app.quit();}else{
 app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.show();window.focus();}});
 app.whenReady().then(async()=>{
  nativeTheme.themeSource='light';Menu.setApplicationMenu(null);
  const icon=path.join(__dirname,'assets/naumi.ico');
  window=new BrowserWindow({width:1460,height:930,minWidth:1000,minHeight:640,show:false,title:'Naumi',backgroundColor:'#f7f9fc',icon,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webviewTag:true,partition:'persist:naumi-workbench',spellcheck:false,backgroundThrottling:false}});
+ primarySession=window.webContents.session;
  window.on('page-title-updated',e=>{e.preventDefault();window.setTitle('Naumi');});
  window.webContents.on('will-navigate',(event,url)=>{if(settings&&new URL(url).origin!==settings.url)event.preventDefault();});
  window.webContents.setWindowOpenHandler(({url})=>{
@@ -38,7 +39,7 @@ app.whenReady().then(async()=>{
  await boot();
  if(process.env.NAUMI_TEST==='1')globalThis.__naumiTest={window,guests,bridge,settings};
 }).catch(error=>{console.error('NAUMI_DESKTOP_START_FAILED',error.message);app.quit();});
-app.on('before-quit',event=>{if(quitting)return;quitting=true;event.preventDefault();void(async()=>{await guests?.flush();await window?.webContents.session.cookies.flushStore();await bridge?.close();if(backend?.owned)backend.child.kill();app.quit();})().catch(()=>app.exit(1));});
+app.on('before-quit',event=>{if(quitting)return;quitting=true;event.preventDefault();void(async()=>{try{await guests?.flush();await primarySession?.cookies.flushStore();}finally{await bridge?.close();if(backend?.owned)backend.child.kill();app.quit();}})().catch(()=>app.exit(1));});
 app.on('window-all-closed',()=>app.quit());
 }
 async function showStartup(error=''){

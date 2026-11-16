@@ -1,11 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
-const packages=[['naumi-enterprise','@naumi/dsh-enterprise'],['naumi-ui-layout','@naumi/dsh-ui-layout']];
+const packages=[['naumi-enterprise','@naumi/dsh-enterprise'],['naumi-ui-layout','@naumi/dsh-ui-layout'],['naumi-sidebar-browser','@naumi/dsh-sidebar-browser']];
 const manifest='.dsh/profiles/web/package.json';
 const profile=JSON.parse(fs.readFileSync(manifest,'utf8'));
 for(const [folder,name]of packages){
   const target=path.join('.dsh/profiles/web/node_modules',name);
-  if(!fs.existsSync(target))throw Error(`Install ${name} into the Web profile first. See NAUMI_CUSTOMIZATION.md.`);
+  if(!fs.existsSync(target)){
+    if(name!=='@naumi/dsh-sidebar-browser')throw Error(`Install ${name} into the Web profile first. See NAUMI_CUSTOMIZATION.md.`);
+    fs.mkdirSync(target,{recursive:true});profile.dependencies??={};profile.dependencies[name]='file:'+path.resolve('plugins',folder).replaceAll('\\','/');
+  }
   for(const file of fs.readdirSync('plugins/'+folder,{recursive:true})){
     const source=path.join('plugins',folder,file);
     if(fs.statSync(source).isFile()){
@@ -22,4 +25,4 @@ for(const [folder,name]of packages){
 if(!profile.dsh.profile.bundles.includes('@naumi/dsh-enterprise'))profile.dsh.profile.bundles.push('@naumi/dsh-enterprise');
 const serialized=JSON.stringify(profile,null,2)+'\n';
 if(fs.readFileSync(manifest,'utf8')!==serialized)fs.writeFileSync(manifest,serialized);
-console.log('NAUMI_SYNC packages=2 bundle_enabled=1');
+console.log('NAUMI_SYNC packages=3 bundle_enabled=1');

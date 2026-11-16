@@ -3,7 +3,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 const root=fileURLToPath(new URL('../..',import.meta.url)),home=path.join(root,'.dsh/desktop-test/harness'),profile=path.join(home,'profiles/web'),nm=path.join(profile,'node_modules');
 fs.mkdirSync(path.join(nm,'@naumi'),{recursive:true});
-for(const [name,target]of [['@deepseek-ai',path.join(root,'node_modules/@deepseek-ai')],['@naumi/dsh-enterprise',path.join(root,'plugins/naumi-enterprise')],['@naumi/dsh-ui-layout',path.join(root,'plugins/naumi-ui-layout')]])if(!fs.existsSync(path.join(nm,name)))fs.symlinkSync(target,path.join(nm,name),'junction');
+for(const [name,target]of [['@deepseek-ai',path.join(root,'node_modules/@deepseek-ai')],['@naumi/dsh-enterprise',path.join(root,'plugins/naumi-enterprise')],['@naumi/dsh-ui-layout',path.join(root,'plugins/naumi-ui-layout')],['@naumi/dsh-sidebar-browser',path.join(root,'plugins/naumi-sidebar-browser')]])if(!fs.existsSync(path.join(nm,name)))fs.symlinkSync(target,path.join(nm,name),'junction');
 fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'naumi-desktop-test',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}},null,2));
 if(!fs.existsSync(path.join(profile,'cordis.patch.yml')))fs.writeFileSync(path.join(profile,'cordis.patch.yml'),'- id: ui-settings-general\n  config:\n    welcomeNoticeVersion: 2026-09-28.1\n');
 fs.writeFileSync(path.join(home,'cordis.patch.yml'),'- id: ui-theme\n  config:\n    preference: light\n- id: session-log-deepseek\n  config:\n    enabled: false\n');

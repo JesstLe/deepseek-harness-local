@@ -6,12 +6,13 @@ import {createHash} from 'node:crypto';
 const root=fileURLToPath(new URL('../..',import.meta.url)),evidence=path.join(root,'evidence/naumi-desktop'),originalRoot=process.argv[2];
 if(!originalRoot)throw Error('Supply the unchanged original checkout');
 const hash=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
-const candidates=(execFileSync('git',['ls-files','-m','-o','--exclude-standard','-z'],{cwd:root}).toString()+'\0'+execFileSync('git',['diff','--name-only','-z','HEAD'],{cwd:root}).toString()).split('\0').filter(Boolean);
+const base='66c432bf4dfa93d82d4219d0813c23c1fb5c83da',baselineFiles=new Set(execFileSync('git',['ls-tree','-r','--name-only',base],{cwd:root}).toString().split('\n'));
+const candidates=(execFileSync('git',['ls-files','-m','-o','--exclude-standard','-z'],{cwd:root}).toString()+'\0'+execFileSync('git',['diff','--name-only','-z',base],{cwd:root}).toString()).split('\0').filter(Boolean);
 const files=[...new Set(candidates)].filter(f=>!f.startsWith('evidence/')&&!f.startsWith('docs/')&&!['plugins/naumi-enterprise/client.js','plugins/naumi-ui-layout/client.js','plugins/naumi-ui-layout/UPSTREAM.json'].includes(f)).sort();
 const manifest=[];
 for(const file of files){
  const item={path:file,modifiedSHA256:hash(path.join(root,file))},source=path.join(originalRoot,file),original=path.join(evidence,'original',file);
- if(fs.existsSync(source)){if(!fs.existsSync(original)){fs.mkdirSync(path.dirname(original),{recursive:true});fs.copyFileSync(source,original);}item.originalSHA256=hash(original);}
+ if(baselineFiles.has(file)){if(!fs.existsSync(original)){fs.mkdirSync(path.dirname(original),{recursive:true});fs.copyFileSync(source,original);}item.originalSHA256=hash(original);}
  manifest.push(item);
 }
 fs.writeFileSync(path.join(evidence,'change-manifest.json'),JSON.stringify(manifest,null,2)+'\n');
