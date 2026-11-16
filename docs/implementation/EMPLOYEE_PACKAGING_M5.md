@@ -68,3 +68,7 @@
 ## M5.3 企业首次连接与归属
 
 新增首次企业origin配置、独立Electron企业session与有限业务请求桥；Cookie不拷贝到localhost，原设备签名/同步/运行门保留。实例协议2绑定listener port/homeHash/企业origin，拒绝relay和隐式home克隆，保留旧identity UUID/key。修复干净PATH下DPAPI shell发现和Windows回执短暂占用。315项本地回归通过；正式npm包73文件、候选产物/双profile登录/原生浏览器与故障恢复/副本回滚最终证据统一见evidence/desktop-enterprise/VERIFICATION.txt与DESKTOP_ENTERPRISE_M5_3.md。下一NSIS真实安装、已安装版本/业务数据迁移回退、签名/依赖和真实员工业务验收；完整目标active。
+
+## M5.4 工作区恢复与 NSIS 候选
+
+0.2.1新增可恢复首次连接及独立企业工作区，原home/identity/private store/原生浏览器资料不覆盖；有活动任务或未知活动状态不切换，旧worker认证退出后才选新home。正常启动不依赖企业在线。333回归与实际workspaces/NSIS/产物/副本恢复最终结果见evidence/desktop-installation/VERIFICATION.txt，细粒度边界见DESKTOP_INSTALLATION_M5_4.md。NSIS正常停机链不代表硬杀孤儿worker或跨工作区旧版降级已完成；总目标active。

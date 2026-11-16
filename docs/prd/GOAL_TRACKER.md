@@ -48,3 +48,13 @@ owner确认的run_agent规则、原子持久队列、原AgentLoop/Native工具�
 实例协议2绑定真实监听端口、规范home和企业origin；identity v1增量补homeHash并保留UUID/key，克隆/搬迁拒绝隐式复用。standalone新增浅色首次连接页与持久企业origin配置、独立企业session登录窗口和固定业务API桥；不复制Cookie到renderer/backend。catalog/manager/enroll/bind复用该桥，原设备签名通道/RBAC/私人同步确认不变。首次GUI桥出现时刷新能力；DPAPI采用绝对系统PowerShell；Windows回执原子rename加入有界handoff重试。315项集中回归通过，正式npm包73文件；最终桌面/产物/副本回滚结果见evidence/desktop-enterprise/VERIFICATION.txt，详见DESKTOP_ENTERPRISE_M5_3.md。
 
 下一M5.4：首次连接错误地址/不可达的修复UI、NSIS真实安装/升级/卸载、已安装版本/业务schema迁移回退与Windows数据handoff；再签名/依赖、真实HTTPS企业/员工登记绑定/供应商与业务验收。企业切换/目录搬迁需要显式迁移流程，不隐式继承旧issuer/设备/cache。整体目标active。
+
+## M5.4 企业工作区与 NSIS 正常停机链
+
+首次连接新增匿名固定接口检查、错误/取消不落盘、启动错误/系统连接修复入口；已有单企业home兼容保留。不同企业采用独立UUID home/设备/SQLite/浏览器namespace，不重写旧issuer；切换前检查真实owner会话与桥操作，认证停止旧worker后选择active，返回旧工作区恢复原数据。企业不可达仍可启动已有本地工作台。333项模块回归通过。
+
+桌面候选0.2.1，实际0.2.0基线NSIS已构建；0.2.1安装/正常停机升级/旧单企业profile降级/卸载的实际结果统一见evidence/desktop-installation/VERIFICATION.txt、WORKSPACE_RECOVERY.json和NSIS_INSTALLATION.json。完整记录见DESKTOP_INSTALLATION_M5_4.md。不把缺失或非PASS结果算验收完成。
+
+卸载观察超时的原命令exit1保留，独立只读复核exit0确认最终清理与数据保留；NSIS_INSTALLATION.json明确reconciledAfterObserverTimeout。观察器增加单次启动、300秒后置状态等待与持久checkpoint；4项回归通过，修订runner完整真机链未重跑。
+
+下一M5.5：安装器认证quiesce、硬杀遗留worker/运行中任务/句柄与失败恢复；新企业工作区回退旧客户端的兼容阻止/恢复；随后业务schema矩阵、干净员工机/真实HTTPS账号/供应商预算与真实业务验收、签名和依赖审查。总目标active。

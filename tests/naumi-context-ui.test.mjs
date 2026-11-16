@@ -41,9 +41,11 @@ test('native leaf relocation preserves exact injected actions, store, locale and
 test('parent/child slot owners cannot accidentally be relocated as leaves',()=>{
  assert.throws(()=>options({options:{},children:{child:{}}},'parent'),/Only leaf/);
 });
-test('all preexisting enterprise front-end code is byte-equivalent apart from one UI install call',()=>{
+test('all preexisting enterprise front-end code is byte-equivalent apart from declared UI install and desktop-only connection action',()=>{
+ const desktopAction=",globalThis.naumiDesktop?.connectionSettings&&h('button',{className:'naumi-btn',onClick:()=>globalThis.naumiDesktop.connectionSettings()},'连接设置')";
+ assert.equal(source.split(desktopAction).length,2);
  const start=source.indexOf('window.__ModuleLoader__.load');
- const restored=source.slice(start).split('\n').filter(line=>!line.includes("void import('/naumi/assets/browser-client.js')")).join('\n').replace("    installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);\n",'');
+ const restored=source.slice(start).replace(desktopAction,'').split('\n').filter(line=>!line.includes("void import('/naumi/assets/browser-client.js')")).join('\n').replace("    installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);\n",'');
  assert.equal(restored.replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'));
 });
 test('team presentation has no direct credential, model, permission or persistence writes',()=>{

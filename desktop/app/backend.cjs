@@ -3,6 +3,7 @@ const fs=require('node:fs'),path=require('node:path'),net=require('node:net');
 const {spawn}=require('node:child_process');
 const {createHash,createHmac,randomBytes,randomUUID,timingSafeEqual}=require('node:crypto');
 const profile=require('./profile.cjs');
+const {currentWorkspace}=require('./workspaces.cjs');
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
 function localURL(value){const u=new URL(value);if(u.protocol!=='http:'||u.hostname!=='127.0.0.1'||u.username||u.password||u.pathname!=='/'||u.search||u.hash||!u.port)throw Error('INVALID_LOCAL_BACKEND');return u.origin;}
 function localSettings(app,{resourcesPath=process.resourcesPath,environment=process.env}={}){
@@ -15,10 +16,10 @@ function localSettings(app,{resourcesPath=process.resourcesPath,environment=proc
   if(environment.NAUMI_ROOT&&environment.NAUMI_TEST!=='1'){fs.mkdirSync(path.dirname(link),{recursive:true});fs.writeFileSync(link,JSON.stringify({root},null,2)+'\n');}
   return {root,home:environment.NAUMI_DSH_HOME??c.home,url:environment.NAUMI_HOST_URL??`http://${c.host}:${c.port}`,node:environment.NAUMI_NODE??'node.exe',logDir:path.join(root,'logs'),isolated:false};
  }
- root=path.join(resourcesPath,'backend');const runtime=profile.runtimeReference(root),home=path.join(userData,'harness');
+ root=path.join(resourcesPath,'backend');const runtime=profile.runtimeReference(root),selected=currentWorkspace(userData),home=selected.home;
  const legacyAdoption=fs.existsSync(path.join(home,'profiles/web/package.json'))&&!profile.exists(path.join(home,'desktop-profile.json'));
  const identity=profile.identity(home),receipt=profile.runtimeReceipt(home,identity.id);
- return {root,home,workspace:path.join(home,'workspace'),url:localURL(environment.NAUMI_HOST_URL??`http://127.0.0.1:${receipt?.port??3080}`),node:path.join(root,'node.exe'),logDir:path.join(home,'logs'),isolated:true,identity,runtime,legacyAdoption};
+ return {root,home,workspaceId:selected.id,workspace:path.join(home,'workspace'),url:localURL(environment.NAUMI_HOST_URL??`http://127.0.0.1:${receipt?.port??3080}`),node:path.join(root,'node.exe'),logDir:path.join(home,'logs'),isolated:true,identity,runtime,legacyAdoption};
 }
 function launchFromLog(settings){
  for(const name of ['server.out.log','server.err.log']){let text='';try{text=fs.readFileSync(path.join(settings.logDir,name),'utf8');}catch{}const urls=text.match(/http:\/\/127\.0\.0\.1:\d+\/?\?token=[A-Za-z0-9_~.%-]+/g)??[];for(const url of urls.reverse())if(new URL(url).origin===settings.url)return url;}

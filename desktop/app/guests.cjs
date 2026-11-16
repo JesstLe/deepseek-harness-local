@@ -58,5 +58,6 @@ class Guests {
   entries(sessionId){return [...this.leases.values()].filter(e=>e.sessionId===sessionId&&e.guest&&!e.guest.isDestroyed());}
   selected(sessionId){return this.entries(sessionId).sort((a,b)=>(b.selectedAt??0)-(a.selectedAt??0))[0];}
   async flush(){for(const partition of this.partitions)await session.fromPartition(partition).cookies.flushStore();}
+  async reset({hostURL,account}){await this.flush();for(const entry of [...this.leases.values()])await this.release(entry.owner,entry.lease);this.hostURL=hostURL;this.account=account;}
 }
 module.exports={Guests};

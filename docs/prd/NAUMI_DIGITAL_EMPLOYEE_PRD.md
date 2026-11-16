@@ -363,3 +363,11 @@ HBT-003/004、CAP-001、BUD-001、LOC-004/005/006、EMP-002/003 扩展；独立�
 - 组织/设备登记的proof、签名离线授权、企业RBAC和原设备通道继续权威；首次连接不会自动登记或上传私人记忆。企业会话过期、权限拒绝、未知网络结果不由应用自动回放mutation；POST携带原始operationId，原企业事务回执去重覆盖Chromium可能的网络重传，并以同一UUID核对未知结果。
 - CAP-001：GUI桥出现/重启触发能力刷新；干净系统PATH下DPAPI改用固定绝对系统PowerShell。Windows回执rename短暂占用有界重试并保留原权威文件。
 - 315项集中模块回归通过。独立双profile Electron、候选正式包/hash、原生浏览器/主进程硬杀接回及副本回滚最终结果按evidence/desktop-enterprise/VERIFICATION.txt记录。真实远程HTTPS员工授权、模型/供应商业务、NSIS安装/升级/卸载、业务schema/已安装版本回退及签名审查仍分别验收，不以本地fixture替代。
+
+## M5.4 连接恢复与真实安装链增量（2026-11-17）
+
+- LOC/EMP：首次URL错误、不可达或取消不再写入连接配置。已有配置不以企业健康作为本地启动前置条件；错误页/系统连接有修复入口。
+- 企业切换采用独立userData子home和浏览器account，不覆盖旧origin/签名设备/私人记忆/缓存。版本1工作区active指针原子提交；旧单企业home原地兼容，无复制身份或自动登记。
+- 活动任务/未知状态/在途桥操作拒绝切换；正常HMAC停止旧worker并观察退出后再选择新home。旧企业session/browser与人格记忆在返回时继续使用。
+- 333项集中回归通过。实际unpacked A/B/A、离线重启与真实NSIS 0.2.0安装/0.2.1升级/0.2.0旧单企业profile降级/卸载证据以evidence/desktop-installation/VERIFICATION.txt及JSON结果为准；具体边界见DESKTOP_INSTALLATION_M5_4.md。
+- 故障中安装quiesce、跨工作区旧版回退、业务schema迁移降级、发布签名/依赖、干净员工机与真实企业/供应商业务继续保留为明确门槛，完整目标active。

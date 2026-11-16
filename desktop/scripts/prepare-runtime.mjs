@@ -7,6 +7,9 @@ import {stageDingTalk} from './stage-dingtalk.mjs';
 import {auditPackage} from '../../scripts/audit-enterprise-package.mjs';
 const project=fileURLToPath(new URL('../..',import.meta.url));
 const sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+// Match normal production packaging: declarations and external source maps are development
+// artifacts. Keep all executable JS/native files, schemas, skills, licenses and font .map data.
+export function isRuntimeDevelopmentArtifact(file){return /\.d\.(?:ts|mts|cts)$|\.(?:js|mjs|cjs|css|ts|mts|cts)\.map$/i.test(file);}
 export function verifyStagedImports(staged){
   const script=`import{registerHooks}from'node:module';import{pathToFileURL}from'node:url';import path from'node:path';const base=pathToFileURL(process.cwd()+path.sep).href;registerHooks({resolve(specifier,context,next){const result=next(specifier,context);if(result.url.startsWith('file:')&&!result.url.startsWith(base))throw Error('STAGED_IMPORT_OUTSIDE_BUNDLE');return result;}});await import('./node_modules/@naumi/dsh-enterprise/host.js');console.log('STAGED_HOST_IMPORT_OK no_ancestor_dependencies=1');`;
   const result=execFileSync(path.join(staged,'node.exe'),['--input-type=module','-e',script],{cwd:staged,encoding:'utf8',env:{SystemRoot:process.env.SystemRoot,PATH:path.dirname(process.execPath)}});
@@ -18,7 +21,7 @@ export function runtimeInventory(target){
   walk(target);return files;
 }
 export function scanRuntimeInventory(files){
-  const forbidden=/(?:^|\/)(?:\.env(?:\..*)?|\.credentials[^/]*|cookies(?:\.sqlite)?|login data|local state|web data|employee[^/]*\.sqlite(?:-wal|-shm)?|sessions|logs|\.git|\.dsh|browser-profiles|naumi-desktop-bridge\.json|backend-link\.json|desktop-(?:instance|profile|profile-journal|backend|enterprise)\.json|device-private-key[^/]*|.*\.(?:pem|pfx|key))$/i;
+  const forbidden=/(?:^|\/)(?:\.env(?:\..*)?|\.credentials[^/]*|cookies(?:\.sqlite)?|login data|local state|web data|employee[^/]*\.sqlite(?:-wal|-shm)?|sessions|logs|\.git|\.dsh|browser-profiles|enterprise-workspaces|naumi-desktop-bridge\.json|backend-link\.json|desktop-(?:instance|profile|profile-journal|backend|enterprise|workspaces)\.json|device-private-key[^/]*|.*\.(?:pem|pfx|key))$/i;
   // SDK source directories named sessions are code, not a copied employee session store.
   for(const file of files)if(forbidden.test(file.path)||/^(?:sessions|logs|browser-profiles)\//i.test(file.path)||/(?:^|\/)(?:\.git|\.dsh|browser-profiles)\//i.test(file.path))throw Error('RUNTIME_PRIVATE_FILE '+file.path);
   return {files:files.length,forbiddenPaths:0};
@@ -33,7 +36,7 @@ export async function prepareRuntime({root=project,target=path.join(root,'runtim
   fs.mkdirSync(runtime,{recursive:true});const staged=path.join(runtime,'desktop-stage-'+randomUUID());fs.mkdirSync(staged);
   try{
     // Only runtime dependencies and source plugins are input. No user home/profile/config is copied.
-    fs.cpSync(path.join(root,'node_modules'),path.join(staged,'node_modules'),{recursive:true,dereference:true,filter:source=>!source.split(path.sep).some(x=>['.cache','.bin','dingtalk-workspace-cli'].includes(x))});
+    fs.cpSync(path.join(root,'node_modules'),path.join(staged,'node_modules'),{recursive:true,dereference:true,filter:source=>!source.split(path.sep).some(x=>['.cache','.bin','dingtalk-workspace-cli'].includes(x))&&!isRuntimeDevelopmentArtifact(source)});
     fs.cpSync(path.join(root,'plugins'),path.join(staged,'plugins'),{recursive:true});
     for(const [source,name]of [['naumi-enterprise','dsh-enterprise'],['naumi-ui-layout','dsh-ui-layout'],['naumi-sidebar-browser','dsh-sidebar-browser']])fs.cpSync(path.join(root,'plugins',source),path.join(staged,'node_modules/@naumi',name),{recursive:true});
     fs.copyFileSync(process.execPath,path.join(staged,'node.exe'));
