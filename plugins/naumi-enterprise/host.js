@@ -3,14 +3,16 @@ import {fileURLToPath} from 'node:url';
 import {businessCookie,projectWorkspace,validateOrigin} from './domain.js';
 import {installAgentDesktop} from './agent-desktop.js';
 import {installEgoBrowser} from './browser.js';
+import {installTeamProfile} from './team-profile.js';
 export const inject=['webServer','connection'];
 /** Supported plugin routes, index branding and an authenticated read-only business adapter. */
 export function apply(ctx,config) {
   installAgentDesktop(ctx);
   installEgoBrowser(ctx);
+  installTeamProfile(ctx);
   const collaborationOrigin=validateOrigin(config.collaborationOrigin);
   const designOrigin=validateOrigin(config.designOrigin);
-  const assets=new Map([['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml'],['browser-client.js','text/javascript; charset=utf-8'],['browser-scheduler.js','text/javascript; charset=utf-8'],['browser.css','text/css; charset=utf-8']]);
+  const assets=new Map([['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml'],['browser-client.js','text/javascript; charset=utf-8'],['browser-scheduler.js','text/javascript; charset=utf-8'],['browser.css','text/css; charset=utf-8'],['team-panel.css','text/css; charset=utf-8'],['team-panel.js','text/javascript; charset=utf-8'],['team-panel-model.js','text/javascript; charset=utf-8']]);
   ctx.effect(()=>ctx.webServer.register({kind:'prefix',path:'/naumi/assets',handler:async(req,res)=>{
     const name=new URL(req.url,'http://localhost').pathname.split('/').at(-1);
     if(!['GET','HEAD'].includes(req.method)||!assets.has(name)){res.writeHead(404).end();return;}
@@ -36,8 +38,8 @@ export function apply(ctx,config) {
     finally{res.off('close',onClose);}
   }}));
   ctx.on('webserver/index-inject',table=>{
-    table.push({kind:'global',name:'__NAUMI__',value:{collaborationOrigin,designOrigin,version:'0.1.0'}});
-    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/browser.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
+    table.push({kind:'global',name:'__NAUMI__',value:{collaborationOrigin,designOrigin,version:'0.2.0'}});
+    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/browser.css"><link rel="stylesheet" href="/naumi/assets/team-panel.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
   });
   ctx.effect(()=>ctx.webServer.tapIndex(html=>html.replace(/<title>[^<]*<\/title>/i,'<title>Naumi · 企业协作</title>').replace(/<link[^>]+rel="(?:shortcut )?icon"[^>]*href="(?!\/naumi\/)[^"]*"[^>]*>/g,'')));
 }

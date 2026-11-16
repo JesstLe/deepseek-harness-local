@@ -1,13 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import vm from 'node:vm';
+import {naumiMonitorReadings as read,naumiPortalOptions as options} from '../plugins/naumi-enterprise/assets/team-panel-model.js';
 const source=fs.readFileSync('plugins/naumi-enterprise/client.js','utf8');
+const panelSource=fs.readFileSync('plugins/naumi-enterprise/assets/team-panel.js','utf8');
 const original=fs.readFileSync('evidence/naumi-context-ui/original/client.js','utf8');
-const css=fs.readFileSync('plugins/naumi-enterprise/assets/style.css','utf8');
-const box={window:{__ModuleLoader__:{load(){}}}};
-vm.runInNewContext(source+'\nglobalThis.helpers={naumiMonitorReadings,naumiPortalOptions};',box);
-const {naumiMonitorReadings:read,naumiPortalOptions:options}=box.helpers;
+const css=fs.readFileSync('plugins/naumi-enterprise/assets/team-panel.css','utf8');
 const plain=x=>JSON.parse(JSON.stringify(x));
 test('monitor keeps unknown values unknown, rather than sample data',()=>{
  assert.deepEqual(plain(read()),{speed:null,total:null,cache:null,context:null});
@@ -48,19 +46,19 @@ test('all preexisting enterprise front-end code is byte-equivalent apart from on
  const restored=source.slice(start).split('\n').filter(line=>!line.includes("void import('/naumi/assets/browser-client.js')")).join('\n').replace("    installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);\n",'');
  assert.equal(restored.replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'));
 });
-test('new UI layer has no new network, credential, model, permission or persistence writes',()=>{
- const added=source.slice(0,source.indexOf('window.__ModuleLoader__.load'));
+test('team presentation has no direct credential, model, permission or persistence writes',()=>{
+ const added=panelSource;
  for(const forbidden of [/\bfetch\s*\(/,/\bXMLHttpRequest\b/,/localStorage\./,/sessionStorage\./,/credentials\//,/settings\/replace/,/setModel\(/,/setPermission\(/,/innerHTML\s*=/,/appendChild\(/])assert(!forbidden.test(added),String(forbidden));
  assert(added.includes('native.openTeammate(sessionId,member.id)'));
  assert(added.includes("openTab('files')"));
 });
 test('original sidebar and model slots are not replaced or restyled by context layer',()=>{
- const added=source.slice(0,source.indexOf('window.__ModuleLoader__.load'));
+ const added=panelSource;
  assert(!added.includes("name:'sidebar'"));assert(!added.includes('conversation.input.model'));
  const newCss=css.slice(css.indexOf('/* UI-only context composition'));
  assert(!newCss.includes('[data-slot="sidebar"]'));assert(!newCss.includes('conversation.input.model'));
 });
 test('session lifecycle cleans observers, presentation markers, and reserved width',()=>{
- for(const fragment of ['resize.disconnect()','observer.disconnect()','delete root.dataset.naumiContextRoot',"removeProperty('--naumi-context-reserve')",'if(!Object.values(record).some(Boolean))docks.delete(id)'])assert(source.includes(fragment));
+ for(const fragment of ['resize.disconnect()','observer.disconnect()','delete root.dataset.naumiContextRoot',"removeProperty('--naumi-context-reserve')",'if(!Object.values(record).some(Boolean))docks.delete(id)'])assert(panelSource.includes(fragment));
  assert(css.includes('.naumi-context-panel[hidden]{display:none!important}'));
 });
