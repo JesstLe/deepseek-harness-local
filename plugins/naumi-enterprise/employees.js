@@ -7,6 +7,7 @@ import {installEmployeeWork} from './employee-work.js';
 import {installEmployeeSync} from './employee-sync-http.js';
 import {EmployeeMemoryMaintenance,maintenanceCommands} from './employee-memory-maintenance.js';
 import {createEnterpriseWorkTools} from './employee-enterprise-work.js';
+import {installEmployeeActivity} from './employee-activity.js';
 
 export function createEmployeeTools(service,{sync}={}){
   const output={schema:{type:'json'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]};
@@ -34,13 +35,14 @@ const commands=z.discriminatedUnion('action',[
   z.object({action:z.literal('memory_update'),botId:str,memoryId:str,expectedRevision:rev,operationId:op,profileRevision:rev.optional(),patch:z.object({text:z.string().trim().min(1).max(4000).optional(),status:z.enum(['candidate','active','rejected','deleted']).optional(),pinned:z.boolean().optional(),expiresAt:expires.optional()}).strict()}).strict(),
 ]);
 
-export function installEmployees(ctx,directory,{store,onReady,heartbeatOptions={},collaborationOrigin,sync}={}){
+export function installEmployees(ctx,directory,{store,onReady,heartbeatOptions={},activityOptions={},collaborationOrigin,sync}={}){
   // agentDefaultModel is a host readiness dependency; never read or modify its selected route here.
   return ctx.inject(['agents','agentTeams','agentDefaultModel','sessions','sessionPersistence','tools','systemPrompt'],scope=>{
     const data=store??new EmployeeStore(path.join(path.dirname(directory.file),'employees.sqlite'));
     const workRuntime=installEmployeeWork(scope,directory,data);
     const syncRuntime=installEmployeeSync(scope,directory,data,{origin:collaborationOrigin,sync});
     const service=new EmployeeService(scope,directory,data),maintenance=new EmployeeMemoryMaintenance(data),installed=new Map();
+    const activityRuntime=installEmployeeActivity(scope,directory,data,service,{...activityOptions,sync:syncRuntime});
     const heartbeat=new EmployeeHeartbeat({agents:scope.agents,directory,store:data,...heartbeatOptions,onError:()=>scope.logger.warn('EMP_HEARTBEAT_SCAN_FAILED')});
     const install=agent=>{
       if(installed.has(agent)||!scope.agentTeams.tryMembership(agent))return;const disposers=[];
@@ -94,7 +96,7 @@ export function installEmployees(ctx,directory,{store,onReady,heartbeatOptions={
       }catch(error){const code=error instanceof z.ZodError?'EMP_INVALID_REQUEST':/^EMP_[A-Z_]+$/.test(error.message)?error.message:'EMP_STORAGE_UNAVAILABLE';
         send(/CONFLICT/.test(code)?409:/NOT_FOUND/.test(code)?404:/REQUIRED|LOCKED|ARCHIVED|DISABLED/.test(code)?403:/STORAGE|SCHEMA/.test(code)?503:400,{error:code});}
     }}));
-    heartbeat.start();onReady?.({service,store:data,heartbeat,settled:()=>Promise.all([...background])});
-    scope.effect(()=>async()=>{heartbeat.close();await syncRuntime?.close();await workRuntime.dispose();for(const dispose of installed.values())dispose();installed.clear();await Promise.all(background);data.close();});
+    heartbeat.start();onReady?.({service,store:data,heartbeat,activityRuntime,settled:()=>Promise.all([...background])});
+    scope.effect(()=>async()=>{heartbeat.close();await activityRuntime.close();await syncRuntime?.close();await workRuntime.dispose();for(const dispose of installed.values())dispose();installed.clear();await Promise.all(background);data.close();});
   });
 }

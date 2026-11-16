@@ -89,6 +89,6 @@ test('AC10 heartbeat is observed state, stale detection, 0 actions; errors and t
     beat.agents={list(){throw Error('fixture scan failure');}};beat.tick();assert.equal(beat.read().runtimeState,'error');
     beat.close();const stopped=beat.read();time+=10000;beat.tick();assert.equal(beat.read().sampledAt,stopped.sampledAt);assert.equal(beat.timer,null);
     const response=await f.get('heartbeat');assert.equal(response.status,200);assert.equal((await response.json()).modelCalls,0);
-    const before=f.sender.tools.size;await f.host.dispose();assert.equal(f.sender.tools.size,before-8);assert.equal(f.runtime.heartbeat.read().runtimeState,'stopped');
+    const before=f.sender.tools.size;await f.host.dispose();assert.equal(f.sender.tools.size,before-10);assert.equal(f.runtime.heartbeat.read().runtimeState,'stopped');
   }finally{await f.cleanup();}
 });

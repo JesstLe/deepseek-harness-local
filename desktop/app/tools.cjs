@@ -62,6 +62,7 @@ async function startBridge({home,guests,window}){
   const send=(code,value)=>{if(!res.destroyed){res.writeHead(code);res.end(JSON.stringify(value));}};
   const received=Buffer.from(req.headers.authorization??''),expected=Buffer.from('Bearer '+token);
   if(req.headers.origin||received.length!==expected.length||!timingSafeEqual(received,expected)){send(403,{error:'NATIVE_BROWSER_AUTH_REQUIRED'});return;}
+  if(req.method==='GET'&&req.url==='/health'){send(200,{ok:true,protocolVersion:1,pid:process.pid,engine:'chromium'});return;}
   if(req.method!=='POST'||req.url!=='/op'){send(404,{error:'NOT_FOUND'});return;}
   try{let body='',bytes=0;for await(const data of req){bytes+=data.length;if(bytes>65536){send(413,{error:'BODY_TOO_LARGE'});return;}body+=data.toString();}const {sessionId,input}=JSON.parse(body);send(200,{ok:true,data:await runtime.perform(sessionId,input)});}
   catch(error){send(400,{ok:false,error:/^[A-Z_0-9]{3,80}$/.test(error.message)?error.message:'NATIVE_BROWSER_OPERATION_FAILED_NO_REPLAY'});}

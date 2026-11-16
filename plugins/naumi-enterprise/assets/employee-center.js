@@ -1,10 +1,11 @@
 import {createEnterpriseWorkPanel} from './employee-enterprise-work.js';
+import {createEmployeeActivityPanel} from './employee-activity-panel.js';
 import {createMemoryMaintenance} from './employee-memory-maintenance.js';
 import {createEmployeeSyncPanel} from './employee-sync-panel.js';
 import {PROFILE_LABELS,MEMORY_LABELS,MEMORY_STATUS,GOAL_STATUS,DELIVERY_STATUS,errorLabel,profileDifference,createEmployeeClient} from './employee-center-model.js';
 
 export function createEmployeeCenter(React,{client=createEmployeeClient()}={}){
-  const h=React.createElement,{useState,useEffect,useRef}=React,SyncPanel=createEmployeeSyncPanel(React),Maintenance=createMemoryMaintenance(React),EnterpriseWork=createEnterpriseWorkPanel(React);
+  const h=React.createElement,{useState,useEffect,useRef}=React,SyncPanel=createEmployeeSyncPanel(React),Maintenance=createMemoryMaintenance(React),EnterpriseWork=createEnterpriseWorkPanel(React),Activity=createEmployeeActivityPanel(React);
   const time=value=>value?new Date(value).toLocaleString('zh-CN',{hour12:false}):'—';
   const localTime=value=>value?new Date(Date.parse(value)-new Date(value).getTimezoneOffset()*60000).toISOString().slice(0,16):'';
   const textInput=(label,value,onChange,props={})=>h('label',{className:'emp-field'},h('span',null,label),h('input',{value,onChange:e=>onChange(e.target.value),...props}));
@@ -81,7 +82,7 @@ export function createEmployeeCenter(React,{client=createEmployeeClient()}={}){
     const review=(transition,reason='',checkedCriteria=[])=>run({action:'delivery_transition',deliveryId:delivery.id,expectedRevision:delivery.revision,transition,reason,checkedCriteria},{work:true});
     const choose=id=>{if(busy)return;setBotId(id);};
     const refresh=()=>{void load();void loadMem();if(delivery)void openDelivery(delivery.id);};
-    const tabs=[['profile','档案'],['memories','记忆'],['work','工作'],['history','成长记录'],['enterprise','企业']];
+    const tabs=[['profile','档案'],['memories','记忆'],['work','工作'],['activity','运行'],['history','成长记录'],['enterprise','企业']];
     const profile=data?.profile;
     return h('main',{className:'naumi-employee-center','data-employee-center':true},
       h('aside',{className:'emp-roster','aria-label':'员工列表'},h('div',{className:'emp-roster-heading'},h('h1',null,'员工中心'),badge(bots.length)),bots.length?bots.map(bot=>h('button',{key:bot.id,type:'button',className:'emp-roster-item','aria-pressed':bot.id===botId,onClick:()=>choose(bot.id),disabled:busy},h('span',{className:'emp-avatar'},bot.name.slice(0,1)),h('span',{className:'emp-roster-name'},h('strong',null,bot.name),h('span',null,bot.kind==='team'?'团队':'智能体')),h('i',{className:bot.status==='active'?'active':'archived'}))):h('p',{className:'emp-empty'},'暂无员工')),
@@ -91,6 +92,7 @@ export function createEmployeeCenter(React,{client=createEmployeeClient()}={}){
         loading&&!data&&h('p',{className:'emp-empty',role:'status'},'读取中…'),
         data&&selected&&h('div',{className:'emp-content',role:'tabpanel',id:'emp-panel-'+tab,'aria-labelledby':'emp-tab-'+tab},
           tab==='enterprise'&&h(SyncPanel,{botId}),
+          tab==='activity'&&h(Activity,{key:botId,botId,writeable,goals:data.work.goals}),
           tab==='work'&&h(EnterpriseWork,{key:botId,botId,onConnect:()=>setTab('enterprise')}),
           tab==='memories'&&h(Maintenance,{key:botId,botId,onChanged:refresh}),
           tab==='profile'&&h(React.Fragment,null,h(Profile,{profile,busy:busy||!writeable,save:patch=>run({action:'profile_update',expectedRevision:profile.revision,patch},{close:false})}),h('div',{className:'emp-runtime-strip'},h('span',null,'执行器 ',badge(data.heartbeat.runtimeState==='healthy'&&!data.heartbeat.stale?'在线':'状态待核查',data.heartbeat.runtimeState==='healthy'?'green':'')),h('span',null,'运行会话 ',data.heartbeat.runningSessionCount??'—'),h('span',null,'最近采样 ',time(data.heartbeat.sampledAt)))),
