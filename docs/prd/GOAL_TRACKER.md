@@ -26,3 +26,7 @@ M3 核心已接入实际 naumi-design-ops（3112），不是旧 naumi-co；详�
 ## M4 企业模型与预算增量
 
 独立模型网关、签名短期设备凭证、企业/员工/Bot/任务权威预留与真实usage结算、UNKNOWN上界核对、受管会话模型准入和模型管理UI已实现。230 Harness/桌面、233企业端、10 UI与独立进程强杀/重放0已通过。接入及副本回滚证据见 evidence/model-gateway；详见 EMPLOYEE_MODEL_GATEWAY_M4.md。真实供应商路由与负责人预算启用不以空路由health代替，受控主动AI与M5继续，总目标active。
+
+## M4 受控主动 AI 增量
+
+owner确认的run_agent规则、原子持久队列、原AgentLoop/Native工具消费、精确turn/网关UUID/不可变产物、人工输入抢占、请求/时长/工作窗口上限与UNKNOWN恢复/核对已实现并接入实际3080。251 Harness/桌面、233企业端、11 UI、真实SIGKILL及53项副本基线回归通过；7插件增量、其他hash不变。真实AI规则启用0、设备未登记、网关真实路由0。详见 EMPLOYEE_PROACTIVE_AI_M4.md 与 evidence/proactive-ai/VERIFICATION.txt；下一M5安装包完整集成及真实模型/员工使用验收，总目标active。

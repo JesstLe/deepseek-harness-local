@@ -4,10 +4,12 @@ import {z} from 'zod';
 import {EmployeeActivityStore,activityCommands} from './employee-activity-store.js';
 import {EmployeeObservation} from './employee-observation.js';
 import {EmployeeCapabilities} from './employee-capabilities.js';
+import {installProactiveAi,aiCommands} from './employee-proactive-ai.js';
 
-export function installEmployeeActivity(scope,directory,store,service,{sync,intervalMs=30000,capabilities:provided}={}){
+export function installEmployeeActivity(scope,directory,store,service,{sync,intervalMs=30000,capabilities:provided,proactiveOptions={}}={}){
   const activity=new EmployeeActivityStore(store),observation=new EmployeeObservation({store,directory,agents:scope.agents});
   const capabilities=provided??new EmployeeCapabilities({ctx:scope,sync,home:path.dirname(path.dirname(directory.file))});
+  const proactive=installProactiveAi(scope,directory,store,activity,sync,proactiveOptions),commandSchema=z.discriminatedUnion('action',[...activityCommands.options,...aiCommands.options]);
   let closed=false,timer,lastCheck=0,value={sampledAt:null,error:null,clockRollback:false,actions:0};const installed=new Map();
   const observe=(agent,state)=>{if(closed)return;try{observation.record(agent,state);}catch{scope.logger.warn('ACT_OBSERVATION_FAILED');}};
   const install=agent=>{
@@ -25,11 +27,11 @@ export function installEmployeeActivity(scope,directory,store,service,{sync,inte
   for(const agent of scope.agents.list())install(agent);
   const tick=()=>{
     if(closed)return;
-    try{const result=activity.tick(directory.list().bots.filter(b=>b.status==='active').map(b=>b.id));value={sampledAt:store.now(),error:null,...result};}
+    try{const result=activity.tick(directory.list().bots.filter(b=>b.status==='active').map(b=>b.id));proactive.engine.tick();value={sampledAt:store.now(),error:null,...result};}
     catch{value={...value,error:'ACT_SCAN_FAILED'};scope.logger.warn('ACT_SCAN_FAILED');}
     if(Date.now()-lastCheck>=60000){lastCheck=Date.now();void capabilities.refresh().catch(()=>scope.logger.warn('ACT_CAPABILITY_PROBE_FAILED'));}
   };
-  const read=botId=>({domain:'local-owner',scheduler:{...value,modelCalls:0,externalActions:0,stale:!value.sampledAt||Date.now()-Date.parse(value.sampledAt)>intervalMs*3},rules:activity.rules(botId),runs:activity.runs(botId),notifications:activity.notifications(botId),observation:observation.read(botId),capabilities:capabilities.read(botId)});
+  const read=botId=>({domain:'local-owner',scheduler:{...value,modelCalls:0,externalActions:0,stale:!value.sampledAt||Date.now()-Date.parse(value.sampledAt)>intervalMs*3},proactive:proactive.engine.view(botId),rules:activity.rules(botId),runs:activity.runs(botId),notifications:activity.notifications(botId),observation:observation.read(botId),capabilities:capabilities.read(botId)});
   scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/employee-activity',handler:async(req,res)=>{
     res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Naumi-Activity','1');
     const admission=scope.connection.admit(req);if('rejection'in admission){res.writeHead(admission.rejection).end();return;}if(admission.peer.principal.kind!=='owner'){res.writeHead(403).end();return;}
@@ -39,10 +41,13 @@ export function installEmployeeActivity(scope,directory,store,service,{sync,inte
       if(req.method!=='POST'){res.setHeader('Allow','GET, POST');send(405,{error:'METHOD_NOT_ALLOWED'});return;}
       if(req.headers['x-naumi-employee-activity']!=='1'||req.headers['sec-fetch-site']==='cross-site'||req.headers.origin&&![`http://${req.headers.host}`,`https://${req.headers.host}`].includes(req.headers.origin)){send(403,{error:'ACT_SAME_ORIGIN_REQUIRED'});return;}
       let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>16384){send(413,{error:'ACT_REQUEST_TOO_LARGE'});return;}chunks.push(Buffer.from(chunk));}
-      let command;try{command=activityCommands.parse(JSON.parse(Buffer.concat(chunks).toString('utf8')));}catch{send(400,{error:'ACT_INVALID_REQUEST'});return;}
-      service.bot(command.botId,{write:true});send(200,activity.command(command));
+      let command;try{command=commandSchema.parse(JSON.parse(Buffer.concat(chunks).toString('utf8')));}catch{send(400,{error:'ACT_INVALID_REQUEST'});return;}
+      service.bot(command.botId,{write:true});
+      if(command.action.startsWith('ai_job_')){send(200,await proactive.engine.command(command));return;}
+      const config=command.config??(command.action==='rule_enable'&&command.enabled?activity.rule(command.botId,command.ruleId).config:null);if(config)proactive.engine.validate(command.botId,config);
+      const result=activity.command(command);proactive.engine.tick();send(200,result);
     }catch(e){const code=e instanceof z.ZodError?'ACT_INVALID_REQUEST':/^(?:EMP|WORK|ACT)_[A-Z_]+$/.test(e.message)?e.message:'ACT_STORAGE_UNAVAILABLE';send(/CONFLICT/.test(code)?409:/NOT_FOUND/.test(code)?404:/REQUIRED|ARCHIVED/.test(code)?403:/UNAVAILABLE/.test(code)?503:400,{error:code});}
   }}));
   tick();timer=setInterval(tick,intervalMs);timer.unref?.();
-  return {activity,observation,capabilities,read,tick,async close(){closed=true;clearInterval(timer);timer=null;for(const dispose of installed.values())dispose();installed.clear();await capabilities.close();}};
+  return {activity,proactive:proactive.engine,observation,capabilities,read,tick,async close(){closed=true;clearInterval(timer);timer=null;await proactive.close();for(const dispose of installed.values())dispose();installed.clear();await capabilities.close();}};
 }

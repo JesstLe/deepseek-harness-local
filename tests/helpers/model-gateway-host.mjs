@@ -3,9 +3,10 @@ import {managedRuntimeHost} from './managed-runtime-host.mjs';import {startModel
 export const generous={costMicros:10000000,tokens:1000000,requests:100,concurrent:4};
 export const policy=(patch={})=>({revision:1,active:true,routes:['chat','backup'],organization:{...generous},employee:{...generous},task:{...generous},maxAttempts:2,credentialSeconds:3600,enforceManaged:true,allowFallback:true,...patch});
 export async function modelGatewayHost({http:withHttp=false}={}){
- const f=await managedRuntimeHost();let requests=0,mints=0,mode='normal',controllerMode='normal',lastBody=null;const upstream=http.createServer(async(req,res)=>{
+ const f=await managedRuntimeHost();let requests=0,mints=0,mode='normal',controllerMode='normal',lastBody=null,wireResponder=null;const upstream=http.createServer(async(req,res)=>{
   const chunks=[];for await(const c of req)chunks.push(c);lastBody=JSON.parse(Buffer.concat(chunks));requests++;
   if(req.headers.authorization!=='Bearer fixture-upstream-only'){res.writeHead(401).end();return;}
+  if(wireResponder&&await wireResponder(lastBody,requests,res))return;
   if(mode==='reject-primary'&&lastBody.model==='wire-primary'){res.writeHead(429).end();return;}
   if(mode==='500'){res.writeHead(500).end('private upstream diagnostic');return;}
   if(mode==='hang')return;
@@ -25,7 +26,7 @@ export async function modelGatewayHost({http:withHttp=false}={}){
  if(withHttp){modelsHost=f.ctx.plugin({name:'model-http-fixture',inject:['llm','connection','webServer'],apply(scope){modelsRuntime=installEmployeeModels(scope,f.directory,{sync:f.sync});}});await modelsHost;client=modelsRuntime.client;}
  else{client=new EmployeeModels({ctx:f.ctx,sync:f.sync,directory:f.directory});f.sync.models=client;adapter=new EmployeeGatewayAdapter({ctx:f.ctx,client,directory:f.directory});registration=f.ctx.llm.registerAdapter([MODEL_PROVIDER],adapter);}
  const request=(body,token=grant(),id=randomUUID())=>fetch(gateway+'/v1/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json','X-Naumi-Request-Id':id},body:JSON.stringify({model:'chat',messages:[{role:'user',content:'网关验证'}],max_tokens:16,stream:false,...body})});
- return {...f,app,client,gateway,grant,request,route,adapter,get requests(){return requests;},get mints(){return mints;},get lastBody(){return lastBody;},get policy(){return currentPolicy;},setPolicy:p=>currentPolicy=p,setMode:v=>mode=v,setControllerMode:v=>controllerMode=v,
+ return {...f,app,client,gateway,grant,request,route,adapter,get now(){return f.now;},get externalCalls(){return f.externalCalls;},get modelCalls(){return f.modelCalls;},get requests(){return requests;},get mints(){return mints;},get lastBody(){return lastBody;},get policy(){return currentPolicy;},setPolicy:p=>currentPolicy=p,setMode:v=>mode=v,setControllerMode:v=>controllerMode=v,setWireResponder:v=>wireResponder=v,
   admin(body){return f.signPacket({aud:'naumi-model-admin',gateway,tenantId:f.claims.tenantId,memberId:f.claims.memberId,jti:randomUUID(),issuedAt:new Date(f.now).toISOString(),expiresAt:new Date(f.now+300000).toISOString(),...body});},
   async cleanup(){if(modelsRuntime){await modelsRuntime.close();await modelsHost.dispose();}else{await client.close();registration();}await app.close();upstream.closeAllConnections();await new Promise(r=>upstream.close(r));await f.cleanup();},
  };

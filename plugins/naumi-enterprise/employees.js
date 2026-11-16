@@ -101,6 +101,6 @@ export function installEmployees(ctx,directory,{store,onReady,heartbeatOptions={
         send(/CONFLICT/.test(code)?409:/NOT_FOUND/.test(code)?404:/REQUIRED|LOCKED|ARCHIVED|DISABLED/.test(code)?403:/STORAGE|SCHEMA/.test(code)?503:400,{error:code});}
     }}));
     heartbeat.start();onReady?.({service,store:data,heartbeat,activityRuntime,gateRuntime,modelsRuntime,settled:()=>Promise.all([...background])});
-    scope.effect(()=>async()=>{heartbeat.close();await gateRuntime?.close();await modelsRuntime?.close();await activityRuntime.close();await syncRuntime?.close();await workRuntime.dispose();for(const dispose of installed.values())dispose();installed.clear();await Promise.all(background);data.close();});
+    scope.effect(()=>async()=>{heartbeat.close();await activityRuntime.close();await gateRuntime?.close();await modelsRuntime?.close();await syncRuntime?.close();await workRuntime.dispose();for(const dispose of installed.values())dispose();installed.clear();await Promise.all(background);data.close();});
   });
 }
