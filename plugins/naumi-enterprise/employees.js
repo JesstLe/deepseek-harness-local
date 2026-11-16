@@ -6,6 +6,7 @@ import {EmployeeService,EmployeeHeartbeat} from './employee-service.js';
 import {installEmployeeWork} from './employee-work.js';
 import {installEmployeeSync} from './employee-sync-http.js';
 import {EmployeeMemoryMaintenance,maintenanceCommands} from './employee-memory-maintenance.js';
+import {createEnterpriseWorkTools} from './employee-enterprise-work.js';
 
 export function createEmployeeTools(service,{sync}={}){
   const output={schema:{type:'json'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]};
@@ -21,7 +22,7 @@ export function createEmployeeTools(service,{sync}={}){
     const {bot}=service.caller(agent),claims=sync.offlineClaims();if(!claims.bindings.some(b=>b.localBotId===bot.id))throw Error('EMP_DEVICE_BINDING_REQUIRED');
     const {query='',limit=10}=z.object({query:z.string().max(300).optional(),limit:z.number().int().min(1).max(30).optional()}).strict().parse(args);
     return sync.sharedMemories().filter(m=>m.payload.text.toLocaleLowerCase().includes(query.toLocaleLowerCase())).slice(0,limit).map(m=>({id:m.id,scope:m.scope,projectId:m.project_id,revision:m.revision,...m.payload}));
-  }));return tools;
+  }));return [...tools,...createEnterpriseWorkTools(service,sync)];
 }
 
 const str=z.string().min(1).max(200),rev=z.number().int().nonnegative(),op=z.string().min(1).max(200),expires=z.string().datetime().nullable();

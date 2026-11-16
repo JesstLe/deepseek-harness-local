@@ -1,0 +1,11 @@
+import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {pathToFileURL} from 'node:url';import {botLiveApi} from './bot-live-api.mjs';
+const e='E:/Workspace/naumi-design-ops-digital-employees/evidence/enterprise-work',api=await botLiveApi(),bots=await api.json('/naumi/bots');assert(bots.bots.length);
+const status=await api.json('/naumi/employee-sync'),operations=await api.json('/naumi/employee-sync?view=operations&botId='+encodeURIComponent(bots.bots[0].id));assert.equal(status.registered,false);assert.equal(status.enabled,false);assert(Array.isArray(operations));
+const anonymous=await fetch(api.base+'/naumi/employee-sync?view=operations&botId='+encodeURIComponent(bots.bots[0].id));assert.equal(anonymous.status,401);
+const {chromium}=await import(pathToFileURL('E:/Workspace/naumi/node_modules/playwright/index.mjs').href),browser=await chromium.launch({headless:true}),page=await browser.newPage({viewport:{width:1440,height:1000},colorScheme:'light'}),errors=[];page.on('pageerror',err=>errors.push(err.message));
+const logs=['server.out.log','server.err.log'].map(n=>fs.readFileSync(path.join('E:/Workspace/deepseek-harness-local/logs',n),'utf8')).join('\n'),launch=[...logs.matchAll(/http:\/\/127\.0\.0\.1:3080\/?\?token=[A-Za-z0-9_~.%-]+/g)].at(-1)?.[0];assert(launch);
+try{
+ await page.goto(launch,{waitUntil:'domcontentloaded'});await page.getByText('员工中心',{exact:true}).first().click();await page.getByRole('tab',{name:'工作',exact:true}).click();await page.getByText('企业任务',{exact:true}).click();const panel=page.locator('[data-enterprise-work]');await panel.getByText('请先登记企业设备',{exact:true}).waitFor();assert(await panel.getByRole('button',{name:'连接企业员工',exact:true}).isVisible());assert.equal(errors.length,0);await page.screenshot({path:e+'/LIVE_ENTERPRISE_WORK.png',animations:'disabled'});
+ fs.writeFileSync(e+'/LIVE_HARNESS.json',JSON.stringify({status:'PASS',tier:'actual deployed Harness, no route mocks, read only',registered:status.registered,automaticUpload:status.enabled,anonymous:anonymous.status,pageErrors:errors,businessMutations:0},null,2));
+ console.log('LIVE_HARNESS enterprise_work_ui=PASS operations_api=200 anonymous=401 enrollment=off business_mutations=0');
+}finally{await browser.close();}

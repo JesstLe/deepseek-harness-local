@@ -64,7 +64,7 @@ export class EmployeeSync {
   async http(endpoint,options={}){
     const r=await this.request(this.origin+endpoint,{...options,redirect:'error',signal:AbortSignal.timeout(15000)});
     const text=await r.text();if(text.length>8*1024*1024)fail('EMP_SYNC_RESPONSE_TOO_LARGE');let value;try{value=JSON.parse(text);}catch{fail('EMP_SYNC_RESPONSE_INVALID');}
-    if(!r.ok){const code=value.code??'EMP_SYNC_UNAVAILABLE';if(['DEVICE_REVOKED','MEMBER_INACTIVE','TENANT_INACTIVE','ACCESS_PENDING','DEVICE_REENROLLMENT_REQUIRED'].includes(code)){this.set('revoked',true);this.db.exec('DELETE FROM shared_cache');}throw Error(code);}
+    if(!r.ok){const code=value.code??'EMP_SYNC_UNAVAILABLE';if(['DEVICE_REVOKED','MEMBER_INACTIVE','TENANT_INACTIVE','ACCESS_PENDING','DEVICE_REENROLLMENT_REQUIRED'].includes(code)){this.set('revoked',true);this.db.exec('DELETE FROM shared_cache');}const error=Error(code);error.status=r.status;throw error;}
     return value;
   }
   async enroll(cookie,name){
@@ -172,5 +172,5 @@ export class EmployeeSync {
   sharedMemories(){this.offlineClaims();return this.db.prepare('SELECT encrypted FROM shared_cache').all().map(r=>this.vault.unseal(r.encrypted)).filter(r=>!r.deleted&&r.payload.status==='active'&&(!r.payload.expiresAt||Date.parse(r.payload.expiresAt)>this.clock()));}
   setEnabled(enabled){this.set('enabled',enabled);return this.status();}
   start(){let delay=30000;const tick=async()=>{if(this.closed)return;try{if(this.get('enabled'))await this.sync();delay=30000;}catch{delay=Math.min(delay*2,300000);}finally{if(!this.closed){this.timer=setTimeout(tick,delay+Math.floor(Math.random()*3000));this.timer.unref?.();}}};this.timer=setTimeout(tick,30000);this.timer.unref?.();}
-  async close(){this.closed=true;clearTimeout(this.timer);await this.flight?.catch(()=>{});this.db.close();}
+  async close(){this.closed=true;clearTimeout(this.timer);await this.enterpriseWork?.close();await this.flight?.catch(()=>{});this.db.close();}
 }

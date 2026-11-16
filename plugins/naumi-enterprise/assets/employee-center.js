@@ -1,9 +1,10 @@
+import {createEnterpriseWorkPanel} from './employee-enterprise-work.js';
 import {createMemoryMaintenance} from './employee-memory-maintenance.js';
 import {createEmployeeSyncPanel} from './employee-sync-panel.js';
 import {PROFILE_LABELS,MEMORY_LABELS,MEMORY_STATUS,GOAL_STATUS,DELIVERY_STATUS,errorLabel,profileDifference,createEmployeeClient} from './employee-center-model.js';
 
 export function createEmployeeCenter(React,{client=createEmployeeClient()}={}){
-  const h=React.createElement,{useState,useEffect,useRef}=React,SyncPanel=createEmployeeSyncPanel(React),Maintenance=createMemoryMaintenance(React);
+  const h=React.createElement,{useState,useEffect,useRef}=React,SyncPanel=createEmployeeSyncPanel(React),Maintenance=createMemoryMaintenance(React),EnterpriseWork=createEnterpriseWorkPanel(React);
   const time=value=>value?new Date(value).toLocaleString('zh-CN',{hour12:false}):'—';
   const localTime=value=>value?new Date(Date.parse(value)-new Date(value).getTimezoneOffset()*60000).toISOString().slice(0,16):'';
   const textInput=(label,value,onChange,props={})=>h('label',{className:'emp-field'},h('span',null,label),h('input',{value,onChange:e=>onChange(e.target.value),...props}));
@@ -90,6 +91,7 @@ export function createEmployeeCenter(React,{client=createEmployeeClient()}={}){
         loading&&!data&&h('p',{className:'emp-empty',role:'status'},'读取中…'),
         data&&selected&&h('div',{className:'emp-content',role:'tabpanel',id:'emp-panel-'+tab,'aria-labelledby':'emp-tab-'+tab},
           tab==='enterprise'&&h(SyncPanel,{botId}),
+          tab==='work'&&h(EnterpriseWork,{key:botId,botId,onConnect:()=>setTab('enterprise')}),
           tab==='memories'&&h(Maintenance,{key:botId,botId,onChanged:refresh}),
           tab==='profile'&&h(React.Fragment,null,h(Profile,{profile,busy:busy||!writeable,save:patch=>run({action:'profile_update',expectedRevision:profile.revision,patch},{close:false})}),h('div',{className:'emp-runtime-strip'},h('span',null,'执行器 ',badge(data.heartbeat.runtimeState==='healthy'&&!data.heartbeat.stale?'在线':'状态待核查',data.heartbeat.runtimeState==='healthy'?'green':'')),h('span',null,'运行会话 ',data.heartbeat.runningSessionCount??'—'),h('span',null,'最近采样 ',time(data.heartbeat.sampledAt)))),
           tab==='memories'&&h(React.Fragment,null,h('div',{className:'emp-toolbar'},h('input',{'aria-label':'搜索记忆',placeholder:'搜索记忆',value:search,onChange:e=>{setSearch(e.target.value);setOffset(0);},maxLength:300}),h('select',{'aria-label':'记忆状态',value:status,onChange:e=>{setStatus(e.target.value);setOffset(0);}},Object.entries({...MEMORY_STATUS,all:'全部状态'}).map(([v,s])=>h('option',{key:v,value:v},s))),h('select',{'aria-label':'记忆类别',value:kind,onChange:e=>{setKind(e.target.value);setOffset(0);}},h('option',{value:'all'},'全部类别'),Object.entries(MEMORY_LABELS).map(([v,s])=>h('option',{key:v,value:v},s))),button('新增记忆',()=>setDialog({type:'memory'}),{className:'primary',disabled:busy||!writeable})),
