@@ -1,0 +1,75 @@
+--- a/plugins/naumi-enterprise/assets/browser-client.js
++++ prototype/plugins/naumi-enterprise/assets/browser-client.js
+@@ -1,9 +1,12 @@
+ import {BrowserScheduler,browserPoint} from './browser-scheduler.js';
++import {nativeBrowserAvailable,createNativeBrowser} from './browser-native-client.js';
+ /** Ego page presentation inside the native Harness docking system. */
+ export function installBrowserUI(ctx,React,Icon){
+   const {createElement:h,useState,useEffect,useRef}=React,id='@naumi/ego-browser';
+   const disposers=[];
+-  function Browser({sessionId,useTabInfo}){
++  const NativeBrowser=createNativeBrowser(React);
++  function Browser(props){return h(nativeBrowserAvailable()?NativeBrowser:WebBrowser,props);}
++  function WebBrowser({sessionId,useTabInfo}){
+     const {tab}=useTabInfo(),[state,setState]=useState(null),[address,setAddress]=useState(''),[error,setError]=useState(null),[busy,setBusy]=useState(false),[pages,setPages]=useState([]);
+     const surface=useRef(null),keyboard=useRef(null),composition=useRef(false),frame=useRef(null),scheduler=useRef(null);
+     if(!scheduler.current)scheduler.current=new BrowserScheduler({
+--- a/plugins/naumi-enterprise/host.js
++++ prototype/plugins/naumi-enterprise/host.js
+@@ -10,7 +10,7 @@
+   installEgoBrowser(ctx);
+   const collaborationOrigin=validateOrigin(config.collaborationOrigin);
+   const designOrigin=validateOrigin(config.designOrigin);
+-  const assets=new Map([['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml'],['browser-client.js','text/javascript; charset=utf-8'],['browser-scheduler.js','text/javascript; charset=utf-8'],['browser.css','text/css; charset=utf-8']]);
++  const assets=new Map([['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml'],['browser-client.js','text/javascript; charset=utf-8'],['browser-native-client.js','text/javascript; charset=utf-8'],['browser-scheduler.js','text/javascript; charset=utf-8'],['browser.css','text/css; charset=utf-8']]);
+   ctx.effect(()=>ctx.webServer.register({kind:'prefix',path:'/naumi/assets',handler:async(req,res)=>{
+     const name=new URL(req.url,'http://localhost').pathname.split('/').at(-1);
+     if(!['GET','HEAD'].includes(req.method)||!assets.has(name)){res.writeHead(404).end();return;}
+--- a/plugins/naumi-enterprise/browser.js
++++ prototype/plugins/naumi-enterprise/browser.js
+@@ -11,11 +11,12 @@
+   });
+ }
+ 
+-export function installEgoBrowser(ctx,{runtime=new EgoBrowserRuntime()}={}){
++export function installEgoBrowser(ctx,{runtime=new EgoBrowserRuntime(),nativeRuntime=new EgoBrowserRuntime({serverName:'naumi-native'})}={}){
+   let toolRegistered=false;
+-  ctx.effect(()=>()=>runtime.dispose());
++  const nativeSessions=new Set(),routed={perform:(scope,args,options)=>(nativeSessions.has(scope)?nativeRuntime:runtime).perform(scope,args,options)};
++  ctx.effect(()=>()=>Promise.all([runtime.dispose(),nativeRuntime.dispose()]));
+   ctx.inject(['skills'],scope=>{scope.plugin(filesystemSkills,{providerName:'naumi-browser',includeDefaultRoots:false,watch:false,customSkillDirs:[],bundledSkillDir:fileURLToPath(new URL('./browser-skills',import.meta.url))});});
+-  ctx.inject(['tools'],scope=>scope.effect(()=>{const dispose=scope.tools.register(createBrowserTool(runtime));toolRegistered=true;return()=>{toolRegistered=false;dispose();};}));
++  ctx.inject(['tools'],scope=>scope.effect(()=>{const dispose=scope.tools.register(createBrowserTool(routed));toolRegistered=true;return()=>{toolRegistered=false;dispose();};}));
+   ctx.effect(()=>ctx.webServer.register({kind:'exact',path:'/naumi/browser',handler:async(req,res)=>{
+     res.setHeader('Cache-Control','private, no-store');res.setHeader('Content-Type','application/json; charset=utf-8');res.setHeader('X-Content-Type-Options','nosniff');
+     const send=(status,data)=>{if(!res.destroyed){res.writeHead(status);res.end(JSON.stringify(data));}};
+@@ -31,7 +32,8 @@
+       let raw='',size=0;for await(const chunk of req){size+=chunk.length;if(size>65536){send(413,{error:'BROWSER_BODY_TOO_LARGE'});return;}raw+=chunk.toString();}
+       let body;try{body=JSON.parse(raw);}catch{send(400,{error:'INVALID_BROWSER_JSON'});return;}
+       if(typeof body.sessionId!=='string'||!body.sessionId||body.sessionId.length>200){send(400,{error:'BROWSER_SESSION_REQUIRED'});return;}
+-      const result=await runtime.perform(body.sessionId,body,{signal:controller.signal});send(200,result);
++      if(body.action==='native-bind'){nativeSessions.add(body.sessionId);send(200,{mode:'native-window',serverName:'naumi-native',screenshotTransport:false});return;}
++      const result=await routed.perform(body.sessionId,body,{signal:controller.signal});send(200,result);
+     }catch(error){const code=String(error.message);send(/^(?:INVALID_|BROWSER_SESSION)/.test(code)?400:503,{error:/^[A-Z][A-Z0-9_]{2,80}$/.test(code)?code:'EGO_OPERATION_FAILED'});}
+     finally{res.off('close',closed);}
+   }}));
+--- a/plugins/naumi-enterprise/browser-runtime.js
++++ prototype/plugins/naumi-enterprise/browser-runtime.js
+@@ -48,7 +48,7 @@
+ 
+ /** Structured operations only; never interpolate page/script text into shell syntax. */
+ export class EgoBrowserRuntime {
+-  constructor({runtime,spawnProcess=spawn}={}){this.runtime=runtime;this.spawnProcess=spawnProcess;this.queues=new Map();this.pages=new Map();this.viewports=new Map();this.children=new Set();this.closed=false;this.metrics={workerStarts:0,requests:0};}
++  constructor({runtime,spawnProcess=spawn,serverName}={}){if(serverName!==undefined&&serverName!=='naumi-native')throw Error('INVALID_EGO_SERVER');this.serverName=serverName;this.runtime=runtime;this.spawnProcess=spawnProcess;this.queues=new Map();this.pages=new Map();this.viewports=new Map();this.children=new Set();this.closed=false;this.metrics={workerStarts:0,requests:0};}
+   status(){try{const r=this.runtime??resolveBrowserRuntime();return {status:'installed',version:r.version,engine:'ego-lite',presentation:'interactive-stream'};}catch(e){return {status:'not_installed',error:e.message,engine:'ego-lite'};}}
+   async perform(scope,input,{signal}={}){
+     if(this.closed)throw Error('EGO_RUNTIME_DISPOSED');
+@@ -65,7 +65,7 @@
+       const readyPath=path.join(r.root,'.dsh/ego-lite-backup','worker-'+randomUUID()+'.json');fs.mkdirSync(path.dirname(readyPath),{recursive:true});
+       const module=pathToFileURL(fileURLToPath(new URL('./browser-bridge.mjs',import.meta.url))).href;
+       const code='await (await import('+JSON.stringify(module)+')).serve('+JSON.stringify({readyPath,token,ownerPid:process.pid})+')';
+-      const child=this.spawnProcess(r.command,['nodejs','-e',code],{cwd:r.app,windowsHide:true,shell:false,stdio:['ignore','pipe','pipe']});
++      const child=this.spawnProcess(r.command,[...(this.serverName?['--ego-server-name='+this.serverName]:[]),'nodejs','-e',code],{cwd:r.app,windowsHide:true,shell:false,stdio:['ignore','pipe','pipe']});
+       this.children.add(child);this.metrics.workerStarts++;let exited=false;
+       const clear=()=>{exited=true;this.children.delete(child);if(this.worker?.child===child){this.worker=null;this.workerPromise=null;}};
+       child.on('error',clear);child.on('close',clear);child.stdout.resume();child.stderr.resume();
