@@ -15,3 +15,21 @@
 未完成与下一步：集中测试与隔离真实供应商连续性；不对3080业务会话发测试，不因观察超时重放模型；完成后普通合并/空闲加载，D2历史工作区与D3任务/交付及D5安装仍独立退出。
 
 集中验证进度：35/35模块（5个新连续性用例+原30）exit0；9路径源码包ZIP CRC/原始哈希、4原文件恢复/5新增删除、副本原30/30通过。全仓首轮因本工作树漏desktop/node_modules junction导致installer/electron依赖缺失，完整失败保留；已补与主仓库相同依赖junction后集中复测，不改业务代码或跳过测试。真实供应商隔离验收已有新会话检索/人设候选确认/双模型/同数据宿主重启记录；未结束前不计整条PASS。
+
+## 验收矩阵（已观察证据）
+| 要求 | 结果 | 证据 |
+| --- | --- | --- |
+| 新会话仍为同员工/记忆 | PASS；新Session绑定同Bot，未在新prompt泄露标记而检索并返回 | LIVE_VERIFICATION fresh_session_native_search |
+| 模型切换保持人设/记忆 | PASS；原生selectModel deepseek-flash→deepseek-v4-pro，工具回读确认人设与标记 | second_model_recall |
+| 宿主重启保持连续 | PASS；停止同隔离宿主后重开同home/port，export除exportedAt完全相等，同Session真实模型检索 | restart checks |
+| 人设随会话演变须确认 | PASS；真实profile_propose候选不注入，owner确认后新模型读取 | persona checks |
+| 临时要求不污染 | PASS；“这次回复简洁直接”前后export除时间完全一致 | temporary check |
+| 遗忘不再注入 | PASS；owner原子遗忘后全新Session检索不再返回随机标记 | forgotten check |
+| 员工私有记忆隔离 | PASS；独立Bot原生工具无前员工标记/人设 | other_employee check |
+| 不借权限/不改模型 | PASS；4个实际持久Session的12个原生权限/sandbox/approval事件，仅employee工具；同Bot3Session策略逐项一致 | NATIVE_POLICIES.json |
+| 旧风格/人设不再冲突 | PASS；35/35模块，旧记录未改/导出保留/当前字段权威/重开 | MODULE.log |
+| 历史物理工作区迁移 | 协作线程daily-five负责，不由上述记忆验收代替 | DAILY_FIVE_CLOSEOUT.md |
+
+真实链路：13检查、10完整原生回合、22供应商请求、2宿主启动；不是loopback假模型。只使用既有选定分组的deepseek-flash与同组已配置deepseek-v4-pro，密钥只在环境/内存，不写fixture；原3组配置/凭据文件hash保持，0次3080请求。企业状态不变。两个隔离宿主已结束，没有新建生产员工或修改业务会话。
+
+主线同步def82a3→b65d506→8734f5a，保留daily-five三模块/0.3.6候选版本，未写协作文件。整合后全仓738/738、exit0，原主线728/728通过也保留；35模块、30副本回滚均exit0。旧风格冲突baseline可复现；副本恢复旧行为仍保留两条style并通过原30测试，当前源码保持修复。功能切片1。
