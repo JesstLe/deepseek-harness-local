@@ -1,0 +1,52 @@
+FILE DELIVERY SINGLE PATH
+Branch: codex/file-delivery-single-path-20261118
+Baseline: 81d474723e3ad46a74e4f6e3e5a7b96590cd3e6c
+Changed fields: assignedWork.output/deliveryPath; original SQL mutate validate callback after original receipt lookup; new inline-text writes for file-task agents -> WORK_TASK_FILES_USE_PRESENT. No new execution/approval ledger, no history migration/deletion, no enterprise/model/UI/package changes.
+
+FOUR PATHS (final main):
+MODIFIED_FILE E:/Workspace/naumi-desktop/evidence/file-delivery-single-path/MODIFIED_FILE.zip
+DIFF_FILE E:/Workspace/naumi-desktop/evidence/file-delivery-single-path/DIFF_FILE.patch
+VERIFICATION E:/Workspace/naumi-desktop/evidence/file-delivery-single-path/VERIFICATION.txt
+ROLLBACK E:/Workspace/naumi-desktop/evidence/file-delivery-single-path/ROLLBACK.sh
+
+BASELINE
+Command: node scripts/repro-file-delivery-single-path.mjs --baseline
+Input: native Session/store, own file-task fixture and inline-text create; no provider inference.
+Literal output: BASELINE file_task_inline_text_draft=CREATED duplicate_path=OPEN model_calls=0
+Exit0. BASELINE.log.
+
+MODIFIED
+Command: node scripts/repro-file-delivery-single-path.mjs --modified
+Same input. Literal output: MODIFIED file_task_inline_text_draft=REJECTED duplicate_path=CLOSED model_calls=0
+Exit0. MODIFIED.log.
+Command: node --test tests/naumi-file-delivery-single-path.test.mjs tests/naumi-work-file-acceptance.test.mjs tests/naumi-work-goal-task-links.test.mjs tests/naumi-local-proactive.test.mjs
+Input: complete module source; native/isolated fixtures.
+Literal result: tests49 pass49 fail0 skipped0. Exit0. MODULE.log. Initial async-tool assertion mistake retained as MODULE_FIRST.log.
+Command: node --test tests/*.test.mjs desktop/tests/*.test.cjs
+Literal result: tests810 pass810 fail0 cancelled0 skipped0. Exit0. REGRESSION.log.
+Coverage: reject new file-task inline create/revise/submit with no partial records; native binary still registers one reviewable file delivery; old create/revise/submit receipts return exact original; changed payload still conflicts; owner/manual notes and old history remain; real text tasks and standalone local proactive drafts remain.
+
+REAL MODIFIED
+Command: node scripts/verify-file-delivery-single-live.mjs --live E:/Workspace/naumi-desktop
+Input: own random-port/home/Bots/workspaces; selected existing deepseek-flash; output4096/request cap48. Owner API creates confirmed Goal for this focused regression, real manager dispatches, real worker reads CSV/writes/presents; owner returns then same task/session attempt2. No 3080 writes, no elevated approval.
+Literal output: FILE_SINGLE_LIVE checks=9 boots=1 supplier_entry_requests=30 same_task=1 attempt=2 file_versions=2 deliveries=1 text_drafts=0 actual3080_writes=0 config_changes=0
+Exit0. LIVE.log. First unrelated pre-file input-required case retained (3 entry requests, native ask_user_question not answered/autoapproved); it is NOT counted as file acceptance success.
+Command: node scripts/audit-file-delivery-single-path.mjs
+Literal output: FILE_SINGLE_AUDIT deliveries=1 file_versions=2 text_artifacts=0 exact_csv=25/2760,31/3480 file_hashes=4 PASS native_responses=29 entry_requests=30 paid_billing=NOT_OBSERVED
+Literal output: FILE_SINGLE_AUDIT passing_cases=1 other_cases=RETAINED actual3080_writes=0
+Exit0. Audit opens original native persistence, SQLite read-only, exact CSV channels/totals and four generated immutable snapshot bytes/hashes. 30 ENTRY requests is not supplier authoritative billing;29 is all-home committed assistant messages.
+
+ROLLBACK
+Command: node scripts/package-file-delivery-single-path.mjs --rollback-test
+Input: marked independent source COPY, no live task/data/ACL changes.
+Literal output: ZIP entries=12 CRC=PASS hashes=PASS
+Literal output: ROLLBACK_SOURCE originals=5 new_removed=7 hashes=PASS live_data=UNTOUCHED
+Literal output: ROLLBACK tests=43 pass=43 fail=0 exit=0
+Literal output: ARTIFACTS paths=12 modified=RETAINED enterprise=UNCHANGED
+Exit0. PACKAGE.log; original43 tests pass on restored source. Final LF/document-only archive reopens/rechecks COPY restoration without redundant business rerun (FINAL_COPY_ROLLBACK.log).
+Command: node evidence/file-delivery-single-path/rollback-behavior.mjs
+Input: the same restored source copy and fresh own native file task.
+Literal output: ROLLBACK_BEHAVIOR file_task_inline_text_draft=CREATED original_path=RESTORED model_calls=0 live_data=UNTOUCHED
+Exit0. Current modified source retained. No installed downgrade/data migration claimed.
+
+Pending at this snapshot: ordinary main integration, 2-backend-file actual load, then D5 latest fixed-main installer/upgrade/uninstall/data-retention/update distribution. Enterprise as-is; overall Goal ACTIVE.

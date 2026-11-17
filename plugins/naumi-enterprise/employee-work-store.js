@@ -84,19 +84,19 @@ export class EmployeeWorkStore{
     const artifact={id:'artifact-'+randomUUID(),botId,deliveryId,revision:1,version,...metadata,fileName:name,content:text,sha256:digest(text),bytes:Buffer.byteLength(text,'utf8'),createdAt:this.store.now()};
     return this.store.put(artifact,'artifact','artifact_create',actor);
   }
-  createDelivery(botId,{operationId,...input},actor={kind:'owner'},metadata={}){
+  createDelivery(botId,{operationId,...input},actor={kind:'owner'},metadata={},validate=()=>{}){
     input=z.object({goalId:id,title,fileName,content,sourceTaskId:id.nullable().default(null)}).strict().parse(input);metadata=z.object({executorBotId:id.optional(),sourceGoalRevision:rev.optional(),sourceTaskId:id.optional(),sourceTaskAttempt:rev.optional(),sourceSessionId:id.optional(),sourceMessageId:id.optional()}).strict().parse(metadata);guardText(input);
     return this.store.mutate(botId,operationId,'delivery_create',{...input,...metadata},actor,()=>{
-      const goal=this.goal(botId,input.goalId);if(['completed','cancelled'].includes(goal.status))fail('WORK_GOAL_CLOSED');if(this.deliveries(botId).length>=1000)fail('WORK_CAPACITY');
+      validate();const goal=this.goal(botId,input.goalId);if(['completed','cancelled'].includes(goal.status))fail('WORK_GOAL_CLOSED');if(this.deliveries(botId).length>=1000)fail('WORK_CAPACITY');
       const time=this.store.now(),deliveryId='delivery-'+randomUUID(),artifact=this.addArtifact(botId,deliveryId,1,input.fileName,input.content,actor,{acceptanceCriteria:[...goal.criteria],...metadata});
       return this.save({id:deliveryId,botId,revision:1,goalId:input.goalId,title:input.title,sourceTaskId:input.sourceTaskId,...metadata,businessStatus:'draft',version:1,
         artifactIds:[artifact.id],currentArtifactId:artifact.id,reviewIds:[],acceptanceCriteria:[...goal.criteria],createdAt:time,updatedAt:time},'delivery','delivery_create',actor);
     });
   }
-  reviseDelivery(botId,{deliveryId,expectedRevision,operationId,fileName:name,content:text},actor={kind:'owner'},metadata={}){
+  reviseDelivery(botId,{deliveryId,expectedRevision,operationId,fileName:name,content:text},actor={kind:'owner'},metadata={},validate=()=>{}){
     rev.parse(expectedRevision);fileName.parse(name);content.parse(text);metadata=z.object({sourceGoalRevision:rev.optional(),sourceTaskId:id.optional(),sourceTaskAttempt:rev.optional(),sourceSessionId:id.optional(),sourceMessageId:id.optional()}).strict().parse(metadata);guardText({name,text});
     return this.store.mutate(botId,operationId,'delivery_revise',{deliveryId,expectedRevision,name,text,...metadata},actor,()=>{
-      const d=this.delivery(botId,deliveryId);if(d.kind==='files')fail('WORK_NATIVE_FILE_REQUIRED');if(d.revision!==expectedRevision)fail('WORK_CONFLICT');if(!['draft','changes_requested'].includes(d.businessStatus))fail('WORK_DELIVERY_IMMUTABLE');if(d.version>=100)fail('WORK_VERSION_LIMIT');
+      validate();const d=this.delivery(botId,deliveryId);if(d.kind==='files')fail('WORK_NATIVE_FILE_REQUIRED');if(d.revision!==expectedRevision)fail('WORK_CONFLICT');if(!['draft','changes_requested'].includes(d.businessStatus))fail('WORK_DELIVERY_IMMUTABLE');if(d.version>=100)fail('WORK_VERSION_LIMIT');
       const g=this.goal(botId,d.goalId);if(['completed','cancelled'].includes(g.status))fail('WORK_GOAL_CLOSED');
       const artifact=this.addArtifact(botId,d.id,d.version+1,name,text,actor,{acceptanceCriteria:[...g.criteria],...metadata});
       return this.save({...d,...metadata,revision:d.revision+1,version:d.version+1,currentArtifactId:artifact.id,artifactIds:[...d.artifactIds,artifact.id],businessStatus:'draft',acceptanceCriteria:[...g.criteria]},'delivery','delivery_revise',actor);
@@ -118,10 +118,10 @@ export class EmployeeWorkStore{
       return this.save({...d,id:deliveryId,botId,revision:d?d.revision+1:1,kind:'files',goalId,title:label,executorBotId,...provenance,businessStatus:'submitted',version,artifactIds:[...d?.artifactIds??[],artifact.id],currentArtifactId:artifact.id,reviewIds:[...d?.reviewIds??[],review.id],createdAt:d?.createdAt??time,updatedAt:time},'delivery',d?'delivery_revise':'delivery_create',actor);
     });
   }
-  transition(botId,{deliveryId,expectedRevision,operationId,action,reason='',checkedCriteria=[]},actor={kind:'owner'},verifiedArtifactId){
+  transition(botId,{deliveryId,expectedRevision,operationId,action,reason='',checkedCriteria=[]},actor={kind:'owner'},verifiedArtifactId,validate=()=>{}){
     rev.parse(expectedRevision);z.enum(['submit','start_review','request_changes','accept','cancel']).parse(action);note.parse(reason);z.array(z.number().int().nonnegative()).max(20).parse(checkedCriteria);guardText(reason);
     return this.store.mutate(botId,operationId,'delivery_'+action,{deliveryId,expectedRevision,reason,checkedCriteria},actor,()=>{
-      const d=this.delivery(botId,deliveryId);if(d.revision!==expectedRevision)fail('WORK_CONFLICT');
+      validate();const d=this.delivery(botId,deliveryId);if(d.revision!==expectedRevision)fail('WORK_CONFLICT');
       const permitted={submit:['draft'],start_review:['submitted'],request_changes:['submitted','in_review'],accept:['in_review'],cancel:['draft','submitted','in_review','changes_requested']};
       if(!permitted[action].includes(d.businessStatus))fail('WORK_INVALID_TRANSITION');
       if(action!=='submit'&&actor.kind!=='owner')fail('WORK_REVIEWER_REQUIRED');

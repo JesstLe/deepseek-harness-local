@@ -1,0 +1,416 @@
+diff --git a/.gitattributes b/.gitattributes
+index 3acc750..ee18674 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -341,3 +341,8 @@ plugins/naumi-enterprise/third-party/ds-bot-im/** -text
+ 
+ # Preserve actual model-generated file bytes, including CSV CRLF.
+ /evidence/daily-real-acceptance/live-*/generated/** binary
++
++/evidence/file-delivery-single-path/DIFF_FILE.patch -text whitespace=-blank-at-eol
++/evidence/file-delivery-single-path/*.log -text whitespace=-blank-at-eol
++/evidence/file-delivery-single-path/ROLLBACK.sh text eol=lf
++/evidence/file-delivery-single-path/live-*/generated/** binary
+diff --git a/docs/implementation/FILE_DELIVERY_SINGLE_PATH.md b/docs/implementation/FILE_DELIVERY_SINGLE_PATH.md
+new file mode 100644
+index 0000000..050e89b
+--- /dev/null
++++ b/docs/implementation/FILE_DELIVERY_SINGLE_PATH.md
+@@ -0,0 +1,19 @@
++# 文件任务单一路径交付（2026-11-18）
++
++模块与职责：本线程独占 employee-work.js / employee-work-store.js、相关文件验收测试及本切片脚本/文档/证据。基线 main/origin/main 81d474723e3ad46a74e4f6e3e5a7b96590cd3e6c；分支 codex/file-delivery-single-path-20261118，独立工作树 E:/Workspace/naumi-file-delivery-single-path。企业、模型、UI图标/导航/原输入器、package、任务执行器和真实业务数据不改。
++
++调研：上轮真实模型完成文件任务时，又调用 inline-text create/revise/submit 建立3个文本artifact；原生文件集合与人工审核正确，但两条交付路径产生重复。原提示文字不足以作为约束。现有文件任务已由 EmployeeTaskFiles 订阅原任务账本并登记文件集合，本模块复用它，不增加执行/审批/交付账本。
++
++公共接口、依赖方向、数据/状态/事务归属：assignedWork增加原账本output及deliveryPath(native_present/inline_text)投影；原create/revise/submit工具说明明确适用路径。EmployeeWorkStore沿用原mutate，在新写事务内增加可选validate callback，放在原operation收据检查之后；业务服务按原任务output决定拒绝文件任务的新inline-text写入，错误WORK_TASK_FILES_USE_PRESENT。文件present和自动待审路径、文本任务及独立主动草稿均走原实现。
++
++兼容：不删除、不隐藏、不迁移既有text delivery/artifact/review。旧成功operation同payload仍返回原收据（create/revise/submit覆盖），不同payload仍冲突；新操作被拒绝且不写operations/events/artifact。Owner仍可明确追加文字说明、审核既有记录；代理不因错误获得owner权限。验证回调不进入原digest，因此旧收据可重试。
++
++本次实现：2个后端模块最小扩展；现有文本来源测试改为真正text任务，保留原provenance验证；新增6项文件拒绝/原生二进制成功/历史收据重试/历史记录与owner控制/文本任务与本地主动草稿兼容。基线repro实证file task可生成inline draft；modified拒绝且0副作用。模块49/49通过；初次工具execute为异步，测试误用assert.throws，改为await assert.rejects，原失败日志保留。
++
++验证命令与层级：node scripts/repro-file-delivery-single-path.mjs --baseline / --modified（本机原生Session/Store与确定性驱动，不是收费模型）；node --test tests/naumi-file-delivery-single-path.test.mjs tests/naumi-work-file-acceptance.test.mjs tests/naumi-work-goal-task-links.test.mjs tests/naumi-local-proactive.test.mjs，49/49 exit0。真实模型独立随机端口/home/Bot/CSV，复用现有选中连接，最多48入口/输出4096/上游单请求120秒，不调用真实3080写API，不自动批准权限升级。无自动重发业务。
++
++未完成项：本轮真实模型双版本且仅1份files交付/0text draft实测、全仓回归、源码副本回滚/四件套、普通main及必要加载；随后固定最新main的安装更新交付。整个Goal继续active，企业保持现状。
++
++全仓810/810、0skip、exit0。首个live在文件执行前由模型发起原生ask_user_question确认，runner记input-required并未代答/批准，3入口保留；没有派单或文件写入。本模块定向实测改由owner API直接创建已确认Goal，再让真实主管派单/员工生成与原task返工，不重复上轮已通过的自然提议全链；整体Goal范围不变。
++
++实测最终通过：FILE_SINGLE_LIVE checks=9 boots=1 supplier_entry_requests=30 same_task=1 attempt=2 file_versions=2 deliveries=1 text_drafts=0 actual3080_writes=0 config_changes=0，exit0。原生公开记录重开29条持久assistant响应；30是入口计数，收费数未观察；两版CSV精确25/2760与31/3480、4文件字节/hash重开通过。首个3入口input-required用例保留，不算文件验收通过。待源码副本回滚/归档/主线及2文件加载；随后D5固定新main构建。
+diff --git a/docs/prd/DAILY_EMPLOYEE_PRIORITY.md b/docs/prd/DAILY_EMPLOYEE_PRIORITY.md
+index 3cd883b..61aefc4 100644
+--- a/docs/prd/DAILY_EMPLOYEE_PRIORITY.md
++++ b/docs/prd/DAILY_EMPLOYEE_PRIORITY.md
+@@ -95,3 +95,8 @@ D1–D4共同属于第一优先级，顺序为依赖安排，不是把主动性
+ 54为供应商入口请求（包括辅助请求），51为全隔离home持久原生assistant响应；runner的12只计前台turn子集，不代表全home响应数，供应商权威计费未观察。前三次失败（ACL、测试输出限制、文字草案未持久化）均保留。实测还发现模型额外建立3个文本artifact，未计为文件验收，后续需收敛文件任务的补充文本交付体验，不隐藏或自动清理已有记录。
+ 
+ 新建Naumi自有工作区的WRITE_OWNER初始化与提议独立原生提示section已修复，804/804集中回归通过；已有外部/历史目录不做权限迁移。具体证据、主线/加载/发布阶段以[真实验收记录](../implementation/DAILY_REAL_ACCEPTANCE.md)为准。下一步：收敛额外文本交付、必要加载，然后固定新main打包完成D5。企业模块保持现状，整个Goal尚未退出。
++
++
++## 文件任务交付路径收敛（2026-11-18）
++
++实测发现的补充text artifact冗余由原工作服务/SQL事务收敛：文件任务新Agent交付只走原生present与文件自动待审，文本任务和独立主动草稿保留；历史文本记录不隐藏/删除，旧成功操作回执仍返回原值。owner明确追加说明不受影响。当前49定向、810全仓通过，真实隔离双版本及主线/加载状态见[实现记录](../implementation/FILE_DELIVERY_SINGLE_PATH.md)。D5仍从包含本模块的最新固定main打包；企业保持现状。
+diff --git a/plugins/naumi-enterprise/employee-work-store.js b/plugins/naumi-enterprise/employee-work-store.js
+index d750f89..eae5907 100644
+--- a/plugins/naumi-enterprise/employee-work-store.js
++++ b/plugins/naumi-enterprise/employee-work-store.js
+@@ -84,19 +84,19 @@ export class EmployeeWorkStore{
+     const artifact={id:'artifact-'+randomUUID(),botId,deliveryId,revision:1,version,...metadata,fileName:name,content:text,sha256:digest(text),bytes:Buffer.byteLength(text,'utf8'),createdAt:this.store.now()};
+     return this.store.put(artifact,'artifact','artifact_create',actor);
+   }
+-  createDelivery(botId,{operationId,...input},actor={kind:'owner'},metadata={}){
++  createDelivery(botId,{operationId,...input},actor={kind:'owner'},metadata={},validate=()=>{}){
+     input=z.object({goalId:id,title,fileName,content,sourceTaskId:id.nullable().default(null)}).strict().parse(input);metadata=z.object({executorBotId:id.optional(),sourceGoalRevision:rev.optional(),sourceTaskId:id.optional(),sourceTaskAttempt:rev.optional(),sourceSessionId:id.optional(),sourceMessageId:id.optional()}).strict().parse(metadata);guardText(input);
+     return this.store.mutate(botId,operationId,'delivery_create',{...input,...metadata},actor,()=>{
+-      const goal=this.goal(botId,input.goalId);if(['completed','cancelled'].includes(goal.status))fail('WORK_GOAL_CLOSED');if(this.deliveries(botId).length>=1000)fail('WORK_CAPACITY');
++      validate();const goal=this.goal(botId,input.goalId);if(['completed','cancelled'].includes(goal.status))fail('WORK_GOAL_CLOSED');if(this.deliveries(botId).length>=1000)fail('WORK_CAPACITY');
+       const time=this.store.now(),deliveryId='delivery-'+randomUUID(),artifact=this.addArtifact(botId,deliveryId,1,input.fileName,input.content,actor,{acceptanceCriteria:[...goal.criteria],...metadata});
+       return this.save({id:deliveryId,botId,revision:1,goalId:input.goalId,title:input.title,sourceTaskId:input.sourceTaskId,...metadata,businessStatus:'draft',version:1,
+         artifactIds:[artifact.id],currentArtifactId:artifact.id,reviewIds:[],acceptanceCriteria:[...goal.criteria],createdAt:time,updatedAt:time},'delivery','delivery_create',actor);
+     });
+   }
+-  reviseDelivery(botId,{deliveryId,expectedRevision,operationId,fileName:name,content:text},actor={kind:'owner'},metadata={}){
++  reviseDelivery(botId,{deliveryId,expectedRevision,operationId,fileName:name,content:text},actor={kind:'owner'},metadata={},validate=()=>{}){
+     rev.parse(expectedRevision);fileName.parse(name);content.parse(text);metadata=z.object({sourceGoalRevision:rev.optional(),sourceTaskId:id.optional(),sourceTaskAttempt:rev.optional(),sourceSessionId:id.optional(),sourceMessageId:id.optional()}).strict().parse(metadata);guardText({name,text});
+     return this.store.mutate(botId,operationId,'delivery_revise',{deliveryId,expectedRevision,name,text,...metadata},actor,()=>{
+-      const d=this.delivery(botId,deliveryId);if(d.kind==='files')fail('WORK_NATIVE_FILE_REQUIRED');if(d.revision!==expectedRevision)fail('WORK_CONFLICT');if(!['draft','changes_requested'].includes(d.businessStatus))fail('WORK_DELIVERY_IMMUTABLE');if(d.version>=100)fail('WORK_VERSION_LIMIT');
++      validate();const d=this.delivery(botId,deliveryId);if(d.kind==='files')fail('WORK_NATIVE_FILE_REQUIRED');if(d.revision!==expectedRevision)fail('WORK_CONFLICT');if(!['draft','changes_requested'].includes(d.businessStatus))fail('WORK_DELIVERY_IMMUTABLE');if(d.version>=100)fail('WORK_VERSION_LIMIT');
+       const g=this.goal(botId,d.goalId);if(['completed','cancelled'].includes(g.status))fail('WORK_GOAL_CLOSED');
+       const artifact=this.addArtifact(botId,d.id,d.version+1,name,text,actor,{acceptanceCriteria:[...g.criteria],...metadata});
+       return this.save({...d,...metadata,revision:d.revision+1,version:d.version+1,currentArtifactId:artifact.id,artifactIds:[...d.artifactIds,artifact.id],businessStatus:'draft',acceptanceCriteria:[...g.criteria]},'delivery','delivery_revise',actor);
+@@ -118,10 +118,10 @@ export class EmployeeWorkStore{
+       return this.save({...d,id:deliveryId,botId,revision:d?d.revision+1:1,kind:'files',goalId,title:label,executorBotId,...provenance,businessStatus:'submitted',version,artifactIds:[...d?.artifactIds??[],artifact.id],currentArtifactId:artifact.id,reviewIds:[...d?.reviewIds??[],review.id],createdAt:d?.createdAt??time,updatedAt:time},'delivery',d?'delivery_revise':'delivery_create',actor);
+     });
+   }
+-  transition(botId,{deliveryId,expectedRevision,operationId,action,reason='',checkedCriteria=[]},actor={kind:'owner'},verifiedArtifactId){
++  transition(botId,{deliveryId,expectedRevision,operationId,action,reason='',checkedCriteria=[]},actor={kind:'owner'},verifiedArtifactId,validate=()=>{}){
+     rev.parse(expectedRevision);z.enum(['submit','start_review','request_changes','accept','cancel']).parse(action);note.parse(reason);z.array(z.number().int().nonnegative()).max(20).parse(checkedCriteria);guardText(reason);
+     return this.store.mutate(botId,operationId,'delivery_'+action,{deliveryId,expectedRevision,reason,checkedCriteria},actor,()=>{
+-      const d=this.delivery(botId,deliveryId);if(d.revision!==expectedRevision)fail('WORK_CONFLICT');
++      validate();const d=this.delivery(botId,deliveryId);if(d.revision!==expectedRevision)fail('WORK_CONFLICT');
+       const permitted={submit:['draft'],start_review:['submitted'],request_changes:['submitted','in_review'],accept:['in_review'],cancel:['draft','submitted','in_review','changes_requested']};
+       if(!permitted[action].includes(d.businessStatus))fail('WORK_INVALID_TRANSITION');
+       if(action!=='submit'&&actor.kind!=='owner')fail('WORK_REVIEWER_REQUIRED');
+diff --git a/plugins/naumi-enterprise/employee-work.js b/plugins/naumi-enterprise/employee-work.js
+index 5f3b0d5..f5a1189 100644
+--- a/plugins/naumi-enterprise/employee-work.js
++++ b/plugins/naumi-enterprise/employee-work.js
+@@ -10,20 +10,21 @@ export class EmployeeWorkService{
+   constructor({ctx,directory,store,tasks=()=>[]}){Object.assign(this,{ctx,directory,store,tasks});this.work=new EmployeeWorkStore(store);this.evidenceService=new EmployeeService(ctx,directory,store);}
+   bot(botId,write=false){const bot=this.directory.list().bots.find(b=>b.id===botId);if(!bot)throw Error('WORK_BOT_NOT_FOUND');if(write&&bot.status!=='active')throw Error('WORK_BOT_ARCHIVED');return bot;}
+   caller(agent,write=false){if(!agent)throw Error('WORK_CALLER_REQUIRED');const m=this.ctx.agentTeams.membership(agent);if(write&&m.role!=='lead')throw Error('WORK_LEAD_REQUIRED');const bot=this.directory.forSession(m.root.id);if(!bot)throw Error('WORK_BOT_NOT_BOUND');this.bot(bot.id,write);return {bot,root:m.root};}
++  textDeliveryGuard(task,actor){return ()=>{if(actor.kind==='agent'&&task?.output==='files')throw Error('WORK_TASK_FILES_USE_PRESENT');};}
+   taskReference(task){return task.workGoalUpdates?.at(-1)??task.workGoal;}
+   linkedTask(botId,taskId,sessionId){if(!taskId)return;const task=this.tasks().find(t=>t.id===taskId),ref=task&&this.taskReference(task);if(!task||task.targetBotId!==botId&&ref?.botId!==botId)throw Error('WORK_TASK_NOT_FOUND');if(sessionId&&task.targetSessionId!==sessionId)throw Error('WORK_TASK_EXECUTOR_REQUIRED');return task;}
+   linkedGoal(task){const ref=this.taskReference(task);if(!ref)return;this.bot(ref.botId,true);if(ref.botId!==task.sourceBotId)throw Error('WORK_TASK_NOT_FOUND');const g=this.work.goal(ref.botId,ref.goalId);if(!['planned','in_progress'].includes(g.status))throw Error('WORK_GOAL_NOT_ACTIVE');this.work.validateGraph(ref.botId,{...g,status:'in_progress'});if(g.title!==ref.title||(g.description??'')!==(ref.description??'')||JSON.stringify(g.criteria)!==JSON.stringify(ref.criteria))throw Error('WORK_GOAL_CHANGED');return ref;}
+   list(botId){this.bot(botId);const tasks=this.tasks();return {domain:'local-owner',syncState:'local_only',goals:this.work.goals(botId),goalProposals:this.work.proposals(botId),fileDeliveryIssues:[...this.fileCoordinator?.errors.values()??[]].filter(e=>tasks.some(t=>t.id===e.taskId&&t.sourceBotId===botId)),linkedTasks:tasks.filter(t=>this.taskReference(t)?.botId===botId).map(t=>Object.fromEntries(['id','sourceBotId','sourceSessionId','targetBotId','targetSessionId','status','revision','attempt','replyMode','workGoal','workGoalUpdates','updatedAt'].map(k=>[k,t[k]]).filter(([,v])=>v!==undefined))).map(t=>({...t,task:tasks.find(x=>x.id===t.id).task.slice(0,240)})),deliveries:this.work.deliveries(botId).map(d=>({...d,executionStatus:d.sourceTaskId?tasks.find(t=>t.id===d.sourceTaskId)?.status??'unknown':'not_linked'}))};}
+-  agentList(agent){const {bot,root}=this.caller(agent),own=this.list(bot.id);return {...own,recentUserSources:this.evidenceService.profile(agent).recentUserSources,assignedWork:this.tasks().filter(t=>t.targetBotId===bot.id&&t.targetSessionId===root.id&&this.taskReference(t)).map(t=>{const ref=this.taskReference(t);return {taskId:t.id,status:t.status,goal:ref,deliveries:this.work.deliveries(ref.botId).filter(d=>d.sourceTaskId===t.id).map(d=>({...d,executionStatus:t.status}))};})};}
++  agentList(agent){const {bot,root}=this.caller(agent),own=this.list(bot.id);return {...own,recentUserSources:this.evidenceService.profile(agent).recentUserSources,assignedWork:this.tasks().filter(t=>t.targetBotId===bot.id&&t.targetSessionId===root.id&&this.taskReference(t)).map(t=>{const ref=this.taskReference(t);return {taskId:t.id,status:t.status,output:t.output??'text',deliveryPath:t.output==='files'?'native_present':'inline_text',goal:ref,deliveries:this.work.deliveries(ref.botId).filter(d=>d.sourceTaskId===t.id).map(d=>({...d,executionStatus:t.status}))};})};}
+   command(input,actor={kind:'owner'},verifiedArtifactId){
+     const command=workCommands.parse(input),{action,botId,...args}=command;this.bot(botId,true);
+     if(action==='file_delivery_retry')throw Error('WORK_FILE_VERIFICATION_REQUIRED');
+     if(action==='goal_proposal_review')return this.work.reviewProposal(botId,args,actor);
+     if(action==='goal_create')return this.work.createGoal(botId,args,actor);
+     if(action==='goal_update')return this.work.updateGoal(botId,args,actor);
+-    if(action==='delivery_create'){const t=this.linkedTask(botId,args.sourceTaskId,actor.kind==='agent'?actor.sessionId:undefined),ref=t&&this.taskReference(t);if(ref){if(ref.botId!==botId)throw Error('WORK_TASK_GOAL_MISMATCH');this.linkedGoal(t);if(args.goalId!==ref.goalId)throw Error('WORK_TASK_GOAL_MISMATCH');}return this.work.createDelivery(botId,args,actor,ref?{executorBotId:t.targetBotId,sourceGoalRevision:ref.revision,...actor.kind==='agent'?{sourceTaskId:t.id,sourceTaskAttempt:t.attempt,sourceSessionId:t.targetSessionId,sourceMessageId:t.messageId}:{} }:{});}
+-    if(action==='delivery_revise'){const d=this.work.delivery(botId,args.deliveryId),t=d.sourceTaskId?this.linkedTask(botId,d.sourceTaskId,actor.kind==='agent'?actor.sessionId:undefined):null,ref=t&&this.taskReference(t);return this.work.reviseDelivery(botId,args,actor,ref?{sourceGoalRevision:actor.kind==='agent'?ref.revision:this.work.goal(botId,d.goalId).revision,...actor.kind==='agent'?{sourceTaskId:t.id,sourceTaskAttempt:t.attempt,sourceSessionId:t.targetSessionId,sourceMessageId:t.messageId}:{} }:{});}
+-    const {transition,...rest}=args;return this.work.transition(botId,{...rest,action:transition},actor,verifiedArtifactId);
++    if(action==='delivery_create'){const t=this.linkedTask(botId,args.sourceTaskId,actor.kind==='agent'?actor.sessionId:undefined),ref=t&&this.taskReference(t);if(ref){if(ref.botId!==botId)throw Error('WORK_TASK_GOAL_MISMATCH');this.linkedGoal(t);if(args.goalId!==ref.goalId)throw Error('WORK_TASK_GOAL_MISMATCH');}return this.work.createDelivery(botId,args,actor,ref?{executorBotId:t.targetBotId,sourceGoalRevision:ref.revision,...actor.kind==='agent'?{sourceTaskId:t.id,sourceTaskAttempt:t.attempt,sourceSessionId:t.targetSessionId,sourceMessageId:t.messageId}:{} }:{},this.textDeliveryGuard(t,actor));}
++    if(action==='delivery_revise'){const d=this.work.delivery(botId,args.deliveryId),t=d.sourceTaskId?this.linkedTask(botId,d.sourceTaskId,actor.kind==='agent'?actor.sessionId:undefined):null,ref=t&&this.taskReference(t);return this.work.reviseDelivery(botId,args,actor,ref?{sourceGoalRevision:actor.kind==='agent'?ref.revision:this.work.goal(botId,d.goalId).revision,...actor.kind==='agent'?{sourceTaskId:t.id,sourceTaskAttempt:t.attempt,sourceSessionId:t.targetSessionId,sourceMessageId:t.messageId}:{} }:{},this.textDeliveryGuard(t,actor));}
++    const {transition,...rest}=args,d=actor.kind==='agent'&&transition==='submit'?this.work.delivery(botId,rest.deliveryId):null,t=d?.sourceTaskId?this.linkedTask(botId,d.sourceTaskId,actor.sessionId):null;return this.work.transition(botId,{...rest,action:transition},actor,verifiedArtifactId,this.textDeliveryGuard(t,actor));
+   }
+   async verifiedCommand(input,actor={kind:'owner'}){
+     const value=workCommands.parse(input);this.bot(value.botId,true);
+@@ -61,9 +62,9 @@ export function createEmployeeWorkTools(service){
+   return [
+     tool('employee_work','Read your Bot goals, acceptance criteria and deliverables. executionStatus is not business acceptance. Only owner reviews and accepts. No business/server approval is implied by local-owner records. recentUserSources provides verified message IDs/quotes for proposing work.',{},agent=>service.agentList(agent)),
+     tool('employee_goal_propose','Propose a trackable goal from a real user message in your own conversation. Read employee_work for existing goals and recentUserSources first. Supply the exact sourceMessageId and quote; do not invent them. This only creates a pending proposal, NOT approval, dispatch, automatic work or acceptance. Reuse a stable operationId; do not re-propose ignored work.',{title:field('string'),description:field('string',false),criteria:{type:'array',items:{type:'string'},required:true},priority:field('integer',false),dueAt:field('string',false),sourceMessageId:field('string'),quote:field('string'),operationId:field('string')},(agent,args,signal)=>service.proposeGoal(agent,args,signal)),
+-    tool('employee_delivery_create','Create an immutable text artifact draft for an existing owner-assigned goal. Keep a stable operationId. This is a draft, not submitted or accepted. sourceTaskId, if supplied, must identify your exact executing delegated task.',{goalId:field('string'),title:field('string'),fileName:field('string'),content:field('string'),sourceTaskId:field('string',false),operationId:field('string')},(agent,args)=>service.agentCommand(agent,{action:'delivery_create',...args})),
+-    tool('employee_delivery_revise','Create a NEW artifact version for your own draft or returned delivery. Old versions/review evidence remain immutable. Does not submit or accept.',{deliveryId:field('string'),expectedRevision:field('integer'),fileName:field('string'),content:field('string'),operationId:field('string')},(agent,args)=>service.agentCommand(agent,{action:'delivery_revise',...args})),
+-    tool('employee_delivery_submit','Submit your own prepared delivery for human review. Submission is not acceptance; do not claim owner approval. Use current revision and a stable operationId.',{deliveryId:field('string'),expectedRevision:field('integer'),operationId:field('string')},(agent,args)=>service.agentCommand(agent,{action:'delivery_transition',transition:'submit',...args})),
++    tool('employee_delivery_create','Create an immutable text artifact draft for an existing owner-assigned goal. Only for inline text work; assigned output=files must save real files and use present instead, without a duplicate text draft. Keep a stable operationId. This is a draft, not submitted or accepted. sourceTaskId, if supplied, must identify your exact executing delegated task.',{goalId:field('string'),title:field('string'),fileName:field('string'),content:field('string'),sourceTaskId:field('string',false),operationId:field('string')},(agent,args)=>service.agentCommand(agent,{action:'delivery_create',...args})),
++    tool('employee_delivery_revise','Create a NEW artifact version for your own inline-text draft or returned delivery. For assigned output=files, revise the real files and use present, not this tool. Old versions/review evidence remain immutable. Does not submit or accept.',{deliveryId:field('string'),expectedRevision:field('integer'),fileName:field('string'),content:field('string'),operationId:field('string')},(agent,args)=>service.agentCommand(agent,{action:'delivery_revise',...args})),
++    tool('employee_delivery_submit','Submit your own prepared inline-text delivery for human review. For assigned output=files, present the real files; native task completion registers their review automatically. Submission is not acceptance; do not claim owner approval. Use current revision and a stable operationId.',{deliveryId:field('string'),expectedRevision:field('integer'),operationId:field('string')},(agent,args)=>service.agentCommand(agent,{action:'delivery_transition',transition:'submit',...args})),
+   ];
+ }
+ 
+@@ -78,7 +79,7 @@ export function installEmployeeWork(ctx,directory,store,{tasks,onReady}={}){
+       try{
+         for(const tool of createEmployeeWorkTools(service))disposers.push(agent.ctx.tools.register(tool));
+         disposers.push(agent.ctx.systemPrompt.section({name:'naumi:goal-proposal-policy',order:agent.ctx.systemPrompt.getSectionOrder('TEAM_POLICY')+4,text:'When the user asks you to propose a work goal or track new multi-step deliverable work, first read employee_work to reuse matching goals and obtain recentUserSources. If no matching assigned or confirmed goal exists, call employee_goal_propose with the exact real user sourceMessageId and quote, then report its returned pending proposal. A chat-only outline is NOT a saved proposal: do not say it is submitted or awaiting confirmation in the product without a successful tool receipt. Use supplied filenames, workspace and scope; do not ask again for choices the user already made. Only the human owner confirms the proposal; never confirm, dispatch or schedule pending work yourself. Do not re-propose dismissed work. Ordinary questions and unrelated chats need no goal.'}));
+-        disposers.push(agent.ctx.systemPrompt.section({name:'naumi:delivery-policy',order:agent.ctx.systemPrompt.getSectionOrder('TEAM_POLICY')+5,text:'For owner-assigned employee goals, use employee_work to read the real criteria. assignedWork contains only the exact delegated Session goal snapshot and its deliveries. For that work, provide sourceTaskId and the assigned goalId when creating a draft; it is saved under the assigning Bot goal, not a new goal for yourself. Never use another Session to publish or revise a task delivery. For inline text use employee_delivery_create/revise and submit explicitly. For standalone files save real files and present in this exact task Session; after the native task completes, verified snapshots automatically appear as a separate pending owner review. Do not duplicate files as Markdown text. A returned file delivery gets a new version only when the same task produces its next native file output. A completed Agent turn or task is not business acceptance. Only the human owner can start review, return or accept; never self-approve, overwrite an accepted artifact, or report local acceptance as enterprise server approval.'}));
++        disposers.push(agent.ctx.systemPrompt.section({name:'naumi:delivery-policy',order:agent.ctx.systemPrompt.getSectionOrder('TEAM_POLICY')+5,text:'For owner-assigned employee goals, use employee_work to read the real criteria. assignedWork contains only the exact delegated Session goal snapshot and its deliveries. For that work, provide sourceTaskId and the assigned goalId when creating a draft; it is saved under the assigning Bot goal, not a new goal for yourself. Never use another Session to publish or revise a task delivery. For inline text use employee_delivery_create/revise and submit explicitly. assignedWork.output and deliveryPath are authoritative. For output=files do not call employee_delivery_create/revise/submit or reproduce the file as a text delivery. Save real files and present in this exact task Session; after the native task completes, verified snapshots automatically appear as a separate pending owner review. Do not duplicate files as Markdown text. A returned file delivery gets a new version only when the same task produces its next native file output. A completed Agent turn or task is not business acceptance. Only the human owner can start review, return or accept; never self-approve, overwrite an accepted artifact, or report local acceptance as enterprise server approval.'}));
+         installed.set(agent,()=>{for(const d of disposers.reverse())d();});
+       }catch(error){for(const d of disposers.reverse())d();throw error;}
+     };
+diff --git a/scripts/audit-file-delivery-single-path.mjs b/scripts/audit-file-delivery-single-path.mjs
+new file mode 100644
+index 0000000..d0667e5
+--- /dev/null
++++ b/scripts/audit-file-delivery-single-path.mjs
+@@ -0,0 +1,19 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash} from 'node:crypto';import {DatabaseSync} from 'node:sqlite';
++import {Context} from '@deepseek-ai/cordis';import SessionStore from '@deepseek-ai/dsh-session';import * as persistence from '@deepseek-ai/dsh-session-persistence-jsonl';
++const out=path.resolve('evidence/file-delivery-single-path'),hash=b=>createHash('sha256').update(b).digest('hex');let passing=0;
++for(const name of fs.readdirSync(out).filter(n=>n.startsWith('live-'))){const dir=path.join(out,name),r=JSON.parse(fs.readFileSync(path.join(dir,'LIVE_VERIFICATION.json')));assert(path.resolve(r.fixture).startsWith(path.resolve('runtime/file-delivery-single-path-')));assert(fs.existsSync(path.join(r.fixture,'.daily-real-fixture')));
++ const ctx=new Context(),sm=ctx.plugin(SessionStore),pm=ctx.plugin(persistence,{root:path.join(r.home,'sessions')});await pm.await();let committed=0;const sessions=[];
++ try{for(const v of await ctx.sessionPersistence.list()){const h=await ctx.sessionPersistence.open(v.header.id,'read');try{const {events}=await h.read();let responses=0;const records=[];for(const e of events)if(e.type==='assistant/message'){responses++;records.push({seq:e.seq,type:e.type,turn:e.data.turn,step:e.data.step,messageId:e.data.message.id,content:e.data.message.content.filter(b=>b.type==='text'||b.type==='tool-call')});}else if(['user/message','tool/result','turn/end','sandbox/mode','approval/policy'].includes(e.type))records.push(e);committed+=responses;sessions.push({sessionId:v.header.id,responses,records});}finally{await h.close();}}}finally{await pm.dispose();await sm.dispose();}
++ fs.writeFileSync(path.join(dir,'NATIVE_AUDIT.json'),JSON.stringify({source:'native read-only persistence; public text/tool/turn projection',allSessionCommittedResponses:committed,supplierEntryRequests:r.supplierRequests,paidBilling:'NOT_OBSERVED',sessions},null,2)+'\n');
++ if(r.status!=='PASS')continue;passing++;
++ const db=new DatabaseSync(path.join(r.home,'naumi/employees.sqlite'),{readOnly:true});let entities;try{entities=db.prepare('SELECT type,json FROM entities').all().map(v=>({type:v.type,value:JSON.parse(v.json)}));}finally{db.close();}
++ const deliveries=entities.filter(e=>e.type==='delivery'&&e.value.sourceTaskId===r.taskId).map(e=>e.value),artifacts=entities.filter(e=>e.type==='artifact'&&e.value.sourceTaskId===r.taskId).map(e=>e.value).sort((a,b)=>a.sourceTaskAttempt-b.sourceTaskAttempt);assert.equal(deliveries.length,1);assert.equal(deliveries[0].kind,'files');assert.equal(deliveries[0].version,2);assert.equal(deliveries[0].businessStatus,'submitted');assert.equal(artifacts.length,2);assert(artifacts.every(a=>a.kind==='files'));const files=[];
++ for(const a of artifacts){assert.equal(a.sourceSessionId,r.executionSessionId);assert.equal(a.files.length,2);let csv;
++  for(const f of a.files){assert(path.resolve(f.snapshot.path).startsWith(path.resolve(r.workerCwd)+path.sep));const bytes=fs.readFileSync(f.snapshot.path);assert.equal(hash(bytes),f.snapshot.sha256);const target=path.join(dir,'generated','attempt-'+a.sourceTaskAttempt,path.basename(f.path));fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,bytes);assert.equal(hash(fs.readFileSync(target)),hash(bytes));files.push({path:path.relative(out,target).replaceAll('\\','/'),sha256:hash(bytes),bytes:bytes.length});if(path.extname(f.path)==='.csv')csv=bytes.toString('utf8').replace(/^\uFEFF/,'').trim().split(/\r?\n/).map(row=>row.split(','));}
++  assert(csv);assert.deepEqual(csv[0],['channel','orders','amount']);assert.equal(csv.length,4);const values=Object.fromEntries(csv.slice(1).map(row=>[row[0],[Number(row[1]),Number(row[2])]]));assert.deepEqual(values,a.sourceTaskAttempt===1?{offline:[8,960],online:[17,1800],total:[25,2760]}:{offline:[14,1680],online:[17,1800],total:[31,3480]});
++ }
++ const ledger=JSON.parse(fs.readFileSync(path.join(r.home,'naumi/bot-tasks.json')));assert.equal(ledger.tasks.length,1);assert.equal(ledger.tasks[0].id,r.taskId);assert.equal(ledger.tasks[0].attempt,2);assert.equal(ledger.tasks[0].targetSessionId,r.executionSessionId);assert.equal(ledger.tasks[0].status,'completed');
++ fs.writeFileSync(path.join(dir,'BUSINESS_AUDIT.json'),JSON.stringify({status:'PASS',supplierEntryRequests:r.supplierRequests,allSessionCommittedResponses:committed,paidBilling:'NOT_OBSERVED',files,deliveries,artifacts,task:ledger.tasks[0]},null,2)+'\n');
++ console.log('FILE_SINGLE_AUDIT deliveries=1 file_versions=2 text_artifacts=0 exact_csv=25/2760,31/3480 file_hashes=4 PASS native_responses='+committed+' entry_requests='+r.supplierRequests+' paid_billing=NOT_OBSERVED');
++}
++assert.equal(passing,1);console.log('FILE_SINGLE_AUDIT passing_cases=1 other_cases=RETAINED actual3080_writes=0');
+diff --git a/scripts/deploy-file-delivery-single-path.mjs b/scripts/deploy-file-delivery-single-path.mjs
+new file mode 100644
+index 0000000..82c9c97
+--- /dev/null
++++ b/scripts/deploy-file-delivery-single-path.mjs
+@@ -0,0 +1,44 @@
++// Narrow main-only runtime delta. No account enrollment, provider calls, or task writes.
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';import {DatabaseSync} from 'node:sqlite';import {botLiveApi} from './bot-live-api.mjs';
++const root=process.cwd(),mode=process.argv[2]??'prepare',runtime=path.resolve(process.argv[3]??root),baseline='81d474723e3ad46a74e4f6e3e5a7b96590cd3e6c';
++const installed=path.join(runtime,'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise'),backup=path.join(runtime,'runtime/file-delivery-single-path-load-'+randomUUID()),out=path.join(root,'evidence/file-delivery-single-path');
++const files=['employee-work.js','employee-work-store.js'];
++const read=p=>fs.readFileSync(p),sha=v=>createHash('sha256').update(v).digest('hex'),norm=v=>v.toString().replaceAll('\r\n','\n');
++const inventory=()=>Object.fromEntries(fs.readdirSync(installed,{recursive:true}).filter(f=>fs.statSync(path.join(installed,f)).isFile()).map(f=>[f.replaceAll('\\','/'),sha(read(path.join(installed,f)))]));
++const sourceCommit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
++fs.mkdirSync(backup,{recursive:true});fs.mkdirSync(out,{recursive:true});const original=inventory(),rows=[];
++for(const file of files){const target=path.join(installed,file),before=fs.existsSync(target)?read(target):null,source=read(path.join(root,'plugins/naumi-enterprise',file));let after=source;assert.equal(norm(source),norm(execFileSync('git',['show',sourceCommit+':plugins/naumi-enterprise/'+file])),'SOURCE_NOT_COMMITTED '+file);
++ assert(before,'RUNTIME_FILE_MISSING '+file);assert.equal(norm(before),norm(execFileSync('git',['show',baseline+':plugins/naumi-enterprise/'+file])),'RUNTIME_DRIFT '+file);
++ for(const[kind,bytes]of[['before',before],['after',after]])if(bytes){const p=path.join(backup,kind,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);}
++ rows.push({file,beforeSHA256:before?sha(before):null,afterSHA256:sha(after)});
++}
++fs.writeFileSync(path.join(backup,'manifest.json'),JSON.stringify({baseline,rows},null,2));
++if(mode==='prepare'){console.log('FILE_DELIVERY_SINGLE_PREPARED files=2 host_client=UNCHANGED package=UNCHANGED backup='+backup);process.exit(0);}assert.equal(mode,'apply');
++assert.equal(execFileSync('git',['branch','--show-current'],{encoding:'utf8'}).trim(),'main');const unrelatedTracked=execFileSync('git',['diff','HEAD','--name-only','-z'],{encoding:'utf8'}).split('\0').filter(Boolean);assert(unrelatedTracked.every(f=>!files.map(p=>'plugins/naumi-enterprise/'+p).includes(f)),'TASK_SOURCE_DIRTY');
++const untracked=execFileSync('git',['ls-files','--others','--exclude-standard','-z'],{encoding:'utf8'}).split('\0').filter(f=>f&&!f.startsWith('evidence/file-delivery-single-path/')),untrackedHashes=Object.fromEntries(untracked.map(f=>[f,sha(read(path.join(root,f)))]));
++const untrackedSizes=Object.fromEntries(Object.keys(untrackedHashes).map(f=>[f,read(path.join(root,f)).length]));const appendedEvidence=[];
++const api=await botLiveApi(runtime),sessions=await api.rpc('session/list',{_request:{}}),bots=await api.json('/naumi/bots'),tasks=await api.json('/naumi/bot-tasks'),models=sha(JSON.stringify(await api.json('/naumi/model-connections')));
++assert(!sessions.items.some(s=>s.running),'RUNNING_SESSIONS');assert(!tasks.tasks.some(t=>['queued','starting','running','waiting'].includes(t.status)),'ACTIVE_TASKS');assert(!tasks.tasks.some(t=>t.workGoal&&t.status==='completed'&&t.delivery?.status==='ready'&&t.delivery.files.length),'EXISTING_FILE_GOALS_REQUIRE_EXPLICIT_RECONCILIATION');
++const groupRows=()=>{const db=new DatabaseSync(path.join(runtime,'.dsh/naumi/bot-groups.sqlite'),{readOnly:true});try{const rows=Object.fromEntries(['rooms','members','posts','replies','post_context','room_name_operations'].map(t=>[t,db.prepare('SELECT * FROM '+t+' ORDER BY rowid').all()]));assert(!rows.replies.some(r=>['queued','starting','sent'].includes(r.state)),'GROUP_BUSY');return sha(JSON.stringify(rows));}finally{db.close();}};
++const groupsBefore=groupRows(),employees=async api=>Object.fromEntries(await Promise.all(bots.bots.map(async b=>{const {exportedAt,...v}=await api.json('/naumi/employees?view=export&botId='+encodeURIComponent(b.id));return[b.id,sha(JSON.stringify(v))];}))),employeesBefore=await employees(api);
++const protectedPaths=['.dsh/.credentials.yaml','.dsh/cordis.patch.yml','.dsh/profiles/web/package.json','.dsh/profiles/web/cordis.yml','.dsh/profiles/web/cordis.patch.yml','.dsh/naumi/bots.json','.dsh/naumi/bot-tasks.json','config/local.json','node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'];
++for(const f of fs.readdirSync(path.join(runtime,'.dsh/sessions'),{recursive:true}))if(path.basename(f)==='session.v4.jsonl.zstd')protectedPaths.push('.dsh/sessions/'+f);
++const protectedBefore=Object.fromEntries(protectedPaths.filter(f=>fs.existsSync(path.join(runtime,f))).map(f=>[f,sha(read(path.join(runtime,f)))]));
++const shell=name=>{const r=spawnSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-File',path.join(runtime,name)],{windowsHide:true,stdio:'ignore',timeout:150000});assert.equal(r.status,0,'SERVICE_COMMAND '+name);};
++const atomic=(p,bytes)=>{fs.mkdirSync(path.dirname(p),{recursive:true});const tmp=p+'.'+randomUUID()+'.tmp';fs.writeFileSync(tmp,bytes);fs.renameSync(tmp,p);};let complete=false;
++try{
++ shell('Stop-Naumi.ps1');for(const[f,h]of Object.entries(protectedBefore))assert.equal(sha(read(path.join(runtime,f))),h,'PRELOAD_DATA_DRIFT '+f);
++ for(const r of rows){const p=path.join(installed,r.file);if(r.beforeSHA256)assert.equal(sha(read(p)),r.beforeSHA256,'PRELOAD_RUNTIME_DRIFT');else assert(!fs.existsSync(p));}
++ for(const r of rows)atomic(path.join(installed,r.file),read(path.join(backup,'after',r.file)));shell('Start-Naumi.ps1');
++ const loaded=await botLiveApi(runtime),afterSessions=await loaded.rpc('session/list',{_request:{}});assert(!afterSessions.items.some(s=>s.running));assert.equal(afterSessions.items.length,sessions.items.length);
++ for(const bot of bots.bots){const r=await loaded.request('/naumi/employee-work?botId='+encodeURIComponent(bot.id));assert.equal(r.status,200);assert.equal(r.headers.get('x-naumi-work-file-acceptance'),'1');assert(Array.isArray((await r.json()).fileDeliveryIssues));}
++ assert.deepEqual(await loaded.json('/naumi/bots'),bots);assert.deepEqual(await loaded.json('/naumi/bot-tasks'),tasks);assert.equal(sha(JSON.stringify(await loaded.json('/naumi/model-connections'))),models);assert.deepEqual(await employees(loaded),employeesBefore);assert.equal(groupRows(),groupsBefore);
++ const after=inventory();for(const r of rows)assert.equal(after[r.file],r.afterSHA256);for(const[f,h]of Object.entries(original))if(!files.includes(f))assert.equal(after[f],h,'UNRELATED_RUNTIME '+f);
++ for(const[f,h]of Object.entries(protectedBefore))assert.equal(sha(read(path.join(runtime,f))),h,'PROTECTED_DATA '+f);for(const[f,h]of Object.entries(untrackedHashes)){const bytes=read(path.join(root,f));if(sha(bytes)!==h){assert(bytes.length>=untrackedSizes[f]&&sha(bytes.subarray(0,untrackedSizes[f]))===h,'OTHER_EVIDENCE_OVERWRITTEN '+f);appendedEvidence.push({file:f,oldBytesPreserved:untrackedSizes[f],appendedBytes:bytes.length-untrackedSizes[f]});}}
++ fs.writeFileSync(path.join(out,'DEPLOYMENT.json'),JSON.stringify({status:'PASS',sourceCommit,files:rows,backup,http:200,sessions:afterSessions.items.length,running:0,bots:bots.bots.length,revision:bots.revision,existingWorkspaceACLChanges:0,automaticRealFileImports:0,enterpriseConfigurationChanges:0,modelCalls:0,modelGroupsUnchanged:true,employeeExportsUnchanged:true,employeeExportComparison:"all_fields_except_exportedAt",taskAndGroupRowsUnchanged:true,protectedFilesUnchanged:Object.keys(protectedBefore).length,unrelatedRuntimeUnchanged:Object.keys(original).filter(f=>!files.includes(f)).length,otherUntrackedFilesPreserved:untracked.length,otherUntrackedAppendOnly:appendedEvidence,unrelatedTrackedEditsNotTouched:unrelatedTracked,nativeComposerUnchanged:true,packageChange:"UNCHANGED"},null,2)+'\n');
++ complete=true;console.log('FILE_DELIVERY_SINGLE_LOADED files=2 http=200 running=0 models=UNCHANGED employees=UNCHANGED tasks=UNCHANGED groups=UNCHANGED account_data=UNCHANGED model_calls=0');
++}finally{if(!complete){
++ const dataFile=path.join(runtime,'.dsh/naumi/bots.json'),expected=protectedBefore['.dsh/naumi/bots.json'];
++ const taskLedger='.dsh/naumi/bot-tasks.json',taskExpected=protectedBefore[taskLedger];if(expected&&sha(read(dataFile))!==expected||taskExpected&&sha(read(path.join(runtime,taskLedger)))!==taskExpected)console.error('FILE_DELIVERY_SINGLE_LOAD_INCOMPLETE new_authoritative_data=RETAINED compatible_reader=RETAINED backup='+backup);
++ else{try{shell('Stop-Naumi.ps1');}catch{}for(const r of rows){const p=path.join(installed,r.file);if(r.beforeSHA256)atomic(p,read(path.join(backup,'before',r.file)));else if(fs.existsSync(p))fs.unlinkSync(p);}shell('Start-Naumi.ps1');console.error('FILE_DELIVERY_SINGLE_LOAD_FAILED runtime=RESTORED backup='+backup);}
++}}
+diff --git a/scripts/package-file-delivery-single-path.mjs b/scripts/package-file-delivery-single-path.mjs
+new file mode 100644
+index 0000000..7a6b403
+--- /dev/null
++++ b/scripts/package-file-delivery-single-path.mjs
+@@ -0,0 +1,25 @@
++import fs from 'node:fs';import path from 'node:path';import {createHash,randomUUID} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';
++const root=process.cwd(),out=path.join(root,'evidence/file-delivery-single-path'),baseline='81d474723e3ad46a74e4f6e3e5a7b96590cd3e6c';
++const paths=[".gitattributes", "plugins/naumi-enterprise/employee-work.js", "plugins/naumi-enterprise/employee-work-store.js", "tests/naumi-work-file-acceptance.test.mjs", "tests/naumi-file-delivery-single-path.test.mjs", "docs/implementation/FILE_DELIVERY_SINGLE_PATH.md", "docs/prd/DAILY_EMPLOYEE_PRIORITY.md", "scripts/repro-file-delivery-single-path.mjs", "scripts/verify-file-delivery-single-live.mjs", "scripts/audit-file-delivery-single-path.mjs", "scripts/package-file-delivery-single-path.mjs", "scripts/deploy-file-delivery-single-path.mjs"];
++const hash=b=>createHash('sha256').update(b).digest('hex'),manifest={baseline,branch:'codex/file-delivery-single-path-20261118',changedFields:['assignedWork.output/deliveryPath','transactional inline-text guard for file tasks, after idempotent receipt lookup','native file/inline text/owner/legacy receipt compatibility'],entries:[]};
++for(const file of paths){let before=null;try{before=execFileSync('git',['show',baseline+':'+file],{stdio:['ignore','pipe','ignore']});}catch{}if(before){const target=path.join(out,'original',file);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,before);}manifest.entries.push({path:file,original:before?hash(before):null,modified:hash(fs.readFileSync(file))});}
++fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
++fs.writeFileSync(path.join(out,'ROLLBACK.sh'),`#!/usr/bin/env bash
++set -euo pipefail
++HERE="$(cd "$(dirname "$0")" && pwd)"
++node - "$1" "$HERE" <<'NODE'
++const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');const target=path.resolve(process.argv[2]),out=path.resolve(process.argv[3]);if(!fs.existsSync(path.join(target,'.naumi-file-single-rollback-copy')))throw Error('MARKED_COPY_REQUIRED');if(target===path.resolve(out,'../..'))throw Error('SOURCE_TARGET_REJECTED');const m=JSON.parse(fs.readFileSync(path.join(out,'manifest.json'))),hash=b=>crypto.createHash('sha256').update(b).digest('hex');for(const e of m.entries){const file=path.resolve(target,e.path);if(!file.startsWith(target+path.sep))throw Error('INVALID_TARGET');if(!fs.existsSync(file)||hash(fs.readFileSync(file))!==e.modified)throw Error('COPY_CHANGED '+e.path);}for(const e of m.entries){const file=path.resolve(target,e.path);if(e.original){const bytes=fs.readFileSync(path.join(out,'original',e.path));if(hash(bytes)!==e.original)throw Error('ORIGINAL_CHANGED');fs.writeFileSync(file,bytes);}else fs.unlinkSync(file);}for(const e of m.entries){const file=path.join(target,e.path);if(e.original?hash(fs.readFileSync(file))!==e.original:fs.existsSync(file))throw Error('RESTORE_FAILED');}console.log('ROLLBACK_SOURCE originals='+m.entries.filter(e=>e.original).length+' new_removed='+m.entries.filter(e=>!e.original).length+' hashes=PASS live_data=UNTOUCHED');
++NODE
++`);
++fs.writeFileSync(path.join(out,'DIFF_FILE.patch'),execFileSync('git',['diff',baseline,'--binary','--',...paths]));
++execFileSync('python',['-X','utf8','-c',"import json,zipfile,pathlib,hashlib; r=pathlib.Path('.');o=r/'evidence/file-delivery-single-path';m=json.loads((o/'manifest.json').read_text());z=zipfile.ZipFile(o/'MODIFIED_FILE.zip','w',zipfile.ZIP_DEFLATED);[z.write(r/e['path'],e['path']) for e in m['entries']];z.close();z=zipfile.ZipFile(o/'MODIFIED_FILE.zip');assert z.testzip() is None;assert all(hashlib.sha256(z.read(e['path'])).hexdigest()==e['modified'] for e in m['entries']);print('ZIP entries='+str(len(z.namelist()))+' CRC=PASS hashes=PASS')"],{stdio:'inherit'});
++if(process.argv.includes('--rollback-test')){
++ const copy=path.join(root,'runtime/file-single-source-rollback-'+randomUUID());fs.mkdirSync(copy,{recursive:true});fs.writeFileSync(path.join(copy,'.naumi-file-single-rollback-copy'),'source-only');
++ for(const dir of ['plugins','tests','scripts','services','desktop/app','desktop/tests','desktop/scripts','desktop/installer'])fs.cpSync(path.join(root,dir),path.join(copy,dir),{recursive:true});
++ for(const file of ['package.json','desktop/package.json','Start-Naumi.ps1','Stop-Naumi.ps1','Start-NaumiDesktop.ps1',...paths]){fs.mkdirSync(path.dirname(path.join(copy,file)),{recursive:true});fs.copyFileSync(path.join(root,file),path.join(copy,file));}
++ fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');fs.symlinkSync(path.join(root,'desktop/node_modules'),path.join(copy,'desktop/node_modules'),'junction');
++ const rb=spawnSync('D:/DEV/Git/bin/bash.exe',[path.join(out,'ROLLBACK.sh'),copy],{encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK.log'),rb.stdout+rb.stderr);if(rb.status!==0)throw Error('ROLLBACK_FAILED '+rb.stdout+rb.stderr);console.log(rb.stdout.trim());
++ const args=['--test','tests/naumi-work-file-acceptance.test.mjs','tests/naumi-work-goal-task-links.test.mjs','tests/naumi-local-proactive.test.mjs'],t=spawnSync(process.execPath,args,{cwd:copy,encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK_TESTS.log'),t.stdout+t.stderr);if(t.status!==0)throw Error('ROLLBACK_TESTS_FAILED '+t.stdout);const tests=Number(t.stdout.match(/tests (\d+)/)?.[1]);console.log('ROLLBACK tests='+tests+' pass='+tests+' fail=0 exit=0');
++ fs.writeFileSync(path.join(out,'ROLLBACK_RESULT.json'),JSON.stringify({status:'PASS',copy,command:'node '+args.join(' '),tests,restored:manifest.entries.filter(e=>e.original).length,removed:manifest.entries.filter(e=>!e.original).length,modifiedSource:'retained',behavior:'original file-task inline text creation restored; new guards removed; native file path unchanged',liveACLsMigrated:0,liveDataTouched:false},null,2)+'\n');
++}
++for(const e of manifest.entries)if(hash(fs.readFileSync(path.join(root,e.path)))!==e.modified)throw Error('MODIFIED_SOURCE_CHANGED');console.log('ARTIFACTS paths='+paths.length+' modified=RETAINED enterprise=UNCHANGED');
+diff --git a/scripts/repro-file-delivery-single-path.mjs b/scripts/repro-file-delivery-single-path.mjs
+new file mode 100644
+index 0000000..9283d2f
+--- /dev/null
++++ b/scripts/repro-file-delivery-single-path.mjs
+@@ -0,0 +1,2 @@
++import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';import {employeeHost} from '../tests/helpers/employee-host.mjs';import {EmployeeWorkStore} from '../plugins/naumi-enterprise/employee-work-store.js';import {EmployeeWorkService} from '../plugins/naumi-enterprise/employee-work.js';
++const baseline=process.argv[2]==='--baseline';assert(baseline||process.argv[2]==='--modified');const f=await employeeHost();try{const w=new EmployeeWorkStore(f.store),s=new EmployeeWorkService({ctx:f.services,directory:f.directory,store:f.store,tasks:()=>f.service.store.read().tasks}),g=w.createGoal(f.sourceBot.id,{operationId:randomUUID(),title:'两个真实文件',criteria:['真实文件，不用正文替代']} );f.service.readWorkGoal=(bot,id)=>w.goal(bot,id);const t=await f.service.dispatch(f.sender,{targetBotId:f.targetBot.id,task:'生成两个真实文件并present',output:'files',replyMode:'background',idempotencyKey:randomUUID(),workGoalId:g.id,workGoalRevision:g.revision});await f.service.settled();const a=f.agents.get(t.targetSessionId),command={action:'delivery_create',goalId:g.id,sourceTaskId:t.id,title:'重复正文',fileName:'说明.md',content:'这不是原生文件集合',operationId:'repro-inline'};if(baseline){s.agentCommand(a,command);assert.equal(w.deliveries(f.sourceBot.id).length,1);console.log('BASELINE file_task_inline_text_draft=CREATED duplicate_path=OPEN model_calls=0');}else{assert.throws(()=>s.agentCommand(a,command),/WORK_TASK_FILES_USE_PRESENT/);assert.equal(w.deliveries(f.sourceBot.id).length,0);console.log('MODIFIED file_task_inline_text_draft=REJECTED duplicate_path=CLOSED model_calls=0');}}finally{await f.cleanup();}
+diff --git a/scripts/verify-file-delivery-single-live.mjs b/scripts/verify-file-delivery-single-live.mjs
+new file mode 100644
+index 0000000..65b7f79
+--- /dev/null
++++ b/scripts/verify-file-delivery-single-live.mjs
+@@ -0,0 +1,88 @@
++// Explicit --live only. Own random-port Harness/home/Bots; no actual3080 writes.
++import fs from 'node:fs';
++import path from 'node:path';
++import http from 'node:http';
++import assert from 'node:assert/strict';
++import {randomUUID,createHash} from 'node:crypto';
++import {spawn,execFileSync} from 'node:child_process';
++import {parse,stringify} from 'yaml';
++import managedWorkspace from '../plugins/naumi-enterprise/managed-workspace.cjs';
++
++const root=process.cwd(),runtime=path.resolve(process.argv[3]??'E:/Workspace/naumi-desktop'),out=path.join(root,'evidence/file-delivery-single-path',process.argv[2]==='--live'?'live-'+Date.now():'prepare');
++assert(['--prepare','--live'].includes(process.argv[2]),'EXPLICIT_PREPARE_OR_LIVE_REQUIRED');
++const paths=['.dsh/cordis.patch.yml','.dsh/profiles/web/cordis.patch.yml','.dsh/.credentials.yaml'],raw=paths.map(p=>fs.readFileSync(path.join(runtime,p))),hash=b=>createHash('sha256').update(b).digest('hex');
++const config=parse(raw[1].toString()),selection=config.find(c=>c.id==='agent-default-model')?.config,providers=config.find(c=>c.id==='llm-pi-ai')?.config.providers;
++assert(selection?.provider&&selection.model,'EXISTING_SELECTION_MISSING');const provider=providers[selection.provider];assert(provider?.apiKeyEnv&&provider.baseURL,'EXISTING_PROVIDER_MISSING');
++const key=parse(raw[2].toString()).refs?.[provider.apiKeyEnv];assert(typeof key==='string'&&key.length>10,'EXISTING_CREDENTIAL_MISSING');
++const models=[selection.model],outputLimit=4096;assert(provider.models.some(m=>m.id===selection.model),'SELECTED_MODEL_NOT_CONFIGURED');
++fs.mkdirSync(out,{recursive:true});if(process.argv[2]==='--prepare'){console.log('DAILY_PREPARED existing_provider=1 selected_model='+models[0]+' credential_disk_writes=0 inference=0');process.exit(0);}
++const fixture=path.join(root,'runtime/file-delivery-single-path-'+randomUUID()),home=path.join(fixture,'home'),profile=path.join(home,'profiles/web'),workspacePath=path.join(fixture,'workspace');fs.mkdirSync(path.join(profile,'node_modules/@naumi'),{recursive:true});await managedWorkspace.createManagedWorkspace(workspacePath,{parent:fixture});
++fs.writeFileSync(path.join(fixture,'.daily-real-fixture'),'isolated-only');
++for(const [name,folder]of [['dsh-enterprise','naumi-enterprise'],['dsh-ui-layout','naumi-ui-layout'],['dsh-sidebar-browser','naumi-sidebar-browser']])fs.symlinkSync(path.join(root,'plugins',folder),path.join(profile,'node_modules/@naumi',name),'junction');fs.symlinkSync(path.join(root,'node_modules/@deepseek-ai'),path.join(profile,'node_modules/@deepseek-ai'),'junction');
++fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'naumi-daily-real-fixture',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}}));
++let supplierRequests=0,truncateNext=false;const upstreamLog=[];
++const upstream=http.createServer(async(req,res)=>{
++ let item;
++ try{let rawBody='';for await(const part of req)rawBody+=part;const body=JSON.parse(rawBody);assert(models.includes(body.model),'UNEXPECTED_MODEL');assert(body.max_tokens<=outputLimit,'OUTPUT_CEILING');assert(supplierRequests<48,'SUPPLIER_REQUEST_CEILING');supplierRequests++;item={index:supplierRequests,model:body.model,forwarded:false,startedAt:new Date().toISOString()};upstreamLog.push(item);
++ const target=new URL(req.url,new URL(provider.baseURL).origin);assert(target.origin===new URL(provider.baseURL).origin,'UNEXPECTED_ORIGIN');const headers=Object.fromEntries(Object.entries(req.headers).filter(([k])=>!['host','connection','content-length','accept-encoding'].includes(k))),controller=new AbortController();
++ const response=await fetch(target,{method:'POST',headers,body:rawBody,signal:AbortSignal.any([controller.signal,AbortSignal.timeout(120000)])});item.forwarded=true;item.http=response.status;res.writeHead(response.status,{'Content-Type':response.headers.get('content-type')??'application/json'});
++ if(truncateNext){truncateNext=false;item.expectedFault='truncated-real-upstream';for await(const chunk of response.body){res.write(chunk.subarray(0,Math.min(16,chunk.length)));res.destroy();controller.abort();break;}return;}
++ for await(const chunk of response.body)res.write(chunk);res.end();item.finished=true;
++ }catch(error){if(item)item.error=String(error.code??error.name);if(!res.headersSent)res.writeHead(503,{'Content-Type':'application/json'}).end(JSON.stringify({error:{type:'daily_acceptance_bound',message:'isolated inference bound or upstream unavailable'}}));else res.destroy();}
++});await new Promise(r=>upstream.listen(0,'127.0.0.1',r));
++const providerId='daily-existing',ref='NAUMI_DAILY_EXISTING_API_KEY',modelConfig={displayName:'日常工作隔离验收',api:provider.api,baseURL:'http://127.0.0.1:'+upstream.address().port+new URL(provider.baseURL).pathname,apiKeyEnv:ref,models:provider.models.filter(m=>models.includes(m.id)).map(m=>({...m,maxTokens:outputLimit})),defaultMaxTokens:outputLimit};
++fs.writeFileSync(path.join(profile,'cordis.patch.yml'),stringify([{id:'agent-default-model',config:{provider:providerId,model:models[0]}},{id:'llm-pi-ai',config:{providers:{[providerId]:modelConfig}}}]));
++const sock=http.createServer();await new Promise(r=>sock.listen(0,'127.0.0.1',r));const port=sock.address().port;assert.notEqual(port,3080);await new Promise(r=>sock.close(r));const base='http://127.0.0.1:'+port;
++const receipt={status:'RUNNING',sourceCommit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),sourceHashes:['scripts/verify-file-delivery-single-live.mjs','plugins/naumi-enterprise/bots.js','plugins/naumi-enterprise/employee-work-store.js','plugins/naumi-enterprise/employee-work.js','plugins/naumi-enterprise/managed-workspace.cjs','plugins/naumi-enterprise/managed-workspace.ps1','plugins/naumi-enterprise/package.json','desktop/app/backend.cjs'].map(p=>({path:p,sha256:hash(fs.readFileSync(path.join(root,p)))})),fixture,home,port,providerGroup:'existing selected connection',models,outputLimit,checks:[],turns:[],realSupplier:true,real3080Requests:0,credentialDiskWrites:0,configWrites:0,enterpriseChanges:0},save=()=>fs.writeFileSync(path.join(out,'LIVE_VERIFICATION.json'),JSON.stringify(receipt,null,2)+'\n');
++let child,output='',cookie='',boots=0;const check=(name,value)=>{assert(value,name);receipt.checks.push(name);save();console.log('DAILY_LIVE_PASS '+name);};
++const scrub=s=>s.replaceAll(key,'REDACTED').replace(/token=[A-Za-z0-9_~.%-]+/g,'token=REDACTED');
++async function stop(){if(!child)return;if(child.exitCode===null&&child.signalCode===null){child.kill('SIGTERM');await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('OWN_HOST_STOP_TIMEOUT')),30000);child.once('close',()=>{clearTimeout(timer);resolve();});});}fs.writeFileSync(path.join(out,'HOST_'+boots+'.log'),scrub(output));child=null;}
++async function start(){
++ output='';child=spawn(process.execPath,[path.join(root,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'web','--host','127.0.0.1','--port',String(port),'--no-open'],{cwd:root,env:{...process.env,DSH_HOME:home,DSH_TELEMETRY_MODE:'DISABLED',[ref]:key},windowsHide:true});boots++;child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);
++ let launch;for(let i=0;;i++){launch=output.match(new RegExp(base.replaceAll('.','\\.')+'/?\\?token=[A-Za-z0-9_~.%-]+'))?.[0];if(launch)break;assert(child.exitCode===null&&child.signalCode===null,'OWN_HOST_EXITED');await new Promise(r=>setTimeout(r,300));}assert(launch,'OWN_HOST_START_TIMEOUT');
++ const r=await fetch(launch,{redirect:'manual',signal:AbortSignal.timeout(10000)});assert.equal(r.status,303);cookie=r.headers.getSetCookie().map(v=>v.split(';')[0]).join('; ');assert(cookie);
++}
++async function request(url,body,header){const r=await fetch(base+url,{...body?{method:'POST',body:JSON.stringify(body)}:{},headers:{cookie,origin:base,'Content-Type':'application/json',...header?{[header]:'1'}:{}},signal:AbortSignal.timeout(45000)}),v=await r.json();assert(r.ok,scrub(JSON.stringify(v)));return v;}
++async function rpc(method,args){const v=await request('/api/'+method,{type:'client-request',rpcId:randomUUID(),method,payload:{args}});assert(v.result?.ok,scrub(JSON.stringify(v)));return v.result.value;}
++const employee=(botId,view='profile')=>request('/naumi/employees?'+new URLSearchParams({botId,view}));
++const owner=(botId,body)=>request('/naumi/employees',{botId,operationId:randomUUID(),...body},'x-naumi-employees');
++const events=async sessionId=>(await rpc('session/events',{request:{address:{kind:'session',sessionId},maxMessages:100}})).records.map(r=>r.event);
++async function turn(sessionId,text,label){
++ const before=await rpc('session/state',{request:{sessionId}});assert(!before.running,'OWN_SESSION_ALREADY_RUNNING');
++ await rpc('session/prompt',{request:{sessionId,requestId:randomUUID(),mode:'queue',content:[{type:'text',text}]}});
++ let last;for(;;){last=await rpc('session/wait',{request:{sessionId,afterSeq:before.cursor,timeoutMs:30000,maxMessages:100}});if(last.reason!=='timeout')break;assert(last.state.running||last.state.queue?.length,'OBSERVED_IDLE_WITHOUT_TERMINAL_RECEIPT');}
++ const rows=(await events(sessionId)).filter(e=>e.seq>before.cursor),end=rows.findLast(e=>e.type==='turn/end');
++ const blocks=rows.filter(e=>e.type==='assistant/message').flatMap(e=>e.data.message.content),tools=blocks.filter(b=>b.type==='tool-call').map(b=>b.name),answer=blocks.filter(b=>b.type==='text').map(b=>b.text).join('\n');
++ receipt.turns.push({label,sessionId,committedNativeResponses:rows.filter(e=>e.type==='assistant/message').length,toolCalls:tools,waitReason:last.reason,endReason:end?.data?.reason,completed:last.reason==='idle'&&end?.data?.reason?.kind==='completed'});save();
++ // A request for approval is a distinct native pending state, not completion
++ // or an idle timeout. Record it and never approve escalation/replay a prompt.
++ if(last.reason==='input-required'){receipt.pendingInput={label,sessionId,state:last.state};save();throw Error(label+' NATIVE_INPUT_REQUIRED_NOT_AUTO_APPROVED');}
++ assert.equal(last.reason,'idle',label+' '+last.reason);assert(end,label+' NO_TERMINAL_TURN');assert.equal(end.data.reason.kind,'completed',label+' '+JSON.stringify(end.data.reason));return {answer,tools,rows};
++}
++async function newChat(bot){const {sessionId}=await rpc('session/create',{request:{cwd:bot.cwd}}),latest=(await request('/naumi/bots')).bots.find(b=>b.id===bot.id);assert(!latest.sessionIds.includes(sessionId),'NEW_CHAT_REUSED_OLD_SESSION');await request('/naumi/bots',{action:'bind',botId:bot.id,sessionId,expectedRevision:latest.revision},'x-naumi-bots');return sessionId;}
++
++const work=(botId,query={})=>request('/naumi/employee-work?'+new URLSearchParams({botId,...query}));
++const workCommand=(botId,body)=>request('/naumi/employee-work',{botId,operationId:randomUUID(),...body},'x-naumi-employee-work');
++const activity=botId=>request('/naumi/employee-activity?botId='+botId);
++const activityCommand=(botId,body)=>request('/naumi/employee-activity',{botId,operationId:randomUUID(),...body},'x-naumi-employee-activity');
++const idleAll=async()=>{for(;;){const rows=await rpc('session/list',{_request:{}});if(!rows.items.some(s=>s.running))return;await new Promise(r=>setTimeout(r,500));}};
++async function waitTask(sourceBot,taskId,attempt){
++ for(;;){const task=(await request('/naumi/bot-tasks')).tasks.find(t=>t.id===taskId),state=await work(sourceBot.id),delivery=state.deliveries.find(d=>d.sourceTaskId===taskId&&d.sourceTaskAttempt===attempt&&d.kind==='files');
++  if(task?.status==='completed'&&task.attempt===attempt&&delivery)return{task,delivery};if(task&&['failed','interrupted','cancelled'].includes(task.status)){receipt.failedTask={id:task.id,status:task.status,error:task.error,endReason:(await events(task.targetSessionId)).findLast(e=>e.type==='turn/end')?.data?.reason};save();throw Error('ISOLATED_TASK_TERMINAL '+JSON.stringify(receipt.failedTask));}if(state.fileDeliveryIssues.length)throw Error('ISOLATED_FILE_DELIVERY_ISSUE '+state.fileDeliveryIssues[0].code);await new Promise(r=>setTimeout(r,1000));}
++}
++async function bytes(botId,artifact,index){const response=await fetch(base+'/naumi/employee-work?'+new URLSearchParams({botId,view:'artifact',artifactId:artifact.id,fileIndex:String(index)}),{headers:{cookie},signal:AbortSignal.timeout(45000)});assert.equal(response.status,200);const value=Buffer.from(await response.arrayBuffer());assert.equal(hash(value),artifact.files[index].snapshot.sha256);assert.equal(response.headers.get('x-artifact-sha256'),hash(value));return value;}
++try{
++ await start();const workspace=await rpc('workspace/create',{request:{path:workspacePath}}),manager=await request('/naumi/bots',{action:'create-primary',requestId:randomUUID(),expectedRevision:0,name:'日常验收主管',workspaceId:workspace.workspace.workspaceId},'x-naumi-bots'),catalog=await request('/naumi/bots'),created=await request('/naumi/bots',{action:'create',requestId:randomUUID(),expectedRevision:catalog.revision,fields:{name:'资料验收员工',kind:'agent',purpose:'只处理本地验收资料，生成真实文件；不用浏览器、网络或安装软件'}},'x-naumi-bots'),worker=created.bot??created;Object.assign(receipt,{managerBotId:manager.id,workerBotId:worker.id});save();
++ const expectedWorkerBase=fs.realpathSync.native(path.join(home,'naumi/workspaces'));assert.equal(path.dirname(fs.realpathSync.native(worker.cwd)),expectedWorkerBase,'WORKER_OUTSIDE_FIXTURE');assert(fs.realpathSync.native(worker.cwd).startsWith(fs.realpathSync.native(fixture)+path.sep));receipt.workerCwd=worker.cwd;save();
++ const csv=path.join(worker.cwd,'sales.csv'),csv1='date,channel,orders,amount\n2026-11-18,online,12,1200\n2026-11-18,offline,8,960\n2026-11-18,online,5,600\n';fs.writeFileSync(csv,csv1);await owner(worker.id,{action:'profile_update',expectedRevision:0,patch:{communicationStyle:'先核对来源，再给结论'}});
++ const goal=await workCommand(manager.id,{action:'goal_create',title:'本地销售日报',description:'读取资料验收员工工作区sales.csv，生成真实文件供人工审核',criteria:['读取原始CSV并按channel汇总orders与amount，包含total','生成真实日报.md和汇总.csv，CSV表头为channel,orders,amount','记录来源，不联网、不安装软件']});receipt.goalId=goal.id;save();check('owner_creates_confirmed_goal_for_focused_file_regression',goal.status==='planned'&&(await request('/naumi/bot-tasks')).tasks.length===0);
++ await turn(manager.homeSessionId,`我已确认工作目标 ${goal.id}（版本 ${goal.revision}）。现在交给资料验收员工（${worker.id}）完成，派单请关联这个已确认目标、output=files、后台执行。我只要你受理后结束本轮，不必等待。请要求员工读取工作区sales.csv，计算真实总计，生成日报.md和汇总.csv，调用present交付两个真实文件，等待人工审核。`,'natural_confirmed_goal_dispatch');
++ const tasks=(await request('/naumi/bot-tasks')).tasks;assert.equal(tasks.length,1,'ONE_NATIVE_TASK');let task=tasks[0];receipt.taskId=task.id;receipt.executionSessionId=task.targetSessionId;save();check('real_manager_dispatch_uses_exact_confirmed_goal_and_native_worker',task.workGoal?.goalId===goal.id&&task.targetBotId===worker.id&&task.sourceSessionId===manager.homeSessionId&&task.output==='files');
++ let complete=await waitTask(manager,task.id,1);task=complete.task;let delivery=complete.delivery,details=await work(manager.id,{view:'delivery',deliveryId:delivery.id}),original=details.artifacts.at(-1);assert.equal(original.files.length,2,'TWO_GENERATED_FILES');const firstBuffers=await Promise.all(original.files.map((_,i)=>bytes(manager.id,original,i))),firstText=firstBuffers.map(b=>b.toString('utf8')).join('\n').replaceAll(',','');check('real_worker_generates_and_presents_files_with_correct_totals',firstText.includes('25')&&firstText.includes('2760')&&original.sourceMessageId===task.messageId&&original.sourceTaskAttempt===1);check('model_completion_is_pending_owner_review_not_acceptance',delivery.businessStatus==='submitted'&&(await work(manager.id)).goals[0].status==='planned');
++ delivery=await workCommand(manager.id,{action:'delivery_transition',deliveryId:delivery.id,expectedRevision:delivery.revision,transition:'request_changes',reason:'补充新增销售数据，并在日报末附复核清单'});const updatedGoal=await workCommand(manager.id,{action:'goal_update',goalId:goal.id,expectedRevision:goal.revision,patch:{criteria:[...goal.criteria,'日报末须附执行复核清单']}});fs.writeFileSync(csv,csv1+'2026-11-18,offline,6,720\n');
++ await idleAll();await turn(manager.homeSessionId,`我已退回这份交付并补充sales.csv一行数据。请沿原任务 ${task.id} 继续修改，不要新派单或新建员工；采用我已确认的目标 ${goal.id} 最新版本 ${updatedGoal.revision}，重新读取CSV，更新日报.md与汇总.csv，日报末增加复核清单，再present交付；后台执行，受理后结束本轮。`,'natural_same_task_return_and_refresh');
++ complete=await waitTask(manager,task.id,2);task=complete.task;delivery=complete.delivery;details=await work(manager.id,{view:'delivery',deliveryId:delivery.id});const latest=details.artifacts.at(-1),newBuffers=await Promise.all(latest.files.map((_,i)=>bytes(manager.id,latest,i))),nextText=newBuffers.map(b=>b.toString('utf8')).join('\n').replaceAll(',','');check('real_return_keeps_task_session_and_creates_new_file_version',task.id===receipt.taskId&&task.targetSessionId===receipt.executionSessionId&&task.attempt===2&&details.version===2&&details.artifacts.length===2&&task.workGoal.revision===1&&task.workGoalUpdates.at(-1).revision===updatedGoal.revision);check('revised_model_files_use_changed_data_and_confirmed_criteria',nextText.includes('31')&&nextText.includes('3480')&&latest.acceptanceCriteria.includes('日报末须附执行复核清单')&&latest.sourceTaskAttempt===2);check('old_model_outputs_are_still_exact_and_review_is_not_overwritten',original.files.every((_,i)=>hash(firstBuffers[i])===original.files[i].snapshot.sha256)&&details.reviews.some(r=>r.action==='request_changes'&&r.sourceTaskAttempt===1));for(let i=0;i<original.files.length;i++)assert.equal(hash(await bytes(manager.id,original,i)),hash(firstBuffers[i]));
++ await idleAll();const linked=(await work(manager.id)).deliveries.filter(d=>d.sourceTaskId===task.id);check('one_native_file_delivery_and_no_duplicate_text_drafts',linked.length===1&&linked[0].kind==='files'&&details.artifacts.every(a=>a.kind==='files'));
++ check('original_configuration_and_credentials_hashes_unchanged',paths.every((p,i)=>hash(fs.readFileSync(path.join(runtime,p)))===hash(raw[i])));
++ Object.assign(receipt,{status:'PASS',boots,supplierRequests,taskId:task.id,deliveryId:delivery.id,sourceTaskAttempt:2,sourceDeliveryVersion:2,maxSupplierRequests:48,deliveries:linked,details});save();console.log('FILE_SINGLE_LIVE checks='+receipt.checks.length+' boots='+boots+' supplier_entry_requests='+supplierRequests+' same_task=1 attempt=2 file_versions=2 deliveries=1 text_drafts=0 actual3080_writes=0 config_changes=0');
++}catch(error){receipt.status='FAIL';receipt.error=scrub(error.message);save();throw Error(scrub(error.message));}finally{await stop();upstream.closeAllConnections();await new Promise(r=>upstream.close(r));receipt.supplierRequests=supplierRequests;receipt.upstreamRequests=upstreamLog;save();}
+diff --git a/tests/naumi-file-delivery-single-path.test.mjs b/tests/naumi-file-delivery-single-path.test.mjs
+new file mode 100644
+index 0000000..c9588d9
+--- /dev/null
++++ b/tests/naumi-file-delivery-single-path.test.mjs
+@@ -0,0 +1,37 @@
++import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import {randomUUID} from 'node:crypto';
++import {employeeHost} from './helpers/employee-host.mjs';import {EmployeeWorkStore} from '../plugins/naumi-enterprise/employee-work-store.js';import {EmployeeWorkService,createEmployeeWorkTools} from '../plugins/naumi-enterprise/employee-work.js';import {EmployeeTaskFiles} from '../plugins/naumi-enterprise/employee-task-files.js';
++const op=()=>randomUUID();
++async function fixture(output='files'){
++ const f=await employeeHost(),work=new EmployeeWorkStore(f.store),ws=new EmployeeWorkService({ctx:f.services,directory:f.directory,store:f.store,tasks:()=>f.service.store.read().tasks}),files=new EmployeeTaskFiles(ws,f.service);ws.fileCoordinator=files;f.service.readWorkGoal=(bot,id)=>work.goal(bot,id);
++ const goal=work.createGoal(f.sourceBot.id,{operationId:op(),title:'交付资料',criteria:['来源和结果可核验']}),task=await f.service.dispatch(f.sender,{targetBotId:f.targetBot.id,task:'交付资料',output,replyMode:'background',idempotencyKey:op(),workGoalId:goal.id,workGoalRevision:goal.revision});await f.service.settled();const current=f.service.current(task.id),agent=f.agents.get(task.targetSessionId),tools=Object.fromEntries(createEmployeeWorkTools(ws).map(t=>[t.name,t]));
++ const command={action:'delivery_create',goalId:goal.id,sourceTaskId:task.id,title:'资料正文',fileName:'资料.md',content:'原文',operationId:op()},actor={kind:'agent',sessionId:agent.id,note:'agent delivery submission'},metadata={executorBotId:f.targetBot.id,sourceGoalRevision:goal.revision,sourceTaskId:task.id,sourceTaskAttempt:current.attempt,sourceSessionId:agent.id,sourceMessageId:current.messageId};
++ const legacy=()=>{const {action,...args}=command;return work.createDelivery(f.sourceBot.id,args,actor,metadata);};
++ return {...f,work,ws,files,goal,task:current,agent,tools,command,actor,metadata,legacy};
++}
++test('file task exposes native path and rejects all new inline draft calls without side effects',async()=>{const f=await fixture();try{
++ const assigned=f.ws.agentList(f.agent).assignedWork[0];assert.equal(assigned.output,'files');assert.equal(assigned.deliveryPath,'native_present');const stats=f.store.stats(),operations=f.store.db.prepare('SELECT count(*) AS n FROM operations').get().n;
++ const {action,...args}=f.command;for(let i=0;i<8;i++)await assert.rejects(Promise.resolve().then(()=>f.tools.employee_delivery_create.execute({...args,operationId:op()},{agent:f.agent})),/WORK_TASK_FILES_USE_PRESENT/);
++ assert.deepEqual(f.store.stats(),stats);assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM operations').get().n,operations);assert.equal(f.work.deliveries(f.sourceBot.id).length,0);assert.equal(f.work.deliveries(f.targetBot.id).length,0);
++ assert.throws(()=>f.ws.agentCommand(f.agent,{...f.command,sourceTaskId:undefined}),/WORK_TASK_REFERENCE_REQUIRED/);
++ }finally{await f.cleanup();}});
++test('rejected text attempt does not block native binary completion or produce a second delivery',async()=>{const f=await fixture();try{
++ assert.throws(()=>f.ws.agentCommand(f.agent,f.command),/WORK_TASK_FILES_USE_PRESENT/);const p=path.join(f.dir,'真实.bin'),bytes=Buffer.from([0,255,128,10]);fs.writeFileSync(p,bytes);
++ await f.complete(f.task,'`'+p+'`',async(a,turn)=>{const callId=op();a.session.append('tool/call',{turn,step:1,callId,name:'write',arguments:{path:p}});a.session.append('tool/result',{turn,message:{role:'tool',toolCallId:callId,toolName:'write',content:[{type:'text',text:'OK'}],isError:false}},{surfaceOp:'append'});});
++ await f.files.reconcile(f.service.current(f.task.id));const rows=f.work.deliveries(f.sourceBot.id);assert.equal(rows.length,1);assert.equal(rows[0].kind,'files');assert.equal(rows[0].businessStatus,'submitted');const a=f.work.artifact(f.sourceBot.id,rows[0].currentArtifactId);assert.equal(a.sourceTaskAttempt,1);assert.deepEqual((await f.ws.artifactFile(f.sourceBot.id,a.id,0)).data,bytes);
++ }finally{await f.cleanup();}});
++test('legacy successful create receipts remain exact and payload conflicts still reject',async()=>{const f=await fixture();try{
++ const prior=f.legacy(),before=f.store.stats();assert.deepEqual(f.ws.agentCommand(f.agent,f.command),prior);assert.deepEqual(f.store.stats(),before);assert.throws(()=>f.ws.agentCommand(f.agent,{...f.command,operationId:op()}),/WORK_TASK_FILES_USE_PRESENT/);assert.throws(()=>f.ws.agentCommand(f.agent,{...f.command,content:'别的内容'}),/EMP_IDEMPOTENCY_CONFLICT/);assert.deepEqual(f.work.delivery(f.sourceBot.id,prior.id),prior);
++ }finally{await f.cleanup();}});
++test('new agent revisions/submits of legacy file-task text are blocked; original records and owner control remain',async()=>{const f=await fixture();try{
++ const prior=f.legacy(),revise={action:'delivery_revise',deliveryId:prior.id,expectedRevision:prior.revision,fileName:'资料.md',content:'新正文',operationId:op()},submit={action:'delivery_transition',transition:'submit',deliveryId:prior.id,expectedRevision:prior.revision,operationId:op()};
++ assert.throws(()=>f.ws.agentCommand(f.agent,revise),/WORK_TASK_FILES_USE_PRESENT/);assert.throws(()=>f.ws.agentCommand(f.agent,submit),/WORK_TASK_FILES_USE_PRESENT/);assert.deepEqual(f.work.delivery(f.sourceBot.id,prior.id),prior);assert.equal(f.work.details(f.sourceBot.id,prior.id).artifacts.length,1);
++ const note=f.ws.command({...f.command,botId:f.sourceBot.id,operationId:op(),title:'用户明确补充的说明'});assert.equal(note.businessStatus,'draft');assert.equal(f.work.deliveries(f.sourceBot.id).length,2);
++ }finally{await f.cleanup();}});
++test('legacy revise and submit operation receipts return without re-running new-path admission',async()=>{const f=await fixture();try{
++ let prior=f.legacy();const input={action:'delivery_revise',deliveryId:prior.id,expectedRevision:prior.revision,fileName:'资料.md',content:'旧版本二',operationId:op()};const {action,...args}=input,revised=f.work.reviseDelivery(f.sourceBot.id,args,f.actor,{sourceGoalRevision:1,sourceTaskId:f.task.id,sourceTaskAttempt:1,sourceSessionId:f.agent.id,sourceMessageId:f.task.messageId});assert.deepEqual(f.ws.agentCommand(f.agent,input),revised);
++ const submit={action:'delivery_transition',transition:'submit',deliveryId:prior.id,expectedRevision:revised.revision,operationId:op()},saved=f.work.transition(f.sourceBot.id,{deliveryId:prior.id,expectedRevision:revised.revision,operationId:submit.operationId,action:'submit'},f.actor);assert.deepEqual(f.ws.agentCommand(f.agent,submit),saved);assert.equal(f.work.details(f.sourceBot.id,prior.id).reviews.length,1);
++ }finally{await f.cleanup();}});
++test('inline text tasks and standalone local proactive drafts keep the original path',async()=>{const f=await fixture('text');try{
++ assert.equal(f.ws.agentList(f.agent).assignedWork[0].deliveryPath,'inline_text');let d=f.ws.agentCommand(f.agent,f.command);d=f.ws.agentCommand(f.agent,{action:'delivery_revise',deliveryId:d.id,expectedRevision:d.revision,operationId:op(),fileName:'资料.md',content:'版本二'});d=f.ws.agentCommand(f.agent,{action:'delivery_transition',transition:'submit',deliveryId:d.id,expectedRevision:d.revision,operationId:op()});assert.equal(d.businessStatus,'submitted');assert.equal(d.version,2);
++ const own=f.work.createGoal(f.targetBot.id,{operationId:op(),title:'本地主动草稿',criteria:['保持草稿']}),draft=f.ws.agentCommand(f.target,{action:'delivery_create',goalId:own.id,title:'草稿',fileName:'复核.md',content:'本地复核',operationId:op()});assert.equal(draft.businessStatus,'draft');assert.equal(draft.botId,f.targetBot.id);
++ }finally{await f.cleanup();}});
+diff --git a/tests/naumi-work-file-acceptance.test.mjs b/tests/naumi-work-file-acceptance.test.mjs
+index a002f35..6b0da46 100644
+--- a/tests/naumi-work-file-acceptance.test.mjs
++++ b/tests/naumi-work-file-acceptance.test.mjs
+@@ -2,7 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';import fs f
+ import {employeeHost} from './helpers/employee-host.mjs';import {EmployeeWorkStore} from '../plugins/naumi-enterprise/employee-work-store.js';import {EmployeeWorkService} from '../plugins/naumi-enterprise/employee-work.js';import {EmployeeTaskFiles} from '../plugins/naumi-enterprise/employee-task-files.js';
+ const op=()=>randomUUID(),sha=b=>createHash('sha256').update(b).digest('hex');
+ async function fixture(){const f=await employeeHost(),work=new EmployeeWorkStore(f.store),ws=new EmployeeWorkService({ctx:f.services,directory:f.directory,store:f.store,tasks:()=>f.service.store.read().tasks}),files=new EmployeeTaskFiles(ws,f.service);ws.fileCoordinator=files;f.service.readWorkGoal=(bot,id)=>work.goal(bot,id);
+- const goal=work.createGoal(f.sourceBot.id,{operationId:op(),title:'交付活动资料',criteria:['数据完整','来源可核验']}),dispatch=async()=>{const t=await f.service.dispatch(f.sender,{targetBotId:f.targetBot.id,task:'生成并交付二进制资料',output:'files',replyMode:'background',idempotencyKey:op(),workGoalId:goal.id,workGoalRevision:goal.revision});await f.service.settled();return f.service.current(t.id);};
++ const goal=work.createGoal(f.sourceBot.id,{operationId:op(),title:'交付活动资料',criteria:['数据完整','来源可核验']}),dispatch=async(output='files')=>{const t=await f.service.dispatch(f.sender,{targetBotId:f.targetBot.id,task:'生成并交付二进制资料',output,replyMode:'background',idempotencyKey:op(),workGoalId:goal.id,workGoalRevision:goal.revision});await f.service.settled();return f.service.current(t.id);};
+  const complete=async(t,buffers=[Buffer.from([0,255,128,13,10])])=>{const paths=buffers.map((b,i)=>{const p=path.join(f.dir,'资料-'+i+'.bin');fs.writeFileSync(p,b);return p;});await f.complete(t,paths.map(p=>'`'+p+'`').join('\n'),async(a,turn)=>{for(const p of paths){const callId=op();a.session.append('tool/call',{turn,step:1,callId,name:'write',arguments:{path:p}});a.session.append('tool/result',{turn,message:{role:'tool',toolCallId:callId,toolName:'write',content:[{type:'text',text:'OK'}],isError:false}},{surfaceOp:'append'});}});return{task:f.service.current(t.id),paths};};
+  const settle=async()=>{for(let n=0;n<100;n++){if(work.deliveries(f.sourceBot.id).some(d=>d.kind==='files'))return;await new Promise(r=>setTimeout(r,10));}const state=await (await f.request(null,{url:'/naumi/employee-work?botId='+f.sourceBot.id})).json();throw Error('AUTO_FILE_DELIVERY_TIMEOUT '+JSON.stringify(state.fileDeliveryIssues??state));};
+  const transition=(d,transition,extra={})=>ws.verifiedCommand({action:'delivery_transition',botId:d.botId,deliveryId:d.id,expectedRevision:d.revision,operationId:op(),transition,...extra});
+@@ -20,6 +20,6 @@ test('owner HTTP returns raw bytes/hash, cross-owner access rejects and review r
+ 
+ test('SQLite failure after native task completion leaves no partial artifact/review and original task is not replayed',async()=>{const f=await fixture();try{const task=await f.dispatch();f.store.beforeCommit=()=>{throw Error('SQL_FAILURE');};const done=await f.complete(task);await new Promise(r=>setTimeout(r,30));assert.equal(f.work.deliveries(f.sourceBot.id).length,0);assert.equal(f.store.entitiesOfType(f.sourceBot.id,'artifact').length,0);assert.equal(f.store.entitiesOfType(f.sourceBot.id,'review').length,0);f.store.beforeCommit=null;await f.files.reconcile(done.task);assert.equal(f.work.deliveries(f.sourceBot.id).length,1);assert.equal(f.service.current(task.id).attempt,1);assert.equal(f.service.current(task.id).status,'completed');}finally{f.store.beforeCommit=null;await f.cleanup();}});
+ test('goal edit or pause blocks a new file publication without rewriting the prior exact criteria',async()=>{const f=await fixture();try{const {task}=await f.complete(await f.dispatch());await f.settle();const d=f.work.deliveries(f.sourceBot.id)[0],a=f.work.artifact(d.botId,d.currentArtifactId);f.work.updateGoal(d.botId,{goalId:f.goal.id,expectedRevision:1,operationId:op(),patch:{criteria:['新条件']}});await assert.rejects(f.files.reconcile(task),/GOAL_CHANGED/);assert.deepEqual(f.work.artifact(d.botId,a.id).acceptanceCriteria,['数据完整','来源可核验']);assert.equal(f.work.delivery(d.botId,d.id).currentArtifactId,a.id);}finally{await f.cleanup();}});
+-test('text artifact and review provenance records current native task attempt without changing original source snapshot',async()=>{const f=await fixture();try{const t=await f.dispatch(),agent=f.agents.get(t.targetSessionId);let d=f.ws.agentCommand(agent,{action:'delivery_create',goalId:f.goal.id,sourceTaskId:t.id,title:'说明',fileName:'说明.md',content:'正文',operationId:op()});let a=f.work.artifact(d.botId,d.currentArtifactId);assert.equal(a.sourceTaskAttempt,1);assert.equal(a.sourceMessageId,t.messageId);assert.equal(a.sourceSessionId,t.targetSessionId);d=f.ws.agentCommand(agent,{action:'delivery_transition',transition:'submit',deliveryId:d.id,expectedRevision:d.revision,operationId:op()});assert.equal(f.work.details(d.botId,d.id).reviews.at(-1).sourceTaskAttempt,1);}finally{await f.cleanup();}});
++test('text artifact and review provenance records current native task attempt without changing original source snapshot',async()=>{const f=await fixture();try{const t=await f.dispatch('text'),agent=f.agents.get(t.targetSessionId);let d=f.ws.agentCommand(agent,{action:'delivery_create',goalId:f.goal.id,sourceTaskId:t.id,title:'说明',fileName:'说明.md',content:'正文',operationId:op()});let a=f.work.artifact(d.botId,d.currentArtifactId);assert.equal(a.sourceTaskAttempt,1);assert.equal(a.sourceMessageId,t.messageId);assert.equal(a.sourceSessionId,t.targetSessionId);d=f.ws.agentCommand(agent,{action:'delivery_transition',transition:'submit',deliveryId:d.id,expectedRevision:d.revision,operationId:op()});assert.equal(f.work.details(d.botId,d.id).reviews.at(-1).sourceTaskAttempt,1);}finally{await f.cleanup();}});
+ 
+ test('lost acceptance receipt remains an idempotent acknowledgement even if the file later becomes unavailable',async()=>{const f=await fixture();try{await f.complete(await f.dispatch());await f.settle();let d=f.work.deliveries(f.sourceBot.id)[0];d=await f.transition(d,'start_review');const command={action:'delivery_transition',botId:d.botId,deliveryId:d.id,expectedRevision:d.revision,operationId:'lost-accepted-receipt',transition:'accept',checkedCriteria:[0,1]},accepted=await f.ws.verifiedCommand(command),artifact=f.work.artifact(d.botId,accepted.currentArtifactId);fs.chmodSync(artifact.files[0].snapshot.path,0o600);fs.unlinkSync(artifact.files[0].snapshot.path);assert.deepEqual(await f.ws.verifiedCommand(command),accepted);assert.equal(f.work.details(d.botId,d.id).reviews.filter(r=>r.action==='accept').length,1);await assert.rejects(f.ws.artifactFile(d.botId,artifact.id,0),/FILE_UNAVAILABLE/);}finally{await f.cleanup();}});
