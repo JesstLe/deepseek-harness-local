@@ -17,7 +17,10 @@ product-identity.js在现有Locale公开translate边界对44个明确namespace/k
 - 桌面旧工程DeepSeek Harness/Naumi企业协作快捷方式合并为带logo的单一Naumi原生桌面入口，原件留私有runtime备份并在另一副本检验恢复。README/部署说明更新自定义连接现状；历史证据不追改，依赖命名、模型标识、许可证原样保留。
 
 ## 验证命令、结果及证据层级
-集中执行基线/修改回归、8语言翻译边界、原生运行UI、设置/插件/预览、浅色与窄屏，以及副本回滚。实际结果见evidence/product-identity/VERIFICATION.txt。
+基线426/426；新增10项覆盖8语言原提示、静态字典全键、插值不改写、原绑定与释放、版本打包、快捷方式副本与logo；整合退休账号兼容主线后集中结果见evidence/product-identity/VERIFICATION.txt。隔离真实Harness/本地SSE模型/Chrome26项通过，实际原生运行图标与Naumi文案、产品版本已打开截图核验，无真实供应商调用；候选/正式运行分别记录。
 
 ## 未完成项与下一步
 本切片不重新制作安装包，不改变任何模型配置、权限、任务/记忆或企业业务数据。新安装包构建自动使用同一品牌资产；实际运行加载单独记录。
+
+## 主线同步与诊断
+基线68b4bb4；模块完成后整合d5033d4（Bot新动效），再提交本模块并普通merge e089a7a（退休账号上下文兼容），package新增压缩peer依赖与product-version.js均保留，不改对方任务代码。UI验证先修正新会话按钮/富文本输入器定位并创建隔离工作区，随后修正多请求SSE释放；失败轮不计通过。
