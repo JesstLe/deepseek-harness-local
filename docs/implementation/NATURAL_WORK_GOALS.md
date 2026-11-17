@@ -19,3 +19,5 @@
 数据与回滚：新增goalproposal实体不改SQLite schema；旧读取器不显示提议但不删除它，已确认goal保持原契约。源码副本回滚不是在线数据库降级，不删除提议或用户确认记录来伪装回退。
 
 最终集中结果：30/30模块、723/723全仓（0skip）、原生壳15项、源码副本13/13全部exit0；14路径ZIP CRC/哈希与9原文件恢复/5新增删除通过。具体命令/输入/字面结果与证据层级见evidence/natural-work-goals/VERIFICATION.txt。源码已就绪，合并/加载分别继续记录。功能切片计数1。
+
+主线与加载：源码普通merge/push main c8b02bb（已整合5201ec4，仅其他线程加载脚本更新，不变更本切片运行代码）。空闲101sessions/0running窗口执行node scripts/deploy-natural-work-goals.mjs apply E:/Workspace/naumi-desktop，exit0；5文件、HTTP200、X-Naumi-Goal-Proposals=1，4bots/revision46。134无关运行文件、110权威会话/配置、57其他证据hash保持；原任务/群/模型保持，员工导出仅新增空goalProposals数组，已有字段逐项一致。host/client/package保持，0模型/自动确认/登记/规则启用。PID7416初次启动仍存活且无输出时继续观察同一进程，未因暂时观察不到HTTP而重复启动，最终同次加载完成。窗口已工具通知释放。

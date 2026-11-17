@@ -10,6 +10,35 @@ index eb7d1cc..bf674f8 100644
 +# Natural work goal proposal audit and source-copy rollback.
 +/evidence/natural-work-goals/** -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab,cr-at-eol
 +/evidence/natural-work-goals/ROLLBACK.sh text eol=lf
+diff --git a/docs/implementation/NATURAL_WORK_GOALS.md b/docs/implementation/NATURAL_WORK_GOALS.md
+new file mode 100644
+index 0000000..5be94fa
+--- /dev/null
++++ b/docs/implementation/NATURAL_WORK_GOALS.md
+@@ -0,0 +1,23 @@
++# 日常自然目标提议与确认 D3
++
++模块与职责：主线程负责从真实用户消息提出工作目标、owner确认或忽略的闭环；不实现另一套任务/输入器/模型调度。基线main/origin/main 83e7b3b3f779a6be9939ac54c10c2e1729e267fb。独立分支codex/natural-work-goals；worktree E:/Workspace/naumi-natural-work-goals。企业模块保持当前状态。
++
++公共接口、依赖与状态归属：复用EmployeeService.evidence对原生用户消息/引用及持久化的校验；EmployeeWorkStore借原employees.sqlite entities/events/operations保存goalproposal实体。提议不是goal，不派单、不启用规则、不通过业务验收。owner确认时在一次SQLite事务中保存原goal及proposal resolution，使用原CAS/operationId；用户可在原GoalForm中调整后确认。原任务和交付状态机不变。
++
++文件归属：employee-work-store.js、employee-work.js、employee-store.js仅work导出新增提议清单、assets/employee-center.js和employee-center-model.js、对应定向测试/隔离UI runner、打包/增量加载脚本和本任务文档证据。协作线程继续负责bot-overview/bot-titles/bot-workspace-migration/bot-file-versions/bot-task*，不双写；不改host/client/package/模型位置。
++
++设计取舍：没有把自然语言直接变成已授权目标/工作；模型可提出目标但确认仅owner。同原始用户消息与相同内容的提议跨operationId去重，忽略后不自动复活。提议仅保存有限公开来源片段，现有凭证文本保护继续生效。表单/审核/工作目录等继续复用，不复制通用行为。
++
++本次实现与迁移状态：开发中；schema仍1，仅新增一种实体，不迁移旧数据或企业配置。
++验证命令、结果及证据层级：基线原工作与日常模块；完整实现后集中测权限/CSRF/幂等/CAS/并发/写失败/重开与原生壳交互。
++未完成与下一步：完成实现、集中验证、源码副本回滚、普通合并推送、空闲增量加载；自然语言真实供应商、派单关联、历史工作区、固定文件版本及安装发布继续分别验收。
++
++集中初测：24/24模块通过。全仓首次722/723，唯一失败为原employees teardown测试固定卸载10工具，而新工具后应为11；已更新精确数量并新增employee_goal_propose确实卸载断言，不跳过测试。UI首次runner误找不存在的“打开当前聊天”菜单，已按现有Bot原生打开按钮修正；初次失败保留。
++
++当前实现：已完成新原生工具、真实来源/持久化校验、跨操作去重、owner编辑确认/忽略、原GoalForm复用、工作列表可见时15秒轻量刷新（开表单/交付详情/隐藏文档时不抢刷新）、导出包含提议、工具卸载。24/24首轮模块与30/30含旧员工模块通过，原生壳15项通过；实际PiAiAdapter/AgentLoop的4次loopback请求，0真实供应商，独立profile/账号/随机端口，无3080写入。1360/360截图均已打开检查。
++
++数据与回滚：新增goalproposal实体不改SQLite schema；旧读取器不显示提议但不删除它，已确认goal保持原契约。源码副本回滚不是在线数据库降级，不删除提议或用户确认记录来伪装回退。
++
++最终集中结果：30/30模块、723/723全仓（0skip）、原生壳15项、源码副本13/13全部exit0；14路径ZIP CRC/哈希与9原文件恢复/5新增删除通过。具体命令/输入/字面结果与证据层级见evidence/natural-work-goals/VERIFICATION.txt。源码已就绪，合并/加载分别继续记录。功能切片计数1。
++
++主线与加载：源码普通merge/push main c8b02bb（已整合5201ec4，仅其他线程加载脚本更新，不变更本切片运行代码）。空闲101sessions/0running窗口执行node scripts/deploy-natural-work-goals.mjs apply E:/Workspace/naumi-desktop，exit0；5文件、HTTP200、X-Naumi-Goal-Proposals=1，4bots/revision46。134无关运行文件、110权威会话/配置、57其他证据hash保持；原任务/群/模型保持，员工导出仅新增空goalProposals数组，已有字段逐项一致。host/client/package保持，0模型/自动确认/登记/规则启用。PID7416初次启动仍存活且无输出时继续观察同一进程，未因暂时观察不到HTTP而重复启动，最终同次加载完成。窗口已工具通知释放。
 diff --git a/docs/prd/DAILY_EMPLOYEE_PRIORITY.md b/docs/prd/DAILY_EMPLOYEE_PRIORITY.md
 index ad3f4e8..470de7b 100644
 --- a/docs/prd/DAILY_EMPLOYEE_PRIORITY.md
@@ -232,6 +261,121 @@ index 2e110b6..3574d02 100644
        const a=scope.connection.admit(req);if('rejection'in a){res.writeHead(a.rejection).end();return;}if(a.peer.principal.kind!=='owner'){res.writeHead(403).end();return;}
        const send=(code,value)=>{if(!res.destroyed)res.writeHead(code,{'Content-Type':'application/json; charset=utf-8'}).end(JSON.stringify(value));};
        try{
+diff --git a/scripts/deploy-natural-work-goals.mjs b/scripts/deploy-natural-work-goals.mjs
+new file mode 100644
+index 0000000..6411ea8
+--- /dev/null
++++ b/scripts/deploy-natural-work-goals.mjs
+@@ -0,0 +1,43 @@
++// Narrow main-only runtime delta. No account enrollment, provider calls, or task writes.
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';import {DatabaseSync} from 'node:sqlite';import {botLiveApi} from './bot-live-api.mjs';
++const root=process.cwd(),mode=process.argv[2]??'prepare',runtime=path.resolve(process.argv[3]??root),baseline='83e7b3b3f779a6be9939ac54c10c2e1729e267fb';
++const installed=path.join(runtime,'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise'),backup=path.join(runtime,'runtime/natural-work-goals-load-'+randomUUID()),out=path.join(root,'evidence/natural-work-goals');
++const files=['employee-work.js','employee-work-store.js','employee-store.js','assets/employee-center-model.js','assets/employee-center.js'];
++const read=p=>fs.readFileSync(p),sha=v=>createHash('sha256').update(v).digest('hex'),norm=v=>v.toString().replaceAll('\r\n','\n');
++const inventory=()=>Object.fromEntries(fs.readdirSync(installed,{recursive:true}).filter(f=>fs.statSync(path.join(installed,f)).isFile()).map(f=>[f.replaceAll('\\','/'),sha(read(path.join(installed,f)))]));
++const sourceCommit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
++fs.mkdirSync(backup,{recursive:true});fs.mkdirSync(out,{recursive:true});const original=inventory(),rows=[];
++for(const file of files){const target=path.join(installed,file),before=fs.existsSync(target)?read(target):null,source=read(path.join(root,'plugins/naumi-enterprise',file));let after=source;assert.equal(norm(source),norm(execFileSync('git',['show',sourceCommit+':plugins/naumi-enterprise/'+file])),'SOURCE_NOT_COMMITTED '+file);
++ assert(before,'RUNTIME_FILE_MISSING '+file);assert.equal(norm(before),norm(execFileSync('git',['show',baseline+':plugins/naumi-enterprise/'+file])),'RUNTIME_DRIFT '+file);
++ for(const[kind,bytes]of[['before',before],['after',after]])if(bytes){const p=path.join(backup,kind,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);}
++ rows.push({file,beforeSHA256:before?sha(before):null,afterSHA256:sha(after)});
++}
++fs.writeFileSync(path.join(backup,'manifest.json'),JSON.stringify({baseline,rows},null,2));
++if(mode==='prepare'){console.log('NATURAL_GOALS_PREPARED files=5 host_client=UNCHANGED backup='+backup);process.exit(0);}assert.equal(mode,'apply');
++assert.equal(execFileSync('git',['branch','--show-current'],{encoding:'utf8'}).trim(),'main');const unrelatedTracked=execFileSync('git',['diff','HEAD','--name-only','-z'],{encoding:'utf8'}).split('\0').filter(Boolean);assert(unrelatedTracked.every(f=>!files.map(p=>'plugins/naumi-enterprise/'+p).includes(f)),'TASK_SOURCE_DIRTY');
++const untracked=execFileSync('git',['ls-files','--others','--exclude-standard','-z'],{encoding:'utf8'}).split('\0').filter(f=>f&&!f.startsWith('evidence/natural-work-goals/')),untrackedHashes=Object.fromEntries(untracked.map(f=>[f,sha(read(path.join(root,f)))]));
++const api=await botLiveApi(runtime),sessions=await api.rpc('session/list',{_request:{}}),bots=await api.json('/naumi/bots'),tasks=await api.json('/naumi/bot-tasks'),models=sha(JSON.stringify(await api.json('/naumi/model-connections')));
++assert(!sessions.items.some(s=>s.running),'RUNNING_SESSIONS');assert(!tasks.tasks.some(t=>['queued','starting','running','waiting'].includes(t.status)),'ACTIVE_TASKS');
++const groupRows=()=>{const db=new DatabaseSync(path.join(runtime,'.dsh/naumi/bot-groups.sqlite'),{readOnly:true});try{const rows=Object.fromEntries(['rooms','members','posts','replies','post_context','room_name_operations'].map(t=>[t,db.prepare('SELECT * FROM '+t+' ORDER BY rowid').all()]));assert(!rows.replies.some(r=>['queued','starting','sent'].includes(r.state)),'GROUP_BUSY');return sha(JSON.stringify(rows));}finally{db.close();}};
++const groupsBefore=groupRows(),employees=async api=>Object.fromEntries(await Promise.all(bots.bots.map(async b=>{const {exportedAt,...v}=await api.json('/naumi/employees?view=export&botId='+encodeURIComponent(b.id));if(v.work?.goalProposals){assert.equal(v.work.goalProposals.length,0,'UNEXPECTED_REAL_PROPOSALS');delete v.work.goalProposals;}return[b.id,sha(JSON.stringify(v))];}))),employeesBefore=await employees(api);
++const protectedPaths=['.dsh/.credentials.yaml','.dsh/cordis.patch.yml','.dsh/profiles/web/package.json','.dsh/profiles/web/cordis.yml','.dsh/profiles/web/cordis.patch.yml','.dsh/naumi/bots.json','.dsh/naumi/bot-tasks.json','config/local.json','node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'];
++for(const f of fs.readdirSync(path.join(runtime,'.dsh/sessions'),{recursive:true}))if(path.basename(f)==='session.v4.jsonl.zstd')protectedPaths.push('.dsh/sessions/'+f);
++const protectedBefore=Object.fromEntries(protectedPaths.filter(f=>fs.existsSync(path.join(runtime,f))).map(f=>[f,sha(read(path.join(runtime,f)))]));
++const shell=name=>{const r=spawnSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-File',path.join(runtime,name)],{windowsHide:true,stdio:'ignore',timeout:150000});assert.equal(r.status,0,'SERVICE_COMMAND '+name);};
++const atomic=(p,bytes)=>{fs.mkdirSync(path.dirname(p),{recursive:true});const tmp=p+'.'+randomUUID()+'.tmp';fs.writeFileSync(tmp,bytes);fs.renameSync(tmp,p);};let complete=false;
++try{
++ shell('Stop-Naumi.ps1');for(const[f,h]of Object.entries(protectedBefore))assert.equal(sha(read(path.join(runtime,f))),h,'PRELOAD_DATA_DRIFT '+f);
++ for(const r of rows){const p=path.join(installed,r.file);if(r.beforeSHA256)assert.equal(sha(read(p)),r.beforeSHA256,'PRELOAD_RUNTIME_DRIFT');else assert(!fs.existsSync(p));}
++ for(const r of rows)atomic(path.join(installed,r.file),read(path.join(backup,'after',r.file)));shell('Start-Naumi.ps1');
++ const loaded=await botLiveApi(runtime),afterSessions=await loaded.rpc('session/list',{_request:{}});assert(!afterSessions.items.some(s=>s.running));assert.equal(afterSessions.items.length,sessions.items.length);
++ for(const f of ['employee-center-model.js','employee-center.js'])assert.equal((await loaded.request('/naumi/assets/'+f)).status,200);const workResponse=await loaded.request('/naumi/employee-work?botId='+encodeURIComponent(bots.bots[0].id));assert.equal(workResponse.status,200);assert.equal(workResponse.headers.get('x-naumi-goal-proposals'),'1');for(const bot of bots.bots){const v=await loaded.json('/naumi/employee-work?botId='+encodeURIComponent(bot.id));assert.deepEqual(v.goalProposals,[],'UNEXPECTED_REAL_PROPOSALS');}
++ assert.deepEqual(await loaded.json('/naumi/bots'),bots);assert.deepEqual(await loaded.json('/naumi/bot-tasks'),tasks);assert.equal(sha(JSON.stringify(await loaded.json('/naumi/model-connections'))),models);assert.deepEqual(await employees(loaded),employeesBefore);assert.equal(groupRows(),groupsBefore);
++ const after=inventory();for(const r of rows)assert.equal(after[r.file],r.afterSHA256);for(const[f,h]of Object.entries(original))if(!files.includes(f))assert.equal(after[f],h,'UNRELATED_RUNTIME '+f);
++ for(const[f,h]of Object.entries(protectedBefore))assert.equal(sha(read(path.join(runtime,f))),h,'PROTECTED_DATA '+f);for(const[f,h]of Object.entries(untrackedHashes))assert.equal(sha(read(path.join(root,f))),h,'OTHER_EVIDENCE_CHANGED '+f);
++ fs.writeFileSync(path.join(out,'DEPLOYMENT.json'),JSON.stringify({status:'PASS',sourceCommit,files:rows,backup,http:200,sessions:afterSessions.items.length,running:0,bots:bots.bots.length,revision:bots.revision,automaticGoalConfirmations:0,enterpriseConfigurationChanges:0,modelCalls:0,modelGroupsUnchanged:true,employeeExportsUnchanged:true,employeeExportComparison:"existing_fields_plus_empty_goalProposals_only",taskAndGroupRowsUnchanged:true,protectedFilesUnchanged:Object.keys(protectedBefore).length,unrelatedRuntimeUnchanged:Object.keys(original).filter(f=>!files.includes(f)).length,otherUntrackedFilesPreserved:untracked.length,unrelatedTrackedEditsNotTouched:unrelatedTracked,nativeComposerUnchanged:true,packageChange:"UNCHANGED"},null,2)+'\n');
++ complete=true;console.log('NATURAL_GOALS_LOADED files=5 http=200 running=0 models=UNCHANGED employees=UNCHANGED tasks=UNCHANGED groups=UNCHANGED account_data=UNCHANGED model_calls=0');
++}finally{if(!complete){
++ const dataFile=path.join(runtime,'.dsh/naumi/bots.json'),expected=protectedBefore['.dsh/naumi/bots.json'];
++ if(expected&&sha(read(dataFile))!==expected)console.error('NATURAL_GOALS_LOAD_INCOMPLETE new_directory_metadata=RETAINED compatible_reader=RETAINED backup='+backup);
++ else{try{shell('Stop-Naumi.ps1');}catch{}for(const r of rows){const p=path.join(installed,r.file);if(r.beforeSHA256)atomic(p,read(path.join(backup,'before',r.file)));else if(fs.existsSync(p))fs.unlinkSync(p);}shell('Start-Naumi.ps1');console.error('NATURAL_GOALS_LOAD_FAILED runtime=RESTORED backup='+backup);}
++}}
+diff --git a/scripts/package-natural-work-goals.mjs b/scripts/package-natural-work-goals.mjs
+new file mode 100644
+index 0000000..2ab52c8
+--- /dev/null
++++ b/scripts/package-natural-work-goals.mjs
+@@ -0,0 +1,11 @@
++import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';
++const root=process.cwd(),out=path.join(root,'evidence/natural-work-goals'),baseline='83e7b3b3f779a6be9939ac54c10c2e1729e267fb';
++const paths=['.gitattributes','docs/implementation/NATURAL_WORK_GOALS.md','docs/prd/DAILY_EMPLOYEE_PRIORITY.md','docs/prd/GOAL_TRACKER.md','plugins/naumi-enterprise/employee-work.js','plugins/naumi-enterprise/employee-work-store.js','plugins/naumi-enterprise/employee-store.js','plugins/naumi-enterprise/assets/employee-center.js','plugins/naumi-enterprise/assets/employee-center-model.js','tests/naumi-natural-work-goals.test.mjs','tests/naumi-employees.test.mjs','scripts/verify-natural-work-goals-ui.mjs','scripts/package-natural-work-goals.mjs','scripts/deploy-natural-work-goals.mjs'];
++const hash=b=>createHash('sha256').update(b).digest('hex'),manifest={baseline,entries:[]};
++for(const file of paths){const original=path.join(out,'original',file);let before=null;if(fs.existsSync(original))before=fs.readFileSync(original);else{try{before=execFileSync('git',['show',baseline+':'+file],{stdio:['ignore','pipe','ignore']});}catch{}if(before){fs.mkdirSync(path.dirname(original),{recursive:true});fs.writeFileSync(original,before);}}const bytes=fs.readFileSync(path.join(root,file));manifest.entries.push({path:file,original:before?hash(before):null,modified:hash(bytes)});}
++fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
++fs.writeFileSync(path.join(out,'ROLLBACK.sh'),`#!/usr/bin/env bash\nset -euo pipefail\nHERE="$(cd "$(dirname "$0")" && pwd)"\nnode - "$1" "$HERE" <<'NODE'\nconst fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');const target=path.resolve(process.argv[2]),out=path.resolve(process.argv[3]);if(!fs.existsSync(path.join(target,'.naumi-natural-work-goals-rollback-copy')))throw Error('MARKED_COPY_REQUIRED');if(target===path.resolve(out,'../..'))throw Error('SOURCE_TARGET_REJECTED');const m=JSON.parse(fs.readFileSync(path.join(out,'manifest.json'))),hash=b=>crypto.createHash('sha256').update(b).digest('hex');for(const e of m.entries){const file=path.resolve(target,e.path);if(!file.startsWith(target+path.sep))throw Error('INVALID_TARGET');if(fs.existsSync(file)&&hash(fs.readFileSync(file))!==e.modified)throw Error('COPY_CHANGED '+e.path);if(e.original){const bytes=fs.readFileSync(path.join(out,'original',e.path));if(hash(bytes)!==e.original)throw Error('ORIGINAL_CHANGED');fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,bytes);}else if(fs.existsSync(file))fs.unlinkSync(file);}for(const e of m.entries){const file=path.join(target,e.path);if(e.original?hash(fs.readFileSync(file))!==e.original:fs.existsSync(file))throw Error('RESTORE_FAILED');}console.log('ROLLBACK_SOURCE originals='+m.entries.filter(e=>e.original).length+' new_removed='+m.entries.filter(e=>!e.original).length+' hashes=PASS live_data=UNTOUCHED');\nNODE\n`);
++const patch=execFileSync('git',['diff',baseline,'--binary','--',...paths]);fs.writeFileSync(path.join(out,'DIFF_FILE.patch'),patch);if(!patch.length)throw Error('NO_TASK_CHANGES');
++execFileSync('python',['-X','utf8','-c',"import json,zipfile,pathlib; r=pathlib.Path('.'); o=r/'evidence/natural-work-goals'; m=json.loads((o/'manifest.json').read_text()); z=zipfile.ZipFile(o/'MODIFIED_FILE.zip','w',zipfile.ZIP_DEFLATED); [z.write(r/e['path'],e['path']) for e in m['entries']]; z.close(); z=zipfile.ZipFile(o/'MODIFIED_FILE.zip'); assert z.testzip() is None; print('ZIP entries='+str(len(z.namelist()))+' CRC=PASS')"],{stdio:'inherit'});
++if(process.argv.includes('--rollback-test')){const copy=path.join(root,'runtime/natural-work-goals-source-rollback-1');if(fs.existsSync(copy))throw Error('COPY_ALREADY_EXISTS');fs.mkdirSync(copy,{recursive:true});fs.writeFileSync(path.join(copy,'.naumi-natural-work-goals-rollback-copy'),'source-only');for(const dir of ['plugins','tests'])fs.cpSync(path.join(root,dir),path.join(copy,dir),{recursive:true});fs.copyFileSync(path.join(root,'package.json'),path.join(copy,'package.json'));for(const e of manifest.entries){const dest=path.join(copy,e.path);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(path.join(root,e.path),dest);}fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');fs.mkdirSync(path.join(copy,'desktop'));fs.cpSync(path.join(root,'services'),path.join(copy,'services'),{recursive:true});for(const dir of ['app','installer','scripts'])fs.cpSync(path.join(root,'desktop',dir),path.join(copy,'desktop',dir),{recursive:true});fs.symlinkSync(path.join(root,'desktop/node_modules'),path.join(copy,'desktop/node_modules'),'junction');const r=spawnSync('D:/DEV/Git/bin/bash.exe',[path.join(out,'ROLLBACK.sh'),copy],{encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK.log'),r.stdout+r.stderr);if(r.status!==0)throw Error('ROLLBACK_FAILED '+r.stdout+r.stderr);console.log(r.stdout.trim());const t=spawnSync(process.execPath,['--test','tests/naumi-employee-work.test.mjs','tests/naumi-daily-work.test.mjs'],{cwd:copy,encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK_TESTS.log'),t.stdout+t.stderr);if(t.status!==0)throw Error('ROLLBACK_TESTS_FAILED '+t.stdout);console.log('ROLLBACK tests=13 pass=13 fail=0 exit=0');}
++for(const e of manifest.entries)if(hash(fs.readFileSync(path.join(root,e.path)))!==e.modified)throw Error('MODIFIED_SOURCE_CHANGED');console.log('ARTIFACTS paths='+paths.length+' modified=RETAINED enterprise=UNCHANGED');
+diff --git a/scripts/verify-natural-work-goals-ui.mjs b/scripts/verify-natural-work-goals-ui.mjs
+new file mode 100644
+index 0000000..5102376
+--- /dev/null
++++ b/scripts/verify-natural-work-goals-ui.mjs
+@@ -0,0 +1,43 @@
++// Full isolated Harness, native Agent tool execution, SQLite/HTTP and real React shell.
++// The only inference endpoint is this script's deterministic loopback SSE fixture.
++import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';import {spawn} from 'node:child_process';import {stringify} from 'yaml';import {chromium} from '../desktop/node_modules/playwright/index.mjs';
++const root=process.cwd(),out=path.join(root,'evidence/natural-work-goals'),temp=path.join(root,'runtime/natural-work-goals-'+randomUUID()),home=path.join(temp,'home'),profile=path.join(home,'profiles/web');fs.mkdirSync(path.join(profile,'node_modules/@naumi'),{recursive:true});fs.mkdirSync(out,{recursive:true});
++for(const [name,folder]of [['dsh-enterprise','naumi-enterprise'],['dsh-ui-layout','naumi-ui-layout'],['dsh-sidebar-browser','naumi-sidebar-browser']])fs.symlinkSync(path.join(root,'plugins',folder),path.join(profile,'node_modules/@naumi',name),'junction');fs.symlinkSync(path.join(root,'node_modules/@deepseek-ai'),path.join(profile,'node_modules/@deepseek-ai'),'junction');
++fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'naumi-daily-work-fixture',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}}));
++const requests=[];
++const upstream=http.createServer(async(req,res)=>{
++ let raw='';for await(const part of req)raw+=part;const body=JSON.parse(raw),last=body.messages.at(-1);requests.push({model:body.model});
++ let toolValue;try{toolValue=JSON.parse(typeof last?.content==='string'?last.content:'');}catch{}
++ let delta,finished=false;
++ if(last?.role!=='tool')delta={role:'assistant',tool_calls:[{index:0,id:'goal-read',type:'function',function:{name:'employee_work',arguments:'{}'}}]};
++ else if(toolValue?.recentUserSources){const source=toolValue.recentUserSources.at(-1);assert(source?.messageId,'REAL_SOURCE_MISSING');delta={role:'assistant',tool_calls:['活动方案','待核对方案','可忽略方案'].map((title,index)=>({index,id:'goal-propose-'+index,type:'function',function:{name:'employee_goal_propose',arguments:JSON.stringify({title,description:'来自当前原生会话的工作安排',criteria:['来源可核验','有行动清单'],sourceMessageId:source.messageId,quote:source.quote,operationId:'native-propose-'+index})}}))};}
++ else{finished=true;delta={role:'assistant',content:'已提出工作目标，等待你在工作与交付中确认。'};}
++ res.writeHead(200,{'Content-Type':'text/event-stream'});for(const chunk of [{choices:[{index:0,delta,finish_reason:null}]},{choices:[{index:0,delta:{},finish_reason:finished?'stop':'tool_calls'}],usage:{prompt_tokens:12,completion_tokens:3,total_tokens:15}}])res.write('data: '+JSON.stringify({id:'goal-'+requests.length,object:'chat.completion.chunk',created:1,model:body.model,...chunk})+'\n\n');res.end('data: [DONE]\n\n');
++});await new Promise(r=>upstream.listen(0,'127.0.0.1',r));
++fs.writeFileSync(path.join(home,'cordis.patch.yml'),stringify([{id:'ui-theme',config:{preference:'light'}},{id:'agent-default-model',config:{provider:'fixture',model:'fixture-model'}}]));fs.writeFileSync(path.join(profile,'cordis.patch.yml'),stringify([{id:'ui-settings-general',config:{welcomeNoticeVersion:'2026-09-28.1'}},{id:'llm-pi-ai',config:{providers:{fixture:{displayName:'隔离测试连接',api:'openai-completions',baseURL:'http://127.0.0.1:'+upstream.address().port+'/v1',apiKeyEnv:'NAUMI_MANAGEMENT_FIXTURE_KEY',models:[{id:'fixture-model',name:'同一模型',contextWindow:128000,maxTokens:2048,reasoningEfforts:false}]}}}}]));
++const sock=http.createServer();await new Promise(r=>sock.listen(0,'127.0.0.1',r));const port=sock.address().port;await new Promise(r=>sock.close(r));const base='http://127.0.0.1:'+port,child=spawn(process.execPath,[path.join(root,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'web','--host','127.0.0.1','--port',String(port),'--no-open'],{cwd:root,env:{...process.env,DSH_HOME:home,DSH_TELEMETRY_MODE:'DISABLED',NAUMI_MANAGEMENT_FIXTURE_KEY:'local-fixture-only'},windowsHide:true});let output='',browser;child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);const checks=[];const check=(name,value)=>{assert(value,name);checks.push(name);console.log('GOAL_UI_PASS '+name);};
++
++try{
++ let launch;for(let i=0;i<180;i++){launch=output.match(new RegExp(base.replaceAll('.','\\.')+'/?\\?token=[A-Za-z0-9_~.%-]+'))?.[0];if(launch)break;if(child.exitCode!==null)throw Error('HOST_BOOT_FAILED');await new Promise(r=>setTimeout(r,300));}assert(launch,'HOST_BOOT_TIMEOUT');
++ const exchange=await fetch(launch,{redirect:'manual'}),cookie=exchange.headers.getSetCookie().map(s=>s.split(';')[0]).join('; '),headers={cookie,'Content-Type':'application/json','x-naumi-bots':'1',origin:base};
++ const call=async(url,body)=>{const r=await fetch(base+url,{headers,...body?{method:'POST',body:JSON.stringify(body)}:{}}),v=await r.json();assert(r.ok,JSON.stringify(v));return v;};const rpc=async(method,args)=>{const v=await call('/api/'+method,{type:'client-request',rpcId:randomUUID(),method,payload:{args}});assert(v.result?.ok,JSON.stringify(v));return v.result.value;};
++ const cwd=path.join(temp,'workspace');fs.mkdirSync(cwd);const workspace=await rpc('workspace/create',{request:{path:cwd}}),bot=await call('/naumi/bots',{action:'create-primary',requestId:randomUUID(),expectedRevision:0,name:'日常目标助手',workspaceId:workspace.workspace.workspaceId});
++ browser=await chromium.launch({headless:true,channel:'chrome'});const context=await browser.newContext({viewport:{width:1360,height:960},colorScheme:'light'}),page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(15000);
++ await page.route('**/naumi/workspace',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'ENTERPRISE_NOT_CONNECTED'})}));await page.goto(launch,{waitUntil:'domcontentloaded'});await page.locator('.naumi-navigation-switch').waitFor();await page.locator('.naumi-navigation-switch button').nth(1).click();
++ await page.locator('.naumi-bot-open').filter({hasText:'日常目标助手'}).click();
++ const composer=page.locator('[contenteditable="true"]').first();await composer.fill('整理下周活动方案，提供来源和可执行清单');await composer.press('Enter');
++ const deadline=Date.now()+60000;let state;while(Date.now()<deadline){state=await call('/naumi/employee-work?botId='+bot.id);if(state.goalProposals.length===3)break;await new Promise(r=>setTimeout(r,400));}assert.equal(state.goalProposals.length,3,'NATIVE_PROPOSALS_MISSING');
++ check('real_user_message_native_agent_tools_make_pending_proposals',state.goalProposals.every(p=>p.status==='pending'&&p.source.messageId&&p.source.sessionId===bot.homeSessionId));check('proposal_does_not_create_goals_deliveries_or_tasks',state.goals.length===0&&state.deliveries.length===0&&(await call('/naumi/bot-tasks')).tasks.length===0);
++ await page.getByRole('button',{name:'日常目标助手的设置',exact:true}).click();await page.getByRole('menuitem',{name:'工作与交付',exact:true}).click();const work=page.locator('[data-daily-work]');await work.locator('[data-proposal-id]').first().waitFor();check('pending_proposals_reuse_daily_work_not_advanced_center',await work.locator('[data-proposal-id]').count()===3&&await work.locator('.emp-tabs,.emp-roster').count()===0);
++ const proposal=state.goalProposals.find(p=>p.goal.title==='活动方案'),card=work.locator('[data-proposal-id="'+proposal.id+'"]');await card.getByText('会话来源',{exact:true}).click();check('exact_user_quote_visible_without_internal_ids',(await card.locator('blockquote').innerText())==='整理下周活动方案，提供来源和可执行清单'&&!(await card.innerText()).includes(proposal.source.sessionId));
++ for(const width of [1360,360]){await page.setViewportSize({width,height:960});await work.locator('.emp-main').evaluate(el=>el.scrollTop=0);check('pending_layout_'+width,await work.evaluate(el=>el.scrollWidth<=el.clientWidth+2&&el.getBoundingClientRect().right<=innerWidth+1));await page.screenshot({path:path.join(out,'goals-'+width+'.png'),animations:'disabled'});}
++ await page.setViewportSize({width:1360,height:960});await card.getByRole('button',{name:'查看与确认',exact:true}).click();let modal=page.getByRole('dialog',{name:'确认工作目标',exact:true});await modal.getByLabel('目标名称').fill('已确认的活动目标');await modal.getByLabel('验收条件（每行一项）').fill('最终来源准确\n执行步骤完整');
++ let dropped=false,operation;await page.route('**/naumi/employee-work',async route=>{if(route.request().method()==='POST'){const body=route.request().postDataJSON();if(body.action==='goal_proposal_review'&&body.proposalId===proposal.id){if(!dropped){dropped=true;operation=body.operationId;await route.fetch();await route.abort('failed');return;}check('lost_confirmation_receipt_reuses_operation_id',body.operationId===operation);}}await route.continue();});
++ await modal.getByRole('button',{name:'确认目标',exact:true}).click();await modal.getByRole('alert').waitFor();check('failed_confirmation_keeps_edits_and_original_revision',await modal.getByLabel('目标名称').inputValue()==='已确认的活动目标');await modal.getByRole('button',{name:'确认目标',exact:true}).click();await modal.waitFor({state:'hidden'});await page.unroute('**/naumi/employee-work');
++ state=await call('/naumi/employee-work?botId='+bot.id);check('owner_confirmation_creates_exactly_one_planned_goal',state.goals.length===1&&state.goals[0].title==='已确认的活动目标'&&state.goals[0].status==='planned'&&state.goals[0].criteria[0]==='最终来源准确');check('original_proposal_evidence_is_immutable',state.goalProposals.find(p=>p.id===proposal.id).goal.title==='活动方案');
++ const conflict=state.goalProposals.find(p=>p.goal.title==='待核对方案');await work.locator('[data-proposal-id="'+conflict.id+'"]').getByRole('button',{name:'查看与确认',exact:true}).click();modal=page.getByRole('dialog',{name:'确认工作目标',exact:true});await modal.getByLabel('工作说明').fill('保持当前确认草稿');const response=await fetch(base+'/naumi/employee-work',{method:'POST',headers:{...headers,'x-naumi-employee-work':'1'},body:JSON.stringify({action:'goal_proposal_review',botId:bot.id,proposalId:conflict.id,expectedRevision:conflict.revision,decision:'dismiss',operationId:randomUUID()})});assert.equal(response.status,200);
++ await modal.getByRole('button',{name:'确认目标',exact:true}).click();await modal.getByRole('alert').waitFor();check('stale_confirmation_keeps_draft_and_does_not_override_dismissal',await modal.getByLabel('工作说明').inputValue()==='保持当前确认草稿'&&(await call('/naumi/employee-work?botId='+bot.id)).goals.length===1);await modal.getByRole('button',{name:'关闭弹窗',exact:true}).click();
++ const ignored=state.goalProposals.find(p=>p.goal.title==='可忽略方案');await work.locator('[data-proposal-id="'+ignored.id+'"]').getByRole('button',{name:'忽略',exact:true}).click();await work.locator('[data-work-proposals]').waitFor({state:'hidden'});check('ignore_is_persisted_without_dispatch_or_goal', (await call('/naumi/employee-work?botId='+bot.id)).goalProposals.filter(p=>p.status==='dismissed').length===2);
++ await page.reload({waitUntil:'domcontentloaded'});await page.getByRole('button',{name:'日常目标助手的设置',exact:true}).click();await page.getByRole('menuitem',{name:'工作与交付',exact:true}).click();await work.getByRole('heading',{name:'已确认的活动目标',exact:true}).waitFor();check('reload_preserves_resolution_and_goal',await work.locator('[data-proposal-id]').count()===0);check('native_model_choice_unchanged',requests.every(r=>r.model==='fixture-model'));check('no_page_errors',errors.length===0);
++ fs.writeFileSync(path.join(out,'UI_VERIFICATION.json'),JSON.stringify({status:'PASS',checks,errors,modelRequests:requests.length,realSupplierCalls:0,enterpriseConnected:false,tier:'isolated actual Harness/native dock/PiAiAdapter/AgentLoop/tools/SQLite/React and owner HTTP'},null,2)+'\n');console.log('GOAL_UI checks='+checks.length+' errors=0 native_model_requests='+requests.length+' real_supplier_calls=0');
++}catch(error){fs.writeFileSync(path.join(out,'UI_FAILURE.json'),JSON.stringify({error:error.message,checks},null,2));throw error;}finally{await browser?.close();child.kill();await new Promise(r=>child.exitCode!==null?r():child.once('close',r));upstream.closeAllConnections();await new Promise(r=>upstream.close(r));fs.writeFileSync(path.join(out,'HOST.log'),output.replace(/token=[A-Za-z0-9_~.%-]+/g,'token=REDACTED'));}
 diff --git a/tests/naumi-employees.test.mjs b/tests/naumi-employees.test.mjs
 index 94d90a2..1e9ced7 100644
 --- a/tests/naumi-employees.test.mjs
@@ -244,3 +388,129 @@ index 94d90a2..1e9ced7 100644
 +    const before=f.sender.tools.size;await f.host.dispose();assert.equal(f.sender.tools.size,before-11);assert.equal(f.sender.tools.has('employee_goal_propose'),false);assert.equal(f.runtime.heartbeat.read().runtimeState,'stopped');
    }finally{await f.cleanup();}
  });
+diff --git a/tests/naumi-natural-work-goals.test.mjs b/tests/naumi-natural-work-goals.test.mjs
+new file mode 100644
+index 0000000..da89681
+--- /dev/null
++++ b/tests/naumi-natural-work-goals.test.mjs
+@@ -0,0 +1,120 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import {randomUUID} from 'node:crypto';
++import {createUserMessage} from '@deepseek-ai/dsh-llm';
++import {EmployeeStore} from '../plugins/naumi-enterprise/employee-store.js';
++import {EmployeeWorkStore} from '../plugins/naumi-enterprise/employee-work-store.js';
++import {EmployeeWorkService} from '../plugins/naumi-enterprise/employee-work.js';
++import {employeeHost} from './helpers/employee-host.mjs';
++
++async function fixture(){
++  const f=await employeeHost(),work=new EmployeeWorkStore(f.store),service=new EmployeeWorkService({ctx:f.services,directory:f.directory,store:f.store});
++  const source=(text='整理下周活动方案，提供来源和可执行清单',agent=f.sender,kind={kind:'user'})=>{
++    const message=createUserMessage({source:kind,content:[{type:'text',text}]});agent.session.append('user/message',message,{surfaceOp:'append'});return message;
++  };
++  const message=source(),input={title:'整理活动方案',description:'形成可复核方案',criteria:['提供来源','行动清单完整'],sourceMessageId:message.id,quote:'整理下周活动方案',operationId:'propose-one'};
++  const propose=(patch={},agent=f.sender)=>agent.tools.get('employee_goal_propose').execute({...input,...patch},{agent});
++  const review=(p,extra={})=>({action:'goal_proposal_review',botId:f.sourceBot.id,proposalId:p.id,expectedRevision:p.revision,operationId:randomUUID(),decision:'confirm',...extra});
++  return {...f,work,service,source,message,input,propose,review};
++}
++
++test('native goal tool persists pending proposal with verified source and no goal/task/approval side effects',async()=>{
++  const f=await fixture();try{
++    const p=await f.propose();assert.equal(p.status,'pending');assert.equal(p.source.messageId,f.message.id);assert.equal(p.source.sessionId,f.sender.id);
++    assert.equal(f.work.goals(f.sourceBot.id).length,0);assert.equal(f.work.deliveries(f.sourceBot.id).length,0);assert.equal(f.work.proposals(f.targetBot.id).length,0);
++    assert(f.log.get(f.sender.id).events.some(e=>e.type==='user/message'&&e.data.id===f.message.id));
++    const v=await f.sender.tools.get('employee_work').execute({},{agent:f.sender});assert.equal(v.goalProposals[0].id,p.id);assert.equal(v.recentUserSources[0].messageId,f.message.id);
++    assert.equal(f.store.export(f.sourceBot.id).work.goalProposals[0].id,p.id);
++    assert.throws(()=>f.work.goal(f.sourceBot.id,p.id),/GOAL_NOT_FOUND/);
++  }finally{await f.cleanup();}
++});
++test('same source/content deduplicates across operation IDs and ignores never revive from retries',async()=>{
++  const f=await fixture();try{
++    const p=await f.propose();assert.deepEqual(await f.propose(),p);assert.deepEqual(await f.propose({operationId:'other-op'}),p);
++    await assert.rejects(f.propose({title:'别的目标'}),/IDEMPOTENCY_CONFLICT/);
++    const dismissed=await f.command(f.review(p,{decision:'dismiss',operationId:'ignore'}));assert.equal(dismissed.status,200);
++    const repeat=await f.propose({operationId:'after-ignore'});assert.equal(repeat.status,'dismissed');assert.equal(f.work.proposals(p.botId).length,1);assert.equal(f.work.goals(p.botId).length,0);
++  }finally{await f.cleanup();}
++});
++test('owner edits and confirms in one transaction; same operation receipt returns same original goal',async()=>{
++  const f=await fixture();try{
++    const p=await f.propose(),command=f.review(p,{goal:{...p.goal,title:'修改后的活动目标',criteria:['最终确认标准']},operationId:'owner-confirm'});
++    const result=await f.command(command);assert.equal(result.status,200);assert.equal(result.value.goal.status,'planned');assert.equal(result.value.goal.title,'修改后的活动目标');assert.equal(result.value.goal.sourceProposalId,p.id);
++    assert.equal(result.value.proposal.goal.title,p.goal.title);assert.equal(result.value.proposal.goalId,result.value.goal.id);
++    assert.deepEqual((await f.command(command)).value,result.value);assert.equal(f.work.goals(p.botId).length,1);
++    assert.equal((await f.command({...command,operationId:'late-op'})).status,409);assert.equal(f.work.goals(p.botId).length,1);
++    await assert.rejects(f.sender.tools.get('employee_delivery_create').execute({goalId:p.id,title:'invalid',fileName:'x.txt',content:'x',operationId:'fake-goal'},{agent:f.sender}),/GOAL_NOT_FOUND/);
++  }finally{await f.cleanup();}
++});
++test('failed confirmation rolls back goal, proposal, audit and operation receipt together',async()=>{
++  const f=await fixture();try{
++    const p=await f.propose(),events=f.store.stats().events,command=f.review(p,{operationId:'atomic-confirm'});
++    f.store.beforeCommit=()=>{throw Error('injected write failure');};assert.equal((await f.command(command)).status,503);
++    assert.equal(f.work.goals(p.botId).length,0);assert.equal(f.work.proposal(p.botId,p.id).status,'pending');assert.equal(f.store.stats().events,events);
++    assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM operations WHERE operation_id=?').get('atomic-confirm').n,0);
++    f.store.beforeCommit=null;assert.equal((await f.command(command)).status,200);assert.equal(f.work.goals(p.botId).length,1);
++  }finally{await f.cleanup();}
++});
++test('parallel confirm versus dismiss has exactly one winner and never overwrites a resolved proposal',async()=>{
++  const f=await fixture();try{
++    const p=await f.propose(),results=await Promise.all([f.command(f.review(p)),f.command(f.review(p,{decision:'dismiss'}))]);
++    assert.deepEqual(results.map(r=>r.status).sort(),[200,409]);const current=f.work.proposal(p.botId,p.id);
++    assert.equal(current.revision,2);assert.equal(f.work.goals(p.botId).length,current.status==='confirmed'?1:0);
++    const repeat=await f.command(f.review(current,{decision:'confirm'}));assert.equal(repeat.status,400);assert.equal(repeat.value.error,'WORK_PROPOSAL_RESOLVED');
++  }finally{await f.cleanup();}
++});
++test('reopened SQLite and a second connection preserve source, resolution and idempotent receipt',async()=>{
++  const f=await fixture();let other;try{
++    const p=await f.propose(),command=f.review(p,{operationId:'cross-connection'}),r=await f.command(command);
++    other=new EmployeeStore(f.store.file);const w=new EmployeeWorkStore(other);assert.equal(w.proposal(p.botId,p.id).source.messageId,f.message.id);
++    const {action,botId,...input}=command;assert.deepEqual(w.reviewProposal(botId,input),r.value);assert.equal(w.goals(p.botId).length,1);
++    assert.throws(()=>w.proposal(f.targetBot.id,p.id),/NOT_FOUND/);
++  }finally{other?.close();await f.cleanup();}
++});
++test('missing/foreign/relay source or mismatched quote cannot create proposals',async()=>{
++  const f=await fixture();try{
++    for(const patch of [{sourceMessageId:'invented'},{quote:'并不存在的文字'}])await assert.rejects(f.propose(patch),/USER_SOURCE_REQUIRED|SOURCE_QUOTE_MISMATCH/);
++    await assert.rejects(f.propose({},f.target),/USER_SOURCE_REQUIRED/);
++    const relay=f.source('整理下周活动方案',f.sender,{kind:'agent-message',form:'relay',senderSessionId:f.target.id});
++    await assert.rejects(f.propose({sourceMessageId:relay.id}),/USER_SOURCE_REQUIRED/);assert.equal(f.work.proposals(f.sourceBot.id).length,0);
++  }finally{await f.cleanup();}
++});
++test('agent cannot create active goals, confirm/dismiss proposals, or spoof Bot/owner/source fields',async()=>{
++  const f=await fixture();try{
++    const p=await f.propose();assert.throws(()=>f.service.agentCommand(f.sender,f.review(p)),/REVIEWER_REQUIRED/);
++    assert.throws(()=>f.work.reviewProposal(p.botId,{...f.review(p)}, {kind:'agent',sessionId:f.sender.id}),/REVIEWER_REQUIRED/);
++    assert.equal((await f.command(f.review(p,{actor:{kind:'owner'}}))).status,400);
++    assert.equal((await f.command(f.review(p,{botId:f.targetBot.id}))).status,404);
++    assert.equal((await f.command({...f.input,action:'goal_propose',botId:p.botId})).status,400);
++    await assert.rejects(f.propose({botId:f.targetBot.id}),/unrecognized|Unrecognized/);
++    await assert.rejects(f.propose({permissions:'all'}),/unrecognized|Unrecognized/);
++  }finally{await f.cleanup();}
++});
++test('owner HTTP admission, CSRF and strict review shape remain enforced',async()=>{
++  const f=await fixture();try{
++    const p=await f.propose(),command=f.review(p),url=f.origin+'/naumi/employee-work';
++    const post=headers=>fetch(url,{method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(command)});
++    assert.equal((await post({})).status,401);assert.equal((await post({cookie:'fixture-guest'})).status,403);
++    assert.equal((await post({cookie:'fixture-owner'})).status,403);assert.equal((await post({cookie:'fixture-owner','x-naumi-employee-work':'1',origin:'https://foreign'})).status,403);
++    assert.equal((await f.command(f.review(p,{decision:'dismiss',goal:p.goal}))).status,400);
++    const read=await fetch(url+'?botId='+p.botId,{headers:{cookie:'fixture-owner'}});assert.equal(read.headers.get('x-naumi-goal-proposals'),'1');assert.equal((await read.json()).goalProposals.length,1);
++    assert.equal(f.work.proposal(p.botId,p.id).status,'pending');
++  }finally{await f.cleanup();}
++});
++test('source flush failure, cancellation and identity changes fail before a durable proposal',async()=>{
++  const f=await fixture();try{
++    const original=f.services.sessions.flush;f.services.sessions.flush=async()=>{throw Error('flush failed');};await assert.rejects(f.propose(),/flush failed/);
++    const abort=new AbortController();f.services.sessions.flush=async s=>{await original(s);abort.abort();};
++    await assert.rejects(f.sender.tools.get('employee_goal_propose').execute(f.input,{agent:f.sender,signal:abort.signal}),/abort/i);
++    f.services.sessions.flush=async s=>{await original(s);f.directory.forSession=()=>f.targetBot;};await assert.rejects(f.propose(),/IDENTITY_CHANGED/);
++    assert.equal(f.work.proposals(f.sourceBot.id).length,0);
++  }finally{await f.cleanup();}
++});
++test('public text protection and invalid criteria prevent persistence; proposals have a pending capacity',async()=>{
++  const f=await fixture();try{
++    await assert.rejects(f.propose({title:'apikey: sk-'+ 'a'.repeat(24)}),/SECRET_PATTERN/);await assert.rejects(f.propose({criteria:[]}),/small|least/i);
++    const p=await f.propose();for(let i=1;i<50;i++)await f.propose({title:'目标'+i,operationId:'capacity'+i});
++    await assert.rejects(f.propose({title:'超限',operationId:'overflow'}),/PROPOSAL_CAPACITY/);assert.equal(f.work.goals(p.botId).length,0);
++    assert.equal((await f.command(f.review(p,{decision:'dismiss'}))).status,200);assert.equal((await f.propose({title:'新目标',operationId:'after-room'})).status,'pending');
++  }finally{await f.cleanup();}
++});
