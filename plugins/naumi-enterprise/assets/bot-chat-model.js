@@ -30,7 +30,7 @@ export async function groupRequest(url='/naumi/bot-groups',{signal,body,fetcher=
  const r=await fetcher(url,{credentials:'same-origin',cache:'no-store',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(15000)]):AbortSignal.timeout(15000),...(body?{method:'POST',headers:{'Content-Type':'application/json','x-naumi-bot-groups':'1'},body:JSON.stringify(body)}:{})});
  const data=await r.json().catch(()=>null);if(!r.ok||!data){const error=Error(data?.error??'BOT_GROUP_UNAVAILABLE');error.status=r.status;throw error;}return data;
 }
-export const groupError=e=>({BOT_GROUP_MENTION_REQUIRED:'请 @ 一位成员，或选择默认接话者。',BOT_GROUP_MEMBER_UNAVAILABLE:'有成员已归档，请重新选择。',BOT_GROUP_CONFLICT:'内容已变化，请刷新后重试。',BOT_GROUP_DEFAULT_NOT_MEMBER:'默认接话者必须在群内。',BOT_GROUP_TASK_NOT_FOUND:'这项任务不属于当前群。',BOT_GROUP_TASK_RECIPIENT_CONFLICT:'任务补充需交给原派单成员。',BOT_GROUP_ATTACHMENT_NOT_STAGED:'附件已失效，请重新添加。',BOT_GROUP_STOP_PENDING:'停止尚未确认，请稍后核对回复状态。'}[e?.message]??([401,403].includes(e?.status)?'连接已失效，请重新进入工作台。':'操作未完成，请重试。'));
+export const groupError=e=>({BOT_GROUP_MENTION_REQUIRED:'请 @ 一位成员，或选择默认接话者。',BOT_GROUP_MEMBER_UNAVAILABLE:'有成员已归档，请重新选择。',BOT_GROUP_INVALID_NAME:'群名需为 1–80 个字符。',BOT_GROUP_CONFLICT:'内容已变化，请刷新后重试。',BOT_GROUP_DEFAULT_NOT_MEMBER:'默认接话者必须在群内。',BOT_GROUP_TASK_NOT_FOUND:'这项任务不属于当前群。',BOT_GROUP_TASK_RECIPIENT_CONFLICT:'任务补充需交给原派单成员。',BOT_GROUP_ATTACHMENT_NOT_STAGED:'附件已失效，请重新添加。',BOT_GROUP_STOP_PENDING:'停止尚未确认，请稍后核对回复状态。'}[e?.message]??([401,403].includes(e?.status)?'连接已失效，请重新进入工作台。':'操作未完成，请重试。'));
 export function createGroupCatalog({fetcher=globalThis.fetch,target=globalThis.window,storage=globalThis.sessionStorage}={}){
  let selected=null;try{selected=storage?.getItem(ACTIVE_KEY)??null;}catch{}
  let snapshot={status:'idle',rooms:[],details:{},selected,creating:false},abort=null,pending=null,timer=null,alive=false,generation=0;
@@ -46,6 +46,7 @@ export function createGroupCatalog({fetcher=globalThis.fetch,target=globalThis.w
   refresh,
   select(ctx,id,{create=false}={}){publish({...snapshot,selected:id,creating:create});try{if(id)storage?.setItem(ACTIVE_KEY,id);}catch{}ctx.layout.beginNavigation?.();ctx.layout.selectPanel(CHAT_PANEL);target?.dispatchEvent(new CustomEvent(CHAT_EVENT));},
   created(ctx,room){publish({...snapshot,rooms:[room,...snapshot.rooms.filter(r=>r.id!==room.id)],selected:room.id,creating:false,status:'ready'});this.select(ctx,room.id);},
+  renamed(room){generation++;abort?.abort();pending=null;publish({...snapshot,rooms:snapshot.rooms.map(r=>r.id===room.id?room:r),details:{...snapshot.details,...(snapshot.details[room.id]?{[room.id]:{...snapshot.details[room.id],room}}:{})}});void refresh();},
   detail(id,value){publish({...snapshot,details:{...snapshot.details,[id]:value}});},
  };
 }

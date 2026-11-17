@@ -1,5 +1,6 @@
 import {dirname,join} from 'node:path';
 import {z} from 'zod';
+import {defineTool} from '@deepseek-ai/dsh-tools';
 import {BotGroupStore} from './bot-group-store.js';
 import {BotGroupService} from './bot-group-service.js';
 
@@ -17,7 +18,17 @@ const commands = z.discriminatedUnion('action', [
     .refine(v=>v.text.length>0||v.attachments?.length),
   z.object({action:z.literal('prepare'),roomId:requestId}).strict(),
   z.object({action:z.literal('interrupt'),roomId:requestId,replyId:requestId}).strict(),
+  z.object({action:z.literal('rename'),operationId:requestId,roomId:requestId,expectedName:z.string().min(1).max(80),name:z.string().trim().min(1).max(80).refine(v=>!/[\u0000-\u001f\u007f]/.test(v))}).strict(),
 ]);
+
+export function createBotGroupTools(ctx,service){
+ const member=exec=>{if(!exec.agent)throw Error('BOT_GROUP_CALLER_REQUIRED');return ctx.agentTeams.membership(exec.agent);};
+ const output={schema:{type:'json'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]};
+ return [
+  defineTool({name:'bot_group_list',description:'List the local owner chat groups and their exact IDs, names and members. Use this before renaming a group. Group identity is separate from Bot names and conversation titles. If names are ambiguous, ask which group; do not guess or use desktop/browser automation.',parameters:{},output,execute:(_args,exec)=>{const m=member(exec);exec.signal?.throwIfAborted();return {rooms:service.store.rooms(),currentRoomId:service.store.member(m.root.id)?.roomId??null};}}),
+  defineTool({name:'bot_group_rename',description:'Rename an existing chat group directly at the user request. Read bot_group_list first, use its exact roomId and current name as expectedName, and supply a new UUID operationId. Retry the SAME operationId and payload after a lost reply. On conflict read the list again; never overwrite a newer name blindly. This changes only the group display name, preserving messages, members, sessions and tasks. Do not operate the GUI or edit files to rename a group.',parameters:{roomId:{type:'string',required:true},expectedName:{type:'string',required:true},name:{type:'string',required:true},operationId:{type:'string',required:true}},output,execute:(args,exec)=>{const m=member(exec);if(m.role!=='lead')throw Error('BOT_GROUP_LEAD_REQUIRED');exec.signal?.throwIfAborted();let input;try{input=commands.parse({action:'rename',...args});}catch{throw Error('BOT_GROUP_INVALID_REQUEST');}return service.rename(input,{kind:'agent',sessionId:m.root.id});}}),
+ ];
+}
 
 export function installBotGroups(ctx, directory, getTasks) {
   return ctx.inject(['agents','webServer','connection','systemPrompt'], scope => {
@@ -29,9 +40,15 @@ export function installBotGroups(ctx, directory, getTasks) {
     directory.groupSessionOwner = resolveOwner;
     const installed = new Map();
     const install = agent => {
-      if (installed.has(agent) || !store.member(agent.id)) return;
-      installed.set(agent, agent.ctx.systemPrompt.context({name:'naumi:bot-group',required:true,
+      if (installed.has(agent)) return;
+      const disposers=[];
+      if(scope.agentTeams?.tryMembership(agent)&&agent.ctx.tools){
+        for(const tool of createBotGroupTools(scope,service))disposers.push(agent.ctx.tools.register(tool));
+        disposers.push(agent.ctx.systemPrompt.section({name:'naumi:group-management',order:agent.ctx.systemPrompt.getSectionOrder('TEAM_POLICY')+3,text:'Chat group names are managed by bot_group_list and bot_group_rename. When the user asks to rename a group, use those tools directly, including from a Bot private chat. Do not use desktop/browser tools, screenshots, shell commands, source searches or file edits for group naming. Group rename is not bot_update or conversation-title rename. Resolve duplicate names by asking the user; report the returned current name only after the persisted operation succeeds.'}));
+      }
+      if(store.member(agent.id))disposers.push(agent.ctx.systemPrompt.context({name:'naumi:bot-group',required:true,
         order:agent.ctx.systemPrompt.getContextOrder('TEAM_IDENTITY')+4,text:() => service.context(agent.id)}));
+      if(disposers.length)installed.set(agent,()=>{for(const dispose of disposers.reverse())dispose();});
     };
     scope.on('agent/created', ({agent}) => install(agent));
     scope.on('agent/disposed', ({agent}) => { installed.get(agent)?.(); installed.delete(agent); });
@@ -86,6 +103,7 @@ export function installBotGroups(ctx, directory, getTasks) {
         try { input = commands.parse(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
         catch { send(400,{error:'BOT_GROUP_INVALID_REQUEST'}); return; }
         if(input.action==='create'){send(200,service.create(input));return;}
+        if(input.action==='rename'){send(200,service.rename(input));return;}
         if(input.action==='prepare'){send(200,await service.prepare(input.roomId));return;}
         if(input.action==='interrupt'){send(200,await service.interrupt(input.roomId,input.replyId));return;}
         const requestAttachments=input.attachments??[];
