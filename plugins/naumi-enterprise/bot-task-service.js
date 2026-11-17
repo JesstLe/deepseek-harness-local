@@ -55,6 +55,11 @@ export class BotTaskService{
     });this.kick();return this.view(value);
   }
   list(agent){const {bot}=this.caller(agent);return this.store.read().tasks.filter(t=>[t.sourceBotId,t.targetBotId].includes(bot.id)).map(publicTask);}
+  summaries(agent,input={}){
+    const {limit=20,offset=0}=z.object({limit:z.number().int().min(1).max(100).optional(),offset:z.number().int().min(0).optional()}).strict().parse(input);
+    const all=this.list(agent).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));
+    return {total:all.length,offset,limit,hasMore:offset+limit<all.length,tasks:all.slice(offset,offset+limit).map(t=>({id:t.id,sourceBotId:t.sourceBotId,sourceSessionId:t.sourceSessionId,targetBotId:t.targetBotId,targetSessionId:t.targetSessionId,status:t.status,revision:t.revision,attempt:t.attempt,task:t.task.slice(0,240),progress:t.progress?.slice(0,160),hasResult:!!t.result,fileCount:t.delivery?.files?.length??0,updatedAt:t.updatedAt}))};
+  }
   async get(agent,taskId){this.authorized(agent,taskId);await this.observeTask(taskId);return this.view(this.current(taskId));}
   async wait(agent,{taskId,afterRevision,timeoutMs=30000,waitForResult=false},{signal}={}){
     const {task}=this.authorized(agent,taskId);z.number().int().min(1).parse(afterRevision);z.number().int().min(100).max(120000).parse(timeoutMs);

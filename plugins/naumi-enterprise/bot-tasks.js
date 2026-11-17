@@ -6,6 +6,25 @@ import {BotTaskStore} from './bot-task-store.js';
 import {BotTaskService} from './bot-task-service.js';
 import {createBotTaskRuntime} from './bot-task-runtime.js';
 import {DELIVERY_PROMPT} from './bot-deliverables.js';
+import {BasicCompactionEngine} from '@deepseek-ai/dsh-compaction-basic';
+
+/** Keep the documented summarizer hook, but route retired-account summaries through
+ * the Session's explicitly selected custom model. Original request history is immutable. */
+export function installRetiredModelCompaction(agent,llm){
+  const engine=agent.ctx.get?.('compaction');if(!engine||typeof engine.summarize!=='function')return()=>{};
+  const original=engine.summarize;
+  const wrapped=function(input,owner,signal){
+    const prior=owner.session.requestHeader()?.config,selected=owner.model?.current();
+    const retired=prior?.provider==='deepseek-account'||prior?.provider==='deepseek';
+    const known=llm.listProviders().some(p=>p.id===prior?.provider);
+    if(!retired||known||!selected||selected.provider===prior.provider||!llm.listProviders().some(p=>p.id===selected.provider))return original.call(this,input,owner,signal);
+    const policy={summarizationProvider:selected.provider,summarizationModel:selected.model};
+    const config={...this.config,...policy,maxTokens:Math.min(this.config?.maxTokens??8192,8192),modelPolicies:(this.config?.modelPolicies??[]).map(p=>({...p,...policy,maxTokens:Math.min(p.maxTokens??this.config?.maxTokens??8192,8192)}))};
+    const facade=new Proxy(this,{get:(target,key,receiver)=>key==='config'?config:Reflect.get(target,key,receiver)});
+    return original.call(facade,input,owner,signal);
+  };
+  engine.summarize=wrapped;return()=>{if(engine.summarize===wrapped)engine.summarize=original;};
+}
 
 export function createBotTaskTools(service){
   const output={schema:{type:'json'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]};
@@ -14,7 +33,7 @@ export function createBotTaskTools(service){
   return [
     tool('bot_dispatch','Delegate a task to an EXISTING persistent Bot by its exact ID from bot_directory. This reuses that Bot identity and creates a linked task Session, not a substitute teammate. Supply a stable idempotencyKey for this request and reuse it on retries. Returns after durable acceptance; the result will be sent back automatically. Does not change models, permissions, or provision external accounts.',
       {targetBotId:{type:'string',required:true},task:{type:'string',required:true},idempotencyKey:{type:'string',required:true},replyMode:{type:'string',enum:['background','wait'],description:'Default background: immediately acknowledge durable dispatch and end your chat turn; do NOT wait/poll. Use wait only when the user explicitly asks to wait for results.'},output:{type:'string',enum:['text','files'],description:'Use files when the user requires separate deliverable files; text only for an inline answer. File tasks require validated file registration before completion.'}},(agent,args,exec)=>service.dispatch(agent,args,exec)),
-    tool('bot_task_list','List real tasks sent or received by this persistent Bot. Team list_agents does not list independent Bots.',{},agent=>service.list(agent)),
+    tool('bot_task_list','List compact real task summaries for this persistent Bot (default newest 20); never loads all old results into context. Use task_get for the exact result and offset for older pages. sourceSessionId/targetSessionId distinguish this conversation from other work. Team list_agents does not list independent Bots.',{limit:{type:'integer',description:'1 through 100, default 20.'},offset:{type:'integer',description:'Zero-based page offset, default 0.'}},(agent,args)=>service.summaries(agent,args)),
     tool('bot_task_get','Read a delegated Bot task, current revision, progress, persisted result and message delivery state.',{taskId},(agent,args)=>service.get(agent,args.taskId)),
     tool('bot_task_continue','Append requirements or revise the SAME existing task, retaining task ID, target Bot, workspace and execution Session. Read the real task/revision first. Active/queued work receives feedback; completed work starts a new attempt in the original Session. Stable idempotencyKey makes retries safe. Never use bot_dispatch for an edit to existing work. Failed/cancelled/interrupted work requires explicit bot_task_retry instead.',
       {taskId,expectedRevision,idempotencyKey:{type:'string',required:true},message:{type:'string',required:true}},(agent,args,exec)=>service.continue(agent,args,exec)),
@@ -32,6 +51,9 @@ export function installBotTasks(ctx,directory,{store,runtime,onReady}={}){
     const ledger=store??new BotTaskStore(path.join(process.env.DSH_HOME??path.join(os.homedir(),'.dsh'),'naumi','bot-tasks.json'));
     const adapter=runtime??createBotTaskRuntime(scope);
     const service=new BotTaskService({ctx:scope,directory,store:ledger,runtime:adapter,onError:()=>scope.logger.warn('BOT_TASK_BACKGROUND_ERROR')});
+    // Presets isolate their compaction service in a child scope. Install once on
+    // its documented summary hook; route selection still comes from the owner.
+    const llm=scope.get('llm');if(llm)scope.effect(()=>installRetiredModelCompaction({ctx:{get:()=>BasicCompactionEngine.prototype}},llm));
     const installed=new Map(),streams=new Set();
     const install=agent=>{
       if(installed.has(agent)||!scope.agentTeams.tryMembership(agent))return;const disposers=[];

@@ -5,6 +5,8 @@ import path from 'node:path';
 import {taskFixture} from './helpers/bot-task-fixture.mjs';
 import {botTaskHost} from './helpers/bot-task-host.mjs';
 import {employeeTasks,receptionTarget,taskDockRows} from '../plugins/naumi-enterprise/assets/bot-task-model.js';
+import {installRetiredModelCompaction} from '../plugins/naumi-enterprise/bot-tasks.js';
+import {BasicCompactionEngine} from '@deepseek-ai/dsh-compaction-basic';
 
 test('completed work continues in the exact same task, Bot, workspace and Session with an immutable original request',async()=>{
   const f=await taskFixture();try{
@@ -100,4 +102,38 @@ test('Bot-level task projection spans source and target Sessions without changin
   assert.equal(receptionTarget(bot,tasks,{byId:{home:{},'job-a':{},'job-b':{}}}),'home');assert.equal(taskDockRows(tasks,'home').current.length,0);
   assert.equal(receptionTarget(bot,tasks,{byId:{}}),'home','A cold native catalog must not cause an implicit new chat');
   const source=fs.readFileSync('plugins/naumi-enterprise/assets/team-panel.js','utf8');assert(source.includes('employeeTasks(bot,jobs.tasks)'));assert(source.includes('createBotTaskCard'));assert(source.includes('会话运行详情'));
+});
+
+test('retired-model compaction uses the explicitly chosen custom route without rewriting historical header or global policy',async()=>{
+  const header={config:{provider:'deepseek-account',model:'deepseek-flash'}},config={modelPolicies:[{provider:'deepseek-account',model:'deepseek-flash'}],maxTokens:8000},calls=[];
+  const engine={config,summarize(input,owner,signal){calls.push({config:this.config,input,owner,signal});return Promise.resolve('summary');}};
+  const original=engine.summarize,agent={ctx:{get:()=>engine},session:{requestHeader:()=>header},model:{current:()=>({provider:'ccs-deepseek-992333',model:'deepseek-flash'})}};
+  const undo=installRetiredModelCompaction(agent,{listProviders:()=>[{id:'ccs-deepseek-992333'}]});
+  const abort=new AbortController(),input={messages:[]};assert.equal(await engine.summarize(input,agent,abort.signal),'summary');
+  assert.equal(calls[0].config.summarizationProvider,'ccs-deepseek-992333');assert.equal(calls[0].config.summarizationModel,'deepseek-flash');assert.equal(calls[0].config.modelPolicies[0].summarizationProvider,'ccs-deepseek-992333');
+  assert.equal(calls[0].input,input);assert.equal(calls[0].signal,abort.signal);assert.equal(header.config.provider,'deepseek-account');assert.equal(engine.config,config);assert(!config.summarizationProvider);
+  undo();assert.equal(engine.summarize,original);
+});
+
+test('compaction does not reroute a registered provider, unrelated history or an unavailable selected route',async()=>{
+  for(const [previous,providers]of [['other',[{id:'custom'}]],['deepseek-account',[{id:'deepseek-account'},{id:'custom'}]],['deepseek-account',[]]]){
+    const config={modelPolicies:[]},engine={config,summarize(){return this.config;}},agent={ctx:{get:()=>engine},session:{requestHeader:()=>({config:{provider:previous,model:'old'}})},model:{current:()=>({provider:'custom',model:'new'})}};
+    const undo=installRetiredModelCompaction(agent,{listProviders:()=>providers});assert.equal(engine.summarize({},agent),config);undo();
+  }
+});
+
+test('real BasicCompactionEngine summarizer sends an explicit custom compaction request preserving history and checkpoint text',async()=>{
+  const calls=[],llm={listProviders:()=>[{id:'custom'}],async *stream(options){calls.push(options);yield {type:'block-start',index:0,blockType:'text'};yield {type:'text-delta',index:0,text:'Retained original files and current task.'};yield {type:'block-end',index:0,block:{type:'text',text:'Retained original files and current task.'}};yield {type:'finish',reason:'stop'};}};
+  const owner={session:{id:'legacy-session',requestHeader:()=>({config:{provider:'deepseek-account',model:'deepseek-flash'}}),toolHistory:()=>[]},model:{current:()=>({provider:'custom',model:'deepseek-flash'})},options:{provider:'custom',model:'deepseek-flash'}};
+  const engine={ctx:{llm},config:{summarizationProvider:'',summarizationModel:'',modelPolicies:[],maxTokens:8000}},messages=[{role:'user',content:[{type:'text',text:'原任务与文件不能丢失'}]}];
+  const undo=installRetiredModelCompaction({ctx:{get:()=>BasicCompactionEngine.prototype}},llm);
+  try{const result=await BasicCompactionEngine.prototype.summarize.call(engine,{messages},owner,new AbortController().signal);assert.equal(calls[0].provider,'custom');assert.equal(calls[0].purpose,'compaction');assert.equal(result.provider,'custom');assert(result.summary[0].text.includes('Retained original'));assert.equal(messages.length,1);assert.equal(owner.session.requestHeader().config.provider,'deepseek-account');}
+  finally{undo();}
+});
+
+test('model-visible task list is bounded and omits full old results without changing detailed HTTP records',async()=>{
+  const f=await taskFixture({concurrency:0});try{
+    const t=await f.service.dispatch(f.sender,f.input());await f.store.change(doc=>{doc.tasks[0].result='x'.repeat(30000);return{value:null};});
+    const view=f.service.summaries(f.sender,{limit:1,offset:0});assert.equal(view.tasks[0].id,t.id);assert.equal(view.tasks[0].hasResult,true);assert(!('result'in view.tasks[0]));assert(!('profile'in view.tasks[0]));assert(JSON.stringify(view).length<1000);assert.equal(f.service.list(f.sender)[0].result.length,30000);
+  }finally{await f.cleanup();}
 });
