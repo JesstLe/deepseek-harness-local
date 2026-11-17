@@ -17,3 +17,8 @@
 全仓810/810、0skip、exit0。首个live在文件执行前由模型发起原生ask_user_question确认，runner记input-required并未代答/批准，3入口保留；没有派单或文件写入。本模块定向实测改由owner API直接创建已确认Goal，再让真实主管派单/员工生成与原task返工，不重复上轮已通过的自然提议全链；整体Goal范围不变。
 
 实测最终通过：FILE_SINGLE_LIVE checks=9 boots=1 supplier_entry_requests=30 same_task=1 attempt=2 file_versions=2 deliveries=1 text_drafts=0 actual3080_writes=0 config_changes=0，exit0。原生公开记录重开29条持久assistant响应；30是入口计数，收费数未观察；两版CSV精确25/2760与31/3480、4文件字节/hash重开通过。首个3入口input-required用例保留，不算文件验收通过。待源码副本回滚/归档/主线及2文件加载；随后D5固定新main构建。
+
+
+## 主线与实际加载收口
+
+源码07bf7f5普通merge/push到main9326bb0。固定该SHA的2文件（employee-work.js、employee-work-store.js）实际增量加载exit0/HTTP200；104sessions/0running/4bots/revision47。113权威文件、151无关运行文件、44其他线程证据、模型组/员工export/任务/群账本保持，package/host/client完全不动，加载模型调用0。归档12路径ZIP/反向patch/可执行rollback重开；源码副本恢复5原文件、移除7新增、43原测试通过，旧重复文本创建路径实际恢复；修改保留。该文件任务冗余切片已完成，旧记录不改写，整体Goal余下D5最新完整安装/升级卸载/数据保留/更新分发。后续固定main必须包括本切片，不能发布旧0.3.6冒充最新。
