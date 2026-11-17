@@ -1,0 +1,86 @@
+Naumi native installer UI verification
+Branch: codex/naumi-installer-ui-20261117
+Initial baseline: e17dc652dbc39ec2420cc092863b30fbbb35e3be
+Integrated/test baseline: 8995df9da41b6a36483a1b84277396892968d69c
+Changed fields: desktop version 0.3.2 -> 0.3.3; desktop lock root versions -> 0.3.3;
+nsis.script unset -> installer/engine.nsi; build invokes installer:ui before fresh stage;
+maintenance includes shared presentation and suppresses uninstall detail printing;
+custom native install/progress/uninstall/completion pages, light brand rail, DPI geometry,
+native button semantics, local path checks, explicit completion and silent-safe failure UI.
+The upstream engine has exactly one include substitution; initMultiUser is byte-equivalent.
+Maintenance gate/exit42, appId, shortcuts, upgrade transactions, explicit app launch and
+user data retention remain upstream-owned. Bot integrity fixes and attributes retained.
+
+ARTIFACTS (reopened; original and modified SHA256 in manifest.json)
+E:/Workspace/naumi-desktop/evidence/installer-ui/MODIFIED_FILE.zip
+E:/Workspace/naumi-desktop/evidence/installer-ui/DIFF_FILE.patch
+E:/Workspace/naumi-desktop/evidence/installer-ui/VERIFICATION.txt
+E:/Workspace/naumi-desktop/evidence/installer-ui/ROLLBACK.sh
+
+BASELINE
+Command: node scripts/installer-ui-evidence.mjs baseline
+Input: git archive 8995df9da41b6a36483a1b84277396892968d69c in an isolated dependency-linked copy;
+       node --test tests/*.test.mjs desktop/tests/*.test.cjs
+Literal output: BASELINE tests=458 pass=458 fail=0 exit=0
+Exit status: 0
+Full output: BASELINE.log; machine result: BASELINE_RESULT.json
+
+MODIFIED
+Command: node --test tests/*.test.mjs desktop/tests/*.test.cjs
+Input: modified source; no real employee/model/business task execution
+Literal output/result:
+ℹ tests 466
+ℹ suites 0
+ℹ pass 466
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+Exit status: 0
+Full output: MODIFIED.log. Final focused UI recheck: UI_TARGETED.log, 8/8, exit0.
+
+NATIVE COMPILE AND UI
+Commands: node desktop/scripts/build-installer-ui.mjs
+          node desktop/scripts/verify-installer-ui.mjs
+          node desktop/scripts/verify-installer-ui.mjs --preview
+Input: production shared presentation; fixed isolated runtime/installer-ui-fixture target.
+Literal results: INSTALLER_UI_GENERATED engine_delta=1 logo=1 maintenance=retained
+INSTALLER_UI_COMPILE fixture=PASS production_presentation=shared
+INSTALLER_UI_COMPILE presentation_preview=PASS production_presentation=shared
+Each compile line additionally prints its absolute executable path.
+Exit status: 0 for all three commands. No unresolved NSIS variables (warning6000).
+COMPILE.log is warning-free. PREVIEW_COMPILE.log contains expected unused-function/page
+warnings because the preview has no file-processing section; it performs no removal.
+Observed welcome, real file-stage native progress, completion, directory picker cancel,
+keyboard focus, checked launch callback receipt, unchecked no-launch, completion close.
+See UI_OBSERVATIONS.json and native PNG screenshots.
+Uninstall confirmation/completion screenshots are PRESENTATION ONLY, not actual removal.
+Current-desktop capture and DPI geometry contracts do not prove multi-monitor DPI acceptance.
+Failure input: Naumi-UI-Fixture.exe /S /D=<fixture>/rejected/Naumi
+Literal result: NATIVE_FAILURE exit=2 rejected_target_created=false silent_prompt=false
+Exit status: native fixture 2 (expected rejection); assertion runner 0. NATIVE_FAILURE.json.
+
+ROLLBACK
+Command: D:/DEV/Git/bin/bash.exe evidence/installer-ui/ROLLBACK.sh --test
+Input: another baseline source copy, apply 23 modified files, restore 6 originals and
+remove 17 new files, verify hashes, then node --test tests/*.test.mjs desktop/tests/*.test.cjs
+Literal output:
+ROLLBACK tests=458 pass=458 fail=0 exit=0
+RESTORED version=0.3.2 default_nsis_pages=1 maintenance=retained data_retention=retained bot_integrity=retained
+CURRENT modified_source=retained live_runtime=untouched
+Exit status: 0
+Restored behavior/status: old 0.3.2 default NSIS presentation, maintenance gate and default
+personal-data retention retained; current modified source remains 0.3.3. ROLLBACK.log and
+ROLLBACK_RESULT.json. Rollback never targets the shared checkout, runtime or employee data.
+
+REOPEN
+Command: node scripts/installer-ui-evidence.mjs reopen
+Literal output:
+REOPEN files=23 zip_crc=PASS hashes=PASS patch=PASS verification=PASS rollback=PASS
+Zip originals and modified bytes checked; patch reverse-check checked; shell syntax checked;
+ROLLBACK.sh Git executable mode100755 checked before commit.
+
+BUILD / DELIVERY
+Pending fixed-main build receipt; append actual build provenance to BUILD.json.
+This slice does not run full-product install/upgrade/downgrade/removal or publish a Release.
+The existing 3080 service, configurations, task ledger and employee data were not touched.

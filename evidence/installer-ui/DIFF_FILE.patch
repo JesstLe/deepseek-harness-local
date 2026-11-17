@@ -1,0 +1,2168 @@
+diff --git a/.gitattributes b/.gitattributes
+index e45ca96..6b23920 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -198,3 +198,18 @@ plugins/naumi-ui-layout/UPSTREAM.json text eol=lf
+ /evidence/product-identity/ROLLBACK.sh text eol=lf
+ /evidence/product-identity/DIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab,cr-at-eol
+ /evidence/bot-task-integrity/DIFF_FILE.patch -text whitespace=-blank-at-eol
++
++# Naumi native installer presentation and reproducible evidence.
++/.gitattributes text eol=lf
++/CHANGELOG.md text eol=lf
++/desktop/installer/*.nsh text eol=lf
++/desktop/installer/*.nsi text eol=lf
++/desktop/installer/UPSTREAM.json text eol=lf
++/desktop/installer/assets/*.bmp -text
++/desktop/scripts/*installer-ui.mjs text eol=lf
++/desktop/tests/installer-ui.test.cjs text eol=lf
++/docs/implementation/INSTALLER_UI.md text eol=lf
++/scripts/installer-ui-evidence.mjs text eol=lf
++/evidence/installer-ui/** -text whitespace=cr-at-eol
++/evidence/installer-ui/DIFF_FILE.patch -text whitespace=-blank-at-eol
++/evidence/installer-ui/ROLLBACK.sh text eol=lf
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 677d824..9575901 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -5,6 +5,12 @@
+ 面向用户书写，中文，每个版本一个小节，格式固定为 `## x.y.z - 日期`。
+ 
+ 
++## 0.3.3 - 2026-11-17
++
++- 全新 Naumi 安装与卸载界面：统一浅色品牌侧区、Logo、字体和操作按钮
++- 安装和卸载进度不再展示内部依赖的逐文件路径
++- 保留原有安装、升级与维护检查机制，默认卸载继续保留个人数据
++
+ ## 0.3.2 - 2026-11-17
+ 
+ - 项目更名为 naumi-desktop：GitHub 仓库、本地目录与更新源地址同步迁移
+diff --git a/desktop/installer/UPSTREAM.json b/desktop/installer/UPSTREAM.json
+new file mode 100644
+index 0000000..701ca89
+--- /dev/null
++++ b/desktop/installer/UPSTREAM.json
+@@ -0,0 +1,12 @@
++{
++  "package": "app-builder-lib",
++  "version": "26.18.0",
++  "originalEngineSHA256": "8811964416d122612c3e7601728af5d3f998d677918df829a4e8b4c739c8b9f8",
++  "modifiedEngineSHA256": "d1f7ee11e9f4e1f5c718ce707ec9f99b710fd5edf6b1f5de19ce4b5e023b8718",
++  "engineChanges": [
++    "assisted presentation include only"
++  ],
++  "multiuserSHA256": "5b624604ee3e3ebe3eeab41b6d560971567009c45a57daf87a74c19c99c52112",
++  "maintenanceHook": "maintenance.nsh",
++  "runtimeNamesHiddenBy": "SetDetailsPrint none and hidden native file status/log controls"
++}
+diff --git a/desktop/installer/assets/action-browse.bmp b/desktop/installer/assets/action-browse.bmp
+new file mode 100644
+index 0000000000000000000000000000000000000000..16047f4db1b3c6586c56d110817d2522f0c0d41a
+GIT binary patch
+literal 40374
+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
+
+literal 0
+HcmV?d00001
+
+diff --git a/desktop/installer/assets/action-cancel.bmp b/desktop/installer/assets/action-cancel.bmp
+new file mode 100644
+index 0000000000000000000000000000000000000000..f6b0a91c33c5d286b15defd91dde96bd664bd656
+GIT binary patch
+literal 46518
+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
+
+literal 0
+HcmV?d00001
+
+diff --git a/desktop/installer/assets/action-done.bmp b/desktop/installer/assets/action-done.bmp
+new file mode 100644
+index 0000000000000000000000000000000000000000..8e89ddd6cb4f41bd113f9775c19e29345602ab21
+GIT binary patch
+literal 84534
+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
+aSNWw0ynnete9RyL5+DH*AOR9kh`<k6X7}*`
+
+literal 0
+HcmV?d00001
+
+diff --git a/desktop/installer/assets/action-install.bmp b/desktop/installer/assets/action-install.bmp
+new file mode 100644
+index 0000000000000000000000000000000000000000..ca19a14d666eddbd7650fbe3bc1cbd83a5368bb8
+GIT binary patch
+literal 84534
+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
+SPXven5g-CYfCzLV0{;glfqr2C
+
+literal 0
+HcmV?d00001
+
+diff --git a/desktop/installer/assets/action-uninstall.bmp b/desktop/installer/assets/action-uninstall.bmp
+new file mode 100644
+index 0000000000000000000000000000000000000000..461dd5218a9558cf88086c05fc2e6f5452e235ea
+GIT binary patch
+literal 84534
+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
+WU>2&2BA^H;0*Zhlpa`@df&T+=^usy;
+
+literal 0
+HcmV?d00001
+
+diff --git a/desktop/installer/assets/logo.bmp b/desktop/installer/assets/logo.bmp
+new file mode 100644
+index 0000000000000000000000000000000000000000..de6f65ccfb541af650ee09880170543d80823bf9
+GIT binary patch
+literal 23286
+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
+
+literal 0
+HcmV?d00001
+
+diff --git a/desktop/installer/assets/rail.bmp b/desktop/installer/assets/rail.bmp
+new file mode 100644
+index 0000000000000000000000000000000000000000..3cc22d788010547e005de90d0af6e60043c77a60
+GIT binary patch
+literal 1347894
+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
+DrdgeR
+
+literal 0
+HcmV?d00001
+
+diff --git a/desktop/installer/engine.nsi b/desktop/installer/engine.nsi
+new file mode 100644
+index 0000000..8f4c4e2
+--- /dev/null
++++ b/desktop/installer/engine.nsi
+@@ -0,0 +1,132 @@
++Var newStartMenuLink
++Var oldStartMenuLink
++Var newDesktopLink
++Var oldDesktopLink
++Var oldShortcutName
++Var oldMenuDirectory
++
++!include "common.nsh"
++!include "MUI2.nsh"
++!include "multiUser.nsh"
++!include "allowOnlyOneInstallerInstance.nsh"
++
++!ifdef BUILD_UNINSTALLER
++  !ifmacrodef customUnInstallSection
++    !define MUI_COMPONENTSPAGE_NODESC
++    !insertmacro MUI_UNPAGE_COMPONENTS
++  !endif
++!endif
++
++!ifdef INSTALL_MODE_PER_ALL_USERS
++  !ifdef BUILD_UNINSTALLER
++    RequestExecutionLevel user
++  !else
++    RequestExecutionLevel admin
++  !endif
++!else
++  RequestExecutionLevel user
++!endif
++
++!ifdef BUILD_UNINSTALLER
++  SilentInstall silent
++!else
++  Var appExe
++  Var launchLink
++!endif
++
++!ifdef ONE_CLICK
++  !include "oneClick.nsh"
++!else
++  !include "${NAUMI_WIZARD_DIR}\pages.nsh"
++!endif
++
++!insertmacro addLangs
++
++!ifmacrodef customHeader
++  !insertmacro customHeader
++!endif
++
++Function .onInit
++  Call setInstallSectionSpaceRequired
++
++  SetOutPath $INSTDIR
++  ${LogSet} on
++
++  !ifmacrodef preInit
++    !insertmacro preInit
++  !endif
++
++  !ifdef DISPLAY_LANG_SELECTOR
++    !insertmacro MUI_LANGDLL_DISPLAY
++  !endif
++
++  !ifdef BUILD_UNINSTALLER
++    WriteUninstaller "${UNINSTALLER_OUT_FILE}"
++    !insertmacro quitSuccess
++  !else
++    !insertmacro check64BitAndSetRegView
++
++    !ifdef ONE_CLICK
++      !insertmacro ALLOW_ONLY_ONE_INSTALLER_INSTANCE
++    !else
++      ${IfNot} ${UAC_IsInnerInstance}
++        !insertmacro ALLOW_ONLY_ONE_INSTALLER_INSTANCE
++      ${EndIf}
++    !endif
++
++    !insertmacro initMultiUser
++
++    !ifmacrodef customInit
++      !insertmacro customInit
++    !endif
++
++    !ifmacrodef addLicenseFiles
++      InitPluginsDir
++      !insertmacro addLicenseFiles
++    !endif
++  !endif
++FunctionEnd
++
++!ifndef BUILD_UNINSTALLER
++  !include "installUtil.nsh"
++!endif
++
++Section "install" INSTALL_SECTION_ID
++  !ifndef BUILD_UNINSTALLER
++    # If we're running a silent upgrade of a per-machine installation, elevate so extracting the new app will succeed.
++    # For a non-silent install, the elevation will be triggered when the install mode is selected in the UI,
++    # but that won't be executed when silent.
++    !ifndef INSTALL_MODE_PER_ALL_USERS
++      !ifndef ONE_CLICK
++          ${if} $hasPerMachineInstallation == "1" # set in onInit by initMultiUser
++          ${andIf} ${Silent}
++            ${ifNot} ${UAC_IsAdmin}
++              ShowWindow $HWNDPARENT ${SW_HIDE}
++              !insertmacro UAC_RunElevated
++              ${Switch} $0
++                ${Case} 0
++                  ${Break}
++                ${Case} 1223 ;user aborted
++                  ${Break}
++                ${Default}
++                  MessageBox mb_IconStop|mb_TopMost|mb_SetForeground "Unable to elevate, error $0"
++                  ${Break}
++              ${EndSwitch}
++              Quit
++            ${else}
++              !insertmacro setInstallModePerAllUsers
++            ${endIf}
++          ${endIf}
++      !endif
++    !endif
++    !include "installSection.nsh"
++  !endif
++SectionEnd
++
++Function setInstallSectionSpaceRequired
++  !insertmacro setSpaceRequired ${INSTALL_SECTION_ID}
++FunctionEnd
++
++!ifdef BUILD_UNINSTALLER
++  !include "uninstaller.nsh"
++!endif
+\ No newline at end of file
+diff --git a/desktop/installer/maintenance.nsh b/desktop/installer/maintenance.nsh
+index 1bee882..ee715f8 100644
+--- a/desktop/installer/maintenance.nsh
++++ b/desktop/installer/maintenance.nsh
+@@ -1,3 +1,5 @@
++﻿!define NAUMI_WIZARD_DIR "${__FILEDIR__}"
++!include "${NAUMI_WIZARD_DIR}\presentation.nsh"
+ ; Official customCheckAppRunning hook runs BEFORE uninstallOldVersion and before
+ ; any installed-file removal. It replaces the builder's force-kill fallback.
+ !define NAUMI_HELPER_DIR "${__FILEDIR__}\..\app"
+@@ -52,3 +54,8 @@
+     Quit
+   ${endif}
+ !macroend
++
++; Suppress per-file deletion paths without replacing the removal transaction.
++!macro customUnInstall
++  SetDetailsPrint none
++!macroend
+diff --git a/desktop/installer/multiuser-init.nsh b/desktop/installer/multiuser-init.nsh
+new file mode 100644
+index 0000000..8274fbb
+--- /dev/null
++++ b/desktop/installer/multiuser-init.nsh
+@@ -0,0 +1,71 @@
++!macro initMultiUser
++  !ifdef INSTALL_MODE_PER_ALL_USERS
++    !insertmacro setInstallModePerAllUsers
++  !else
++    ${If} ${UAC_IsInnerInstance}
++    ${AndIfNot} ${UAC_IsAdmin}
++      # special return value for outer instance so it knows we did not have admin rights
++      SetErrorLevel 0x666666
++      Quit
++    ${endIf}
++
++    !ifndef MULTIUSER_INIT_TEXT_ADMINREQUIRED
++      !define MULTIUSER_INIT_TEXT_ADMINREQUIRED "$(^Caption) requires administrator privileges."
++    !endif
++
++    !ifndef MULTIUSER_INIT_TEXT_POWERREQUIRED
++      !define MULTIUSER_INIT_TEXT_POWERREQUIRED "$(^Caption) requires at least Power User privileges."
++    !endif
++
++    !ifndef MULTIUSER_INIT_TEXT_ALLUSERSNOTPOSSIBLE
++      !define MULTIUSER_INIT_TEXT_ALLUSERSNOTPOSSIBLE "Your user account does not have sufficient privileges to install $(^Name) for all users of this computer."
++    !endif
++
++    # checks registry for previous installation path (both for upgrading, reinstall, or uninstall)
++    StrCpy $hasPerMachineInstallation "0"
++    StrCpy $hasPerUserInstallation "0"
++
++    # set installation mode to setting from a previous installation
++    ReadRegStr $perMachineInstallationFolder HKLM "${INSTALL_REGISTRY_KEY}" InstallLocation
++    ${if} $perMachineInstallationFolder != ""
++      StrCpy $hasPerMachineInstallation "1"
++    ${endif}
++
++    ReadRegStr $perUserInstallationFolder HKCU "${INSTALL_REGISTRY_KEY}" InstallLocation
++    ${if} $perUserInstallationFolder != ""
++      StrCpy $hasPerUserInstallation "1"
++    ${endif}
++
++    ${GetParameters} $R0
++    ${GetOptions} $R0 "/allusers" $R1
++    ${IfNot} ${Errors}
++      StrCpy $hasPerMachineInstallation "1"
++      StrCpy $hasPerUserInstallation "0"
++    ${EndIf}
++
++    ${GetOptions} $R0 "/currentuser" $R1
++    ${IfNot} ${Errors}
++      StrCpy $hasPerMachineInstallation "0"
++      StrCpy $hasPerUserInstallation "1"
++    ${EndIf}
++
++    ${if} $hasPerUserInstallation == "1"
++    ${andif} $hasPerMachineInstallation == "0"
++      !insertmacro setInstallModePerUser
++    ${elseif} $hasPerUserInstallation == "0"
++      ${andif} $hasPerMachineInstallation == "1"
++      !insertmacro setInstallModePerAllUsers
++    ${else}
++      # if there is no installation, or there is both per-user and per-machine
++      !ifdef INSTALL_MODE_PER_ALL_USERS
++        !insertmacro setInstallModePerAllUsers
++      !else
++        !ifdef INSTALL_MODE_PER_ALL_USERS_DEFAULT
++          !insertmacro setInstallModePerAllUsers
++        !else
++          !insertmacro setInstallModePerUser
++        !endif
++      !endif
++    ${endif}
++  !endif
++!macroend
+diff --git a/desktop/installer/pages.nsh b/desktop/installer/pages.nsh
+new file mode 100644
+index 0000000..54ac666
+--- /dev/null
++++ b/desktop/installer/pages.nsh
+@@ -0,0 +1,39 @@
++﻿; Product pages only; application extraction, identity, upgrade rollback,
++; registration and maintenance remain in the pinned builder engine.
++!define NAUMI_PRODUCT_ENGINE
++!include UAC.nsh
++!ifndef INSTALL_MODE_PER_ALL_USERS
++  !include multiUserUi.nsh
++!endif
++!ifndef BUILD_UNINSTALLER
++  !insertmacro NaumiInstallerFunctions
++  !ifmacrodef licensePage
++    !insertmacro skipPageIfUpdated
++    !insertmacro licensePage
++  !endif
++  !ifndef INSTALL_MODE_PER_ALL_USERS
++    !insertmacro PAGE_INSTALL_MODE
++  !endif
++  Page custom NaumiInstall NaumiInstallLeave
++  !define MUI_PAGE_CUSTOMFUNCTION_SHOW NaumiProgressShow
++  !insertmacro MUI_PAGE_INSTFILES
++  Page custom NaumiDone NaumiDoneLeave
++  Function StartApp
++    ${If} ${isUpdated}
++      StrCpy $1 "--updated"
++    ${Else}
++      StrCpy $1 ""
++    ${EndIf}
++    ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "$1"
++  FunctionEnd
++!else
++  !insertmacro NaumiUninstallerFunctions
++  UninstPage custom un.NaumiConfirm
++  !ifndef INSTALL_MODE_PER_ALL_USERS
++    !insertmacro PAGE_INSTALL_MODE
++  !endif
++  !define MUI_PAGE_CUSTOMFUNCTION_SHOW un.NaumiProgressShow
++  !insertmacro MUI_UNPAGE_INSTFILES
++  UninstPage custom un.NaumiDone
++!endif
++!include "${NAUMI_WIZARD_DIR}\multiuser-init.nsh"
+diff --git a/desktop/installer/presentation.nsh b/desktop/installer/presentation.nsh
+new file mode 100644
+index 0000000..ff77b6d
+--- /dev/null
++++ b/desktop/installer/presentation.nsh
+@@ -0,0 +1,267 @@
++﻿!ifndef NAUMI_PRESENTATION_INCLUDED
++!define NAUMI_PRESENTATION_INCLUDED
++!include MUI2.nsh
++!include nsDialogs.nsh
++!include FileFunc.nsh
++!define /IfNDef MUI_ICON "${NAUMI_WIZARD_DIR}\..\app\assets\naumi.ico"
++!define /IfNDef MUI_UNICON "${NAUMI_WIZARD_DIR}\..\app\assets\naumi.ico"
++!define MUI_BGCOLOR FFFFFF
++!define MUI_TEXTCOLOR 26334B
++!define MUI_INSTFILESPAGE_COLORS "26334B FFFFFF"
++!define MUI_INSTFILESPAGE_PROGRESSBAR smooth
++ShowInstDetails nevershow
++ShowUninstDetails nevershow
++BrandingText "Naumi ${VERSION}"
++XPStyle on
++!insertmacro MUI_INSTFILESPAGE_INTERFACE
++Var NaumiDpi
++Var NaumiPage
++!ifndef BUILD_UNINSTALLER
++Var NaumiPathField
++Var NaumiRunCheck
++!endif
++Var NaumiAction
++
++!macro NaumiHideChrome ID
++  GetDlgItem $0 $HWNDPARENT ${ID}
++  ShowWindow $0 ${SW_HIDE}
++!macroend
++!macro NaumiScale X Y W H
++  IntOp $R4 ${X} * $NaumiDpi
++  IntOp $R4 $R4 / 96
++  IntOp $R5 ${Y} * $NaumiDpi
++  IntOp $R5 $R5 / 96
++  IntOp $R6 ${W} * $NaumiDpi
++  IntOp $R6 $R6 / 96
++  IntOp $R7 ${H} * $NaumiDpi
++  IntOp $R7 $R7 / 96
++!macroend
++!macro NaumiWindowSize
++  !insertmacro NaumiHideChrome 1034
++  !insertmacro NaumiHideChrome 1035
++  !insertmacro NaumiHideChrome 1036
++  !insertmacro NaumiHideChrome 1037
++  !insertmacro NaumiHideChrome 1038
++  !insertmacro NaumiHideChrome 1039
++  !insertmacro NaumiHideChrome 1028
++  !insertmacro NaumiHideChrome 1256
++  System::Call 'user32::GetDpiForWindow(p $HWNDPARENT) i .r0'
++  StrCpy $NaumiDpi $0
++  ${If} $NaumiDpi < 96
++    StrCpy $NaumiDpi 96
++  ${EndIf}
++  !insertmacro NaumiScale 0 0 820 520
++  System::Call 'user32::SetWindowPos(p $HWNDPARENT, p 0, i 0, i 0, i $R6, i $R7, i 6)'
++!macroend
++!macro NaumiLabel X Y W H TEXT SIZE WEIGHT
++  !insertmacro NaumiScale ${X} ${Y} ${W} ${H}
++  ${NSD_CreateLabel} $R4 $R5 $R6 $R7 "${TEXT}"
++  Pop $0
++  SetCtlColors $0 "26334B" "FFFFFF"
++  CreateFont $1 "Microsoft YaHei UI" ${SIZE} ${WEIGHT}
++  SendMessage $0 ${WM_SETFONT} $1 1
++!macroend
++
++!macro NaumiShell
++  !insertmacro NaumiWindowSize
++  System::Call 'user32::GetSystemMenu(p $HWNDPARENT, i 0) p .r0'
++  System::Call 'user32::EnableMenuItem(p r0, i 0xF060, i 0)'
++  System::Call 'user32::DrawMenuBar(p $HWNDPARENT)'
++  nsDialogs::Create 1044
++  Pop $NaumiPage
++  !insertmacro NaumiScale 0 0 820 520
++  System::Call 'user32::SetWindowPos(p $NaumiPage, p 0, i 0, i 0, i $R6, i $R7, i 4)'
++  SetCtlColors $NaumiPage "26334B" "FFFFFF"
++  SetCtlColors $HWNDPARENT "26334B" "FFFFFF"
++  GetDlgItem $0 $HWNDPARENT 1
++  ShowWindow $0 ${SW_HIDE}
++  GetDlgItem $0 $HWNDPARENT 2
++  EnableWindow $0 1
++  ShowWindow $0 ${SW_HIDE}
++  GetDlgItem $0 $HWNDPARENT 3
++  ShowWindow $0 ${SW_HIDE}
++  GetDlgItem $0 $HWNDPARENT 1034
++  ShowWindow $0 ${SW_HIDE}
++  InitPluginsDir
++  File /oname=$PLUGINSDIR\naumi-wizard.bmp "${NAUMI_WIZARD_DIR}\assets\logo.bmp"
++  File /oname=$PLUGINSDIR\action-install.bmp "${NAUMI_WIZARD_DIR}\assets\action-install.bmp"
++  File /oname=$PLUGINSDIR\action-uninstall.bmp "${NAUMI_WIZARD_DIR}\assets\action-uninstall.bmp"
++  File /oname=$PLUGINSDIR\action-done.bmp "${NAUMI_WIZARD_DIR}\assets\action-done.bmp"
++  File /oname=$PLUGINSDIR\action-cancel.bmp "${NAUMI_WIZARD_DIR}\assets\action-cancel.bmp"
++  File /oname=$PLUGINSDIR\action-browse.bmp "${NAUMI_WIZARD_DIR}\assets\action-browse.bmp"
++  !insertmacro NaumiRail $NaumiPage
++  !insertmacro NaumiLabel 716 40 56 20 "${VERSION}" 9 400
++!macroend
++
++!macro NaumiRail PARENT
++  InitPluginsDir
++  File /oname=$PLUGINSDIR\naumi-rail.bmp "${NAUMI_WIZARD_DIR}\assets\rail.bmp"
++  !insertmacro NaumiScale 0 0 216 520
++  System::Call 'user32::CreateWindowExW(i 0, w "STATIC", w "Naumi", i 0x5000000E, i $R4, i $R5, i $R6, i $R7, p ${PARENT}, p 0, p 0, p 0) p .r2'
++  System::Call 'user32::LoadImageW(p 0, w "$PLUGINSDIR\naumi-rail.bmp", i 0, i $R6, i $R7, i 0x10) p .r0'
++  SendMessage $2 ${STM_SETIMAGE} 0 $0
++!macroend
++
++!macro NaumiButton X Y W H TEXT ASSET CALLBACK
++  !insertmacro NaumiScale ${X} ${Y} ${W} ${H}
++  ${NSD_CreateButton} $R4 $R5 $R6 $R7 "${TEXT}"
++  Pop $NaumiAction
++  ${NSD_AddStyle} $NaumiAction 0x8080
++  System::Call 'user32::LoadImageW(p 0, w "$PLUGINSDIR\${ASSET}.bmp", i 0, i $R6, i $R7, i 0x10) p .r0'
++  SendMessage $NaumiAction ${BM_SETIMAGE} 0 $0
++  ${NSD_OnClick} $NaumiAction ${CALLBACK}
++!macroend
++
++!macro NaumiNativeLabel X Y W H TEXT SIZE WEIGHT
++  !insertmacro NaumiScale ${X} ${Y} ${W} ${H}
++  System::Call 'user32::CreateWindowExW(i 0, w "STATIC", w "${TEXT}", i 0x50000000, i $R4, i $R5, i $R6, i $R7, p $mui.InstFilesPage, p 0, p 0, p 0) p .r0'
++  SetCtlColors $0 "26334B" "FFFFFF"
++  CreateFont $1 "Microsoft YaHei UI" ${SIZE} ${WEIGHT}
++  SendMessage $0 ${WM_SETFONT} $1 1
++!macroend
++
++!macro NaumiFunctions PREFIX MODE
++Function ${PREFIX}NaumiNext
++  SendMessage $HWNDPARENT ${WM_COMMAND} 1 0
++FunctionEnd
++Function ${PREFIX}NaumiCancel
++  SendMessage $HWNDPARENT ${WM_CLOSE} 0 0
++FunctionEnd
++Function ${PREFIX}NaumiProgressShow
++  SetAutoClose true
++  SetDetailsPrint none
++  !insertmacro NaumiWindowSize
++  !insertmacro NaumiScale 0 0 820 520
++  System::Call 'user32::SetWindowPos(p $mui.InstFilesPage, p 0, i 0, i 0, i $R6, i $R7, i 4)'
++  SetCtlColors $HWNDPARENT "26334B" "FFFFFF"
++  SetCtlColors $mui.InstFilesPage "26334B" "FFFFFF"
++  ShowWindow $mui.InstFilesPage.Text ${SW_HIDE}
++  ShowWindow $mui.InstFilesPage.ShowLogButton ${SW_HIDE}
++  ShowWindow $mui.InstFilesPage.Log ${SW_HIDE}
++  GetDlgItem $0 $HWNDPARENT 1034
++  ShowWindow $0 ${SW_HIDE}
++  GetDlgItem $0 $HWNDPARENT 1
++  ShowWindow $0 ${SW_HIDE}
++  GetDlgItem $0 $HWNDPARENT 2
++  ShowWindow $0 ${SW_HIDE}
++  GetDlgItem $0 $HWNDPARENT 3
++  ShowWindow $0 ${SW_HIDE}
++  !insertmacro NaumiScale 248 258 524 8
++  System::Call 'user32::SetWindowPos(p $mui.InstFilesPage.ProgressBar, p 0, i $R4, i $R5, i $R6, i $R7, i 4)'
++  System::Call 'uxtheme::SetWindowTheme(p $mui.InstFilesPage.ProgressBar, w "", w "")'
++  SendMessage $mui.InstFilesPage.ProgressBar ${PBM_SETBARCOLOR} 0 0xED5D31
++  !insertmacro NaumiRail $mui.InstFilesPage
++  !insertmacro NaumiNativeLabel 716 40 56 20 "${VERSION}" 9 400
++  !if "${MODE}" == "install"
++    !insertmacro NaumiNativeLabel 248 112 524 44 "正在安装 Naumi" 22 600
++  !else
++    !insertmacro NaumiNativeLabel 248 112 524 44 "正在卸载 Naumi" 22 600
++    !insertmacro NaumiNativeLabel 248 196 524 28 "个人数据将保留" 10 400
++  !endif
++FunctionEnd
++Function ${PREFIX}NaumiDone
++  !insertmacro NaumiShell
++  !if "${MODE}" == "install"
++    !insertmacro NaumiLabel 248 112 524 44 "安装完成" 22 600
++    !insertmacro NaumiScale 248 196 524 28
++    ${NSD_CreateCheckbox} $R4 $R5 $R6 $R7 "完成后打开 Naumi"
++    Pop $NaumiRunCheck
++    SetCtlColors $NaumiRunCheck "526078" "FFFFFF"
++    CreateFont $1 "Microsoft YaHei UI" 10 400
++    SendMessage $NaumiRunCheck ${WM_SETFONT} $1 1
++    ${NSD_Check} $NaumiRunCheck
++  !else
++    !insertmacro NaumiLabel 248 112 524 44 "卸载完成" 22 600
++    !insertmacro NaumiLabel 248 196 524 28 "个人数据已保留" 10 400
++  !endif
++  !insertmacro NaumiButton 612 388 160 44 "完成" action-done ${PREFIX}NaumiNext
++  nsDialogs::Show
++FunctionEnd
++!macroend
++
++!macro NaumiFailure PREFIX EVENT
++Function ${PREFIX}${EVENT}
++  SetAutoClose false
++  ${IfNot} ${Silent}
++    GetDlgItem $0 $HWNDPARENT 2
++    EnableWindow $0 1
++    ShowWindow $0 ${SW_SHOW}
++    SendMessage $0 ${WM_SETTEXT} 0 "STR:关闭"
++    MessageBox MB_OK|MB_ICONEXCLAMATION "操作未完成。请检查磁盘空间和文件占用后重试。"
++  ${EndIf}
++FunctionEnd
++!macroend
++
++!macro NaumiInstallerFunctions
++!insertmacro NaumiFailure "" ".onInstFailed"
++!insertmacro NaumiFunctions "" "install"
++Function NaumiBrowse
++  nsDialogs::SelectFolderDialog "选择 Naumi 安装位置" "$INSTDIR"
++  Pop $0
++  ${If} $0 != error
++    ${NSD_SetText} $NaumiPathField $0
++  ${EndIf}
++FunctionEnd
++Function NaumiInstall
++  !ifdef NAUMI_PRODUCT_ENGINE
++    ${If} ${isUpdated}
++      Abort
++    ${EndIf}
++  !endif
++  !insertmacro NaumiShell
++  !insertmacro NaumiLabel 248 112 524 44 "安装 Naumi" 22 600
++  !insertmacro NaumiLabel 248 190 524 24 "安装位置" 10 400
++  !insertmacro NaumiScale 248 224 428 40
++  ${NSD_CreateText} $R4 $R5 $R6 $R7 "$INSTDIR"
++  Pop $NaumiPathField
++  CreateFont $1 "Microsoft YaHei UI" 10 400
++  SendMessage $NaumiPathField ${WM_SETFONT} $1 1
++  !insertmacro NaumiButton 688 224 84 40 "更改" action-browse NaumiBrowse
++  !insertmacro NaumiButton 248 388 88 44 "取消" action-cancel NaumiCancel
++  !insertmacro NaumiButton 612 388 160 44 "安装 Naumi" action-install NaumiNext
++  nsDialogs::Show
++FunctionEnd
++Function NaumiInstallLeave
++  ${NSD_GetText} $NaumiPathField $INSTDIR
++  StrLen $0 $INSTDIR
++  ${If} $0 < 4
++    MessageBox MB_OK|MB_ICONEXCLAMATION "请选择有效的安装位置。"
++    Abort
++  ${EndIf}
++  StrCpy $0 $INSTDIR 1 1
++  StrCpy $1 $INSTDIR 1 2
++  ${If} $0 != ":"
++  ${OrIf} $1 != "\"
++    MessageBox MB_OK|MB_ICONEXCLAMATION "请选择完整的本机安装路径。"
++    Abort
++  ${EndIf}
++  GetFullPathName $INSTDIR "$INSTDIR"
++  ${GetFileName} "$INSTDIR" $0
++  ${If} $0 != "Naumi"
++    StrCpy $INSTDIR "$INSTDIR\Naumi"
++  ${EndIf}
++FunctionEnd
++Function NaumiDoneLeave
++  ${NSD_GetState} $NaumiRunCheck $0
++  ${If} $0 == ${BST_CHECKED}
++    Call StartApp
++  ${EndIf}
++FunctionEnd
++!macroend
++
++!macro NaumiUninstallPage PREFIX
++Function ${PREFIX}NaumiConfirm
++  !insertmacro NaumiShell
++  !insertmacro NaumiLabel 248 112 524 44 "卸载 Naumi" 22 600
++  !insertmacro NaumiLabel 248 196 524 28 "个人数据将保留" 10 400
++  !insertmacro NaumiButton 248 388 88 44 "取消" action-cancel ${PREFIX}NaumiCancel
++  !insertmacro NaumiButton 612 388 160 44 "卸载 Naumi" action-uninstall ${PREFIX}NaumiNext
++  nsDialogs::Show
++FunctionEnd
++!macroend
++!macro NaumiUninstallerFunctions
++!insertmacro NaumiFailure "un." "onUninstFailed"
++!insertmacro NaumiFunctions "un." "uninstall"
++!insertmacro NaumiUninstallPage "un."
++!macroend
++!endif
+diff --git a/desktop/package-lock.json b/desktop/package-lock.json
+index 554b399..2a93113 100644
+--- a/desktop/package-lock.json
++++ b/desktop/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "naumi-desktop",
+-  "version": "0.3.0",
++  "version": "0.3.3",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "naumi-desktop",
+-      "version": "0.3.0",
++      "version": "0.3.3",
+       "license": "UNLICENSED",
+       "dependencies": {
+         "electron-updater": "^6.6.2"
+diff --git a/desktop/package.json b/desktop/package.json
+index 0502961..09c79b9 100644
+--- a/desktop/package.json
++++ b/desktop/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "naumi-desktop",
+-  "version": "0.3.2",
++  "version": "0.3.3",
+   "private": true,
+   "description": "Naumi 企业协作桌面端",
+   "author": "Naumi",
+@@ -9,11 +9,12 @@
+   "scripts": {
+     "start": "electron .",
+     "icons": "node scripts/build-icons.mjs",
+-    "build": "npm run icons && npm run stage && electron-builder --win --x64",
+-    "build:dir": "npm run icons && npm run stage && electron-builder --win --x64 --dir",
++    "build": "npm run icons && npm run installer:ui && npm run stage && electron-builder --win --x64",
++    "build:dir": "npm run icons && npm run installer:ui && npm run stage && electron-builder --win --x64 --dir",
+     "test": "node --test tests/*.test.cjs",
+     "release": "node ../scripts/publish-desktop-update.mjs",
+-    "stage": "node ../scripts/build-naumi-layout.mjs && node ../scripts/build-naumi-browser.mjs && node scripts/prepare-runtime.mjs"
++    "stage": "node ../scripts/build-naumi-layout.mjs && node ../scripts/build-naumi-browser.mjs && node scripts/prepare-runtime.mjs",
++    "installer:ui": "node scripts/build-installer-ui.mjs"
+   },
+   "dependencies": {
+     "electron-updater": "^6.6.2"
+@@ -74,7 +75,8 @@
+       "allowElevation": false,
+       "useZip": true,
+       "differentialPackage": false,
+-      "include": "installer/maintenance.nsh"
++      "include": "installer/maintenance.nsh",
++      "script": "installer/engine.nsi"
+     },
+     "publish": [
+       {
+diff --git a/desktop/scripts/build-installer-ui.mjs b/desktop/scripts/build-installer-ui.mjs
+new file mode 100644
+index 0000000..60d558c
+--- /dev/null
++++ b/desktop/scripts/build-installer-ui.mjs
+@@ -0,0 +1,13 @@
++import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';import {createHash} from 'node:crypto';import sharp from 'sharp';
++const root=fileURLToPath(new URL('../..',import.meta.url)),dir=path.join(root,'desktop/installer'),upstream=path.join(root,'desktop/node_modules/app-builder-lib/templates/nsis'),sha=b=>createHash('sha256').update(b).digest('hex');
++const engine=fs.readFileSync(path.join(upstream,'installer.nsi'),'utf8').replaceAll('\r\n','\n'),marker='!include "assistedInstaller.nsh"';if(engine.split(marker).length!==2)throw Error('INSTALLER_ENGINE_CHANGED');
++fs.mkdirSync(path.join(dir,'assets'),{recursive:true});fs.writeFileSync(path.join(dir,'engine.nsi'),engine.replace(marker,'!include "${NAUMI_WIZARD_DIR}\\pages.nsh"'));
++const assisted=fs.readFileSync(path.join(upstream,'assistedInstaller.nsh'),'utf8').replaceAll('\r\n','\n'),start=assisted.indexOf('!macro initMultiUser');if(start<0)throw Error('INSTALLER_MULTIUSER_CHANGED');fs.writeFileSync(path.join(dir,'multiuser-init.nsh'),assisted.slice(start));
++function bmpFromRGB(rgb,width,height){const stride=Math.ceil(width*3/4)*4,bmp=Buffer.alloc(54+stride*height);bmp.write('BM');bmp.writeUInt32LE(bmp.length,2);bmp.writeUInt32LE(54,10);bmp.writeUInt32LE(40,14);bmp.writeInt32LE(width,18);bmp.writeInt32LE(height,22);bmp.writeUInt16LE(1,26);bmp.writeUInt16LE(24,28);bmp.writeUInt32LE(stride*height,34);for(let y=0;y<height;y++)for(let x=0;x<width;x++){const s=(y*width+x)*3,t=54+(height-1-y)*stride+x*3;bmp[t]=rgb[s+2];bmp[t+1]=rgb[s+1];bmp[t+2]=rgb[s];}return bmp;}
++const rgba=await sharp(path.join(root,'plugins/naumi-enterprise/assets/symbol.svg')).resize(88,88).flatten({background:'#ffffff'}).removeAlpha().raw().toBuffer();fs.writeFileSync(path.join(dir,'assets/logo.bmp'),bmpFromRGB(rgba,88,88));
++for(const[name,label,width,height,fill,color]of [['install','安装 Naumi',160,44,'#315ded','#ffffff'],['uninstall','卸载 Naumi',160,44,'#315ded','#ffffff'],['done','完成',160,44,'#315ded','#ffffff'],['cancel','取消',88,44,'#ffffff','#667085'],['browse','更改',84,40,'#f2f5fa','#44546f']]){const svg=Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="white"/><rect x="1" y="1" width="${width-2}" height="${height-2}" rx="9" fill="${fill}"/><text x="50%" y="50%" dy=".35em" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" font-size="14" font-weight="500" fill="${color}">${label}</text></svg>`);const rgb=await sharp(svg,{density:144}).resize(width*2,height*2).flatten({background:'#ffffff'}).removeAlpha().raw().toBuffer();fs.writeFileSync(path.join(dir,'assets/action-'+name+'.bmp'),bmpFromRGB(rgb,width*2,height*2));}
++const railSVG=Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="216" height="520"><defs><linearGradient id="g" x2=".55" y2="1"><stop stop-color="#f5f7ff"/><stop offset="1" stop-color="#e9efff"/></linearGradient></defs><rect width="216" height="520" fill="url(#g)"/><path d="M-42 467 L22 216 L157 463 L223 206" fill="none" stroke="#dbe4ff" stroke-width="36" stroke-linecap="round" stroke-linejoin="round"/><path d="M-25 548 L46 277 L190 526 L253 291" fill="none" stroke="#f9faff" stroke-width="1.2"/><text x="76" y="60" font-family="Microsoft YaHei UI, sans-serif" font-size="21" font-weight="650" fill="#202631">Naumi</text></svg>`);
++const rail=await sharp(railSVG,{density:144}).resize(432,1040).composite([{input:await sharp(path.join(root,'plugins/naumi-enterprise/assets/symbol.svg')).resize(64,64).png().toBuffer(),left:64,top:64}]).flatten({background:'#f5f7ff'}).removeAlpha().raw().toBuffer();
++fs.writeFileSync(path.join(dir,'assets/rail.bmp'),bmpFromRGB(rail,432,1040));
++fs.writeFileSync(path.join(dir,'UPSTREAM.json'),JSON.stringify({package:'app-builder-lib',version:JSON.parse(fs.readFileSync(path.join(root,'desktop/node_modules/app-builder-lib/package.json'))).version,originalEngineSHA256:sha(engine),modifiedEngineSHA256:sha(fs.readFileSync(path.join(dir,'engine.nsi'))),engineChanges:['assisted presentation include only'],multiuserSHA256:sha(assisted.slice(start)),maintenanceHook:'maintenance.nsh',runtimeNamesHiddenBy:'SetDetailsPrint none and hidden native file status/log controls'},null,2)+'\n');
++console.log('INSTALLER_UI_GENERATED engine_delta=1 logo=1 maintenance=retained');
+diff --git a/desktop/scripts/verify-installer-ui.mjs b/desktop/scripts/verify-installer-ui.mjs
+new file mode 100644
+index 0000000..8f96185
+--- /dev/null
++++ b/desktop/scripts/verify-installer-ui.mjs
+@@ -0,0 +1,86 @@
++// Isolated native QA only: no product registry, shortcuts or employee profile.
++import fs from 'node:fs';
++import path from 'node:path';
++import assert from 'node:assert/strict';
++import {createRequire} from 'node:module';
++import {execFileSync} from 'node:child_process';
++import {fileURLToPath} from 'node:url';
++const root=fileURLToPath(new URL('../..',import.meta.url));
++const require=createRequire(import.meta.url);
++const {getMakeNsisPath}=require('app-builder-lib/out/toolsets/windows.js');
++const tool=await getMakeNsisPath();
++const folder=path.join(root,'runtime/installer-ui-fixture');
++const preview=process.argv.includes('--preview');
++fs.mkdirSync(folder,{recursive:true});
++const q=s=>s.replaceAll('/','\\');
++const exe=path.join(folder,preview?'Naumi-Page-Preview.exe':'Naumi-UI-Fixture.exe');
++const header=`Unicode true
++!include MUI2.nsh
++!define VERSION "0.3.3"
++!define NAUMI_WIZARD_DIR "${q(path.join(root,'desktop/installer'))}"
++!include "\${NAUMI_WIZARD_DIR}\\presentation.nsh"
++Name "Naumi"
++Caption "Naumi${preview?' · 页面预览':''}"
++OutFile "${q(exe)}"
++InstallDir "${q(path.join(folder,'installed/Naumi'))}"
++RequestExecutionLevel user
++`;
++const body=preview?`
++; Production uninstall UI only; NO removal, installation, registration or launch.
++!insertmacro NaumiFunctions "" "uninstall"
++!insertmacro NaumiUninstallPage ""
++Page custom NaumiConfirm
++Page custom NaumiDone
++!insertmacro MUI_LANGUAGE "SimpChinese"
++Section
++SectionEnd
++`:`
++!define MUI_CUSTOMFUNCTION_GUIINIT QaInit
++!insertmacro NaumiInstallerFunctions
++!insertmacro NaumiUninstallerFunctions
++Page custom NaumiInstall NaumiInstallLeave
++!define MUI_PAGE_CUSTOMFUNCTION_SHOW NaumiProgressShow
++!insertmacro MUI_PAGE_INSTFILES
++Page custom NaumiDone NaumiDoneLeave
++UninstPage custom un.NaumiConfirm
++!define MUI_PAGE_CUSTOMFUNCTION_SHOW un.NaumiProgressShow
++!insertmacro MUI_UNPAGE_INSTFILES
++UninstPage custom un.NaumiDone
++!insertmacro MUI_LANGUAGE "SimpChinese"
++Function QaInit
++  IfFileExists "${q(path.join(folder,'qa-progress.flag'))}" 0 +2
++    System::Call 'user32::PostMessageW(p $HWNDPARENT, i 0x111, p 1, p 0)'
++FunctionEnd
++Function StartApp
++  FileOpen $0 "${q(path.join(folder,'launch-request.txt'))}" w
++  FileWrite $0 "fixture only; no application launched"
++  FileClose $0
++FunctionEnd
++Section
++  StrCmp $INSTDIR "${q(path.join(folder,'installed/Naumi'))}" +2
++    Abort
++  SetDetailsPrint none
++  SetOutPath "$INSTDIR\\resources\\backend\\node_modules\\@deepseek-ai\\fixture"
++  File /oname=module.txt "${q(path.join(root,'desktop/installer/UPSTREAM.json'))}"
++  WriteUninstaller "$INSTDIR\\Uninstall Naumi.exe"
++  IfSilent +2
++    Sleep 18000
++  FileOpen $0 "${q(path.join(folder,'install-receipt.txt'))}" w
++  FileWrite $0 "fixture installed; no product registry or employee data modified"
++  FileClose $0
++SectionEnd
++Section Uninstall
++  StrCmp $INSTDIR "${q(path.join(folder,'installed/Naumi'))}" +2
++    Abort
++  SetDetailsPrint none
++  SetOutPath "$TEMP"
++  RMDir /r "$INSTDIR"
++SectionEnd
++`;
++const source=path.join(folder,preview?'preview.nsi':'fixture.nsi');
++fs.writeFileSync(source,header+body);
++const output=execFileSync(tool.path,['/INPUTCHARSET','UTF8','/V2',source],{env:{...process.env,...tool.env},encoding:'utf8'});
++fs.writeFileSync(path.join(folder,preview?'preview-compile.log':'compile.log'),output);
++assert(!/warning 6000/.test(output),'NSIS_UNRESOLVED_VARIABLE');
++assert(fs.existsSync(exe));
++console.log(`INSTALLER_UI_COMPILE ${preview?'presentation_preview':'fixture'}=PASS production_presentation=shared executable=${exe}`);
+diff --git a/desktop/tests/installer-ui.test.cjs b/desktop/tests/installer-ui.test.cjs
+new file mode 100644
+index 0000000..b7772d8
+--- /dev/null
++++ b/desktop/tests/installer-ui.test.cjs
+@@ -0,0 +1,59 @@
++'use strict';
++const test=require('node:test'), assert=require('node:assert/strict');
++const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
++const root=path.resolve(__dirname,'../..'),read=p=>fs.readFileSync(path.join(root,p),'utf8').replace(/^\uFEFF/,'');
++const source=read('desktop/installer/presentation.nsh'),pages=read('desktop/installer/pages.nsh');
++const pkg=JSON.parse(read('desktop/package.json'));
++const sha=s=>crypto.createHash('sha256').update(s).digest('hex');
++test('pinned installer engine changes only the assisted presentation include',()=>{
++ const upstream=read('desktop/node_modules/app-builder-lib/templates/nsis/installer.nsi').replaceAll('\r\n','\n');
++ const engine=read('desktop/installer/engine.nsi');
++ assert.equal(engine,upstream.replace('!include "assistedInstaller.nsh"','!include "${NAUMI_WIZARD_DIR}\\pages.nsh"'));
++ const meta=JSON.parse(read('desktop/installer/UPSTREAM.json'));
++ assert.equal(meta.originalEngineSHA256,sha(upstream));assert.equal(meta.modifiedEngineSHA256,sha(engine));
++});
++test('upstream multiuser identity, install directory and upgrade admission are retained',()=>{
++ const assisted=read('desktop/node_modules/app-builder-lib/templates/nsis/assistedInstaller.nsh').replaceAll('\r\n','\n');
++ assert.equal(read('desktop/installer/multiuser-init.nsh'),assisted.slice(assisted.indexOf('!macro initMultiUser')));
++ assert(pages.indexOf('!insertmacro PAGE_INSTALL_MODE')<pages.indexOf('Page custom NaumiInstall'));
++ assert(source.includes('${If} ${isUpdated}\n      Abort'));
++});
++test('native progress is real, path details and default headers are hidden',()=>{
++ for(const s of ['ShowInstDetails nevershow','ShowUninstDetails nevershow','SetDetailsPrint none','$mui.InstFilesPage.ProgressBar','$mui.InstFilesPage.Text ${SW_HIDE}','$mui.InstFilesPage.Log ${SW_HIDE}','$mui.InstFilesPage.ShowLogButton ${SW_HIDE}'])assert(source.includes(s),s);
++ assert(!/PBM_SETPOS|PBM_DELTAPOS|PBM_SETRANGE/.test(source));
++ assert(source.indexOf('!insertmacro MUI_INSTFILESPAGE_INTERFACE')<source.indexOf('Function ${PREFIX}NaumiProgressShow'));
++});
++test('completion remains explicit and failures cannot display false completion',()=>{
++ assert(source.includes('SetAutoClose true'));assert(pages.includes('Page custom NaumiDone NaumiDoneLeave'));
++ assert(pages.includes('UninstPage custom un.NaumiDone'));assert(source.includes('".onInstFailed"'));
++ assert(source.includes('"onUninstFailed"'));assert(source.includes('SetAutoClose false'));
++ assert(source.includes('${NSD_GetState} $NaumiRunCheck $0'));assert(pages.includes('${StdUtils.ExecShellAsUser}'));
++});
++test('buttons retain native semantics and local path validation is non-destructive',()=>{
++ assert(source.includes('${NSD_CreateButton}'));assert(source.includes('${NSD_OnClick}'));
++ assert(source.includes('nsDialogs::SelectFolderDialog'));assert(source.includes('${If} $0 != error'));
++ assert(source.includes('GetFullPathName $INSTDIR'));assert(source.includes('${GetFileName}'));
++ const leave=source.slice(source.indexOf('Function NaumiInstallLeave'),source.indexOf('Function NaumiDoneLeave'));
++ assert(!/CreateDirectory|WriteReg|Delete|RMDir|Exec/.test(leave));
++});
++test('one light layout scales geometry and uses high resolution branded assets',()=>{
++ for(const s of ['MUI_BGCOLOR FFFFFF','GetDpiForWindow','NaumiScale','820 520','NaumiRail','Microsoft YaHei UI'])assert(source.includes(s));
++ const assets={'logo.bmp':[88,88],'rail.bmp':[432,1040],'action-install.bmp':[320,88],'action-browse.bmp':[168,80]};
++ for(const [file,[w,h]]of Object.entries(assets)){const b=fs.readFileSync(path.join(root,'desktop/installer/assets',file));assert.equal(b.toString('ascii',0,2),'BM');assert.equal(b.readInt32LE(18),w);assert.equal(b.readInt32LE(22),h);}
++ for(const dpi of [96,120,144,192]){const scale=v=>Math.trunc(v*dpi/96);assert(scale(612)+scale(160)<scale(820));assert(scale(388)+scale(44)<scale(520));}
++});
++test('maintenance gate, user data retention, product identity and package staging stay enabled',()=>{
++ const hook=read('desktop/installer/maintenance.nsh');
++ for(const s of ['!macro customCheckAppRunning','SetErrorLevel 42','installer-preflight.cjs','!macro customInstall','!macro customUnInstall'])assert(hook.includes(s));
++ assert(!hook.includes('taskkill'));assert.equal(pkg.build.appId,'com.naumi.desktop');
++ assert.equal(pkg.build.nsis.deleteAppDataOnUninstall,false);assert.equal(pkg.build.nsis.script,'installer/engine.nsi');
++ assert(pkg.scripts.build.includes('npm run installer:ui && npm run stage'));
++ assert.equal(pkg.build.beforePack,'./scripts/verify-staged-runtime.cjs');
++ const lock=JSON.parse(read('desktop/package-lock.json'));assert.equal(lock.version,pkg.version);assert.equal(lock.packages[''].version,pkg.version);
++});
++test('uninstall preview is a non-destructive presentation, not an alternate removal engine',()=>{
++ const fixture=read('desktop/scripts/verify-installer-ui.mjs');
++ const preview=fixture.slice(fixture.indexOf('const body=preview?'),fixture.indexOf('`:`'));
++ for(const token of ['RMDir','DeleteRegKey','WriteRegStr','WriteUninstaller','ExecShell'])assert(!preview.includes(token));
++ assert(preview.includes('NaumiUninstallPage'));assert(preview.includes('Page custom NaumiDone'));
++});
+diff --git a/docs/implementation/INSTALLER_UI.md b/docs/implementation/INSTALLER_UI.md
+new file mode 100644
+index 0000000..6cebab8
+--- /dev/null
++++ b/docs/implementation/INSTALLER_UI.md
+@@ -0,0 +1,58 @@
++# Naumi 原生安装／卸载界面
++
++## 模块与职责
++
++2026-11-17；负责人：installer-ui；分支 `codex/naumi-installer-ui-20261117`。
++初始基线 `e17dc652dbc39ec2420cc092863b30fbbb35e3be`；集中验证前已整合
++`8995df9da41b6a36483a1b84277396892968d69c`。功能模块计数：1。
++Bot integrity 两个后端文件及其 `.gitattributes` 证据条目原样保留；本任务不重启3080。
++
++本模块仅负责 Windows 安装器展示和页面导航，使用真实 NSIS 原生控件，不新增 Electron 安装壳、不轮询截图模拟进度。
++`desktop/installer/presentation.nsh` 为安装／卸载共用的视觉；`pages.nsh` 为页面编排。
++浅色品牌侧区、Naumi Logo、低对比度 N 图形、固定网格、蓝色主操作，无营销文案。
++窗口逻辑尺寸820×520；几何尺寸按 `GetDpiForWindow/96` 缩放，bitmap使用2倍源尺寸。
++高 DPI 几何有契约覆盖；本机截图不等于多显示器／高 DPI 真机矩阵已完成。
++
++## 公共接口、依赖方向、状态归属
++
++- `npm --prefix desktop run installer:ui` 生成 pinned app-builder-lib 引擎副本、multiuser宏、视觉BMP及来源hash。
++- `engine.nsi` 相对于上游仅替换 assistedInstaller 的 include；提取、安装、升级／恢复、注册表、快捷方式及卸载仍使用上游实现。
++- `multiuser-init.nsh` 与 pinned 上游对应宏逐字节等价；先确定安装作用域再展示路径，避免选择路径被后续作用域初始化覆盖。
++- 更新调用跳过路径页；静默参数仍使用原引擎，完成后打开应用仍走 `StdUtils.ExecShellAsUser`。
++- `customCheckAppRunning`、维护准入、失败exit42、finish回执保留；UI不拥有员工数据、会话、模型或维护事务。
++- 默认卸载保留个人数据；显式上游 `--delete-app-data` 参数行为没有更改。
++- 不重命名真实依赖／开源许可。隐藏的是默认状态与逐文件路径控件，而非删除依赖。
++
++## 本次实现与迁移
++
++1. 安装页：原生路径输入／目录选择／取消／安装；检查本机绝对路径、规范化路径、保留Naumi子目录。
++2. 进度页：保留真正的native progress bar；隐藏默认header、文件状态、日志按钮及日志列表，`SetDetailsPrint none`。
++3. 完成页：文件阶段结束后自动前进至显式完成页，用户决定是否打开应用；不伪造百分比。
++4. 卸载确认、进度、完成页使用同一视觉，保留默认个人数据策略。
++5. 提取失败不展示成功页，恢复关闭按钮并提示操作未完成；维护门禁的原exit42不改。
++6. 桌面候选版本0.3.3，同步desktop lock与产品版本生成物，仍从固定main构建，不自动发布Release或覆盖正在运行的安装。
++
++## 验证命令、证据层级
++
++详细命令、原hash、输出与退出码见 `evidence/installer-ui/VERIFICATION.txt`。
++
++- `node --test tests/*.test.mjs desktop/tests/*.test.cjs`：完整主线及新增UI契约，集中执行。
++- `node desktop/scripts/verify-installer-ui.mjs`：共享生产presentation的隔离原生NSIS编译／安装夹具，无产品注册表、快捷方式或员工数据写入，目标目录严格固定。
++- `node desktop/scripts/verify-installer-ui.mjs --preview`：**只展示**生产卸载确认／完成页；无删除、注册、安装或运行应用指令；不是实际卸载验收。
++- 原生安装页、真实进度、完成衔接和目录选择取消：截图与UI记录。
++- `ROLLBACK.sh --test`：在另一源码副本恢复旧文件／删除新增文件，重新运行旧主线测试，当前工作树保留新版。
++- 正式构建：固定main执行 `npm --prefix desktop run build`，强制fresh stage和完整资源校验；安装包hash／版本另记BUILD.json。
++
++## 未完成项与下一步
++
++新版完整产品安装、升级／降级、实际卸载及不同缩放显示器的原生验收仍是独立门槛；
++编译、展示夹具、单元测试和构建不冒充这些结果。本次不覆盖员工现有安装或个人数据，
++不调用真实模型，不改变3080当前运行代码。
++
++## 接续提示
++
++```text
++接续installer-ui：先查VERIFICATION.txt与BUILD.json，对照固定main和包hash。
++保留上游安装事务、维护准入与默认数据保留；只改presentation/pages，不改Bot或模型配置。
++运行完整产品安装链前先核对现有产品安装归属；卸载展示夹具不是实际卸载证据。
++```
+diff --git a/plugins/naumi-enterprise/product-version.js b/plugins/naumi-enterprise/product-version.js
+index 2cef7f0..5d79a43 100644
+--- a/plugins/naumi-enterprise/product-version.js
++++ b/plugins/naumi-enterprise/product-version.js
+@@ -1 +1 @@
+-export const PRODUCT_VERSION="0.3.2";
++export const PRODUCT_VERSION="0.3.3";
+diff --git a/scripts/installer-ui-evidence.mjs b/scripts/installer-ui-evidence.mjs
+new file mode 100644
+index 0000000..b50f1df
+--- /dev/null
++++ b/scripts/installer-ui-evidence.mjs
+@@ -0,0 +1,74 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import assert from 'node:assert/strict';
++import {createHash,randomUUID} from 'node:crypto';
++import {execFileSync,spawnSync} from 'node:child_process';
++
++const root=process.cwd(),dir=path.join(root,'evidence/installer-ui');
++const baseline='8995df9da41b6a36483a1b84277396892968d69c';
++const sha=b=>createHash('sha256').update(b).digest('hex');
++const files=['.gitattributes','CHANGELOG.md','desktop/package.json','desktop/package-lock.json',
++ 'plugins/naumi-enterprise/product-version.js','desktop/installer/maintenance.nsh',
++ 'desktop/installer/presentation.nsh','desktop/installer/pages.nsh','desktop/installer/engine.nsi',
++ 'desktop/installer/multiuser-init.nsh','desktop/installer/UPSTREAM.json',
++ ...['logo','rail','action-install','action-uninstall','action-done','action-cancel','action-browse'].map(n=>'desktop/installer/assets/'+n+'.bmp'),
++ 'desktop/scripts/build-installer-ui.mjs','desktop/scripts/verify-installer-ui.mjs',
++ 'desktop/tests/installer-ui.test.cjs','docs/implementation/INSTALLER_UI.md','scripts/installer-ui-evidence.mjs'];
++const runTests=(copy,log)=>{
++ const result=spawnSync(process.execPath,['--test','tests/*.test.mjs','desktop/tests/*.test.cjs'],{cwd:copy,encoding:'utf8',windowsHide:true,timeout:240000,maxBuffer:15*1024*1024});
++ fs.writeFileSync(path.join(dir,log),(result.stdout??'')+(result.stderr??''));
++ assert.equal(result.status,0,log);const n=Number((result.stdout.match(/(?:ℹ |# )tests (\d+)/)??[])[1]);assert(n);
++ return {tests:n,exit:result.status,command:'node --test tests/*.test.mjs desktop/tests/*.test.cjs'};
++};
++function copyOf(ref){
++ const parent=path.join(root,'runtime','installer-evidence-'+randomUUID()),copy=path.join(parent,'copy');
++ fs.mkdirSync(copy,{recursive:true});const tar=path.join(parent,'source.tar');
++ fs.writeFileSync(tar,execFileSync('git',['archive',ref],{maxBuffer:120*1024*1024}));
++ execFileSync('C:/Windows/System32/tar.exe',['-xf',tar,'-C',copy]);
++ fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');
++ fs.symlinkSync(path.join(root,'desktop/node_modules'),path.join(copy,'desktop/node_modules'),'junction');
++ return copy;
++}
++fs.mkdirSync(dir,{recursive:true});
++const mode=process.argv[2];
++if(mode==='baseline'){
++ const copy=copyOf(baseline),result=runTests(copy,'BASELINE.log');
++ fs.writeFileSync(path.join(dir,'BASELINE_RESULT.json'),JSON.stringify({...result,baseline,source:'git archive baseline, isolated dependency-linked copy'},null,2)+'\n');
++ console.log(`BASELINE tests=${result.tests} pass=${result.tests} fail=0 exit=0`);
++}else if(mode==='prepare'){
++ const manifest=[];
++ for(const file of files){
++  const modified=fs.readFileSync(path.join(root,file));let original=null;
++  try{original=execFileSync('git',['show',baseline+':'+file],{stdio:['ignore','pipe','ignore']});}catch{}
++  for(const [kind,bytes]of [['modified',modified],['original',original]])if(bytes){const p=path.join(dir,kind,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);}
++  manifest.push({file,originalSHA256:original?sha(original):null,modifiedSHA256:sha(modified)});
++ }
++ fs.writeFileSync(path.join(dir,'manifest.json'),JSON.stringify({baseline,files:manifest},null,2)+'\n');
++ fs.writeFileSync(path.join(dir,'DIFF_FILE.patch'),execFileSync('git',['diff','--cached','--binary',baseline,'--',...files],{maxBuffer:15*1024*1024}));
++ execFileSync('python',['-c',`import pathlib,zipfile; p=pathlib.Path(r'${dir}'); z=zipfile.ZipFile(p/'MODIFIED_FILE.zip','w',zipfile.ZIP_DEFLATED); [z.write(f,f.relative_to(p).as_posix()) for d in ['original','modified'] for f in sorted((p/d).rglob('*')) if f.is_file()]; z.write(p/'manifest.json','manifest.json'); z.close()`]);
++ console.log(`ARTIFACTS files=${manifest.length} originals=${manifest.filter(m=>m.originalSHA256).length} hashes=PASS`);
++}else if(mode==='rollback'){
++ assert(process.argv.includes('--test'),'COPY_TEST_REQUIRED');
++ const manifest=JSON.parse(fs.readFileSync(path.join(dir,'manifest.json'))).files,copy=copyOf(baseline);
++ // Build a genuinely modified second copy before restoring original bytes.
++ for(const m of manifest){const p=path.join(copy,m.file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.copyFileSync(path.join(dir,'modified',m.file),p);assert.equal(sha(fs.readFileSync(p)),m.modifiedSHA256);}
++ for(const m of manifest){const p=path.join(copy,m.file);if(m.originalSHA256){fs.copyFileSync(path.join(dir,'original',m.file),p);assert.equal(sha(fs.readFileSync(p)),m.originalSHA256);}else fs.unlinkSync(p);}
++ const result=runTests(copy,'ROLLBACK.log');
++ const pkg=JSON.parse(fs.readFileSync(path.join(copy,'desktop/package.json')));
++ assert.equal(pkg.version,'0.3.2');assert(!pkg.build.nsis.script);assert.equal(pkg.build.nsis.deleteAppDataOnUninstall,false);
++ assert(fs.readFileSync(path.join(copy,'desktop/installer/maintenance.nsh'),'utf8').includes('customCheckAppRunning'));
++ for(const file of ['plugins/naumi-enterprise/bot-task-service.js','plugins/naumi-enterprise/bot-tasks.js'])assert.equal(sha(fs.readFileSync(path.join(copy,file))),sha(fs.readFileSync(path.join(root,file))));
++ for(const m of manifest)assert.equal(sha(fs.readFileSync(path.join(root,m.file))),m.modifiedSHA256,'ACTIVE_MODIFIED_SOURCE_CHANGED');
++ execFileSync('git',['apply','--reverse','--check',path.join(dir,'DIFF_FILE.patch')],{cwd:root});
++ const output=`ROLLBACK tests=${result.tests} pass=${result.tests} fail=0 exit=0\nRESTORED version=0.3.2 default_nsis_pages=1 maintenance=retained data_retention=retained bot_integrity=retained\nCURRENT modified_source=retained live_runtime=untouched`;
++ fs.writeFileSync(path.join(dir,'ROLLBACK_RESULT.json'),JSON.stringify({...result,status:'PASS',output,copy},null,2)+'\n');console.log(output);
++}else if(mode==='reopen'){
++ const manifest=JSON.parse(fs.readFileSync(path.join(dir,'manifest.json'))).files;
++ for(const m of manifest){assert.equal(sha(fs.readFileSync(path.join(root,m.file))),m.modifiedSHA256);assert.equal(sha(fs.readFileSync(path.join(dir,'modified',m.file))),m.modifiedSHA256);if(m.originalSHA256)assert.equal(sha(fs.readFileSync(path.join(dir,'original',m.file))),m.originalSHA256);}
++ execFileSync('python',['-c',`import pathlib,zipfile,json,hashlib; p=pathlib.Path(r'${dir}'); z=zipfile.ZipFile(p/'MODIFIED_FILE.zip'); assert z.testzip() is None; m=json.loads(z.read('manifest.json')); assert m==json.loads((p/'manifest.json').read_text()); assert all(hashlib.sha256(z.read('modified/'+r['file'])).hexdigest()==r['modifiedSHA256'] for r in m['files'])`]);
++ const report=fs.readFileSync(path.join(dir,'VERIFICATION.txt'),'utf8');
++ for(const file of ['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh']){fs.readFileSync(path.join(dir,file));assert(report.includes('E:/Workspace/naumi-desktop/evidence/installer-ui/'+file));}
++ execFileSync('D:/DEV/Git/bin/bash.exe',['-n',path.join(dir,'ROLLBACK.sh')]);
++ assert.equal(JSON.parse(fs.readFileSync(path.join(dir,'ROLLBACK_RESULT.json'))).status,'PASS');
++ console.log(`REOPEN files=${manifest.length} zip_crc=PASS hashes=PASS patch=PASS verification=PASS rollback=PASS`);
++}else throw Error('EXPECTED baseline|prepare|rollback|reopen');
