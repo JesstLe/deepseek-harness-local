@@ -87,7 +87,7 @@ export function createEmployeeCenter(React,{client=createEmployeeClient()}={}){
     const tabs=[['profile','档案'],['memories','记忆'],['work','工作'],['activity','运行'],['history','成长记录'],['enterprise','企业']];
     const profile=data?.profile;
     return h('main',{className:'naumi-employee-center','data-employee-center':true},
-      h('aside',{className:'emp-roster','aria-label':'员工列表'},h('div',{className:'emp-roster-heading'},h('h1',null,'员工中心'),badge(bots.length)),bots.length?bots.map(bot=>h('button',{key:bot.id,type:'button',className:'emp-roster-item','aria-pressed':bot.id===botId,onClick:()=>choose(bot.id),disabled:busy},h('span',{className:'emp-avatar'},bot.name.slice(0,1)),h('span',{className:'emp-roster-name'},h('strong',null,bot.name),h('span',null,bot.kind==='team'?'团队':'智能体')),h('i',{className:bot.status==='active'?'active':'archived'}))):h('p',{className:'emp-empty'},'暂无员工')),
+      h('aside',{className:'emp-roster','aria-label':'员工列表'},h('div',{className:'emp-roster-heading'},h('h1',null,'高级管理'),badge(bots.length)),bots.length?bots.map(bot=>h('button',{key:bot.id,type:'button',className:'emp-roster-item','aria-pressed':bot.id===botId,onClick:()=>choose(bot.id),disabled:busy},h('span',{className:'emp-avatar'},bot.name.slice(0,1)),h('span',{className:'emp-roster-name'},h('strong',null,bot.name),h('span',null,bot.kind==='team'?'团队':'智能体')),h('i',{className:bot.status==='active'?'active':'archived'}))):h('p',{className:'emp-empty'},'暂无员工')),
       h('section',{className:'emp-main'},selected&&h('header',{className:'emp-header'},h('div',{className:'emp-heading'},h('img',{src:'/naumi/assets/symbol.svg',alt:'',width:42,height:42}),h('div',null,h('h1',null,selected.name),h('p',null,selected.purpose))),h('div',{className:'emp-header-actions'},badge(selected.status==='active'?'在职':'已归档',selected.status==='active'?'green':''),badge('本地已保存'),button('刷新',refresh,{disabled:loading||busy,'aria-label':'刷新员工数据'}))),
         selected&&h('nav',{className:'emp-tabs',role:'tablist','aria-label':'员工信息'},tabs.map(([id,label])=>h('button',{type:'button',role:'tab',tabIndex:tab===id?0:-1,'aria-selected':tab===id,'aria-controls':'emp-panel-'+id,id:'emp-tab-'+id,key:id,onClick:()=>{setTab(id);setDelivery(null);},onKeyDown:e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const index=tabs.findIndex(t=>t[0]===tab),next=e.key==='Home'?0:e.key==='End'?tabs.length-1:(index+(e.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;setTab(tabs[next][0]);e.currentTarget.parentElement.children[next].focus();}},label))),
         h('div',{className:'emp-feedback','aria-live':'polite'},error&&h('p',{role:'alert',className:'emp-error'},error),notice&&h('p',{role:'status',className:'emp-success'},notice)),
@@ -123,10 +123,10 @@ export function createEmployeeCenter(React,{client=createEmployeeClient()}={}){
   return Center;
 }
 
-export function installEmployeeCenter(ctx,React,Icon,{openOnReady=false}={}){
+export function installEmployeeCenter(ctx,React,Icon,{openOnReady=false,showNavigation=false}={}){
   const Center=createEmployeeCenter(React),disposers=[];
   disposers.push(ctx.slots.inject('main',()=>ctx.slots.register({name:'main',key:'naumi-employees'},Center)));
-  disposers.push(ctx.slots.inject('sidebar.panellist',()=>ctx.slots.register({name:'sidebar.panellist',id:'naumi-employees',order:-94,label:()=> '员工中心'},()=>React.createElement(Icon,{name:'layers'}))));
+  if(showNavigation)disposers.push(ctx.slots.inject('sidebar.panellist',()=>ctx.slots.register({name:'sidebar.panellist',id:'naumi-employees',order:-94,label:()=> '高级管理'},()=>React.createElement(Icon,{name:'layers'}))));
   if(openOnReady&&!new URLSearchParams(location.hash.slice(1)).has('session')&&!new URLSearchParams(location.search).has('session'))ctx.layout.selectPanel('naumi-employees');
   return()=>{for(const dispose of disposers.reverse())dispose();};
 }
