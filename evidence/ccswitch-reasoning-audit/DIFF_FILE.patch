@@ -1,3 +1,19 @@
+diff --git a/.gitattributes b/.gitattributes
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -271,6 +271,12 @@
+ /evidence/im-gateway/*.log -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
+ /evidence/im-gateway/DIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab,cr-at-eol
+ /evidence/im-gateway/ROLLBACK.sh text eol=lf
++
++# Reasoning audit evidence: preserve captured bytes and executable rollback.
++/evidence/ccswitch-reasoning-audit/** -text whitespace=cr-at-eol
++/evidence/ccswitch-reasoning-audit/*.log -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
++/evidence/ccswitch-reasoning-audit/DIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab,cr-at-eol
++/evidence/ccswitch-reasoning-audit/ROLLBACK.sh text eol=lf
+ # IM settings product-polish evidence keeps exact rollback bytes.
+ /evidence/im-settings-polish/** -text whitespace=cr-at-eol
+ /evidence/im-settings-polish/*.log -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
 diff --git a/desktop/scripts/prepare-runtime.mjs b/desktop/scripts/prepare-runtime.mjs
 --- a/desktop/scripts/prepare-runtime.mjs
 +++ b/desktop/scripts/prepare-runtime.mjs
@@ -413,18 +429,7 @@ new file mode 100644
 diff --git a/plugins/naumi-enterprise/package.json b/plugins/naumi-enterprise/package.json
 --- a/plugins/naumi-enterprise/package.json
 +++ b/plugins/naumi-enterprise/package.json
-@@ -62,10 +62,6 @@
-     "desktop-enterprise.js",
-     "model-connections.js",
-     "product-version.js",
--    "plugin-market.js",
--    "market-contract.js",
--    "market-installer.js",
--    "market-native.js",
-     "model-specs.js",
-     "official-model-specs.json",
-     "im-gateway.js",
-@@ -74,7 +70,9 @@
+@@ -74,7 +74,9 @@
      "im-delivery.js",
      "im-interactions.js",
      "im-platforms.js",
@@ -490,7 +495,7 @@ new file mode 100644
 new file mode 100644
 --- /dev/null
 +++ b/scripts/native-reasoning-extension.mjs
-@@ -0,0 +1,22 @@
+@@ -0,0 +1,21 @@
 +import fs from 'node:fs';import path from 'node:path';import {createHash,randomUUID} from 'node:crypto';import {pathToFileURL} from 'node:url';
 +export const REASONING_UPSTREAM_SHA='1a3ae58f9b4493e15459cc5000ec80f21b5d3f4a9dea6ffb6bc28e5b8817ae8a';
 +export const REASONING_EXTENSION='Naumi preserve provider reasoning default v1';
@@ -512,7 +517,6 @@ new file mode 100644
 +}
 +export function installReasoningDefaults(file){const before=fs.readFileSync(file,'utf8'),after=extendReasoningDefaults(before);if(before===after)return {changed:false,sha256:sha(after)};const backup=file+'.naumi-original';if(fs.existsSync(backup)&&sha(fs.readFileSync(backup))!==REASONING_UPSTREAM_SHA)throw Error('REASONING_BACKUP_CHANGED');if(!fs.existsSync(backup))fs.writeFileSync(backup,before);const tmp=file+'.'+randomUUID()+'.tmp';fs.writeFileSync(tmp,after);fs.renameSync(tmp,file);return {changed:true,originalSHA256:sha(before),sha256:sha(after)};}
 +if(process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url)console.log('REASONING_EXTENSION '+JSON.stringify(installReasoningDefaults(path.resolve(process.argv[2]??'node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js'))));
-+
 diff --git a/scripts/probe-ccswitch-models.mjs b/scripts/probe-ccswitch-models.mjs
 new file mode 100644
 --- /dev/null
@@ -620,7 +624,7 @@ new file mode 100644
 +function groupState(){const db=new DatabaseSync(path.join(runtime,'.dsh/naumi/bot-groups.sqlite'),{readOnly:true});try{const rows=Object.fromEntries(['rooms','members','posts','replies','post_context','room_name_operations'].map(t=>[t,db.prepare('SELECT * FROM '+t+' ORDER BY rowid').all()]));assert(!rows.replies.some(r=>['queued','starting','sent'].includes(r.state)),'GROUP_BUSY');return sha(JSON.stringify(rows));}finally{db.close();}}
 +async function gate(){const api=await botLiveApi(runtime),sessions=await api.rpc('session/list',{_request:{}}),tasks=await api.json('/naumi/bot-tasks');assert(!sessions.items.some(s=>s.running),'RUNNING_SESSIONS');assert(!tasks.tasks.some(t=>['queued','starting','running','waiting'].includes(t.status)),'ACTIVE_TASKS');return {api,sessions,groups:groupState()};}
 +if(mode==='prepare'){
-+ assert.equal(git('branch','--show-current').toString().trim(),'main');assert.equal(git('status','--porcelain','--untracked-files=no').toString(),'','TRACKED_MAIN_DIRTY');assert(!fs.existsSync(checkpoint),'EXISTING_DEPLOYMENT_INTENT');const g=await gate(),settings=await g.api.rpc('settings/describe',{}),baseline='2ae583a',commit=git('rev-parse','HEAD').toString().trim(),dir=path.join(runtime,'.dsh/reasoning-models-'+randomUUID()),candidate=path.join(dir,'candidate');fs.mkdirSync(path.join(candidate,'plugins/naumi-enterprise'),{recursive:true});
++ assert.equal(git('branch','--show-current').toString().trim(),'main');assert.equal(git('status','--porcelain','--untracked-files=no').toString(),'','TRACKED_MAIN_DIRTY');assert(!fs.existsSync(checkpoint),'EXISTING_DEPLOYMENT_INTENT');const g=await gate(),settings=await g.api.rpc('settings/describe',{}),baseline='a4c89c3',commit=git('rev-parse','HEAD').toString().trim(),dir=path.join(runtime,'.dsh/reasoning-models-'+randomUUID()),candidate=path.join(dir,'candidate');fs.mkdirSync(path.join(candidate,'plugins/naumi-enterprise'),{recursive:true});
 + const changed=['model-connections.js','assets/model-connections.js','assets/model-connections.css'],added=['model-reasoning.js','official-reasoning-specs.json'];
 + for(const f of changed){const dest=path.join(candidate,'plugins/naumi-enterprise',f);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(path.join(installed,f),dest);}
 + execFileSync('git',['init','--quiet'],{cwd:candidate});const patch=path.join(dir,'runtime-delta.patch');fs.writeFileSync(patch,git('diff','--binary',baseline,commit,'--',...changed.map(f=>'plugins/naumi-enterprise/'+f)));execFileSync('git',['apply','--check','--ignore-space-change',patch],{cwd:candidate});execFileSync('git',['apply','--ignore-space-change',patch],{cwd:candidate});
@@ -651,10 +655,10 @@ diff --git a/scripts/package-reasoning-audit.mjs b/scripts/package-reasoning-aud
 new file mode 100644
 --- /dev/null
 +++ b/scripts/package-reasoning-audit.mjs
-@@ -0,0 +1,17 @@
+@@ -0,0 +1,18 @@
 +import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {execFileSync,spawnSync} from 'node:child_process';import {createHash,randomUUID} from 'node:crypto';
-+const root=process.cwd(),base=process.argv[2]??'2ae583a',e=path.join(root,'evidence/ccswitch-reasoning-audit'),sha=b=>createHash('sha256').update(b).digest('hex');
-+const files=['desktop/scripts/prepare-runtime.mjs','plugins/naumi-enterprise/assets/model-connections.css','plugins/naumi-enterprise/assets/model-connections.js','plugins/naumi-enterprise/model-connections.js','plugins/naumi-enterprise/model-reasoning.js','plugins/naumi-enterprise/official-reasoning-specs.json','plugins/naumi-enterprise/package.json','scripts/sync-naumi.mjs','scripts/audit-ccswitch-models.mjs','scripts/ccswitch-source.mjs','scripts/native-reasoning-extension.mjs','scripts/probe-ccswitch-models.mjs','scripts/probe-reasoning-models.mjs','scripts/reasoning-fixture-runner.mjs','scripts/verify-reasoning-ui.mjs','scripts/verify-ccswitch-source.mjs','scripts/deploy-reasoning-models.mjs','scripts/package-reasoning-audit.mjs','tests/helpers/reasoning-adapter.mjs','tests/naumi-model-connections.test.mjs','tests/naumi-model-reasoning.test.mjs','docs/implementation/CCSWITCH_REASONING_AUDIT.md'];
++const root=process.cwd(),base=process.argv[2]??'a4c89c3',e=path.join(root,'evidence/ccswitch-reasoning-audit'),sha=b=>createHash('sha256').update(b).digest('hex');
++const files=['.gitattributes','desktop/scripts/prepare-runtime.mjs','plugins/naumi-enterprise/assets/model-connections.css','plugins/naumi-enterprise/assets/model-connections.js','plugins/naumi-enterprise/model-connections.js','plugins/naumi-enterprise/model-reasoning.js','plugins/naumi-enterprise/official-reasoning-specs.json','plugins/naumi-enterprise/package.json','scripts/sync-naumi.mjs','scripts/audit-ccswitch-models.mjs','scripts/ccswitch-source.mjs','scripts/native-reasoning-extension.mjs','scripts/probe-ccswitch-models.mjs','scripts/probe-reasoning-models.mjs','scripts/reasoning-fixture-runner.mjs','scripts/verify-reasoning-ui.mjs','scripts/verify-ccswitch-source.mjs','scripts/deploy-reasoning-models.mjs','scripts/package-reasoning-audit.mjs','tests/helpers/reasoning-adapter.mjs','tests/naumi-model-connections.test.mjs','tests/naumi-model-reasoning.test.mjs','docs/implementation/CCSWITCH_REASONING_AUDIT.md'];
 +const manifest={baseline:execFileSync('git',['rev-parse',base],{encoding:'utf8'}).trim(),files:[]};for(const file of files){const current=fs.readFileSync(path.join(root,file));let old;try{old=execFileSync('git',['show',base+':'+file],{stdio:['ignore','pipe','pipe']});}catch{old=null;}if(old?.equals(current))continue;manifest.files.push({path:file,before:old?sha(old):null,after:sha(current)});if(old){const p=path.join(e,'original',file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,old);}}
 +fs.writeFileSync(path.join(e,'artifact-manifest.json'),JSON.stringify(manifest,null,2)+'\n');const py=String.raw`import pathlib,json,zipfile,difflib,sys
 +root=pathlib.Path(sys.argv[1]);e=root/'evidence/ccswitch-reasoning-audit';m=json.loads((e/'artifact-manifest.json').read_text());patch=[]
@@ -668,6 +672,7 @@ new file mode 100644
 +`;
 +process.stdout.write(execFileSync('python',['-X','utf8','-c',py,root],{encoding:'utf8'}));const copy=path.join(root,'runtime/reasoning-rollback-'+randomUUID());fs.mkdirSync(copy,{recursive:true});fs.writeFileSync(path.join(copy,'.naumi-reasoning-copy'),'owned test copy\n');for(const folder of ['plugins','tests'])fs.cpSync(path.join(root,folder),path.join(copy,folder),{recursive:true});for(const r of manifest.files){const p=path.join(copy,r.path);fs.mkdirSync(path.dirname(p),{recursive:true});fs.copyFileSync(path.join(root,r.path),p);}fs.mkdirSync(path.join(copy,'evidence'),{recursive:true});fs.cpSync(path.join(root,'evidence/official-model-specs'),path.join(copy,'evidence/official-model-specs'),{recursive:true});fs.writeFileSync(path.join(copy,'package.json'),'{"type":"module"}');fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');
 +const bash='D:/DEV/Git/bin/bash.exe',result=spawnSync(bash,[path.join(e,'ROLLBACK.sh').replaceAll('\\','/'),copy.replaceAll('\\','/')],{cwd:root,encoding:'utf8'});fs.writeFileSync(path.join(e,'ROLLBACK.log'),result.stdout+result.stderr+'EXIT_STATUS='+result.status+'\n');assert.equal(result.status,0,result.stderr);const tests=['tests/naumi-model-connections.test.mjs','tests/naumi-model-specs.test.mjs','tests/naumi-model-discovery.test.mjs'];const tested=spawnSync(process.execPath,['--test',...tests],{cwd:copy,encoding:'utf8'});fs.writeFileSync(path.join(e,'ROLLBACK_TESTS.log'),tested.stdout+tested.stderr+'EXIT_STATUS='+tested.status+'\n');assert.equal(tested.status,0,tested.stdout+tested.stderr);for(const r of manifest.files)assert.equal(sha(fs.readFileSync(path.join(root,r.path))),r.after,'ACTIVE_MODIFIED_NOT_RETAINED');
++execFileSync('git',['init','--quiet'],{cwd:copy});execFileSync('git',['apply','--check',path.join(e,'DIFF_FILE.patch')],{cwd:copy,stdio:['ignore','pipe','pipe']});console.log('PATCH_CHECK_PASS restored_baseline=accepted');
 +fs.writeFileSync(path.join(e,'PACKAGE_RESULT.json'),JSON.stringify({status:'PASS',baseline:manifest.baseline,files:manifest.files.length,rollbackCopy:copy,rollbackCommand:'D:/DEV/Git/bin/bash.exe evidence/ccswitch-reasoning-audit/ROLLBACK.sh '+copy,rollbackExit:result.status,rollbackOutput:result.stdout.trim(),testsCommand:'node --test '+tests.join(' '),testsExit:tested.status,activeModifiedRetained:true,artifacts:Object.fromEntries(['MODIFIED_FILE.zip','DIFF_FILE.patch','ROLLBACK.sh'].map(f=>[f,{path:path.join(e,f),sha256:sha(fs.readFileSync(path.join(e,f)))}]))},null,2)+'\n');console.log(result.stdout.trim());console.log('ROLLBACK_TESTS_PASS tests=44 exit=0 active_modified=retained');
 diff --git a/tests/helpers/reasoning-adapter.mjs b/tests/helpers/reasoning-adapter.mjs
 new file mode 100644
@@ -709,14 +714,14 @@ new file mode 100644
 +test('official adaptive, inherited, disabled and custom modes preserve unrelated model fields and strip request-only fields',()=>{const old={id:'glm-5.3',custom:'preserved',compat:{supportsCacheControl:false}};const next=configureReasoning({id:old.id,reasoningPreset:'official'},{...old,reasoningPreset:'official'},'anthropic-messages');assert.equal(next.compat.forceAdaptiveThinking,true);assert.equal(next.compat.supportsCacheControl,false);assert.equal(next.custom,'preserved');assert(!('reasoningPreset'in next));assert(!('reasoningEfforts'in configureReasoning({reasoningPreset:'inherit'},next,'anthropic-messages')));assert.equal(configureReasoning({reasoningPreset:'disabled'},next,'anthropic-messages').reasoningEfforts,false);});
 +test('malformed, off-only, empty or mismatched protocol efforts are rejected',()=>{for(const v of [{},{off:'none'},{high:null},{ultra:'high'},{high:''},{high:'secret value'},[]])assert.throws(()=>validateEfforts(v),e=>e.code==='MODEL_REASONING_INVALID');assert.throws(()=>configureReasoning({id:'unknown',reasoningPreset:'official'},{id:'unknown'},'openai-responses'));assert.throws(()=>configureReasoning({reasoningEfforts:{high:'high'},reasoningMode:'adaptive'},{},'openai-responses'));});
 +test('group default must be accepted by every exact model; provider default is never guessed',()=>{const p={models:[model('gpt-6-sol','openai-responses'),model('gpt-6.1-sol','openai-responses')]};assert.doesNotThrow(()=>validateDefault(p,'high'));assert.throws(()=>validateDefault(p,'off'));assert.doesNotThrow(()=>validateDefault(p,null));});
-+test('pinned extension is idempotent, atomic and refuses upstream/backup drift',()=>{const original=fs.readFileSync('node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js','utf8'),candidate=extendReasoningDefaults(original);assert.equal(extendReasoningDefaults(candidate),candidate);assert.throws(()=>extendReasoningDefaults(candidate+'\n'));const dir=path.resolve('runtime/reasoning-pin-'+randomUUID());fs.mkdirSync(dir,{recursive:true});const file=path.join(dir,'index.js');fs.writeFileSync(file,original);assert.equal(installReasoningDefaults(file).changed,true);assert.equal(installReasoningDefaults(file).changed,false);assert.equal(createHash('sha256').update(fs.readFileSync(file+'.naumi-original')).digest('hex'),REASONING_UPSTREAM_SHA);});
++test('pinned extension is idempotent, atomic and refuses upstream/backup drift',()=>{const filePath='node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js',installed=fs.readFileSync(filePath,'utf8'),original=createHash('sha256').update(installed).digest('hex')===REASONING_UPSTREAM_SHA?installed:fs.readFileSync(filePath+'.naumi-original','utf8'),candidate=extendReasoningDefaults(original);assert.equal(extendReasoningDefaults(candidate),candidate);assert.throws(()=>extendReasoningDefaults(candidate+'\n'));const dir=path.resolve('runtime/reasoning-pin-'+randomUUID());fs.mkdirSync(dir,{recursive:true});const file=path.join(dir,'index.js');fs.writeFileSync(file,original);assert.equal(installReasoningDefaults(file).changed,true);assert.equal(installReasoningDefaults(file).changed,false);assert.equal(createHash('sha256').update(fs.readFileSync(file+'.naumi-original')).digest('hex'),REASONING_UPSTREAM_SHA);});
 +for(const api of ['openai-responses','openai-completions','anthropic-messages'])test('real adapter '+api+' preserves default vs off and maps low/high/xhigh/max without budgets',async()=>{const bodies=[];const server=http.createServer(async(req,res)=>{let b='';for await(const c of req)b+=c;bodies.push(JSON.parse(b));mockResponse(res,api);});await new Promise(r=>server.listen(0,'127.0.0.1',r));const f=await adapterFixture({test:{api,baseURL:'http://127.0.0.1:'+server.address().port+'/v1',apiKeyEnv:'FIXTURE',preserveReasoningDefault:true,models:[model('gpt-6-sol',api)]}});try{const info=await f.adapter.resolveModel('test','gpt-6-sol');assert(info.reasoning.efforts.some(e=>e.id==='max'));for(const effort of [undefined,'off','low','high','xhigh','max']){const chunks=await generate(f.adapter,effort);assert(chunks.some(c=>c.type==='text-delta'&&c.text==='OK'));const b=bodies.at(-1);if(api==='anthropic-messages'){if(effort===undefined){assert.equal(b.thinking,undefined);assert.equal(b.output_config,undefined);}else if(effort==='off'){assert.equal(b.thinking.type,'disabled');assert.equal(b.output_config,undefined);}else{assert.equal(b.thinking.type,'adaptive');assert.equal(b.thinking.budget_tokens,undefined);assert.equal(b.output_config.effort,effort);}}else if(api==='openai-responses')assert.equal(b.reasoning?.effort,effort==='off'?'none':effort);else assert.equal(b.reasoning_effort,effort==='off'?'none':effort);}const n=bodies.length;await assert.rejects(generate(f.adapter,'minimal'),e=>e.code==='UNSUPPORTED_REASONING_EFFORT');assert.equal(bodies.length,n);}finally{await f.close();server.closeAllConnections();await new Promise(r=>server.close(r));}});
 +test('non-opted existing route retains original default-off wire behavior; group default is applied explicitly',async()=>{const bodies=[],api='openai-responses',server=http.createServer(async(req,res)=>{let b='';for await(const c of req)b+=c;bodies.push(JSON.parse(b));mockResponse(res,api);});await new Promise(r=>server.listen(0,'127.0.0.1',r));for(const opt of [false,true]){const f=await adapterFixture({test:{api,baseURL:'http://127.0.0.1:'+server.address().port+'/v1',apiKeyEnv:'FIXTURE',preserveReasoningDefault:opt,...opt?{reasoning:'high'}:{},models:[model('gpt-6-sol',api)]}});try{await generate(f.adapter);assert.equal(bodies.at(-1).reasoning.effort,opt?'high':'none');}finally{await f.close();}}server.closeAllConnections();await new Promise(r=>server.close(r));});
 diff --git a/docs/implementation/CCSWITCH_REASONING_AUDIT.md b/docs/implementation/CCSWITCH_REASONING_AUDIT.md
 new file mode 100644
 --- /dev/null
 +++ b/docs/implementation/CCSWITCH_REASONING_AUDIT.md
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,52 @@
 +# CC Switch 模型复核与推理档位
 +
 +日期：2026-11-17。负责人：当前任务；基线 541830103b4cd2782a3f8621f012c625932c95d1；分支 codex/ccswitch-reasoning-audit-20261117；独立 worktree E:/Workspace/naumi-model-reasoning-audit。首次同步主线 e16b369。功能迭代 1。
@@ -730,10 +735,42 @@ new file mode 100644
 +原生缺口：添加包含 off 的能力映射时，无指定档位会被 pi-ai 当作显式关闭。增加 opt-in preserveReasoningDefault，仅在已声明能力且未指定档位时，把 dispatch 副本的 off 设为 null；目录仍公开真实 off 能力，显式关闭仍发送 none/disabled。扩展脚本固定原始 SHA、原子替换、原始备份，sync 和打包共用；未启用路由不改变。
 +
 +## 本次实现与迁移状态
-+开发中。模型连接页增加每模型官方/继承/关闭/自定义能力与协议模式，连接默认档位仅接受所有模型共有能力。继续复用原生选择器，不新增第二个发送区或全局拦截。预算、默认模型、凭据、会话消息、后台任务不随能力导入改变。
++已实现。模型连接页增加每模型官方/继承/关闭/自定义能力与协议模式，连接默认档位仅接受所有模型共有能力。继续复用原生选择器，不新增第二个发送区或全局拦截。预算、默认模型、凭据、会话消息、后台任务不随能力导入改变。
 +
 +## 验证命令、结果及证据层级
-+基线 node --test tests/naumi-model-connections.test.mjs tests/naumi-model-specs.test.mjs tests/naumi-model-discovery.test.mjs：44/44。来源只读审计、模型列表和真实路由样例见 evidence/ccswitch-reasoning-audit；不是每模型全量可用证明。后续集中覆盖真实原生适配器 mock wire、设置 HTTP/CAS、原生目录/Session 档位、UI、全量与副本回滚。
++基线 node --test tests/naumi-model-connections.test.mjs tests/naumi-model-specs.test.mjs tests/naumi-model-discovery.test.mjs：44/44。来源只读审计、模型列表和真实路由样例见 evidence/ccswitch-reasoning-audit；不是每模型全量可用证明。定向 57/57；真实固定版适配器 mock wire 覆盖三协议的默认/off/low/high/xhigh/max 与错误档位；设置 HTTP/CAS、原生目录、设置 UI、两 Bot 的 Session 档位隔离/重开持久化共 20 项通过，pageErrors=0、supplierCalls=0；原生 model/selection 压缩日志真实写入。副本回滚恢复 8 个原文件、移除 15 个新增文件，原基线 44/44 再次通过，工作副本保持修改。
 +
 +## 未完成项与下一步
-+完成配置与原生扩展、官方映射验证、实际配置增量、集中验收、四件套、普通合并推送及运行接入。不打断正在运行的对话，不宣称未测模型可用。
++已普通合并并推送 main，功能固定提交 406277c1c6f3f892b5c2218911971927e8cef4d1。当前安装程序的 backend-link 指向本仓库，后端已在运行门禁通过后重载；安装包本次不重建。
++
++## 当前来源与真实供应商复核
++- 18 条来源配置的内容 SHA256 全部与审计前一致；CC Switch 只读。8 组凭据匹配；不修改默认模型、不替换密钥。
++- 6 个非配额异常分组逐模型验证 16/16 有效。7 条先验证指定推理档位，其余 9 条追加验证；供应商接受请求和本地精确 wire 字段验收分开，不声称代理公开其内部映射。
++- Kimi Coding（3条）和 open（19条）分别在路由样例与定向复测中返回配额错误；22 条不做重复逐模型扣费探测，原组保留。OpenCode Go 缺少 x-opencode-session 时先拒绝，补齐会话头后明确返回 api_key_expired；LAN 反代网络断开，均不新增无效连接。
++- OMP tdh 三个遗漏 ID（gpt-5.5、gpt-5.3-codex、gpt-5.3-codex-spark）不在该账号当前返回的 20 条模型目录中；不把陈旧来源写入当前可用目录。Claude 来源的 [1M] 型号在目录中只有 canonical ID，保留现有 canonical ID 和上下文预算，不盲目添加括号作为 wire ID。
++- 官方 OAuth/无 key 来源与当前 API-key 路由分开处理，Hermes 缺环境密钥不复制。目录的 401/404 不等于推理失效，experientiallabs 和 DeepSeek 的有效路由保留。
++- 官方精确 ID 能力匹配 27/38；11 条旧型号/别名不猜测。Kimi Overview 与 Model Configuration 对默认档位存在差异，保存两份资料，较具体页面确认 K3.1 Pro 支持 low/high/max；本实现不强填任何默认档位，保持供应商默认。
++
++## 复现与回滚
++```powershell
++node scripts/audit-ccswitch-models.mjs
++node scripts/probe-ccswitch-models.mjs
++node scripts/probe-reasoning-models.mjs
++node scripts/probe-reasoning-models.mjs --remaining
++node scripts/verify-reasoning-ui.mjs
++node scripts/package-reasoning-audit.mjs a4c89c3
++```
++前三类供应商探测会产生小额真实请求；审计与 UI 本身不发供应商推理。ROLLBACK.sh 仅接受带 .naumi-reasoning-copy 标记且不含 .git 的单独副本；先核对全部修改与原件 hash，再恢复。运行配置私有原件与修改件由部署脚本单独保存在 .dsh 下，不加入公共证据。
++
++测试期间发现并修复自定义档位 schema 的稀疏 Record 问题，增加回归；Windows worktree junction 的 import.meta.main 检查偶发未执行入口，夹具改为显式调用原 CLI 的 runCli，并复制单个原生适配器包后扩展，不改共享依赖。空白 Session 即使改名也不以该标题显示，原生 UI 验收改用正式 Bot/home Session 入口，而不是创建消息或修改原生导航规则。
++
++主线同步：5418301 → e16b369 → a4c89c3，集成提交 944eb18；只将 .gitattributes 两个独立证据段合并并保留 package 的并行新增项。集中全量 node --test tests/*.test.mjs desktop/tests/*.test.cjs：668/668、exit 0；包闭包 132 文件 PASS。功能迭代仍为 1。
++
++## 本机实际接入
++- 7 个运行文件接入：模型设置服务/JS/CSS、官方能力与解析器、package 两项增量、固定原始 SHA 的原生适配器扩展。115 个其他插件文件、9 个受保护文件的 hash 均保持。
++- 使用实际 settings/mutate + revision CAS，单次增量迁移 27 条能力，11 条保留；只写 reasoningEfforts、必要 compat.forceAdaptiveThinking 和分组 preserveReasoningDefault。深比较证明上下文/输出预算、默认模型、凭据及其余配置不变。
++- 验收 8 组38模型、27条原生目录公开档位，94会话/0运行；94个原压缩会话日志均作为完整原字节前缀保留。Bot/任务台账/群记录均核对不变。
++- 运行配置保留私有原件和修改件，另一个副本恢复原字节通过，活动配置保留修改；部署过程供应商请求0。真实供应商测试仍以先前16个模型的回执为准，配额、过期密钥和网络问题不被部署成功覆盖。
++- Start-Naumi 脚本输出 RUNNING PID=44716 URL=http://127.0.0.1:3080 HTTP=200；真实 settings/modelCatalog 和模型设置页面已读到新能力。源码合并、HTTP/原生目录、供应商实际回执分别记录于 VERIFICATION.txt 和 DEPLOYMENT.json。
++
++发布后定向 57/57 再次通过；实际设置页面读取到 3 条官方档位、供应商默认，未保存任何新配置。Ego 原生截屏驱动两次超时，未产生当前页面截图；native-reasoning-picker.png / reasoning-settings.png 是独立夹具的真实渲染，均已打开检查，不混称为本机页面截图。

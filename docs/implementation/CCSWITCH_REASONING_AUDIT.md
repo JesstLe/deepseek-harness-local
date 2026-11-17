@@ -17,7 +17,7 @@
 基线 node --test tests/naumi-model-connections.test.mjs tests/naumi-model-specs.test.mjs tests/naumi-model-discovery.test.mjs：44/44。来源只读审计、模型列表和真实路由样例见 evidence/ccswitch-reasoning-audit；不是每模型全量可用证明。定向 57/57；真实固定版适配器 mock wire 覆盖三协议的默认/off/low/high/xhigh/max 与错误档位；设置 HTTP/CAS、原生目录、设置 UI、两 Bot 的 Session 档位隔离/重开持久化共 20 项通过，pageErrors=0、supplierCalls=0；原生 model/selection 压缩日志真实写入。副本回滚恢复 8 个原文件、移除 15 个新增文件，原基线 44/44 再次通过，工作副本保持修改。
 
 ## 未完成项与下一步
-待主线整合后的全量验证、实际后端配置增量和运行接入。运行门禁在准备/迁移/验收时重复核验，不打断正在运行的对话。安装包本次不重建。
+已普通合并并推送 main，功能固定提交 406277c1c6f3f892b5c2218911971927e8cef4d1。当前安装程序的 backend-link 指向本仓库，后端已在运行门禁通过后重载；安装包本次不重建。
 
 ## 当前来源与真实供应商复核
 - 18 条来源配置的内容 SHA256 全部与审计前一致；CC Switch 只读。8 组凭据匹配；不修改默认模型、不替换密钥。
@@ -41,3 +41,12 @@ node scripts/package-reasoning-audit.mjs a4c89c3
 测试期间发现并修复自定义档位 schema 的稀疏 Record 问题，增加回归；Windows worktree junction 的 import.meta.main 检查偶发未执行入口，夹具改为显式调用原 CLI 的 runCli，并复制单个原生适配器包后扩展，不改共享依赖。空白 Session 即使改名也不以该标题显示，原生 UI 验收改用正式 Bot/home Session 入口，而不是创建消息或修改原生导航规则。
 
 主线同步：5418301 → e16b369 → a4c89c3，集成提交 944eb18；只将 .gitattributes 两个独立证据段合并并保留 package 的并行新增项。集中全量 node --test tests/*.test.mjs desktop/tests/*.test.cjs：668/668、exit 0；包闭包 132 文件 PASS。功能迭代仍为 1。
+
+## 本机实际接入
+- 7 个运行文件接入：模型设置服务/JS/CSS、官方能力与解析器、package 两项增量、固定原始 SHA 的原生适配器扩展。115 个其他插件文件、9 个受保护文件的 hash 均保持。
+- 使用实际 settings/mutate + revision CAS，单次增量迁移 27 条能力，11 条保留；只写 reasoningEfforts、必要 compat.forceAdaptiveThinking 和分组 preserveReasoningDefault。深比较证明上下文/输出预算、默认模型、凭据及其余配置不变。
+- 验收 8 组38模型、27条原生目录公开档位，94会话/0运行；94个原压缩会话日志均作为完整原字节前缀保留。Bot/任务台账/群记录均核对不变。
+- 运行配置保留私有原件和修改件，另一个副本恢复原字节通过，活动配置保留修改；部署过程供应商请求0。真实供应商测试仍以先前16个模型的回执为准，配额、过期密钥和网络问题不被部署成功覆盖。
+- Start-Naumi 脚本输出 RUNNING PID=44716 URL=http://127.0.0.1:3080 HTTP=200；真实 settings/modelCatalog 和模型设置页面已读到新能力。源码合并、HTTP/原生目录、供应商实际回执分别记录于 VERIFICATION.txt 和 DEPLOYMENT.json。
+
+发布后定向 57/57 再次通过；实际设置页面读取到 3 条官方档位、供应商默认，未保存任何新配置。Ego 原生截屏驱动两次超时，未产生当前页面截图；native-reasoning-picker.png / reasoning-settings.png 是独立夹具的真实渲染，均已打开检查，不混称为本机页面截图。
