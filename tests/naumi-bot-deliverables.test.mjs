@@ -100,7 +100,7 @@ test('native present remains authoritative, different turns and forged relay coo
     await assert.rejects(f.service.runtime.mirror(f.sender.id,reply.id,[{...refs[0],seq:99999}]),/REFERENCE_MISMATCH/);
     assert.equal(f.sender.session.snapshotEvents().filter(e=>e.type==='deliverables/presented').length,0);
     assert.deepEqual(references(f.agents.get(task.targetSessionId).session.snapshotEvents(),task.targetSessionId,2),[]);
-    fs.unlinkSync(file);await assert.rejects(f.service.runtime.mirror(f.sender.id,reply.id,refs));
+    fs.unlinkSync(file);await f.service.runtime.mirror(f.sender.id,reply.id,refs);assert(fs.existsSync(refs[0].snapshot.path));
   }finally{await f.cleanup();}
 });
 
@@ -118,14 +118,14 @@ test('same-turn native deliveries do not leak from old turns and cross-workspace
     const task=await start(f),file=path.join(f.dir,'private.md');fs.writeFileSync(file,'source');
     await f.complete(task,'完成',async(a,t)=>registerFiles(a.session,t,[{path:file}],'present-1'));
     const refs=f.service.current(task.id).delivery.files,reply=f.sender.inbox.nextTurn[0];
-    // The viewer can use the source Session reference; no recipient-local card is forged across workspaces.
+    // New immutable snapshots are explicitly verified and copied into the recipient workspace.
     const otherRoot=path.join(f.dir,'other');fs.mkdirSync(otherRoot);
     f.sender.session=Session.create(SessionId(f.sender.id),f.sender.session.snapshotEvents(),{...f.sender.session.header,cwd:otherRoot});
     f.sender.session.append('turn/start',{turn:1});f.sender.session.append('user/message',reply,{surfaceOp:'append'});
-    await assert.rejects(f.service.runtime.mirror(f.sender.id,reply.id,refs),/OUTSIDE_WORKSPACE/);
-    assert.equal(f.sender.session.snapshotEvents().filter(e=>e.type==='deliverables/presented').length,0);
+    await f.service.runtime.mirror(f.sender.id,reply.id,refs);
+    const mirrored=f.sender.session.snapshotEvents().filter(e=>e.type==='deliverables/presented');assert.equal(mirrored.length,1);assert(mirrored[0].data.files[0].path.startsWith(otherRoot));assert.equal(fs.readFileSync(mirrored[0].data.files[0].path,'utf8'),'source');
     const forged=refs.map(r=>({...r,path:path.join(f.dir,'another.md')}));
-    await assert.rejects(f.service.runtime.mirror(f.sender.id,reply.id,forged),/REFERENCE_MISMATCH/);
+    await assert.rejects(f.service.runtime.verifyVersion(forged[0]),/REFERENCE/);
     assert(reply.content[0].text.includes(previewAddress(refs[0])));
     const worker=f.agents.get(task.targetSessionId);worker.session.append('turn/start',{turn:2});worker.session.append('user/message',{id:'new-request',role:'user',source:{kind:'user'},content:[{type:'text',text:'另一任务'}]},{surfaceOp:'append'});
     worker.session.append('turn/end',{turn:2,reason:{kind:'completed'}});

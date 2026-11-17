@@ -121,6 +121,7 @@ export function installBotTasks(ctx,directory,{store,runtime,onReady}={}){
       }catch(error){const code=/^BOT_[A-Z_]+$/.test(error.message)?error.message:'BOT_TASK_UNAVAILABLE';
         send(/FORBIDDEN|REQUIRED/.test(code)?403:/CONFLICT/.test(code)?409:/NOT_FOUND/.test(code)?404:/INVALID|UNAVAILABLE/.test(code)?503:400,{error:code});}
     }}));
+    scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/bot-file-version',handler:async(req,res)=>{if(!admit(req,res))return;res.setHeader('Content-Type','application/json');if(req.method!=='GET'){res.writeHead(405).end();return;}try{const q=new URL(req.url,'http://localhost').searchParams,t=service.current(q.get('taskId')),files=[...(t.delivery?.files??[]),...(t.deliveryHistory??[]).flatMap(v=>v.files)],ref=files.find(f=>f.sessionId===q.get('sessionId')&&f.seq===Number(q.get('seq'))&&f.index===Number(q.get('index')));if(!ref?.snapshot)throw Error('BOT_VERSION_NOT_FOUND');await adapter.verifyVersion(ref);res.writeHead(200).end(JSON.stringify({sha256:ref.snapshot.sha256,bytes:ref.snapshot.bytes}));}catch{res.writeHead(409).end(JSON.stringify({error:'BOT_VERSION_UNAVAILABLE'}));}}}));
     scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/bot-tasks/events',handler:(req,res)=>{
       if(!admit(req,res))return;if(req.method!=='GET'){res.writeHead(405).end();return;}
       res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Connection':'keep-alive','X-Accel-Buffering':'no'});

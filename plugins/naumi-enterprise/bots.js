@@ -1,3 +1,5 @@
+import {installBotWorkspaceMigration} from './bot-workspace-migration.js';
+import {installBotOverview} from './bot-overview.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -252,7 +254,7 @@ export function installBots(ctx,{directory,collaborationOrigin}={}){
   return ctx.inject(['agents','agentTeams','agentPresets','sessions','sessionPersistence','tools','systemPrompt'],scope=>{
     const store=directory??new BotDirectory(path.join(process.env.DSH_HOME??path.join(os.homedir(),'.dsh'),'naumi','bots.json'));
     let taskService,groupService;
-    const taskRuntime=installBotTasks(scope,store,{onReady:service=>{taskService=service;}});
+    const taskRuntime=installBotTasks(scope,store,{onReady:service=>{taskService=service;installBotOverview(scope,store,service);installBotWorkspaceMigration(scope,store,service,()=>groupService);}});
     const groupRuntime=installBotGroups(scope,store,()=>taskService,{onReady:service=>{groupService=service;}});
     const imRuntime=installIMGateway(scope,store,()=>taskService,()=>groupService);
     const employeeRuntime=installEmployees(scope,store,{collaborationOrigin});
