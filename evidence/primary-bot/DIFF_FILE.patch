@@ -54,10 +54,10 @@ index 0000000..0fed39d
 +本次按用户选择完成历史文件迁移规划；上述复制、原生新 home、未来 cwd 切换与历史预览迁移仍为独立后续切片。主 Bot 功能上线不自动执行这些数据迁移，不在用户完成主 Bot 设置时悄悄搬动历史文件。
 diff --git a/docs/implementation/PRIMARY_BOT_ONBOARDING.md b/docs/implementation/PRIMARY_BOT_ONBOARDING.md
 new file mode 100644
-index 0000000..de08614
+index 0000000..4bb190f
 --- /dev/null
 +++ b/docs/implementation/PRIMARY_BOT_ONBOARDING.md
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,45 @@
 +# 账号主 Bot 与首次进入引导
 +
 +## 模块与职责
@@ -101,8 +101,10 @@ index 0000000..de08614
 +## 验收进度
 +
 +已整合 origin/main 4c44363，集中回归 573/573，exit 0。真实隔离 Harness：首次创建、旧账号认领、原生 home、默认群成员与原生 composer 均已通过，page errors=0，model calls=0。源码副本基线/回滚各38/38；正式数据未用于这些写入测试。新增历史文件规划按用户选择见 [迁移规划](BOT_WORKSPACE_MIGRATION.md)，规划不等于实际搬迁。
++
++正式增量加载成功：固定 main e664224（已包含并行群改名源码），11文件，HTTP200，92sessions/0running/3bots/revision36；101个受保护文件和当时92个无关运行文件哈希保持。随后并行群改名仅补齐其自身catalog/CSS并完成验收；本任务不覆盖这些增量。已再整合main b18bfdc。最终源码副本回滚基线使用078142a（有群改名、无主Bot），保留其他线程功能；开工原始基线38/38记录不变。
 diff --git a/plugins/naumi-enterprise/assets/bot-groups.js b/plugins/naumi-enterprise/assets/bot-groups.js
-index 870bc57..eb58d72 100644
+index 2bf3a06..80fa651 100644
 --- a/plugins/naumi-enterprise/assets/bot-groups.js
 +++ b/plugins/naumi-enterprise/assets/bot-groups.js
 @@ -1,5 +1,6 @@
@@ -128,9 +130,9 @@ index 870bc57..eb58d72 100644
 -  return h('div',{className:'nbc-modal-backdrop',onMouseDown:e=>{if(e.target===e.currentTarget&&!pending)onCancel();}},h('form',{ref,className:'nbc-create',role:'dialog','aria-modal':true,'aria-label':'新建群聊',onSubmit:submit,onKeyDown:key},h('header',null,h('h2',null,'新建群聊'),action('关闭建群',onCancel,'close',{disabled:pending})),h('label',{className:'nbc-field'},'群名',h('input',{value:name,maxLength:80,required:true,disabled:pending,onChange:e=>change(()=>setName(e.target.value))})),h('fieldset',{disabled:pending},h('legend',null,'成员'),h('div',{className:'nbc-member-grid'},bots.map(bot=>h('label',{key:bot.id,className:'nbc-member-option','data-checked':members.includes(bot.id)},h('input',{type:'checkbox',checked:members.includes(bot.id),disabled:members.length>=12&&!members.includes(bot.id),onChange:e=>change(()=>{setMembers(v=>e.target.checked?[...v,bot.id]:v.filter(id=>id!==bot.id));if(!e.target.checked&&manager===bot.id)setManager('');})}),h(Avatar,{bot,staticPreview:true}),h('span',null,bot.name))))),h('label',{className:'nbc-field'},'默认接话者',h('select',{value:manager,disabled:pending,onChange:e=>change(()=>setManager(e.target.value))},h('option',{value:''},'每次点名'),bots.filter(b=>members.includes(b.id)).map(b=>h('option',{key:b.id,value:b.id},b.name)))),error&&h('p',{className:'nbc-error',role:'alert'},error),h('footer',null,h('button',{type:'button',onClick:onCancel,disabled:pending},'取消'),h('button',{type:'submit',className:'nbc-primary',disabled:pending||members.length<2||!name.trim()},pending?'创建中…':'创建群聊'))));
 +  return h('div',{className:'nbc-modal-backdrop',onMouseDown:e=>{if(e.target===e.currentTarget&&!pending)onCancel();}},h('form',{ref,className:'nbc-create',role:'dialog','aria-modal':true,'aria-label':'新建群聊',onSubmit:submit,onKeyDown:key},h('header',null,h('h2',null,'新建群聊'),action('关闭建群',onCancel,'close',{disabled:pending})),h('label',{className:'nbc-field'},'群名',h('input',{value:name,maxLength:80,required:true,disabled:pending,onChange:e=>change(()=>setName(e.target.value))})),h('fieldset',{disabled:pending},h('legend',null,'成员'),h('div',{className:'nbc-member-grid'},bots.map(bot=>h('label',{key:bot.id,className:'nbc-member-option','data-checked':members.includes(bot.id)},h('input',{type:'checkbox',checked:members.includes(bot.id),disabled:bot.id===primary?.id||members.length>=12&&!members.includes(bot.id),onChange:e=>change(()=>{setMembers(v=>e.target.checked?[...v,bot.id]:v.filter(id=>id!==bot.id));if(!e.target.checked&&manager===bot.id)setManager('');})}),h(Avatar,{bot,staticPreview:true}),h('span',null,bot.name))))),!primary&&h('label',{className:'nbc-field'},'默认接话者',h('select',{value:manager,disabled:pending,onChange:e=>change(()=>setManager(e.target.value))},h('option',{value:''},'每次点名'),bots.filter(b=>members.includes(b.id)).map(b=>h('option',{key:b.id,value:b.id},b.name)))),error&&h('p',{className:'nbc-error',role:'alert'},error),h('footer',null,h('button',{type:'button',onClick:onCancel,disabled:pending},'取消'),h('button',{type:'submit',className:'nbc-primary',disabled:pending||members.length<2||!name.trim()},pending?'创建中…':'创建群聊'))));
   }
-  function NativeComposer({room,native,accessory,busy,onSubmit,onCancel}){
-   const [binding,setBinding]=useState(null),[error,setError]=useState('');const callbacks=useRef({onSubmit,onCancel});callbacks.current={onSubmit,onCancel};
-@@ -91,6 +92,6 @@ export function createBotGroupsPage(ctx,React){
+  function GroupTitle({room,working}){
+   const [editing,setEditing]=useState(false),[name,setName]=useState(''),[pending,setPending]=useState(false),[error,setError]=useState(''),[conflict,setConflict]=useState(false);
+@@ -106,6 +107,6 @@ export function createBotGroupsPage(ctx,React){
    );
   }
   return function UnifiedConversation({native}){const state=useSyncExternalStore(groups.subscribe,groups.getSnapshot,groups.getSnapshot),people=useSyncExternalStore(catalog.subscribe,catalog.getSnapshot,catalog.getSnapshot),room=state.rooms.find(r=>r.id===state.selected),bots=people.bots;
@@ -287,7 +289,7 @@ index 0000000..b67ba57
 + };
 +}
 diff --git a/plugins/naumi-enterprise/bot-group-service.js b/plugins/naumi-enterprise/bot-group-service.js
-index c15a0cb..343691e 100644
+index 45e837a..22a80a3 100644
 --- a/plugins/naumi-enterprise/bot-group-service.js
 +++ b/plugins/naumi-enterprise/bot-group-service.js
 @@ -42,8 +42,12 @@ export class BotGroupService {
@@ -303,15 +305,15 @@ index c15a0cb..343691e 100644
      return this.store.create(input, () => {
        const active = new Set(this.directory.list().bots.filter(bot => bot.status === 'active').map(bot => bot.id));
        if (input.botIds.some(id => !active.has(id))) fail('BOT_GROUP_MEMBER_UNAVAILABLE');
-@@ -52,6 +56,7 @@ export class BotGroupService {
-   }
+@@ -54,6 +58,7 @@ export class BotGroupService {
+   rename(input,actor='owner') { return this.store.rename(input,actor); }
  
    post(input) {
 +    this.alignPrimary();
      const post = this.store.post(input, () => {
        const room = this.store.room(input.roomId);
        if (!room) fail('BOT_GROUP_NOT_FOUND');
-@@ -68,7 +73,7 @@ export class BotGroupService {
+@@ -70,7 +75,7 @@ export class BotGroupService {
          if(input.botIds.some(id=>id!==sender.botId))fail('BOT_GROUP_TASK_RECIPIENT_CONFLICT');
          targets=[sender.botId];
        }
@@ -320,7 +322,7 @@ index c15a0cb..343691e 100644
        if (!targets.length) fail('BOT_GROUP_MENTION_REQUIRED');
        if (targets.some(id => !members.some(bot => bot.id === id && bot.status === 'active'))) fail('BOT_GROUP_MEMBER_UNAVAILABLE');
        return room.members.filter(member => targets.includes(member.botId));
-@@ -78,6 +83,7 @@ export class BotGroupService {
+@@ -80,6 +85,7 @@ export class BotGroupService {
    }
  
    read(roomId, before) {
@@ -328,7 +330,7 @@ index c15a0cb..343691e 100644
      const room = this.store.room(roomId);
      if (!room) fail('BOT_GROUP_NOT_FOUND');
      const posts = this.store.posts(roomId, {before});
-@@ -114,6 +120,7 @@ export class BotGroupService {
+@@ -116,6 +122,7 @@ export class BotGroupService {
    }
  
    async prepare(roomId){
@@ -337,10 +339,10 @@ index c15a0cb..343691e 100644
      const member=room.members.find(m=>m.botId===room.defaultBotId)??room.members[0];
      const bot=this.directory.forSession(member.sessionId);
 diff --git a/plugins/naumi-enterprise/bot-group-store.js b/plugins/naumi-enterprise/bot-group-store.js
-index 80c5e6f..37d810f 100644
+index 350ae02..ceac544 100644
 --- a/plugins/naumi-enterprise/bot-group-store.js
 +++ b/plugins/naumi-enterprise/bot-group-store.js
-@@ -57,6 +57,15 @@ export class BotGroupStore {
+@@ -62,6 +62,15 @@ export class BotGroupStore {
      return this.db.prepare(`SELECT bot_id AS botId, session_id AS sessionId FROM members
        WHERE room_id=? ORDER BY position`).all(roomId);
    }
@@ -357,10 +359,10 @@ index 80c5e6f..37d810f 100644
    member(sessionId) {
      return this.db.prepare(`SELECT room_id AS roomId, bot_id AS botId, session_id AS sessionId
 diff --git a/plugins/naumi-enterprise/bot-groups.js b/plugins/naumi-enterprise/bot-groups.js
-index 8b28cb7..c3c0a93 100644
+index d013a65..934862b 100644
 --- a/plugins/naumi-enterprise/bot-groups.js
 +++ b/plugins/naumi-enterprise/bot-groups.js
-@@ -25,6 +25,9 @@ export function installBotGroups(ctx, directory, getTasks) {
+@@ -36,6 +36,9 @@ export function installBotGroups(ctx, directory, getTasks) {
      try { store = new BotGroupStore(join(dirname(directory.file), 'bot-groups.sqlite')); }
      catch { scope.logger.warn('BOT_GROUP_STORAGE_UNAVAILABLE'); return; }
      const service = new BotGroupService({directory,store,getTasks,onError:() => scope.logger.warn('BOT_GROUP_BACKGROUND_ERROR')});
@@ -670,16 +672,16 @@ index 0000000..9c91645
 +}
 diff --git a/scripts/primary-bot-evidence.mjs b/scripts/primary-bot-evidence.mjs
 new file mode 100644
-index 0000000..2c5b214
+index 0000000..4378c65
 --- /dev/null
 +++ b/scripts/primary-bot-evidence.mjs
 @@ -0,0 +1,21 @@
 +import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';import assert from 'node:assert/strict';
-+const root=process.cwd(),out=path.join(root,'evidence/primary-bot'),base='9f99b1d86d52c651f414007e75f3156b384a0346',sha=b=>createHash('sha256').update(b).digest('hex');fs.mkdirSync(out,{recursive:true});
++const root=process.cwd(),out=path.join(root,'evidence/primary-bot'),base='078142a',sha=b=>createHash('sha256').update(b).digest('hex');fs.mkdirSync(out,{recursive:true});
 +const files=execFileSync('git',['diff','--name-only',base,'HEAD','--','plugins/naumi-enterprise','tests/naumi-primary-bot.test.mjs','scripts/primary-bot-ui-host.mjs','scripts/deploy-primary-bot.mjs','scripts/primary-bot-evidence.mjs','scripts/plan-bot-workspaces.mjs','tests/naumi-workspace-plan.test.mjs','docs/implementation/PRIMARY_BOT_ONBOARDING.md','docs/implementation/BOT_WORKSPACE_MIGRATION.md'],{encoding:'utf8'}).trim().split('\n').filter(Boolean);
 +// Limit scope to this slice; the integrated streaming Markdown fix belongs to main.
 +const own=files.filter(f=>!f.endsWith('/bot-chat-markdown.js')),manifest=[];
-+for(const file of own){let before=null;try{before=execFileSync('git',['show',base+':'+file],{stdio:['ignore','pipe','ignore']});}catch{}const after=fs.readFileSync(path.join(root,file));for(const[kind,bytes]of[['original',before],['modified',after]])if(bytes){const p=path.join(out,kind,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);}manifest.push({file,before:before?sha(before):null,after:sha(after)});}
++for(const file of own){let before=null;try{before=execFileSync('git',['show',base+':'+file],{stdio:['ignore','pipe','ignore']});}catch{}const after=Buffer.from(fs.readFileSync(path.join(root,file),'utf8').replaceAll('\r\n','\n'));for(const[kind,bytes]of[['original',before],['modified',after]])if(bytes){const p=path.join(out,kind,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);}manifest.push({file,before:before?sha(before):null,after:sha(after)});}
 +fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify({base,fields:['primaryBotId','primarySetup'],branch:'codex/primary-bot-onboarding',files:manifest},null,2)+'\n');
 +fs.writeFileSync(path.join(out,'DIFF_FILE.patch'),execFileSync('git',['diff','--binary',base,'HEAD','--',...own]));
 +const zip=spawnSync('python',['-c',`import pathlib,zipfile; root=pathlib.Path(r'${out}'); z=zipfile.ZipFile(root/'MODIFIED_FILE.zip','w',zipfile.ZIP_DEFLATED); [(z.write(p,p.relative_to(root/'modified').as_posix())) for p in (root/'modified').rglob('*') if p.is_file()]; z.close()`],{encoding:'utf8'});assert.equal(zip.status,0,zip.stderr);
@@ -691,7 +693,7 @@ index 0000000..2c5b214
 +const run=(name)=>{const r=spawnSync(process.execPath,args,{cwd:copy,encoding:'utf8'});fs.writeFileSync(path.join(out,name+'.log'),(r.stdout??'')+(r.stderr??''));assert.equal(r.status,0,name);console.log(name+' tests=38 pass=38 fail=0 exit=0');};run('BASELINE-COPY');
 +for(const row of manifest){const p=path.join(copy,row.file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.copyFileSync(path.join(out,'modified',row.file),p);}
 +const rollback=spawnSync('D:/DEV/Git/bin/bash.exe',[path.join(out,'ROLLBACK.sh'),copy],{cwd:root,encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK-COMMAND.log'),(rollback.stdout??'')+(rollback.stderr??''));assert.equal(rollback.status,0,rollback.stderr);process.stdout.write(rollback.stdout);run('ROLLBACK');
-+for(const row of manifest)assert.equal(sha(fs.readFileSync(path.join(root,row.file))),row.after,'SOURCE_MUST_REMAIN_MODIFIED');
++for(const row of manifest)assert.equal(sha(Buffer.from(fs.readFileSync(path.join(root,row.file),'utf8').replaceAll('\r\n','\n'))),row.after,'SOURCE_MUST_REMAIN_MODIFIED');
 +// Reopen each claimed artifact, not only its directory entry.
 +for(const p of ['MODIFIED_FILE.zip','DIFF_FILE.patch','ROLLBACK.sh','manifest.json','restore-source.mjs'])assert(fs.readFileSync(path.join(out,p)).length>0,p);
 +console.log('PRIMARY_ARTIFACTS reopened=5 modified_source=RETAINED');
