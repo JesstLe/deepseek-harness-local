@@ -20,7 +20,7 @@ export function installPathBudget(files){
 export function presentationScript(raw,engine,metadata){
  const normalized=raw.replaceAll('\r\n','\n');
  if(sha(normalized)!==metadata.originalEngineSHA256 || sha(engine)!==metadata.modifiedEngineSHA256 ||
- engine!==normalized.replace('!include "assistedInstaller.nsh"','!include "${NAUMI_WIZARD_DIR}\\pages.nsh"').replace('!include "installUtil.nsh"','!include "installUtil.nsh"\n  !include "${NAUMI_WIZARD_DIR}\\upgrade-shortcuts.nsh"'))throw Error('NSIS_PRESENTATION_SOURCE_CHANGED');
+ engine!==normalized.replace('!include "assistedInstaller.nsh"','!include "${NAUMI_WIZARD_DIR}\\pages.nsh"').replace('!include "installUtil.nsh"','!include "${NAUMI_WIZARD_DIR}\\install-util.nsh"'))throw Error('NSIS_PRESENTATION_SOURCE_CHANGED');
  return engine;
 }
 export function installPresentationHook(Target,engine,metadata){
@@ -40,6 +40,7 @@ export async function buildDesktop(args=process.argv.slice(2)){
  if(require('app-builder-lib/package.json').version!==metadata.version)throw Error('NSIS_BUILDER_VERSION_CHANGED');
  for(const arg of args)if(arg!=='--dir'&&arg!=='--reuse-packaged'&&!arg.startsWith('--output='))throw Error('UNKNOWN_BUILD_ARGUMENT '+arg);
  const output=args.find(a=>a.startsWith('--output='))?.slice('--output='.length);
+ const stockUtil=fs.readFileSync(require.resolve('app-builder-lib/templates/nsis/include/installUtil.nsh'),'utf8').replaceAll('\r\n','\n'),modifiedUtil=fs.readFileSync(path.join(dir,'install-util.nsh'),'utf8');if(sha(stockUtil)!==metadata.installUtilOriginalSHA256||sha(modifiedUtil)!==metadata.installUtilModifiedSHA256)throw Error('NSIS_SHORTCUT_POLICY_SOURCE_CHANGED');
  const callerCwd=process.cwd();
  const budget=installPathBudget(JSON.parse(fs.readFileSync(path.join(root,'runtime/desktop-backend/runtime-files.json'))));
  fs.writeFileSync(path.join(root,'runtime/installer-path-budget.nsh'),'!define NAUMI_MAX_INSTALLDIR_CHARS '+budget.maxInstallDirChars+'\n');

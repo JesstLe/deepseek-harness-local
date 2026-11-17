@@ -8,7 +8,7 @@ const sha=s=>crypto.createHash('sha256').update(s).digest('hex');
 test('pinned installer engine retains stock transactions with declared presentation and shortcut policy hooks',()=>{
  const upstream=read('desktop/node_modules/app-builder-lib/templates/nsis/installer.nsi').replaceAll('\r\n','\n');
  const engine=read('desktop/installer/engine.nsi');
- assert.equal(engine,upstream.replace('!include "assistedInstaller.nsh"','!include "${NAUMI_WIZARD_DIR}\\pages.nsh"').replace('!include "installUtil.nsh"','!include "installUtil.nsh"\n  !include "${NAUMI_WIZARD_DIR}\\upgrade-shortcuts.nsh"'));
+ assert.equal(engine,upstream.replace('!include "assistedInstaller.nsh"','!include "${NAUMI_WIZARD_DIR}\\pages.nsh"').replace('!include "installUtil.nsh"','!include "${NAUMI_WIZARD_DIR}\\install-util.nsh"'));
  const meta=JSON.parse(read('desktop/installer/UPSTREAM.json'));
  assert.equal(meta.originalEngineSHA256,sha(upstream));assert.equal(meta.modifiedEngineSHA256,sha(engine));
 });
@@ -87,3 +87,5 @@ test('presentation build hook preserves both native builder phases and restores 
  const hook=builder.slice(builder.indexOf('export function installPresentationHook'),builder.indexOf('export async function buildDesktop'));assert(!hook.includes('writeFile'));
  assert(builder.includes("path.join(root,'runtime/installer-path-budget.nsh')"));
 });
+
+test('shortcut capability policy is compiled before the stock old-uninstaller function',()=>{const original=read('desktop/node_modules/app-builder-lib/templates/nsis/include/installUtil.nsh').replaceAll('\r\n','\n'),modified=read('desktop/installer/install-util.nsh'),start=original.indexOf('!macro setIsTryToKeepShortcuts'),end=original.indexOf('!macroend',start)+'!macroend'.length,policy=read('desktop/installer/upgrade-shortcuts.nsh').replaceAll('\r\n','\n').replace('!macroundef setIsTryToKeepShortcuts\n','');assert.equal(modified,original.slice(0,start)+policy.trim()+'\n'+original.slice(end));assert(modified.indexOf('${FileExists} "$INSTDIR\\${APP_EXECUTABLE_FILENAME}"')<modified.indexOf('Function uninstallOldVersion'));});

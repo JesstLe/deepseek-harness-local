@@ -9,15 +9,17 @@ for(const [label,updated,exists,expected,fix]of (baseline?[["baseline-manual",fa
 !define APP_EXECUTABLE_FILENAME "Naumi.exe"
 !define isUpdated '${updated?1:0} == 1'
 Var isTryToKeepShortcuts
-${old}
-${fix?policy:''}
+${fix?(()=>{const v=fs.readFileSync(path.join(root,'desktop/installer/install-util.nsh'),'utf8'),i=v.indexOf('!macro setIsTryToKeepShortcuts');return v.slice(i,v.indexOf('!macroend',i)+'!macroend'.length);})():old}
 Name "Naumi shortcut capability fixture"
 OutFile "${q(exe)}"
 RequestExecutionLevel user
 SilentInstall silent
+Function ProbeCompiledPolicy
+!insertmacro setIsTryToKeepShortcuts
+FunctionEnd
 Section
 StrCpy $INSTDIR "${q(cwd)}"
-!insertmacro setIsTryToKeepShortcuts
+Call ProbeCompiledPolicy
 FileOpen $9 "${q(receipt)}" w
 FileWrite $9 "$isTryToKeepShortcuts"
 FileClose $9
