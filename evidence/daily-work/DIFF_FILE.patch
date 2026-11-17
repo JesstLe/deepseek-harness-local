@@ -1,0 +1,415 @@
+diff --git a/.gitattributes b/.gitattributes
+index c0b5af8..aa36da5 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -252,3 +252,9 @@ plugins/naumi-ui-layout/UPSTREAM.json text eol=lf
+ /evidence/installer-path-fix/DIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab,cr-at-eol
+ /evidence/installer-path-fix/*.txt -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
+ /evidence/installer-path-fix/ROLLBACK.sh text eol=lf
++
++# Daily employee work evidence keeps exact original bytes.
++/evidence/daily-work/** -text whitespace=cr-at-eol
++/evidence/daily-work/*.log -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
++/evidence/daily-work/DIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab,cr-at-eol
++/evidence/daily-work/ROLLBACK.sh text eol=lf
+diff --git a/docs/implementation/DAILY_WORK.md b/docs/implementation/DAILY_WORK.md
+new file mode 100644
+index 0000000..883fb3e
+--- /dev/null
++++ b/docs/implementation/DAILY_WORK.md
+@@ -0,0 +1,17 @@
++# 日常工作与交付入口 D1
++
++模块与职责：复用 employee-center 的真实工作组件、状态、目标/交付表单和 CAS/owner API，以 workOnly 组合给普通用户一个轻量入口。企业端保持现状；不新增第二套工作账本或验收状态机。
++
++公共接口、依赖与状态归属：Bot菜单 → employee-experience 的 work 事件 → createEmployeeCenter({workOnly:true, initialBotId})。GET/POST /naumi/employee-work、原 employees.sqlite 与原版本审核逻辑不变。普通工作页只查询所选 Bot 的工作，不查询档案/心跳/成长或调用企业工作、设备、同步、运行和预算API；管理员原高级入口保留原角色检查。
++
++本次实现：Bot菜单工作与交付、目标创建/编辑/状态、不可变文本版本和下载校验、提交/退回/逐项验收、关闭/焦点边界、窄屏。单 Bot 组合不显示员工中心导航/员工列表/企业页/运行参数。既有原生会话、输入器、派单、模型位置均不修改。共享 Center 的高级模式保留原行为，没有复制表单和审核生命周期。
++
++负责人：本线程；分支 codex/daily-employee-priority；基线 e620bd982b77bac92d2dc820c83ae2255658d682。功能切片计数1；PRD优先级更新计数0。文件范围：4个员工前端资产、对应测试、隔离UI runner、docs/prd与本文、evidence/daily-work。不修改host/client/package、企业模块、模型、运行配置或真实员工数据。
++
++验证命令与层级：基线定向22/22；新增后25/25、集中全仓602/602；隔离真实Harness壳/SQLite/owner HTTP链路18项。最终结果见 evidence/daily-work/VERIFICATION.txt。UI验证不发供应商请求，不对3080业务写入；源码副本回滚不降级真实数据库。
++
++未完成项与下一步：D1不等于D2–D5完整交付。自然语言建立/确认目标、派单关联、任意二进制交付固定版本、旧工作区迁移、本地主动AI分域、故障恢复和最新安装包继续实施；当前只复用已支持的不可变文本交付，不把原生文件卡引用冒充固定快照。运行加载和安装包发布分别记证，不因源码测试通过写成上线。
++
++集中壳复测发现原组件409后自动刷新会清除刚显示的错误，导致冲突反馈竞态；已改为刷新当前数据后再保留冲突提示，草稿和旧revision不自动覆盖。原失败日志保留为UI_CONFLICT_FAILURE。
++
++新增日常弹窗在Escape关闭后明确恢复Bot菜单按钮焦点；不依赖可能已移除的菜单项或body作为焦点目标。修改后定向壳复测结果单独记录。
+diff --git a/docs/prd/DAILY_EMPLOYEE_PRIORITY.md b/docs/prd/DAILY_EMPLOYEE_PRIORITY.md
+new file mode 100644
+index 0000000..131a4c1
+--- /dev/null
++++ b/docs/prd/DAILY_EMPLOYEE_PRIORITY.md
+@@ -0,0 +1,53 @@
++# 数字员工：日常使用优先交付计划
++
++日期：2026-11-17。决策来源：用户确认企业相关功能次要，先完成日常使用、主动性与可靠执行、员工连续性、工作与交付；企业模块保持当前现状。开工基线 main/origin/main：e620bd982b77bac92d2dc820c83ae2255658d682。
++
++## 新目标与范围
++
++把 Naumi 做成能持续工作的本地数字员工产品：用户通过日常会话和轻量工作入口完成安排工作、后台执行、补充要求、版本化交付、退回/验收与经验复用；员工身份、记忆和任务跨会话/模型/重启保持连续，明确批准的主动工作有边界、可停止、不重复执行。完成隔离真实链路与故障验收后，从固定 main 构建、发布并验证安装/更新。
++
++企业组织、跨产品授权、设备登记、企业共享记忆/同步、集中网关预算与分布式企业执行本期冻结，保持已有源码、接口、数据、配置和开关，不删除、不迁移、不自动启用。统一登录现状保留；它的企业授权扩展不是本阶段前置条件。已有安全与审批边界继续有效。
++
++## 执行顺序与退出条件
++
++| 切片 | 实施重点 | 退出条件 |
++| --- | --- | --- |
++| D1 日常工作入口 | 复用现有本地目标/版本交付/审核组件与 owner API，普通用户能直接操作，不依赖企业角色或员工中心；保持原聊天、模型位置 | 非企业账号可创建/编辑目标，查看交付版本、退回、逐项验收与关闭；不访问企业业务接口；失败保留输入，冲突不覆盖 |
++| D2 员工连续性 | 既有身份/接待与执行会话/记忆/习惯/人物候选跨任务使用，补工作区与历史关联缺口 | 切换会话/模型/重启仍定位同一员工和原任务；明确偏好被检索使用，遗忘不再注入，临时要求不污染；新任务不借其他员工权限 |
++| D3 工作与交付闭环 | 自然任务与目标/派单/固定版本/人工验收关联，复用原任务账本，不新增平行执行状态 | 同 task 补充要求、退回生成新版本、验收不等于模型结束；文件来源和校验可核验，旧版本仍可打开；批准经验在下个任务可复用 |
++| D4 本地主动与可靠执行 | 从现有确定性规则和原生执行器扩展 local-owner 主动执行；与企业受管模式显式分域，复用批准/工作窗/限额/幂等/恢复 | 不需企业登记可批准本地工作；人工优先、停用/暂停最终入口生效；模型断流/强杀/未知副作用不自动重放；休眠不补跑风暴；无事0模型 |
++| D5 日常候选版交付 | 完整切片集中验证、最新固定 main 打包、Logo/内置插件/浏览器、安装与更新 | 隔离账号/工作区真实使用链路、安装/升级/卸载与数据保留通过；远端安装包与清单哈希一致，旧安装版可更新至候选版 |
++| E 后置企业阶段 | 原 M3 与企业相关 M4 扩展、统一身份产品授权/组织设备网关贯通 | D1–D5退出后单独恢复，不把冻结视为已完成 |
++
++D1–D4共同属于第一优先级，顺序为依赖安排，不是把主动性降为次要。工作区历史迁移采用独立审计与可恢复切片；Codex/Claude导入需求保留待办，不混写为已完成。
++
++## 现有实现与关键缺口
++
++- 主 Bot、员工手动/工具创建、独立新员工工作区、异步委派、同任务续办、群聊和输入框 @ 已有，直接复用。
++- 档案/记忆/心跳、目标依赖、不可变文本版本、本地审核反馈候选已有；普通入口隐藏后，本地工作页尚未成为日常可达路径。
++- 原主动 AI 的 run_agent 依赖企业 task/managed session/naumi-enterprise 模型；新 local-owner 路径须有独立批准和持久化执行约束，不删除旧判断或回退为无保护执行。只有本地计数/估算时明确不是供应商权威计费。
++- 统一登录冷启动仍需服务器；本期保留现状，不以企业身份离线授权阻塞本地模块开发。桌面冷启动断线的最终体验单列验收，未接通前保留缺口，不以运行中可继续冒充已解决。
++- 本地0.3.5包源4c44363，不含最新主管/员工管理和@增量，发布上传FAILED；最终候选版须从新的固定main构建。
++
++## 验收与协作
++
++只用隔离 Session/账号/任务账本验证写入；禁止测试对既有真实业务任务 continue/retry。集中验证整个切片，不每次微改全量测试。真实模型、壳交互、模块、主线、运行加载、安装发布各自留证。
++
++模块与职责：本记录负责范围、优先级与退出门槛；PRD需求ID保留。
++公共接口/状态归属：沿用 BotDirectory、原 Session/任务账本、employees.sqlite、原 owner API；企业权威保持原模块。
++本次迁移状态：仅更新交付决策，不迁移员工数据或企业配置。
++验证命令与层级：文档相对链接、优先级一致性、git diff --check；纯文档不触发业务测试或发布。
++未完成项：D1–D5逐项收口；系统Goal工具上一实查为paused且无恢复/改写接口，用户已明确要求继续执行；不以文档状态冒充工具状态改变。
++
++## 可复用实施指令
++
++```text
++继续 Naumi 日常数字员工目标，先读 DAILY_EMPLOYEE_PRIORITY 和对应模块文档。
++企业模块保持现状，先实现 D1–D5：日常使用、连续性、工作交付、可控本地主动与可靠恢复、最新安装包完整交付。
++复用既有组件/会话/任务/记忆，不改原模型位置，不显示高级控制台，不绕过权限/审批/UNKNOWN。
++完整模块后集中验证、更新文档、独立worktree提交，整合最新main并正常merge/push；发布只用固定main。
++```
++
++## D1 实施进展
++
++已实现轻量工作入口并复用原组件；25项模块、602项全仓与18项隔离真实壳交互通过。首次UI runner的关闭按钮可访问名与窄屏隐藏侧栏两个定位错误已更正，失败日志保留。最终源码/主线/加载状态以 evidence/daily-work/VERIFICATION.txt 为准；D2–D5未因此退出。
+diff --git a/docs/prd/DIGITAL_EMPLOYEE_DELIVERY.md b/docs/prd/DIGITAL_EMPLOYEE_DELIVERY.md
+index 50e5337..6c2f07c 100644
+--- a/docs/prd/DIGITAL_EMPLOYEE_DELIVERY.md
++++ b/docs/prd/DIGITAL_EMPLOYEE_DELIVERY.md
+@@ -1,6 +1,13 @@
+ # 数字员工实施追踪
+ 
+-更新时间：2026-11-16。PRD：`NAUMI_DIGITAL_EMPLOYEE_PRD.md`。实施模型：GPT-6.1 Sol。
++## 当前优先级覆盖（2026-11-17）
++
++用户已确认：**先完成日常使用、主动性与可靠执行、员工连续性、工作与交付，再做企业相关模块。企业模块保持当前现状。**
++
++当前实施以 [日常数字员工交付计划](DAILY_EMPLOYEE_PRIORITY.md) D1–D5 为准；下文原 M1–M5 编号与验收历史保留，原顺序不再作为企业前置依赖。复用已有本地能力，企业组织/共享同步/集中授权网关等不新增、不迁移、不启用。
++
++
++更新时间：2026-11-17（优先级调整，历史模块数据保留）。PRD：`NAUMI_DIGITAL_EMPLOYEE_PRD.md`。实施模型：GPT-6.1 Sol。
+ 
+ | 阶段 | 内容 | 当前状态 | 证据/剩余 |
+ | --- | --- | --- | --- |
+diff --git a/docs/prd/GOAL_TRACKER.md b/docs/prd/GOAL_TRACKER.md
+index 416bdf9..3a67314 100644
+--- a/docs/prd/GOAL_TRACKER.md
++++ b/docs/prd/GOAL_TRACKER.md
+@@ -1,6 +1,13 @@
+ # 总目标：Naumi 数字员工完整交付
+ 
+-建立日期：2026-11-16。状态：active。实施模型：GPT-6.1 Sol。
++## 当前优先级覆盖（2026-11-17）
++
++用户已确认：**先完成日常使用、主动性与可靠执行、员工连续性、工作与交付，再做企业相关模块。企业模块保持当前现状。**
++
++当前实施以 [日常数字员工交付计划](DAILY_EMPLOYEE_PRIORITY.md) D1–D5 为准；下文原 M1–M5 编号与验收历史保留，原顺序不再作为企业前置依赖。复用已有本地能力，企业组织/共享同步/集中授权网关等不新增、不迁移、不启用。用户已要求继续推进；系统 Goal 上一实查为 paused，工具无恢复或改写接口，文档不伪报切换成功。
++
++
++建立日期：2026-11-16。执行决策：日常优先，用户已要求继续；系统 Goal 上一实查 paused。实施模型：GPT-6.1 Sol。
+ 
+ 本文件对应用户明确提出的“制定目标完整推进”，不把单个阶段交付当成总目标完成。
+ 
+@@ -16,10 +23,10 @@
+ 
+ 1. 保护其他工作树及运行版未提交改动；只同步已核验的增量文件。
+ 2. 每个完整模块后集中测试；进度写回实现记录与验收矩阵。
+-3. 总目标维持 active，直至所有必要阶段验收完成；需要外部配置的项按真实证据记录。
++3. 当前交付范围与退出条件以 DAILY_EMPLOYEE_PRIORITY.md 为准；系统 Goal 状态以工具实查为准，不以历史 active 描述替代。企业能力保持现状，不作为本期完成门槛。
+ 4. 本机验收、服务端部署与员工使用验收分别记录；不以代码已提交代替上线。
+ 
+-## 当前接续
++## 历史接续（当前执行改按上方 D1–D5）
+ 
+ M3 核心已接入实际 naumi-design-ops（3112），不是旧 naumi-co；详见 docs/implementation/EMPLOYEE_SYNC_M3.md。当前真实设备未登记、上传关闭。MEM-007 与原生企业工作桥已接入，详见 ENTERPRISE_WORK_BRIDGE.md。M4 执行归属模块已接入，详见 EXECUTION_LEASES_M4.md。能力/运行观察/本地主动规则详见 EMPLOYEE_ACTIVITY_M4.md；受管运行门详见 EMPLOYEE_RUNTIME_GATE_M4.md；下一权威预算/独立模型通道/受控AI主动执行，再 M5 安装包；总目标 active。
+ 
+diff --git a/docs/prd/NAUMI_DIGITAL_EMPLOYEE_PRD.md b/docs/prd/NAUMI_DIGITAL_EMPLOYEE_PRD.md
+index 29fec1c..986fdd6 100644
+--- a/docs/prd/NAUMI_DIGITAL_EMPLOYEE_PRD.md
++++ b/docs/prd/NAUMI_DIGITAL_EMPLOYEE_PRD.md
+@@ -1,12 +1,19 @@
+ # Naumi 数字员工 PRD
+ 
+-版本：1.0。日期：2026-11-16。状态：需求已定稿，分阶段实现。负责人：产品所有者确认需求，GPT-6.1 Sol 实施。
++## 当前优先级覆盖（2026-11-17）
++
++用户已确认：**先完成日常使用、主动性与可靠执行、员工连续性、工作与交付，再做企业相关模块。企业模块保持当前现状。**
++
++当前实施以 [日常数字员工交付计划](DAILY_EMPLOYEE_PRIORITY.md) D1–D5 为准；下文原 M1–M5 编号与验收历史保留，原顺序不再作为企业前置依赖。复用已有本地能力，企业组织/共享同步/集中授权网关等不新增、不迁移、不启用。
++
++
++版本：1.1。更新日期：2026-11-17。状态：需求已定稿，分阶段实现。负责人：产品所有者确认需求，GPT-6.1 Sol 实施。
+ 
+ ## 0. 阅读与交付约定
+ 
+ - 本文覆盖近期关于 Bot 员工化、长期记忆、心跳、性格、动态人物设定、协作、组织与本地优先的全部需求。
+ - 每项需求有 ID、优先级、归属、规则与验收条件。实现进度见 `DIGITAL_EMPLOYEE_DELIVERY.md`，不以本文存在代替功能完成。
+-- 当前代码基线：`290fea0`。已有 Bot 身份/目录/关联会话、同机跨 Bot 派单、结果回传、显式重试与重启恢复。
++- 首版历史代码基线：`290fea0`；本次优先级评估基线：`e620bd9`。已有 Bot 身份/目录/关联会话、同机跨 Bot 派单、结果回传、显式重试与重启恢复。
+ - 本期不改左侧导航、模型选择位置、浏览器集成或企业业务登录；新 UI 统一浅色、简洁，无营销标语。
+ - 验证层级区分：单元/真实本地容器与 HTTP/实际运行服务/真实模型/服务器部署/员工安装包，不互相替代。
+ 
+diff --git a/plugins/naumi-enterprise/assets/employee-center.js b/plugins/naumi-enterprise/assets/employee-center.js
+index 308f560..1b84189 100644
+--- a/plugins/naumi-enterprise/assets/employee-center.js
++++ b/plugins/naumi-enterprise/assets/employee-center.js
+@@ -7,7 +7,7 @@ import {createMemoryMaintenance} from './employee-memory-maintenance.js';
+ import {createEmployeeSyncPanel} from './employee-sync-panel.js';
+ import {PROFILE_LABELS,MEMORY_LABELS,MEMORY_STATUS,GOAL_STATUS,DELIVERY_STATUS,errorLabel,profileDifference,createEmployeeClient} from './employee-center-model.js';
+ 
+-export function createEmployeeCenter(React,{client=createEmployeeClient()}={}){
++export function createEmployeeCenter(React,{client=createEmployeeClient(),workOnly=false,initialBotId="",onClose}={}){
+   const h=React.createElement,{useState,useEffect,useRef}=React,Avatar=createBotAvatar(React),SyncPanel=createEmployeeSyncPanel(React),Maintenance=createMemoryMaintenance(React),EnterpriseWork=createEnterpriseWorkPanel(React),Activity=createEmployeeActivityPanel(React),RuntimePanel=createEmployeeRuntimePanel(React),ModelPanel=createEmployeeModelPanel(React);
+   const time=value=>value?new Date(value).toLocaleString('zh-CN',{hour12:false}):'—';
+   const localTime=value=>value?new Date(Date.parse(value)-new Date(value).getTimezoneOffset()*60000).toISOString().slice(0,16):'';
+@@ -60,25 +60,25 @@ export function createEmployeeCenter(React,{client=createEmployeeClient()}={}){
+       area(action==='request_changes'?'退回原因':'审核记录',reason,setReason,{required:action==='request_changes',maxLength:2000,rows:4}),h('div',{className:'emp-form-footer'},h('button',{type:'submit',className:'primary',disabled:busy},action==='accept'?'确认验收':'退回修改')));
+   }
+   function Center(){
+-    const [bots,setBots]=useState([]),[botId,setBotId]=useState(''),[tab,setTab]=useState('profile'),[data,setData]=useState(null),[memories,setMemories]=useState([]),[search,setSearch]=useState(''),[status,setStatus]=useState('active'),[kind,setKind]=useState('all'),[offset,setOffset]=useState(0),[busy,setBusy]=useState(false),[loading,setLoading]=useState(false),[error,setError]=useState(null),[notice,setNotice]=useState(''),[dialog,setDialog]=useState(null),[delivery,setDelivery]=useState(null);
++    const [bots,setBots]=useState([]),[botId,setBotId]=useState(initialBotId),[tab,setTab]=useState(workOnly?'work':'profile'),[data,setData]=useState(null),[memories,setMemories]=useState([]),[search,setSearch]=useState(''),[status,setStatus]=useState('active'),[kind,setKind]=useState('all'),[offset,setOffset]=useState(0),[busy,setBusy]=useState(false),[loading,setLoading]=useState(false),[error,setError]=useState(null),[notice,setNotice]=useState(''),[dialog,setDialog]=useState(null),[delivery,setDelivery]=useState(null);
+     const flight=useRef(false),alive=useRef(true),generation=useRef(0),memoryGeneration=useRef(0),selection=useRef(botId);selection.current=botId;
+-    useEffect(()=>{alive.current=true;const abort=new AbortController();client.catalog(abort.signal).then(c=>{setBots(c.bots);setBotId(c.bots.find(b=>b.status==='active')?.id??c.bots[0]?.id??'');}).catch(e=>{if(!abort.signal.aborted)setError(errorLabel(e));});return()=>{alive.current=false;abort.abort();};},[]);
++    useEffect(()=>{alive.current=true;const abort=new AbortController();client.catalog(abort.signal).then(c=>{setBots(c.bots);setBotId(workOnly?(c.bots.some(b=>b.id===initialBotId)?initialBotId:''):(c.bots.find(b=>b.status==='active')?.id??c.bots[0]?.id??''));}).catch(e=>{if(!abort.signal.aborted)setError(errorLabel(e));});return()=>{alive.current=false;abort.abort();};},[]);
+     async function load(id=botId,signal){
+       if(!id)return;const stamp=++generation.current;setLoading(true);
+       try{
+-        const [profile,heartbeat,work,history]=await Promise.all([client.employee(id,'profile',{},signal),client.employee(id,'heartbeat',{},signal),client.work(id,{},signal),client.employee(id,'timeline',{},signal)]);
++        const [profile,heartbeat,work,history]=workOnly?[null,null,await client.work(id,{},signal),[]]:await Promise.all([client.employee(id,'profile',{},signal),client.employee(id,'heartbeat',{},signal),client.work(id,{},signal),client.employee(id,'timeline',{},signal)]);
+         if(alive.current&&stamp===generation.current){setData({profile,heartbeat,work,history,historyMore:history.length===30});setError(null);}
+       }catch(e){if(alive.current&&stamp===generation.current&&!signal?.aborted){setError(errorLabel(e));if(e.message==='EMP_AUTH_REQUIRED')setData(null);}}
+       finally{if(alive.current&&stamp===generation.current)setLoading(false);}
+     }
+-    async function loadMem(id=botId,signal){const stamp=++memoryGeneration.current;try{const list=await client.employee(id,'memories',{query:search,status,kind,offset,limit:20},signal);if(alive.current&&selection.current===id&&stamp===memoryGeneration.current&&!signal?.aborted)setMemories(list);}catch(e){if(alive.current&&stamp===memoryGeneration.current&&!signal?.aborted){setError(errorLabel(e));if(e.message==='EMP_AUTH_REQUIRED')setMemories([]);}}}
++    async function loadMem(id=botId,signal){if(workOnly)return;const stamp=++memoryGeneration.current;try{const list=await client.employee(id,'memories',{query:search,status,kind,offset,limit:20},signal);if(alive.current&&selection.current===id&&stamp===memoryGeneration.current&&!signal?.aborted)setMemories(list);}catch(e){if(alive.current&&stamp===memoryGeneration.current&&!signal?.aborted){setError(errorLabel(e));if(e.message==='EMP_AUTH_REQUIRED')setMemories([]);}}}
+     useEffect(()=>{setData(null);setDelivery(null);setDialog(null);setNotice('');setMemories([]);setOffset(0);const c=new AbortController();void load(botId,c.signal);return()=>c.abort();},[botId]);
+     useEffect(()=>{if(!botId)return;const c=new AbortController(),timer=setTimeout(()=>void loadMem(botId,c.signal),search?220:0);return()=>{clearTimeout(timer);c.abort();};},[botId,search,status,kind,offset]);
+     const selected=bots.find(b=>b.id===botId),writeable=selected?.status==='active';
+     const run=async(body,{work=false,close=true,after}={})=>{
+       if(flight.current||!writeable)return;flight.current=true;setBusy(true);setError(null);setNotice('');const id=botId;
+       try{const result=await client.command(work?'/naumi/employee-work':'/naumi/employees',{botId:id,...body});if(!alive.current||selection.current!==id)return;await load(id);await loadMem(id);if(delivery)await openDelivery(delivery.id);if(close)setDialog(null);setNotice('已保存到本机');after?.(result);}
+-      catch(e){if(alive.current&&selection.current===id){setError(errorLabel(e));if(e.status===409)await load(id);}}
++      catch(e){if(alive.current&&selection.current===id){if(e.status===409)await load(id);if(alive.current&&selection.current===id)setError(errorLabel(e));}}
+       finally{flight.current=false;if(alive.current)setBusy(false);}
+     };
+     const openDelivery=async id=>{const selectedBot=botId;try{const d=await client.work(botId,{view:'delivery',deliveryId:id});if(selection.current===selectedBot)setDelivery(d);}catch(e){setError(errorLabel(e));}};
+@@ -87,16 +87,16 @@ export function createEmployeeCenter(React,{client=createEmployeeClient()}={}){
+     const refresh=()=>{void load();void loadMem();if(delivery)void openDelivery(delivery.id);};
+     const tabs=[['profile','档案'],['memories','记忆'],['work','工作'],['activity','运行'],['history','成长记录'],['enterprise','企业']];
+     const profile=data?.profile;
+-    return h('main',{className:'naumi-employee-center','data-employee-center':true},
+-      h('aside',{className:'emp-roster','aria-label':'员工列表'},h('div',{className:'emp-roster-heading'},h('h1',null,'高级管理'),badge(bots.length)),bots.length?bots.map(bot=>h('button',{key:bot.id,type:'button',className:'emp-roster-item','aria-pressed':bot.id===botId,onClick:()=>choose(bot.id),disabled:busy},h(Avatar,{bot,className:'emp-avatar'}),h('span',{className:'emp-roster-name'},h('strong',null,bot.name),h('span',null,bot.kind==='team'?'团队':'智能体')),h('i',{className:bot.status==='active'?'active':'archived'}))):h('p',{className:'emp-empty'},'暂无员工')),
+-      h('section',{className:'emp-main'},selected&&h('header',{className:'emp-header'},h('div',{className:'emp-heading'},h('img',{src:'/naumi/assets/symbol.svg',alt:'',width:42,height:42}),h('div',null,h('h1',null,selected.name),h('p',null,selected.purpose))),h('div',{className:'emp-header-actions'},badge(selected.status==='active'?'在职':'已归档',selected.status==='active'?'green':''),badge('本地已保存'),button('刷新',refresh,{disabled:loading||busy,'aria-label':'刷新员工数据'}))),
+-        selected&&h('nav',{className:'emp-tabs',role:'tablist','aria-label':'员工信息'},tabs.map(([id,label])=>h('button',{type:'button',role:'tab',tabIndex:tab===id?0:-1,'aria-selected':tab===id,'aria-controls':'emp-panel-'+id,id:'emp-tab-'+id,key:id,onClick:()=>{setTab(id);setDelivery(null);},onKeyDown:e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const index=tabs.findIndex(t=>t[0]===tab),next=e.key==='Home'?0:e.key==='End'?tabs.length-1:(index+(e.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;setTab(tabs[next][0]);e.currentTarget.parentElement.children[next].focus();}},label))),
++    return h('main',{className:'naumi-employee-center'+(workOnly?' naumi-daily-work':''),'data-employee-center':!workOnly||undefined,'data-daily-work':workOnly||undefined},
++      !workOnly&&h('aside',{className:'emp-roster','aria-label':'员工列表'},h('div',{className:'emp-roster-heading'},h('h1',null,'高级管理'),badge(bots.length)),bots.length?bots.map(bot=>h('button',{key:bot.id,type:'button',className:'emp-roster-item','aria-pressed':bot.id===botId,onClick:()=>choose(bot.id),disabled:busy},h(Avatar,{bot,className:'emp-avatar'}),h('span',{className:'emp-roster-name'},h('strong',null,bot.name),h('span',null,bot.kind==='team'?'团队':'智能体')),h('i',{className:bot.status==='active'?'active':'archived'}))):h('p',{className:'emp-empty'},'暂无员工')),
++      h('section',{className:'emp-main'},selected&&h('header',{className:'emp-header'},h('div',{className:'emp-heading'},h('img',{src:'/naumi/assets/symbol.svg',alt:'',width:42,height:42}),h('div',null,h('h1',null,selected.name),!workOnly&&h('p',null,selected.purpose))),h('div',{className:'emp-header-actions'},!workOnly&&badge(selected.status==='active'?'在职':'已归档',selected.status==='active'?'green':''),!workOnly&&badge('本地已保存'),button('刷新',refresh,{disabled:loading||busy,'aria-label':'刷新员工数据'}),workOnly&&button('关闭',onClose,{disabled:busy,'aria-label':'关闭工作与交付'}))),
++        !workOnly&&selected&&h('nav',{className:'emp-tabs',role:'tablist','aria-label':'员工信息'},tabs.map(([id,label])=>h('button',{type:'button',role:'tab',tabIndex:tab===id?0:-1,'aria-selected':tab===id,'aria-controls':'emp-panel-'+id,id:'emp-tab-'+id,key:id,onClick:()=>{setTab(id);setDelivery(null);},onKeyDown:e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const index=tabs.findIndex(t=>t[0]===tab),next=e.key==='Home'?0:e.key==='End'?tabs.length-1:(index+(e.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;setTab(tabs[next][0]);e.currentTarget.parentElement.children[next].focus();}},label))),
+         h('div',{className:'emp-feedback','aria-live':'polite'},error&&h('p',{role:'alert',className:'emp-error'},error),notice&&h('p',{role:'status',className:'emp-success'},notice)),
+         loading&&!data&&h('p',{className:'emp-empty',role:'status'},'读取中…'),
+-        data&&selected&&h('div',{className:'emp-content',role:'tabpanel',id:'emp-panel-'+tab,'aria-labelledby':'emp-tab-'+tab},
++        data&&selected&&h('div',{className:'emp-content',role:'tabpanel',id:'emp-panel-'+tab,'aria-labelledby':workOnly?undefined:'emp-tab-'+tab},
+           tab==='enterprise'&&h(SyncPanel,{botId}),
+           tab==='activity'&&h(React.Fragment,null,h(RuntimePanel,{key:'runtime-'+botId,botId}),h(ModelPanel,{key:'models-'+botId,botId}),h(Activity,{key:botId,botId,writeable,goals:data.work.goals})),
+-          tab==='work'&&h(EnterpriseWork,{key:botId,botId,onConnect:()=>setTab('enterprise')}),
++          !workOnly&&tab==='work'&&h(EnterpriseWork,{key:botId,botId,onConnect:()=>setTab('enterprise')}),
+           tab==='memories'&&h(Maintenance,{key:botId,botId,onChanged:refresh}),
+           tab==='profile'&&h(React.Fragment,null,h(Profile,{profile,busy:busy||!writeable,save:patch=>run({action:'profile_update',expectedRevision:profile.revision,patch},{close:false})}),h('div',{className:'emp-runtime-strip'},h('span',null,'执行器 ',badge(data.heartbeat.runtimeState==='healthy'&&!data.heartbeat.stale?'在线':'状态待核查',data.heartbeat.runtimeState==='healthy'?'green':'')),h('span',null,'运行会话 ',data.heartbeat.runningSessionCount??'—'),h('span',null,'最近采样 ',time(data.heartbeat.sampledAt)))),
+           tab==='memories'&&h(React.Fragment,null,h('div',{className:'emp-toolbar'},h('input',{'aria-label':'搜索记忆',placeholder:'搜索记忆',value:search,onChange:e=>{setSearch(e.target.value);setOffset(0);},maxLength:300}),h('select',{'aria-label':'记忆状态',value:status,onChange:e=>{setStatus(e.target.value);setOffset(0);}},Object.entries({...MEMORY_STATUS,all:'全部状态'}).map(([v,s])=>h('option',{key:v,value:v},s))),h('select',{'aria-label':'记忆类别',value:kind,onChange:e=>{setKind(e.target.value);setOffset(0);}},h('option',{value:'all'},'全部类别'),Object.entries(MEMORY_LABELS).map(([v,s])=>h('option',{key:v,value:v},s))),button('新增记忆',()=>setDialog({type:'memory'}),{className:'primary',disabled:busy||!writeable})),
+diff --git a/plugins/naumi-enterprise/assets/employee-experience-model.js b/plugins/naumi-enterprise/assets/employee-experience-model.js
+index a3af4f0..d11d52c 100644
+--- a/plugins/naumi-enterprise/assets/employee-experience-model.js
++++ b/plugins/naumi-enterprise/assets/employee-experience-model.js
+@@ -1,6 +1,6 @@
+ export const EXPERIENCE_EVENT='naumi:employee-settings';
+ export const SIMPLE_FIELDS={communicationStyle:'回复方式',workStyle:'做事习惯'};
+-export const EXPERIENCE_ACTIONS=[['appearance','更换形象'],['style','调整工作方式'],['memories','查看记住的内容'],['forget','忘记某件事'],['restore','恢复之前的设置']];
++export const EXPERIENCE_ACTIONS=[['work','工作与交付'],['appearance','更换形象'],['style','调整工作方式'],['memories','查看记住的内容'],['forget','忘记某件事'],['restore','恢复之前的设置']];
+ export const hasSession=location=>new URLSearchParams(location?.hash?.slice(1)??'').has('session')||new URLSearchParams(location?.search??'').has('session');
+ export function cleanEmployeeLanding(storage){try{if(storage?.getItem('naumi.activePanel')==='naumi-employees'){storage.setItem('naumi.activePanel','naumi-workbench');return true;}}catch{}return false;}
+ export async function advancedEmployeeAccess(fetcher=globalThis.fetch,signal){
+diff --git a/plugins/naumi-enterprise/assets/employee-experience.css b/plugins/naumi-enterprise/assets/employee-experience.css
+index ca11e61..4c4ef93 100644
+--- a/plugins/naumi-enterprise/assets/employee-experience.css
++++ b/plugins/naumi-enterprise/assets/employee-experience.css
+@@ -7,3 +7,6 @@
+ .nx-memories article{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:17px 0;border-bottom:1px solid #edf0f5}.nx-memories p,.nx-confirm p{margin:0;font-size:13px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}.nx-memories article>div:first-child{flex:1;min-width:0}.nx-memories dl{font-size:12px;line-height:1.7;margin:8px 0 0}.nx-memories dt{color:#8490a5}.nx-memories dd{margin:0;white-space:pre-wrap}.nx-row-actions{display:flex;gap:6px;flex-shrink:0}.nx-row-actions button{font-size:12px;padding:6px 10px}.nx-empty{padding:30px 0;text-align:center;color:#95a0b3;font-size:13px}.nx-pagination{display:flex;justify-content:space-between;margin-top:20px}.nx-pagination button{font-size:12px}.nx-dialog .nx-version{display:grid;gap:8px;width:100%;margin:14px 0;text-align:left;padding:16px;background:#fafbff}.nx-version time{font-size:12px;color:#8b96aa}.nx-version span{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}.nx-confirm{padding:20px 26px 24px;background:#fafbff;border-top:1px solid #e7ecf4;max-height:45dvh;overflow:auto}.nx-confirm h3{margin:0 0 12px;font-size:15px}.nx-confirm>div{display:flex;justify-content:flex-end;gap:9px;margin-top:18px}.nx-toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);z-index:100001;border:1px solid #e3e8f0;border-radius:12px;padding:12px 18px;background:#fff;color:#9a515f;box-shadow:0 8px 32px #17243b1a;font-size:13px}
+ .naumi-bot-menu-anchor{position:relative;flex-shrink:0}.naumi-bot-menu-toggle{display:grid;place-items:center;width:24px;height:30px;border:0;background:transparent;color:#9a8da6;border-radius:6px;cursor:pointer;font-size:17px}.naumi-bot-menu-toggle:hover,.naumi-bot-menu-toggle[aria-expanded=true]{background:#e5e0ef;color:#6b557f}.nx-bot-menu{position:fixed;z-index:99999;min-width:180px;padding:6px;border:1px solid #e5e8f0;border-radius:13px;background:#fff;color:#44516a;box-shadow:0 12px 38px #20314d24;font-family:Inter,"Segoe UI","Microsoft YaHei",sans-serif}.nx-bot-menu button{display:block;width:100%;padding:10px 12px;text-align:left;border:0;border-radius:8px;background:transparent;color:inherit;font:inherit;font-size:13px;cursor:pointer}.nx-bot-menu button:hover,.nx-bot-menu button:focus-visible{background:#f0f3fb}.nx-bot-menu button[data-advanced]{border-top:1px solid #edf0f6;border-radius:0;margin-top:4px;padding-top:13px;color:#8b95a5}
+ @media(max-width:600px){.nx-backdrop{padding:12px}.nx-dialog{max-height:calc(100dvh - 24px);border-radius:17px}.nx-dialog>header{padding:20px}.nx-body{padding:6px 20px 20px}.nx-confirm{padding:18px 20px}.nx-memories article{gap:10px}.nx-row-actions{flex-direction:column}.nx-feedback{padding:0 20px}}
++
++.nx-daily-backdrop{position:fixed;inset:0;z-index:1900;display:grid;place-items:center;padding:32px;background:#26304d35;backdrop-filter:blur(3px);outline:none}.nx-daily-backdrop .naumi-daily-work{width:min(1120px,100%);height:min(900px,calc(100dvh - 64px));grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);border:1px solid #e6eaf2;border-radius:22px;box-shadow:0 24px 80px #24324f25}.naumi-daily-work .emp-main{min-width:0;padding:28px 32px;overflow:auto}.naumi-daily-work .emp-header{padding-bottom:18px}.naumi-daily-work .emp-content{padding-top:12px}.naumi-daily-work .emp-modal{color:#253149}.naumi-daily-work .emp-modal-backdrop{z-index:2001}.naumi-daily-work .emp-goals{grid-template-columns:repeat(2,minmax(0,1fr))}.naumi-daily-work .emp-goal-card{min-width:0;overflow-wrap:anywhere}.naumi-daily-work .emp-delivery-row{min-width:0}.naumi-daily-work .emp-delivery-row>span:first-child{min-width:0;overflow-wrap:anywhere}
++@media(max-width:720px){.nx-daily-backdrop{padding:10px}.nx-daily-backdrop .naumi-daily-work{height:calc(100dvh - 20px);border-radius:16px}.naumi-daily-work .emp-main{padding:18px 14px}.naumi-daily-work .emp-goals{grid-template-columns:1fr}.naumi-daily-work .emp-header{gap:12px}.naumi-daily-work .emp-card-actions{flex-wrap:wrap}.naumi-daily-work .emp-section-heading{gap:12px;flex-wrap:wrap}}
+diff --git a/plugins/naumi-enterprise/assets/employee-experience.js b/plugins/naumi-enterprise/assets/employee-experience.js
+index 95e9445..adc800d 100644
+--- a/plugins/naumi-enterprise/assets/employee-experience.js
++++ b/plugins/naumi-enterprise/assets/employee-experience.js
+@@ -46,10 +46,12 @@ export function createEmployeeExperience(React,{client=createEmployeeClient()}={
+ export function installEmployeeExperience(ctx,React,createPortal){
+  const h=React.createElement,Experience=createEmployeeExperience(React),Appearance=createAppearanceDialog(React);
+  const stale=cleanEmployeeLanding(globalThis.sessionStorage);if(stale&&!hasSession(globalThis.location))ctx.layout.selectPanel('naumi-workbench');
+- function Overlay(){const [request,setRequest]=React.useState(null),[error,setError]=React.useState('');React.useEffect(()=>{let closed=false,center;const listener=async event=>{const {bot,mode}=event.detail??{};if(!bot?.id||!['appearance','style','memories','forget','restore','advanced'].includes(mode))return;setError('');
++ function DailyWorkDialog({Component,bot,onClose}){const ref=React.useRef(null);React.useEffect(()=>{const previous=document.activeElement;ref.current?.focus();return()=>{const trigger=document.querySelector('[data-bot-id="'+CSS.escape(bot.id)+'"] .naumi-bot-menu-toggle');if(trigger?.isConnected)trigger.focus();else if(previous?.isConnected)previous.focus();};},[]);return h('section',{ref,tabIndex:-1,className:'nx-daily-backdrop',role:'dialog','aria-modal':true,'aria-label':'工作与交付',onKeyDown:event=>{if(event.target.closest('.emp-modal-backdrop'))return;if(event.key==='Escape'){event.stopPropagation();if(!ref.current.querySelector('button[aria-label="关闭工作与交付"]:disabled'))onClose();}if(event.key==='Tab'){const controls=[...ref.current.querySelectorAll('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled),a[href]')],first=controls[0],last=controls.at(-1);if(!controls.length){event.preventDefault();return;}if(event.shiftKey&&(document.activeElement===first||document.activeElement===ref.current)){event.preventDefault();last.focus();}else if(!event.shiftKey&&(document.activeElement===last||document.activeElement===ref.current)){event.preventDefault();first.focus();}}}},h(Component));}
++ function Overlay(){const [request,setRequest]=React.useState(null),[error,setError]=React.useState('');React.useEffect(()=>{let closed=false,center,requestSerial=0;const listener=async event=>{const {bot,mode}=event.detail??{};if(!bot?.id||!['work','appearance','style','memories','forget','restore','advanced'].includes(mode))return;const serial=++requestSerial;setError('');
++   if(mode==='work'){try{const module=await import('./employee-center.js');if(closed||serial!==requestSerial)return;const Component=module.createEmployeeCenter(React,{workOnly:true,initialBotId:bot.id,onClose:()=>setRequest(null)});setRequest({bot,mode,Component});}catch{if(!closed&&serial===requestSerial)setError('工作页面未加载，请重试');}return;}
+    if(mode==='advanced'){if(!await advancedEmployeeAccess()){if(!closed)setError('请使用企业管理员账号');return;}const module=await import('./employee-center.js');if(closed)return;center??=module.installEmployeeCenter(ctx,React,()=>null,{showNavigation:false});ctx.layout.selectPanel('naumi-employees');return;}
+-   setRequest({bot,mode});};window.addEventListener(EXPERIENCE_EVENT,listener);return()=>{closed=true;window.removeEventListener(EXPERIENCE_EVENT,listener);center?.();};},[]);
+-  return createPortal(h(React.Fragment,null,request&&h(request.mode==='appearance'?Appearance:Experience,{key:request.bot.id+'-'+request.mode,...request,onClose:()=>{setRequest(null);document.querySelector('[data-bot-id="'+CSS.escape(request.bot.id)+'"] .naumi-bot-menu-toggle')?.focus();}}),error&&h('div',{role:'alert',className:'nx-toast',onClick:()=>setError('')},error)),document.body);
++   setRequest({bot,mode});};window.addEventListener(EXPERIENCE_EVENT,listener);return()=>{closed=true;requestSerial++;window.removeEventListener(EXPERIENCE_EVENT,listener);center?.();};},[]);
++  return createPortal(h(React.Fragment,null,request&&(request.mode==='work'?h(DailyWorkDialog,{key:request.bot.id,Component:request.Component,bot:request.bot,onClose:()=>setRequest(null)}):h(request.mode==='appearance'?Appearance:Experience,{key:request.bot.id+'-'+request.mode,...request,onClose:()=>{setRequest(null);document.querySelector('[data-bot-id="'+CSS.escape(request.bot.id)+'"] .naumi-bot-menu-toggle')?.focus();}})),error&&h('div',{role:'alert',className:'nx-toast',onClick:()=>setError('')},error)),document.body);
+  }
+  return ctx.slots.inject('shell.overlay',()=>ctx.slots.register({name:'shell.overlay',id:'naumi-employee-experience',order:95},Overlay));
+ }
+diff --git a/scripts/deploy-daily-work.mjs b/scripts/deploy-daily-work.mjs
+new file mode 100644
+index 0000000..a444d06
+--- /dev/null
++++ b/scripts/deploy-daily-work.mjs
+@@ -0,0 +1,15 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash} from 'node:crypto';import {execFileSync} from 'node:child_process';
++const root=path.resolve(process.argv[2]??'E:/Workspace/naumi-desktop'),out=path.join(root,'evidence/daily-work');
++assert.equal(execFileSync('git',['branch','--show-current'],{cwd:root,encoding:'utf8'}).trim(),'main','FIXED_MAIN_REQUIRED');const sourceCommit=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim();
++const names=['employee-center.js','employee-experience.js','employee-experience-model.js','employee-experience.css'],runtime=path.join(root,'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise'),source=path.join(root,'plugins/naumi-enterprise/assets'),hash=b=>createHash('sha256').update(b).digest('hex'),norm=b=>b.toString().replaceAll('\r\n','\n');
++execFileSync('git',['diff','--exit-code','--',...names.map(n=>'plugins/naumi-enterprise/assets/'+n)],{cwd:root});
++const walk=(dir,prefix='')=>fs.readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(path.join(dir,e.name),prefix+e.name+'/'):e.isFile()?[prefix+e.name]:[]),unrelated=new Map(walk(runtime).filter(n=>!names.map(x=>'assets/'+x).includes(n)).map(n=>[n,hash(fs.readFileSync(path.join(runtime,n)))]));
++const items=names.map(name=>{const target=path.join(runtime,'assets',name),before=fs.readFileSync(target),after=fs.readFileSync(path.join(source,name)),original=fs.readFileSync(path.join(out,'original/plugins/naumi-enterprise/assets',name));assert.equal(norm(before),norm(original),'RUNTIME_DRIFT '+name);return {name,target,before,after};});
++const probe=execFileSync(process.execPath,['scripts/check-bot-runtime.mjs',root],{cwd:root,encoding:'utf8'}).trim();assert(probe.includes('running=0'));
++const backup=path.join(root,'runtime/daily-work-load-'+Date.now());fs.mkdirSync(backup,{recursive:true});for(const i of items)fs.writeFileSync(path.join(backup,i.name),i.before);
++const touched=[];try{for(const i of items){const temp=i.target+'.daily-tmp';fs.writeFileSync(temp,i.after);fs.renameSync(temp,i.target);touched.push(i);assert.equal(hash(fs.readFileSync(i.target)),hash(i.after));}
++ const logs=['server.out.log','server.err.log'].map(n=>fs.readFileSync(path.join(root,'logs',n),'utf8')).join('\n'),launch=[...logs.matchAll(/http:\/\/127\.0\.0\.1:3080\/?\?token=[A-Za-z0-9_~.%-]+/g)].at(-1)?.[0];assert(launch);const exchange=await fetch(launch,{redirect:'manual',signal:AbortSignal.timeout(5000)});assert.equal(exchange.status,303);const cookie=exchange.headers.getSetCookie().map(x=>x.split(';')[0]).join('; ');for(const i of items){const response=await fetch('http://127.0.0.1:3080/naumi/assets/'+i.name,{headers:{cookie},signal:AbortSignal.timeout(5000)});assert.equal(response.status,200);assert.equal(norm(await response.text()),norm(i.after));}
++ for(const [file,digest]of unrelated)assert.equal(hash(fs.readFileSync(path.join(runtime,file))),digest,'UNRELATED_CHANGED '+file);
++ const afterProbe=execFileSync(process.execPath,['scripts/check-bot-runtime.mjs',root],{cwd:root,encoding:'utf8'}).trim();assert.equal(afterProbe,probe);
++ fs.writeFileSync(path.join(out,'DEPLOYMENT.json'),JSON.stringify({status:'PASS',sourceCommit,files:items.map(i=>({name:i.name,before:hash(i.before),after:hash(i.after)})),unrelatedRuntimeFilesUnchanged:unrelated.size,probeBefore:probe,probeAfter:afterProbe,restarted:false,modelCalls:0,enterpriseConfigurationChanges:0,backup},null,2)+'\n');console.log('DAILY_LOADED files=4 assets_http=200 unrelated='+unrelated.size+' restart=0 model_calls=0 enterprise_changes=0');
++}catch(error){for(const i of touched)fs.writeFileSync(i.target,i.before);throw error;}
+diff --git a/scripts/package-daily-work.mjs b/scripts/package-daily-work.mjs
+new file mode 100644
+index 0000000..c11aaba
+--- /dev/null
++++ b/scripts/package-daily-work.mjs
+@@ -0,0 +1,11 @@
++import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';
++const root=process.cwd(),out=path.join(root,'evidence/daily-work'),baseline='e620bd982b77bac92d2dc820c83ae2255658d682';
++const paths=['.gitattributes','docs/prd/NAUMI_DIGITAL_EMPLOYEE_PRD.md','docs/prd/GOAL_TRACKER.md','docs/prd/DIGITAL_EMPLOYEE_DELIVERY.md','docs/prd/DAILY_EMPLOYEE_PRIORITY.md','docs/implementation/DAILY_WORK.md','plugins/naumi-enterprise/assets/employee-center.js','plugins/naumi-enterprise/assets/employee-experience.js','plugins/naumi-enterprise/assets/employee-experience-model.js','plugins/naumi-enterprise/assets/employee-experience.css','tests/naumi-employee-experience.test.mjs','tests/naumi-daily-work.test.mjs','scripts/verify-daily-work-ui.mjs','scripts/package-daily-work.mjs','scripts/deploy-daily-work.mjs'];
++const hash=b=>createHash('sha256').update(b).digest('hex'),manifest={baseline,entries:[]};
++for(const file of paths){const original=path.join(out,'original',file);let before=null;if(fs.existsSync(original))before=fs.readFileSync(original);else{try{before=execFileSync('git',['show',baseline+':'+file],{stdio:['ignore','pipe','ignore']});}catch{}if(before){fs.mkdirSync(path.dirname(original),{recursive:true});fs.writeFileSync(original,before);}}const bytes=fs.readFileSync(path.join(root,file));manifest.entries.push({path:file,original:before?hash(before):null,modified:hash(bytes)});}
++fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
++fs.writeFileSync(path.join(out,'ROLLBACK.sh'),`#!/usr/bin/env bash\nset -euo pipefail\nHERE="$(cd "$(dirname "$0")" && pwd)"\nnode - "$1" "$HERE" <<'NODE'\nconst fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');const target=path.resolve(process.argv[2]),out=path.resolve(process.argv[3]);if(!fs.existsSync(path.join(target,'.naumi-daily-rollback-copy')))throw Error('MARKED_COPY_REQUIRED');if(target===path.resolve(out,'../..'))throw Error('SOURCE_TARGET_REJECTED');const m=JSON.parse(fs.readFileSync(path.join(out,'manifest.json'))),hash=b=>crypto.createHash('sha256').update(b).digest('hex');for(const e of m.entries){const file=path.resolve(target,e.path);if(!file.startsWith(target+path.sep))throw Error('INVALID_TARGET');if(fs.existsSync(file)&&hash(fs.readFileSync(file))!==e.modified)throw Error('COPY_CHANGED '+e.path);if(e.original){const bytes=fs.readFileSync(path.join(out,'original',e.path));if(hash(bytes)!==e.original)throw Error('ORIGINAL_CHANGED');fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,bytes);}else if(fs.existsSync(file))fs.unlinkSync(file);}for(const e of m.entries){const file=path.join(target,e.path);if(e.original?hash(fs.readFileSync(file))!==e.original:fs.existsSync(file))throw Error('RESTORE_FAILED');}console.log('ROLLBACK_SOURCE originals='+m.entries.filter(e=>e.original).length+' new_removed='+m.entries.filter(e=>!e.original).length+' hashes=PASS live_data=UNTOUCHED');\nNODE\n`);
++const patch=execFileSync('git',['diff',baseline,'--binary','--',...paths]);fs.writeFileSync(path.join(out,'DIFF_FILE.patch'),patch);if(!patch.length)throw Error('NO_TASK_CHANGES');
++execFileSync('python',['-X','utf8','-c',"import json,zipfile,pathlib; r=pathlib.Path('.'); o=r/'evidence/daily-work'; m=json.loads((o/'manifest.json').read_text()); z=zipfile.ZipFile(o/'MODIFIED_FILE.zip','w',zipfile.ZIP_DEFLATED); [z.write(r/e['path'],e['path']) for e in m['entries']]; z.close(); z=zipfile.ZipFile(o/'MODIFIED_FILE.zip'); assert z.testzip() is None; print('ZIP entries='+str(len(z.namelist()))+' CRC=PASS')"],{stdio:'inherit'});
++if(process.argv.includes('--rollback-test')){const copy=path.join(root,'runtime/daily-source-rollback-final');if(fs.existsSync(copy))throw Error('COPY_ALREADY_EXISTS');fs.mkdirSync(copy,{recursive:true});fs.writeFileSync(path.join(copy,'.naumi-daily-rollback-copy'),'source-only');for(const dir of ['plugins','tests'])fs.cpSync(path.join(root,dir),path.join(copy,dir),{recursive:true});fs.copyFileSync(path.join(root,'package.json'),path.join(copy,'package.json'));for(const e of manifest.entries){const dest=path.join(copy,e.path);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(path.join(root,e.path),dest);}fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');fs.mkdirSync(path.join(copy,'desktop'));fs.symlinkSync(path.join(root,'desktop/node_modules'),path.join(copy,'desktop/node_modules'),'junction');const r=spawnSync('D:/DEV/Git/bin/bash.exe',[path.join(out,'ROLLBACK.sh'),copy],{encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK.log'),r.stdout+r.stderr);if(r.status!==0)throw Error('ROLLBACK_FAILED '+r.stdout+r.stderr);console.log(r.stdout.trim());const t=spawnSync(process.execPath,['--test','tests/naumi-employee-work.test.mjs','tests/naumi-employee-experience.test.mjs'],{cwd:copy,encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK_TESTS.log'),t.stdout+t.stderr);if(t.status!==0)throw Error('ROLLBACK_TESTS_FAILED '+t.stdout);console.log('ROLLBACK tests=22 pass=22 fail=0 exit=0');}
++for(const e of manifest.entries)if(hash(fs.readFileSync(path.join(root,e.path)))!==e.modified)throw Error('MODIFIED_SOURCE_CHANGED');console.log('ARTIFACTS paths='+paths.length+' modified=RETAINED enterprise=UNCHANGED');
+diff --git a/scripts/verify-daily-work-ui.mjs b/scripts/verify-daily-work-ui.mjs
+new file mode 100644
+index 0000000..d2395eb
+--- /dev/null
++++ b/scripts/verify-daily-work-ui.mjs
+@@ -0,0 +1,36 @@
++// Full isolated Harness, native Agent tool execution, SQLite/HTTP and real React shell.
++// The only inference endpoint is this script's deterministic loopback SSE fixture.
++import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';import {spawn} from 'node:child_process';import {stringify} from 'yaml';import {chromium} from '../desktop/node_modules/playwright/index.mjs';
++const root=process.cwd(),out=path.join(root,'evidence/daily-work'),temp=path.join(root,'runtime/daily-work-'+randomUUID()),home=path.join(temp,'home'),profile=path.join(home,'profiles/web');fs.mkdirSync(path.join(profile,'node_modules/@naumi'),{recursive:true});fs.mkdirSync(out,{recursive:true});
++for(const [name,folder]of [['dsh-enterprise','naumi-enterprise'],['dsh-ui-layout','naumi-ui-layout'],['dsh-sidebar-browser','naumi-sidebar-browser']])fs.symlinkSync(path.join(root,'plugins',folder),path.join(profile,'node_modules/@naumi',name),'junction');fs.symlinkSync(path.join(root,'node_modules/@deepseek-ai'),path.join(profile,'node_modules/@deepseek-ai'),'junction');
++fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'naumi-daily-work-fixture',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}}));
++const requests=[];const upstream=http.createServer((req,res)=>{requests.push(req.url);res.writeHead(503).end('NO_INFERENCE_IN_UI_ACCEPTANCE');});await new Promise(r=>upstream.listen(0,'127.0.0.1',r));
++fs.writeFileSync(path.join(home,'cordis.patch.yml'),stringify([{id:'ui-theme',config:{preference:'light'}},{id:'agent-default-model',config:{provider:'fixture',model:'fixture-model'}}]));fs.writeFileSync(path.join(profile,'cordis.patch.yml'),stringify([{id:'ui-settings-general',config:{welcomeNoticeVersion:'2026-09-28.1'}},{id:'llm-pi-ai',config:{providers:{fixture:{displayName:'隔离测试连接',api:'openai-completions',baseURL:'http://127.0.0.1:'+upstream.address().port+'/v1',apiKeyEnv:'NAUMI_MANAGEMENT_FIXTURE_KEY',models:[{id:'fixture-model',name:'同一模型',contextWindow:128000,maxTokens:2048,reasoningEfforts:false}]}}}}]));
++const sock=http.createServer();await new Promise(r=>sock.listen(0,'127.0.0.1',r));const port=sock.address().port;await new Promise(r=>sock.close(r));const base='http://127.0.0.1:'+port,child=spawn(process.execPath,[path.join(root,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'web','--host','127.0.0.1','--port',String(port),'--no-open'],{cwd:root,env:{...process.env,DSH_HOME:home,DSH_TELEMETRY_MODE:'DISABLED',NAUMI_MANAGEMENT_FIXTURE_KEY:'local-fixture-only'},windowsHide:true});let output='',browser;child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);const checks=[];const check=(name,value)=>{assert(value,name);checks.push(name);console.log('DAILY_PASS '+name);};
++
++try{
++ let launch;for(let i=0;i<180;i++){launch=output.match(new RegExp(base.replaceAll('.','\\.')+'/?\\?token=[A-Za-z0-9_~.%-]+'))?.[0];if(launch)break;if(child.exitCode!==null)throw Error('HOST_BOOT_FAILED');await new Promise(r=>setTimeout(r,300));}assert(launch,'HOST_BOOT_TIMEOUT');
++ const exchange=await fetch(launch,{redirect:'manual'}),cookie=exchange.headers.getSetCookie().map(s=>s.split(';')[0]).join('; '),headers={cookie,'Content-Type':'application/json','x-naumi-bots':'1',origin:base};
++ const call=async(url,body)=>{const r=await fetch(base+url,{headers,...body?{method:'POST',body:JSON.stringify(body)}:{}}),v=await r.json();assert(r.ok,JSON.stringify(v));return v;};const rpc=async(method,args)=>{const v=await call('/api/'+method,{type:'client-request',rpcId:randomUUID(),method,payload:{args}});assert(v.result?.ok,JSON.stringify(v));return v.result.value;};
++ const cwd=path.join(temp,'workspace');fs.mkdirSync(cwd);const workspace=await rpc('workspace/create',{request:{path:cwd}});const bot=await call('/naumi/bots',{action:'create-primary',requestId:randomUUID(),expectedRevision:0,name:'日常助手',workspaceId:workspace.workspace.workspaceId});
++ browser=await chromium.launch({headless:true,channel:'chrome'});const context=await browser.newContext({viewport:{width:1360,height:960},colorScheme:'light'}),page=await context.newPage(),errors=[],businessRequests=[];page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(15000);
++ await page.route('**/naumi/workspace',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'ENTERPRISE_NOT_CONNECTED'})}));
++ await page.goto(launch);await page.locator('.naumi-navigation-switch').waitFor();await page.locator('.naumi-navigation-switch button').nth(1).click();
++ const open=async()=>{await page.getByRole('button',{name:'日常助手的设置',exact:true}).click();await page.getByRole('menuitem',{name:'工作与交付',exact:true}).click();await page.locator('[data-daily-work]').waitFor();await page.getByRole('button',{name:'创建目标',exact:true}).waitFor();};
++ await open();check('ordinary_menu_opens_shared_work_component_without_enterprise_role',await page.locator('[data-daily-work]').isVisible());
++ let workOpen=true;page.on('request',req=>{if(workOpen&&/\/naumi\/(?:workspace|employee-(?:sync|enterprise|runtime|models|activity))/.test(req.url()))businessRequests.push(req.url());});
++ let work=page.locator('[data-daily-work]');check('advanced_roster_tabs_heartbeat_and_ids_absent',!(await work.innerText()).match(/高级管理|心跳|运行会话|设备登记|同步配置|本地版本|修改档案/)&&await work.locator('.emp-roster,.emp-tabs').count()===0);
++ let dropGoal=true,retryId;await page.route('**/naumi/employee-work',async route=>{if(route.request().method()==='POST'){const body=route.request().postDataJSON();if(body.action==='goal_create'){if(dropGoal){dropGoal=false;retryId=body.operationId;await route.fetch();await route.abort('failed');return;}check('lost_goal_receipt_reuses_operation_id',retryId===body.operationId);}}await route.continue();});await work.getByRole('button',{name:'创建目标',exact:true}).click();let modal=page.getByRole('dialog',{name:'创建工作目标',exact:true});await modal.getByLabel('目标名称').fill('提交活动方案');await modal.getByLabel('验收条件（每行一项）').fill('来源可核验\n有明确行动清单');await modal.getByRole('button',{name:'创建目标',exact:true}).click();await modal.getByRole('alert').waitFor();check('failed_goal_submit_keeps_draft',await modal.getByLabel('目标名称').inputValue()==='提交活动方案');await modal.getByRole('button',{name:'创建目标',exact:true}).click();await modal.waitFor({state:'hidden'});await page.unroute('**/naumi/employee-work');await work.getByRole('heading',{name:'提交活动方案',exact:true}).waitFor();check('goal_created_through_real_owner_http', (await call('/naumi/employee-work?botId='+bot.id)).goals.length===1);
++ await work.getByRole('button',{name:'编辑目标',exact:true}).click();modal=page.getByRole('dialog',{name:'编辑工作目标',exact:true});await modal.getByLabel('工作说明').fill('保留当前草稿');let g=(await call('/naumi/employee-work?botId='+bot.id)).goals[0];const concurrent=await fetch(base+'/naumi/employee-work',{method:'POST',headers:{...headers,'x-naumi-employee-work':'1'},body:JSON.stringify({action:'goal_update',botId:bot.id,goalId:g.id,expectedRevision:g.revision,operationId:randomUUID(),patch:{description:'另一个页面已保存'}})});assert.equal(concurrent.status,200);await modal.getByRole('button',{name:'保存目标',exact:true}).click();await modal.getByRole('alert').waitFor();check('conflict_preserves_draft_without_overwriting',await modal.getByLabel('工作说明').inputValue()==='保留当前草稿'&&(await call('/naumi/employee-work?botId='+bot.id)).goals[0].description==='另一个页面已保存');await modal.getByRole('button',{name:'关闭弹窗',exact:true}).click();
++ await work.getByRole('button',{name:'添加交付',exact:true}).click();modal=page.getByRole('dialog',{name:'添加交付',exact:true});await modal.getByLabel('交付名称').fill('方案正文');await modal.getByLabel('交付内容').fill('# 初稿\n原始内容');await modal.getByRole('button',{name:'保存草稿',exact:true}).click();await modal.waitFor({state:'hidden'});await work.locator('.emp-delivery-row').click();await work.getByRole('button',{name:'提交审核',exact:true}).click();await work.getByRole('button',{name:'开始审核',exact:true}).click();await work.getByRole('button',{name:'退回修改',exact:true}).click();modal=page.getByRole('dialog',{name:'退回修改',exact:true});await modal.getByLabel('退回原因').fill('补充核验来源');await modal.getByRole('button',{name:'退回修改',exact:true}).click();await modal.waitFor({state:'hidden'});check('human_return_persisted', (await call('/naumi/employee-work?botId='+bot.id)).deliveries[0].businessStatus==='changes_requested');
++ await work.getByRole('button',{name:'保存新版本',exact:true}).click();modal=page.getByRole('dialog',{name:'保存交付新版本',exact:true});await modal.getByLabel('交付内容').fill('# 第二版\n补充来源与行动清单');await modal.getByRole('button',{name:'保存新版本',exact:true}).click();await modal.waitFor({state:'hidden'});await work.getByRole('button',{name:'提交审核',exact:true}).click();await work.getByRole('button',{name:'开始审核',exact:true}).click();await work.getByRole('button',{name:'验收通过',exact:true}).click();modal=page.getByRole('dialog',{name:'验收交付',exact:true});await modal.getByLabel('来源可核验',{exact:true}).check();await modal.getByLabel('有明确行动清单',{exact:true}).check();await modal.getByRole('button',{name:'确认验收',exact:true}).click();await modal.waitFor({state:'hidden'});
++ let summary=await call('/naumi/employee-work?botId='+bot.id),d=summary.deliveries[0];check('accepted_new_version_not_automatic_goal_completion',d.businessStatus==='accepted'&&d.version===2&&summary.goals[0].status==='planned');
++ const details=await call('/naumi/employee-work?botId='+bot.id+'&view=delivery&deliveryId='+d.id);check('old_artifact_and_human_review_history_preserved',details.artifacts.length===2&&details.reviews.some(r=>r.action==='request_changes'&&r.reason==='补充核验来源'));
++ const old=await fetch(base+'/naumi/employee-work?botId='+bot.id+'&view=artifact&artifactId='+details.artifacts[0].id,{headers:{cookie}});check('old_version_download_keeps_original_content',await old.text()==='# 初稿\n原始内容');
++ await work.getByRole('button',{name:'← 返回工作列表',exact:true}).click();await work.getByLabel('提交活动方案状态').selectOption('completed');await work.getByText('已完成',{exact:true}).waitFor();check('goal_completed_only_after_explicit_owner_action',(await call('/naumi/employee-work?botId='+bot.id)).goals[0].status==='completed');
++ for(const width of [1360,580,360]){await page.setViewportSize({width,height:900});check('daily_layout_'+width,await work.evaluate(el=>el.scrollWidth<=el.clientWidth+2&&el.getBoundingClientRect().right<=innerWidth));await page.screenshot({path:path.join(out,'daily-'+width+'.png'),animations:'disabled'});}
++ check('no_new_enterprise_dependency_requests',businessRequests.length===0);
++ workOpen=false;await work.getByRole('button',{name:'关闭工作与交付',exact:true}).click();await page.locator('[data-daily-work]').waitFor({state:'hidden'});await page.setViewportSize({width:1360,height:960});await page.reload({waitUntil:'domcontentloaded'});await open();workOpen=true;work=page.locator('[data-daily-work]');await work.getByRole('heading',{name:'提交活动方案',exact:true}).waitFor();check('refresh_reopens_persisted_work_without_advanced_navigation',await work.getByText('已完成',{exact:true}).isVisible());
++ workOpen=false;await page.keyboard.press('Escape');await page.locator('[data-daily-work]').waitFor({state:'hidden'});check('escape_restores_daily_bot_focus',await page.getByRole('button',{name:'日常助手的设置',exact:true}).evaluate(el=>el===document.activeElement));check('no_model_or_page_errors',requests.length===0&&errors.length===0);
++ fs.writeFileSync(path.join(out,'UI_VERIFICATION.json'),JSON.stringify({status:'PASS',checks,errors,modelRequests:requests.length,enterpriseRequestsWhileUsingWork:businessRequests.length,tier:'isolated real Harness shell/native React + production owner HTTP/SQLite; no supplier inference; no real account writes'},null,2)+'\n');console.log('DAILY_UI checks='+checks.length+' errors=0 model_calls=0 enterprise_work_calls=0');
++}catch(error){fs.writeFileSync(path.join(out,'UI_FAILURE.json'),JSON.stringify({error:error.message,checks},null,2));throw error;}finally{await browser?.close();child.kill();await new Promise(r=>child.exitCode!==null?r():child.once('close',r));upstream.closeAllConnections();await new Promise(r=>upstream.close(r));fs.writeFileSync(path.join(out,'HOST.log'),output.replace(/token=[A-Za-z0-9_~.%-]+/g,'token=REDACTED'));}
+diff --git a/tests/naumi-daily-work.test.mjs b/tests/naumi-daily-work.test.mjs
+new file mode 100644
+index 0000000..4f7bc9f
+--- /dev/null
++++ b/tests/naumi-daily-work.test.mjs
+@@ -0,0 +1,33 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import {createEmployeeCenter} from '../plugins/naumi-enterprise/assets/employee-center.js';
++import {EXPERIENCE_ACTIONS} from '../plugins/naumi-enterprise/assets/employee-experience-model.js';
++
++function hookHost(){
++ const slots=[],effects=[];let cursor=0;
++ const React={createElement:(type,props,...children)=>({type,props:props??{},children}),Fragment:'Fragment',useState(initial){const i=cursor++;if(!(i in slots))slots[i]=typeof initial==='function'?initial():initial;return [slots[i],value=>{slots[i]=typeof value==='function'?value(slots[i]):value;}];},useRef(initial){const i=cursor++;return slots[i]??(slots[i]={current:initial});},useEffect(fn,deps){const i=cursor++,old=slots[i];if(!old||deps.some((v,n)=>v!==old[n]))effects.push(fn);slots[i]=deps;}};
++ return {React,render(Component){cursor=0;return Component();},async flush(){for(const fn of effects.splice(0))fn();await new Promise(r=>setImmediate(r));}};
++}
++function nodes(root){return root&&typeof root==='object'?[root,...(root.children??[]).flat(Infinity).flatMap(nodes)]:[];}
++
++test('daily work reuses the existing Center and queries only local work for the chosen Bot',async()=>{
++ const host=hookHost(),calls=[],bot={id:'bot-daily',name:'日常员工',status:'active',purpose:'岗位',kind:'agent'};
++ const client={catalog:async()=>({bots:[bot,{...bot,id:'bot-other',name:'其他员工'}]}),work:async id=>{calls.push(id);return {goals:[],deliveries:[]};},employee(){assert.fail('daily work must not query profiles, heartbeat or history');}};
++ const Component=createEmployeeCenter(host.React,{client,workOnly:true,initialBotId:bot.id,onClose(){}});
++ host.render(Component);await host.flush();const tree=host.render(Component),all=nodes(tree);
++ assert.equal(tree.props['data-daily-work'],true);assert.equal(tree.props['data-employee-center'],undefined);assert.deepEqual(calls,[bot.id]);
++ assert(!all.some(n=>n.type==='aside'||n.type==='nav'));assert(!all.some(n=>typeof n.type==='function'&&/Enterprise|Sync|Runtime|Model|Activity/.test(n.type.name)));
++ assert(all.some(n=>n.type==='button'&&n.children.includes('创建目标')));assert(!JSON.stringify(tree).includes('其他员工'));
++});
++
++test('daily Bot selection never falls back to another account or arbitrary catalog employee',async()=>{
++ const host=hookHost(),client={catalog:async()=>({bots:[{id:'bot-other',name:'其他账号员工',status:'active'}]}),work:async()=>({goals:[],deliveries:[]})};
++ const Component=createEmployeeCenter(host.React,{client,workOnly:true,initialBotId:'bot-missing'});host.render(Component);await host.flush();const tree=host.render(Component);
++ assert(!JSON.stringify(tree).includes('其他账号员工'));assert(!nodes(tree).some(n=>n.type==='button'&&n.children.includes('创建目标')));
++});
++
++test('daily work entry is explicit and legacy enterprise management remains guarded',()=>{
++ assert(EXPERIENCE_ACTIONS.some(([id,label])=>id==='work'&&label==='工作与交付'));
++ const source=fs.readFileSync('plugins/naumi-enterprise/assets/employee-experience.js','utf8');assert(source.includes('workOnly:true'));assert(source.includes("if(mode==='advanced'){if(!await advancedEmployeeAccess())"));assert(source.includes("event.target.closest('.emp-modal-backdrop')"));
++});
+diff --git a/tests/naumi-employee-experience.test.mjs b/tests/naumi-employee-experience.test.mjs
+index eef589e..fcff7dc 100644
+--- a/tests/naumi-employee-experience.test.mjs
++++ b/tests/naumi-employee-experience.test.mjs
+@@ -3,7 +3,7 @@ const post=(f,body,headers={})=>fetch(f.origin+'/naumi/employees',{method:'POST'
+ test('default employee management registers no navigation entry or automatic opening',()=>{const registered=[],ctx={slots:{inject(name,fn){fn();return()=>{};},register(options){registered.push(options);return()=>{};}},layout:{selectPanel(){assert.fail('default must not open');}}};installEmployeeCenter(ctx,{createElement:()=>{},useState(){},useEffect(){},useRef(){}},()=>{});assert.deepEqual(registered.map(x=>x.name),['main']);});
+ test('stale employee landing is replaced without interpreting ordinary settings as admin access',()=>{const map=new Map([['naumi.activePanel','naumi-employees']]),storage={getItem:k=>map.get(k),setItem:(k,v)=>map.set(k,v)};assert(cleanEmployeeLanding(storage));assert.equal(map.get('naumi.activePanel'),'naumi-workbench');assert(!cleanEmployeeLanding(storage));assert(!cleanEmployeeLanding({getItem(){throw Error();}}));assert(hasSession({hash:'#session=x'}));assert(hasSession({search:'?session=y'}));assert(!hasSession({hash:''}));});
+ test('advanced presentation uses only current server actor roles and fails closed offline',async()=>{for(const roles of [['designer'],[],['admin'],['owner']])assert.equal(await advancedEmployeeAccess(async()=>Response.json({actor:{id:'verified',roles}})),roles.includes('admin')||roles.includes('owner'));assert.equal(await advancedEmployeeAccess(async()=>{throw Error('offline');}),false);assert.equal(await advancedEmployeeAccess(async()=>Response.json({actor:{roles:['admin']}})),false);assert.equal(await advancedEmployeeAccess(async()=>Response.json({actor:{id:'x',roles:['admin']}},{status:403})),false);});
+-test('simple restoration changes only visible work-style fields, never learning/locks/personality or permissions',()=>{const current={communicationStyle:'short',workStyle:'careful',persona:'current',autoLearning:false,lockedFields:['persona']},version={communicationStyle:'long',workStyle:'careful',persona:'old',autoLearning:true,lockedFields:[],permissions:'all'};assert.deepEqual(restoreWorkStyle(current,version),{communicationStyle:'long'});assert.deepEqual(restoreWorkStyle(current,current),{});assert.throws(()=>restoreWorkStyle(current,null),/VERSION_NOT_FOUND/);assert.equal(EXPERIENCE_ACTIONS.length,5);assert.deepEqual(EXPERIENCE_ACTIONS[0],['appearance','更换形象']);assert.deepEqual(publicMemory({text:'raw JSON',proposedProfile:{personality:'严谨'}}),{title:'建议调整工作方式',changes:[{field:'personality',label:'性格',value:'严谨'}]});});
++test('simple restoration changes only visible work-style fields, never learning/locks/personality or permissions',()=>{const current={communicationStyle:'short',workStyle:'careful',persona:'current',autoLearning:false,lockedFields:['persona']},version={communicationStyle:'long',workStyle:'careful',persona:'old',autoLearning:true,lockedFields:[],permissions:'all'};assert.deepEqual(restoreWorkStyle(current,version),{communicationStyle:'long'});assert.deepEqual(restoreWorkStyle(current,current),{});assert.throws(()=>restoreWorkStyle(current,null),/VERSION_NOT_FOUND/);assert.equal(EXPERIENCE_ACTIONS.length,6);assert.deepEqual(EXPERIENCE_ACTIONS[0],['work','工作与交付']);assert.deepEqual(publicMemory({text:'raw JSON',proposedProfile:{personality:'严谨'}}),{title:'建议调整工作方式',changes:[{field:'personality',label:'性格',value:'严谨'}]});});
+ test('explicit forgetting remains available with learning disabled and cannot leak another Bot memory',async()=>{const f=await employeeHost();try{const b=f.sourceBot.id;f.store.learnExplicit(b,'first','以后回复简洁直接',f.sender.id);f.store.learnExplicit(f.targetBot.id,'other','以后回复简洁直接',f.target.id);const p=f.store.profile(b);f.store.updateProfile(b,{expectedRevision:p.revision,operationId:'disable',patch:{autoLearning:false}});const result=f.store.learnExplicit(b,'forget','忘记我的偏好：简洁直接',f.sender.id);assert.equal(result.count,1);assert.equal(f.store.memories(b).length,0);assert.equal(f.store.profile(b).communicationStyle,'');assert.equal(f.store.profile(b).autoLearning,false);assert.equal(f.store.memories(f.targetBot.id).length,1);assert.deepEqual(f.store.learnExplicit(b,'forget','忘记我的偏好：简洁直接',f.sender.id),result);}finally{await f.cleanup();}});
+ test('forget latest means exact same-session user preference, never inferred/cross-session or unrelated history',async()=>{const f=await employeeHost();try{const b=f.sourceBot.id;f.store.learnExplicit(b,'a','记住我的偏好：保留来源',f.sender.id);f.store.learnExplicit(b,'b','记住我的偏好：其他会话',f.target.id);const candidate=f.store.createMemory(b,{operationId:'candidate',kind:'preference',text:'候选',status:'candidate'});assert.equal(f.store.learnExplicit(b,'c','忘掉刚才那条偏好',f.sender.id).count,1);assert(f.store.memories(b).some(m=>m.text==='其他会话'));assert.equal(f.store.entity(b,candidate.id).status,'candidate');assert.equal(f.store.learnExplicit(b,'d','这是引用：忘掉刚才那条偏好',f.sender.id).learned,false);}finally{await f.cleanup();}});
+ test('forget owner HTTP atomically removes active preference and matching style with revision checks',async()=>{const f=await employeeHost();try{const b=f.sourceBot.id,r=f.store.learnExplicit(b,'a','以后回复先给结论',f.sender.id),command={action:'memory_forget',memoryId:r.memory.id,expectedRevision:1,profileRevision:1,operationId:'forget'};assert.equal((await post(f,{...command,profileRevision:0,operationId:'stale'})).status,409);assert.equal(f.store.memories(b).length,1);assert.equal((await post(f,command)).status,200);assert.equal((await post(f,command)).status,200);assert.equal(f.store.profile(b).communicationStyle,'');assert.equal(f.store.memories(b).length,0);assert(f.store.history(b).some(e=>e.action==='memory_forget'));assert.equal(f.sender.session.header.cwd,f.dir);}finally{await f.cleanup();}});

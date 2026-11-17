@@ -8,7 +8,7 @@ import {groupCatalog,groupRequest,groupError,roomDraft,watchGroupReplies,roomWor
 
 export function createBotGroupsPage(ctx,React){
  const h=React.createElement,{useEffect,useState,useRef,useSyncExternalStore}=React,groups=groupCatalog(),catalog=botCatalog(),Avatar=createBotAvatar(React),Markdown=createChatMarkdown(React);
- const mentionProvider=createGroupMentions(React,{roomFor:id=>groups.getSnapshot().rooms.find(r=>r.id===id),bots:()=>catalog.getSnapshot().bots});
+ const mentionProvider=createGroupMentions(React,{roomFor:id=>groups.getSnapshot().rooms.find(r=>r.id===id),bots:()=>catalog.getSnapshot().bots,subscribe:catalog.subscribe});
  ctx.inject(['inputTriggers'],scope=>scope.effect(()=>scope.inputTriggers.registerSource(mentionProvider.source)));
  const icon=(kind,size=18)=>h('svg',{width:size,height:size,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.6,strokeLinecap:'round',strokeLinejoin:'round','aria-hidden':true},h('path',{d:{edit:'m16 3 5 5-12 12-6 1 1-6Z M14 5l5 5',send:'m5 12 7-7 7 7 M12 5v14',users:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M16 3a4 4 0 0 1 0 8 M22 21v-2a4 4 0 0 0-3-3.9 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',files:'M14 3H6v18h12V7z M14 3v5h5 M9 12h6 M9 16h6',close:'m6 6 12 12 M18 6 6 18',at:'M16 8v6a2 2 0 0 0 4 0v-2a8 8 0 1 0-3 6 M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0'}[kind]??'M5 12h14'}));
  const action=(label,onClick,kind,props={})=>h('button',{type:'button',className:'nbc-icon','aria-label':label,title:label,onClick,...props},icon(kind));
