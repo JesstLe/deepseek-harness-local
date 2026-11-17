@@ -44,7 +44,7 @@ export function createBotCatalog({fetcher=globalThis.fetch,eventSource=url=>new 
           if(!response.ok){if(response.status===401||response.status===403){stopEvents();publish({status:'forbidden',bots:[],revision:0});}else publish({...snapshot,status:'error'});return;}
           const value=await response.json();if(generation!==epoch)return;
           if(value.version!==1||!Array.isArray(value.bots))throw Error('BOT_DIRECTORY_INVALID');
-          publish({status:'ready',bots:value.bots,revision:value.revision});
+          publish({status:'ready',bots:value.bots,revision:value.revision,primaryBotId:value.primaryBotId??null,primarySetup:value.primarySetup??null});
           if(started&&!events){events=eventSource('/naumi/bots/events');events.onmessage=()=>void refresh();events.onerror=()=>{if(started&&generation===epoch){stopEvents();publish({...snapshot,status:'error'});void refresh();}};}
         }catch(error){if(generation===epoch&&!controller.signal.aborted)publish({...snapshot,status:'error'});}
       }while(again&&generation===epoch);
@@ -55,6 +55,10 @@ export function createBotCatalog({fetcher=globalThis.fetch,eventSource=url=>new 
     getSnapshot:()=>snapshot,
     subscribe(listener){listeners.add(listener);if(!started){started=true;epoch++;windowTarget?.addEventListener('focus',focus);void refresh();}return()=>{listeners.delete(listener);if(listeners.size===0){started=false;epoch++;controller?.abort();stopEvents();pending=null;again=false;windowTarget?.removeEventListener('focus',focus);snapshot={status:'idle',bots:[],revision:0};}};},
     refresh,
+    async primary(body){
+      const response=await fetcher('/naumi/bots',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','x-naumi-bots':'1'},body:JSON.stringify(body),signal:AbortSignal.timeout(30000)});
+      const value=await response.json().catch(()=>({error:'BOT_PRIMARY_UNAVAILABLE'}));await refresh();if(!response.ok)throw Error(value.error??'BOT_PRIMARY_UNAVAILABLE');return value;
+    },
     async appearance(bot,appearance){
       const response=await fetcher('/naumi/bots',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','x-naumi-bots':'1'},body:JSON.stringify({action:'appearance',botId:bot.id,expectedRevision:bot.revision,appearance}),signal:AbortSignal.timeout(12000)});
       const value=await response.json().catch(()=>({error:'BOT_APPEARANCE_FAILED'}));if(!response.ok){await refresh();throw Error(value.error??'BOT_APPEARANCE_FAILED');}await refresh();return value;

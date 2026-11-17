@@ -57,6 +57,15 @@ export class BotGroupStore {
     return this.db.prepare(`SELECT bot_id AS botId, session_id AS sessionId FROM members
       WHERE room_id=? ORDER BY position`).all(roomId);
   }
+  adoptPrimary(botId){
+    this.write(()=>{
+      for(const row of this.db.prepare('SELECT id FROM rooms').all()){
+        if(!this.members(row.id).some(m=>m.botId===botId))this.db.prepare('INSERT INTO members VALUES (?, ?, ?, ?)')
+          .run(row.id,botId,'session-'+randomUUID(),this.members(row.id).length);
+        this.db.prepare('UPDATE rooms SET default_bot_id=? WHERE id=?').run(botId,row.id);
+      }
+    });
+  }
 
   member(sessionId) {
     return this.db.prepare(`SELECT room_id AS roomId, bot_id AS botId, session_id AS sessionId

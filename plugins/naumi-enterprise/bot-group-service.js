@@ -42,8 +42,12 @@ export class BotGroupService {
     this.running = null;
     this.again = false;
   }
+  alignPrimary(){const id=this.directory.primary?.()?.id;if(id&&id!==this.appliedPrimary){this.store.adoptPrimary(id);this.appliedPrimary=id;}}
 
   create(input) {
+    this.alignPrimary();
+    const primary=this.directory.primary?.();
+    if(primary){input={...input,botIds:[primary.id,...input.botIds.filter(id=>id!==primary.id)],defaultBotId:primary.id};if(input.botIds.length>12)fail('BOT_GROUP_MEMBER_LIMIT');}
     return this.store.create(input, () => {
       const active = new Set(this.directory.list().bots.filter(bot => bot.status === 'active').map(bot => bot.id));
       if (input.botIds.some(id => !active.has(id))) fail('BOT_GROUP_MEMBER_UNAVAILABLE');
@@ -52,6 +56,7 @@ export class BotGroupService {
   }
 
   post(input) {
+    this.alignPrimary();
     const post = this.store.post(input, () => {
       const room = this.store.room(input.roomId);
       if (!room) fail('BOT_GROUP_NOT_FOUND');
@@ -68,7 +73,7 @@ export class BotGroupService {
         if(input.botIds.some(id=>id!==sender.botId))fail('BOT_GROUP_TASK_RECIPIENT_CONFLICT');
         targets=[sender.botId];
       }
-      if (!targets.length && room.defaultBotId) targets.push(room.defaultBotId);
+      if (!targets.length && (this.directory.primary?.()?.id??room.defaultBotId)) targets.push(this.directory.primary?.()?.id??room.defaultBotId);
       if (!targets.length) fail('BOT_GROUP_MENTION_REQUIRED');
       if (targets.some(id => !members.some(bot => bot.id === id && bot.status === 'active'))) fail('BOT_GROUP_MEMBER_UNAVAILABLE');
       return room.members.filter(member => targets.includes(member.botId));
@@ -78,6 +83,7 @@ export class BotGroupService {
   }
 
   read(roomId, before) {
+    this.alignPrimary();
     const room = this.store.room(roomId);
     if (!room) fail('BOT_GROUP_NOT_FOUND');
     const posts = this.store.posts(roomId, {before});
@@ -114,6 +120,7 @@ export class BotGroupService {
   }
 
   async prepare(roomId){
+    this.alignPrimary();
     const room=this.store.room(roomId);if(!room)fail('BOT_GROUP_NOT_FOUND');
     const member=room.members.find(m=>m.botId===room.defaultBotId)??room.members[0];
     const bot=this.directory.forSession(member.sessionId);

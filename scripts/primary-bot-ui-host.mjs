@@ -1,0 +1,23 @@
+// Real isolated Harness, real production HTTP/SQLite/Session services; no paid inference.
+import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import {spawn} from 'node:child_process';import {randomUUID} from 'node:crypto';import {stringify} from 'yaml';import assert from 'node:assert/strict';
+const root=process.cwd(),out=path.join(root,'evidence/primary-bot'),temporary=process.argv[2]?path.resolve(process.argv[2]):path.join(root,'runtime/primary-bot-'+randomUUID()),home=path.join(temporary,'home'),profile=path.join(home,'profiles/web');
+fs.mkdirSync(path.join(profile,'node_modules/@naumi'),{recursive:true});fs.mkdirSync(out,{recursive:true});
+for(const [name,folder]of [['dsh-enterprise','naumi-enterprise'],['dsh-ui-layout','naumi-ui-layout'],['dsh-sidebar-browser','naumi-sidebar-browser']]){const target=path.join(profile,'node_modules/@naumi',name);if(!fs.existsSync(target))fs.symlinkSync(path.join(root,'plugins',folder),target,'junction');}
+if(!fs.existsSync(path.join(profile,'node_modules/@deepseek-ai')))fs.symlinkSync(path.join(root,'node_modules/@deepseek-ai'),path.join(profile,'node_modules/@deepseek-ai'),'junction');
+fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'naumi-primary-fixture',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}}));
+const upstreamRequests=[];const upstream=http.createServer((req,res)=>{upstreamRequests.push(req.url);res.writeHead(503).end('INFERENCE_NOT_ALLOWED');});await new Promise(r=>upstream.listen(0,'127.0.0.1',r));
+fs.writeFileSync(path.join(home,'cordis.patch.yml'),stringify([{id:'ui-theme',config:{preference:'light'}},{id:'session-log-deepseek',disabled:true},{id:'agent-default-model',config:{provider:'fixture',model:'configured-model'}}]));
+fs.writeFileSync(path.join(profile,'cordis.patch.yml'),stringify([{id:'ui-settings-general',config:{welcomeNoticeVersion:'2026-09-28.1'}},{id:'llm-pi-ai',config:{providers:{fixture:{displayName:'已有连接',api:'openai-completions',baseURL:'http://127.0.0.1:'+upstream.address().port+'/v1',apiKeyEnv:'NAUMI_PRIMARY_FIXTURE_KEY',models:[{id:'configured-model',contextWindow:128000,maxTokens:1024,reasoningEfforts:false}]}}}}]));
+const socket=http.createServer();await new Promise(r=>socket.listen(0,'127.0.0.1',r));const port=socket.address().port;await new Promise(r=>socket.close(r));const base='http://127.0.0.1:'+port;
+assert(temporary.startsWith(path.join(root,'runtime')+path.sep),'ISOLATED_PATH_REQUIRED');
+const child=spawn(process.execPath,[path.join(root,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'web','--host','127.0.0.1','--port',String(port),'--no-open'],{cwd:root,windowsHide:true,env:{...process.env,DSH_HOME:home,DSH_TELEMETRY_MODE:'DISABLED',NAUMI_PRIMARY_FIXTURE_KEY:'isolated-only'}});let output='';child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);
+let stopping=false;async function stop(){if(stopping)return;stopping=true;child.kill();await new Promise(r=>child.exitCode!==null?r():child.once('close',r));upstream.closeAllConnections();await new Promise(r=>upstream.close(r));console.log('PRIMARY_FIXTURE_CLOSED model_requests='+upstreamRequests.length);}
+process.on('SIGINT',()=>void stop());process.on('SIGTERM',()=>void stop());
+try{let launch;for(let i=0;i<180;i++){launch=output.match(new RegExp(base.replaceAll('.','\\.')+'/?\\?token=[A-Za-z0-9_~.%-]+'))?.[0];if(launch)break;if(child.exitCode!==null)throw Error('BOOT_FAILED');await new Promise(r=>setTimeout(r,500));}assert(launch,'BOOT_TIMEOUT');
+ fs.writeFileSync(path.join(root,'runtime/primary-ui.private.json'),JSON.stringify({base,launch,home,temporary,pid:child.pid}));
+ fs.writeFileSync(path.join(out,'HOST.json'),JSON.stringify({port,pid:child.pid,profile:'isolated',realHarness:true,modelRequests:0},null,2));
+ console.log('PRIMARY_FIXTURE_READY port='+port+' pid='+child.pid);
+ const control=http.createServer((req,res)=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify({upstreamRequests,alive:child.exitCode===null}));});await new Promise(r=>control.listen(0,'127.0.0.1',r));
+ const state=JSON.parse(fs.readFileSync(path.join(root,'runtime/primary-ui.private.json')));state.control='http://127.0.0.1:'+control.address().port;fs.writeFileSync(path.join(root,'runtime/primary-ui.private.json'),JSON.stringify(state));
+ await new Promise(r=>child.once('close',r));control.closeAllConnections();await new Promise(r=>control.close(r));
+}catch(error){fs.writeFileSync(path.join(out,'HOST-ERROR.log'),output.replace(/token=[A-Za-z0-9_~.%-]+/g,'token=REDACTED'));throw error;}finally{await stop();}
