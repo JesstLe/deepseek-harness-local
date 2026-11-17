@@ -68,3 +68,6 @@ Bot integrity 两个后端文件及其 `.gitattributes` 证据条目原样保留
 保留上游安装事务、维护准入与默认数据保留；只改presentation/pages，不改Bot或模型配置。
 运行完整产品安装链前先核对现有产品安装归属；卸载展示夹具不是实际卸载证据。
 ```
+
+## 2026-11-18 手动原目录升级
+真实0.3.5→0.3.6覆盖安装暴露旧卸载器删除同名外部客户端快捷方式的问题。`upgrade-shortcuts.nsh`在原目录已有Naumi.exe时采用原模板已有的KeepShortcuts能力协商，旧卸载器支持才传`--keep-shortcuts`；新安装和换目录仍用原分支。engine除presentation include外新增此精确policy include，源hash及构建边界同步更新；没有替换原卸载器、复制/提取事务或维护检查。原生NSIS宏5例及安装器11测试通过；实际安装验收以daily-five证据为准。首轮快捷方式已恢复原客户端目标，重建hash差异单列，不声称原字节恢复。
