@@ -1,0 +1,11 @@
+// Read-only migration inventory. A plan is not an authorization to move/delete shared files.
+import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';import {zstdDecompressSync} from 'node:zlib';import {pathToFileURL} from 'node:url';
+const sha=b=>createHash('sha256').update(b).digest('hex'),key=p=>path.resolve(p).toLowerCase();
+export {planBotWorkspaces} from '../plugins/naumi-enterprise/bot-workspace-plan.js';
+import {planBotWorkspaces} from '../plugins/naumi-enterprise/bot-workspace-plan.js';
+export function readStoredEvents(home,id){const root=path.join(home,'sessions');let file;for(const p of fs.readdirSync(root)){const candidate=path.join(root,p,id,'session.v4.jsonl.zstd');if(fs.existsSync(candidate)){file=candidate;break;}}if(!file)throw Error('SESSION_MISSING');const input=fs.readFileSync(file),parts=[];let offset=0;while(offset<input.length){const result=zstdDecompressSync(input.subarray(offset),{info:true});if(!result.engine.bytesWritten)throw Error('SESSION_FRAME_INVALID');offset+=result.engine.bytesWritten;parts.push(result.buffer);}return Buffer.concat(parts).toString('utf8').split('\n').filter(Boolean).map(JSON.parse);}
+if(import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
+ const runtime=path.resolve(process.argv[2]??'E:/Workspace/naumi-desktop'),home=path.join(runtime,'.dsh'),output=path.resolve(process.argv[3]??path.join(runtime,'runtime/bot-workspace-migration-plan.json')),catalog=JSON.parse(fs.readFileSync(path.join(home,'naumi/bots.json'))),ledger=JSON.parse(fs.readFileSync(path.join(home,'naumi/bot-tasks.json')));
+ const before=sha(fs.readFileSync(path.join(home,'naumi/bots.json'))),plan=planBotWorkspaces({home,catalog,ledger,eventsFor:id=>readStoredEvents(home,id)});fs.mkdirSync(path.dirname(output),{recursive:true});fs.writeFileSync(output,JSON.stringify(plan,null,2)+'\n');if(sha(fs.readFileSync(path.join(home,'naumi/bots.json')))!==before)throw Error('CATALOG_CHANGED_DURING_PLAN');
+ console.log('WORKSPACE_PLAN bots='+plan.bots.length+' files='+plan.files.length+' copy_candidates='+plan.files.filter(f=>f.status==='copy-candidate').length+' review='+plan.files.filter(f=>f.status!=='copy-candidate').length+' unassigned='+plan.unassigned.length+' warnings='+plan.warnings.length+' source_writes=0 model_calls=0 output='+output);
+}
