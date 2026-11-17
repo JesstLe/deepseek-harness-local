@@ -21,3 +21,5 @@
 实现缺口与修复详见[工作区沙箱](MANAGED_WORKSPACE_SANDBOX.md)。新建工作区权限最小初始化、原生目标提议独立section；48定向与804全仓通过。原日志中.NET受限调用错误的stdout不是写入证据，最终真实Set-Content和跨目录/DACL负向测试才作为边界验收。
 
 未完成：真实模型仍创建额外3个补充文本artifact（文件集合和验收本身正确）；需收敛文件任务交付写入路径，保留历史不自动清理。当前实现待源码副本回滚/四件套/主线和必要实际加载；D5新版本安装包/更新分发仍未完成。企业配置/原模型组/真实业务保持现状。
+
+Main整合：源码f664243/80608d5已普通merge/push为aad2892。首次增量加载在期望header处失败，原因是部署脚本误将原有x-naumi-work-file-acceptance检查改名；源码模块实际没有该新header。脚本已自动恢复旧运行文件并重启，104sessions/0running/4bots/revision47/HTTP200保持。仅修正验收脚本header为原协议，原失败日志保留，未发模型或修改原任务/模型。后续实际成功加载状态以DEPLOYMENT.json/VERIFICATION最终追加为准；不能把此首次失败算成功。
