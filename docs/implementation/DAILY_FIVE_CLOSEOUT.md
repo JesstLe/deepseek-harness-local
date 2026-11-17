@@ -3,9 +3,9 @@
 负责人：当前任务；分支 codex/daily-five-closeout-20261117；基线 ba4ee2a182e3dd8d4a4ddc5160b193fc987af8cd。独立 worktree E:/Workspace/naumi-daily-five-20261117。
 
 ## 范围与状态
-1. Bot 工作总览、自动任务标题、手动改名与历史检索：实施中。
-2. 旧 Bot 工作区与历史文件复制迁移：隔离实现与集成测试通过，真实迁移待验收；不删除原件、不改旧任务 cwd。
-3. 文件不可变版本与同任务修订：隔离实现与二进制集成测试通过，真实加载待验收；复用原 Session 文件预览和任务卡。
+1. Bot 工作总览、自动任务标题、手动改名与历史检索：已主线、真实服务增量加载。
+2. 旧 Bot 工作区与历史文件复制迁移：已主线、3个旧Bot实际迁移和9个历史文件复制通过；不删除原件、不改旧任务 cwd。
+3. 文件不可变版本与同任务修订：已主线、真实服务加载；原生隔离二进制交付验收通过；复用原 Session 文件预览和任务卡。
 4. 钉钉真实机器人私聊：用户明确延期到明天对接；不配置账号、不发送消息、不再收集凭据。
 5. 固定 main 安装候选、升级/数据保留与公开发布：待前述切片完成后执行。
 
@@ -46,3 +46,13 @@ BotDirectory / 原生 Session、BotTaskStore、原生标题事件和工作区服
 - FULL_FINAL.log：`node --test --test-concurrency=1 tests/*.test.mjs desktop/tests/*.test.cjs`，733/733，exit0，154.4秒。
 - 再同步def82a3，合并点f89029b；新增上游变化仅自然目标证据与Cloud部署脚本。LATEST_MAIN_RECHECK.log集中56/56，exit0。D3/D4文件与工具/确认接口全部保留。
 - 加载协调：D3已释放，PID7416/101sessions/0running；D2使用独立profile/随机端口，不占3080。本任务即将main整合，再做只读prepare，运行时仍未加载。
+
+## 真实加载与迁移（2026-11-18）
+- 20文件增量prepare基线32159bd，host/client按现有运行版本精确追加挂接，package仅追加5个模块名；不覆盖整包、不碰employee-work/center/store。初次验证完成后证据目录缺失，已修复证据保存可重入；复查成功，不重复加载。
+- 加载后101sessions/0running，126无关运行文件和109权威文件保持，员工导出、模型、群账本、任务不变。
+- 真实迁移先暴露启动时registry尚未提供；请求在复制/新home/目录变更前拒绝。改为操作时延迟读取，新增原生隔离迁移测试，再单文件补载b65d506；没有模型请求。
+- 迁移operationId=2f264e20-029a-4e6f-8bcf-c9b8c67eec91：3个旧Bot迁移，9份副本SHA通过，旧原件保留；4个Bot现在独立cwd，104sessions（101旧+3新home），catalog revision47，0running。旧任务/群/模型/员工export不变；44未归属条目、3待核查引用不猜归属、不删改。
+- MIGRATION_ROLLBACK.json：真实目录原字节备份SHA匹配迁移前捕获值，在另一副本恢复并用BotDirectory重开；当前实际目录保持迁移后状态，101旧Session压缩文件原字节保持。
+- UI_NATIVE_BINARY.log：18/18，原生present发布实际二进制，经真正workspaceFiles分块读取生成快照；删除工作原件后快照逐字节和owner核验通过。供应商外呼0，4次确定性loopback夹具请求。
+- 源码副本ROLLBACK tests=43 pass=43 fail=0 exit=0；当前修改保留。可执行ROLLBACK.sh仅接受带任务marker的runtime副本，不操作实际数据目录。
+- 0.3.6中间依赖stage从固定main b65d506完成：45,618文件、closure PASS、private paths0。用户要求纳入D2 82d2070后，不发布中间包；仅刷新两份D2源及打包副本，重新核对其余45,614 staged文件，再从包含D2/D3/D4的固定main打最终安装候选。没有重跑真实模型。
