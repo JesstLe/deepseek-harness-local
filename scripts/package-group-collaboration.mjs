@@ -1,6 +1,6 @@
 import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import assert from 'node:assert/strict';import {createHash} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';
 import {extendNativeComposer,NATIVE_COMPOSER_SHA} from './native-composer-extension.mjs';
-const root=process.cwd(),out=path.join(root,'evidence/group-live-collaboration'),base='3b81257f393d5d37ead6f10e40d9ebec5248666e',sha=b=>createHash('sha256').update(b).digest('hex');fs.mkdirSync(out,{recursive:true});
+const root=process.cwd(),out=path.join(root,'evidence/group-live-collaboration'),base='e148c0166284e2a8bd7b77f9f0ba306cbc85101d',sha=b=>createHash('sha256').update(b).digest('hex');fs.mkdirSync(out,{recursive:true});
 const files=execFileSync('git',['diff','--name-only',base,'HEAD'],{encoding:'utf8'}).trim().split('\n').filter(f=>f&&!f.startsWith('evidence/'));
 const rows=[];for(const file of files){const after=execFileSync('git',['show','HEAD:'+file]);let before=null;try{before=execFileSync('git',['show',base+':'+file],{stdio:['ignore','pipe','ignore']});}catch{}
  for(const [kind,bytes]of[['original',before],['modified',after]])if(bytes){const p=path.join(out,kind,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);}
