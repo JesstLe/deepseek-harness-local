@@ -1,9 +1,9 @@
 diff --git a/docs/implementation/MODEL_DISCOVERY.md b/docs/implementation/MODEL_DISCOVERY.md
 new file mode 100644
-index 0000000..7d9fdb0
+index 0000000..0b7d1f8
 --- /dev/null
 +++ b/docs/implementation/MODEL_DISCOVERY.md
-@@ -0,0 +1,29 @@
+@@ -0,0 +1,33 @@
 +# 模型列表获取
 +
 +日期：2026-11-17；负责人：本任务。基线 d5033d45547def77d7fb8b55efefa0b36f3e3832。
@@ -33,6 +33,10 @@ index 0000000..7d9fdb0
 +## 未完成项与下一步
 +
 +本次不调用真实供应商、不发布新安装包；正式本地接入和Git整合按验证文件记载。
++
++主线同步：d5033d4 → origin/main e089a7a → 64b2df5；模块计数1。保留他人任务续办与打包清单变化。定向27/27、原生设置UI/HTTP18/18、集中438/438，整合最新主线后442/442通过；副本恢复3个原始文件并通过15项基线。截图已打开检查。
++
++本机接入：main 5de2f6b已合入并推送；运行版仅更新3个模型连接文件，源文件/静态资源hash一致、旧文件副本hash通过。部署启动阶段被编排中断后显式恢复服务，实际75会话/0运行/3 Bot/revision22保留。真实3080到隔离models供应商的一次只读列表调用通过，配置不变、推理0；不把该夹具调用称作真实供应商可用性验收。部署记录见DEPLOYMENT.json；刷新原页面加载新UI。
 diff --git a/plugins/naumi-enterprise/assets/model-connections.css b/plugins/naumi-enterprise/assets/model-connections.css
 index 80878f3..e4dbaa7 100644
 --- a/plugins/naumi-enterprise/assets/model-connections.css
@@ -169,10 +173,10 @@ index f370596..537c846 100644
   });
 diff --git a/scripts/deploy-model-discovery.mjs b/scripts/deploy-model-discovery.mjs
 new file mode 100644
-index 0000000..b9ec8f6
+index 0000000..557b049
 --- /dev/null
 +++ b/scripts/deploy-model-discovery.mjs
-@@ -0,0 +1,12 @@
+@@ -0,0 +1,13 @@
 +import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';import {botLiveApi} from './bot-live-api.mjs';
 +const root=process.cwd(),dir=path.join(root,'evidence/model-discovery'),target=path.join(root,'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise'),files=['model-connections.js','assets/model-connections.js','assets/model-connections.css'],backup=path.join(root,'.dsh/model-discovery-backup-'+randomUUID()),hash=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 +assert.equal(execFileSync('git',['branch','--show-current'],{encoding:'utf8'}).trim(),'main');const before=Object.fromEntries(fs.readdirSync(target,{recursive:true}).filter(f=>fs.statSync(path.join(target,f)).isFile()).map(f=>[f.replaceAll('\\','/'),hash(path.join(target,f))]));
@@ -180,6 +184,7 @@ index 0000000..b9ec8f6
 +const preservedFiles=['.dsh/.credentials.yaml','.dsh/profiles/web/cordis.patch.yml','.dsh/naumi/bots.json'].filter(f=>fs.existsSync(path.join(root,f))),preserved=Object.fromEntries(preservedFiles.map(f=>[f,hash(path.join(root,f))]));
 +execFileSync(process.execPath,['scripts/check-bot-runtime.mjs',root],{stdio:'inherit'});fs.mkdirSync(backup,{recursive:true});for(const f of files){const p=path.join(backup,f);fs.mkdirSync(path.dirname(p),{recursive:true});fs.copyFileSync(path.join(target,f),p);}
 +function shell(script){const r=spawnSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-File',path.join(root,script)],{encoding:'utf8',windowsHide:true,timeout:150000});process.stdout.write(r.stdout??'');assert.equal(r.status,0,r.stderr);}
++fs.writeFileSync(path.join(backup,'INTENT.json'),JSON.stringify({status:'prepared',files,before,preserved,mainCommit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim()},null,2)+'\n');
 +let complete=false,upstream;try{shell('Stop-Naumi.ps1');for(const f of files)fs.copyFileSync(path.join(root,'plugins/naumi-enterprise',f),path.join(target,f));shell('Start-Naumi.ps1');for(const[f,h]of Object.entries(before))if(!files.includes(f))assert.equal(hash(path.join(target,f)),h,'Unrelated runtime changed: '+f);for(const[f,h]of Object.entries(preserved))assert.equal(hash(path.join(root,f)),h,'Protected state changed: '+f);
 + let calls=0;upstream=http.createServer((req,res)=>{calls++;assert.equal(req.method,'GET');assert.equal(req.url,'/v1/models');assert.equal(req.headers.authorization,'Bearer local-discovery-probe');res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data:[{id:'local-model-list-probe'}]}));});await new Promise(r=>upstream.listen(0,'127.0.0.1',r));const api=await botLiveApi(root),result=await api.json('/naumi/model-connections',{action:'discover',baseURL:'http://127.0.0.1:'+upstream.address().port+'/v1',api:'openai-completions',apiKey:'local-discovery-probe'},'x-naumi-model-connections');assert.deepEqual(result,{models:[{id:'local-model-list-probe'}]});assert.equal(calls,1);
 + for(const file of ['assets/model-connections.js','assets/model-connections.css']){const r=await api.request('/naumi/'+file);assert.equal(r.status,200);assert.equal(createHash('sha256').update(Buffer.from(await r.arrayBuffer())).digest('hex'),hash(path.join(target,file)));}
@@ -196,6 +201,20 @@ index 0000000..2377b59
 +for(const r of m){assert.equal(hash(fs.readFileSync(path.join(root,r.file))),r.modifiedSHA256);assert.equal(hash(fs.readFileSync(path.join(e,'original',r.file))),r.originalSHA256);assert.equal(hash(fs.readFileSync(path.join(e,'modified',r.file))),r.modifiedSHA256);}
 +for(const name of ['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh'])assert(fs.readFileSync(path.join(e,name)).length>0);assert(fs.readFileSync(e+'/DIFF_FILE.patch','utf8').includes('action:z.literal(\'discover\')'));execFileSync('D:/DEV/Git/bin/bash.exe',['-n',e+'/ROLLBACK.sh']);
 +const zip=spawnSync('python',['-c',`import zipfile; z=zipfile.ZipFile(r'${e}/MODIFIED_FILE.zip'); assert z.testzip() is None; assert len(z.namelist())>=7`],{encoding:'utf8',windowsHide:true});assert.equal(zip.status,0,zip.stderr);console.log('REOPEN artifacts=4 source_hashes=PASS originals=PASS zip=PASS patch=PASS rollback=PASS');
+diff --git a/scripts/verify-model-discovery-live.mjs b/scripts/verify-model-discovery-live.mjs
+new file mode 100644
+index 0000000..08d04ec
+--- /dev/null
++++ b/scripts/verify-model-discovery-live.mjs
+@@ -0,0 +1,8 @@
++import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import assert from 'node:assert/strict';import {createHash} from 'node:crypto';import {execFileSync} from 'node:child_process';import {botLiveApi} from './bot-live-api.mjs';
++const root=process.cwd(),e='evidence/model-discovery',hash=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex'),files=['model-connections.js','assets/model-connections.js','assets/model-connections.css'],live='.dsh/profiles/web/node_modules/@naumi/dsh-enterprise';const originalBackup=fs.readdirSync('.dsh').filter(n=>n.startsWith('model-discovery-backup-')).map(n=>path.join('.dsh',n)).sort().at(-1);assert(originalBackup);const manifest=JSON.parse(fs.readFileSync(e+'/hashes.json'));
++for(const file of files){const row=manifest.find(r=>r.file==='plugins/naumi-enterprise/'+file);assert.equal(hash('plugins/naumi-enterprise/'+file),row.modifiedSHA256);assert.equal(hash(path.join(live,file)),row.modifiedSHA256);assert.equal(hash(path.join(originalBackup,file)),row.originalSHA256);}
++const api=await botLiveApi(root),config=await api.json('/naumi/model-connections');let calls=0;const upstream=http.createServer((req,res)=>{calls++;assert.equal(req.method,'GET');assert.equal(req.url,'/v1/models');assert.equal(req.headers.authorization,'Bearer local-discovery-probe');res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data:[{id:'local-model-list-probe'}]}));});await new Promise(r=>upstream.listen(0,'127.0.0.1',r));
++try{const result=await api.json('/naumi/model-connections',{action:'discover',baseURL:'http://127.0.0.1:'+upstream.address().port+'/v1',api:'openai-completions',apiKey:'local-discovery-probe'},'x-naumi-model-connections');assert.deepEqual(result,{models:[{id:'local-model-list-probe'}]});assert.equal(calls,1);assert.deepEqual(await api.json('/naumi/model-connections'),config);for(const file of ['assets/model-connections.js','assets/model-connections.css']){const r=await api.request('/naumi/'+file);assert.equal(r.status,200);assert.equal(createHash('sha256').update(Buffer.from(await r.arrayBuffer())).digest('hex'),hash(path.join(live,file)));}
++const sessions=await api.rpc('session/list',{_request:{}}),bots=await api.json('/naumi/bots');assert.equal(sessions.items.filter(s=>s.running===true).length,0);assert.equal(sessions.items.length,75);assert.equal(bots.bots.length,3);assert.equal(bots.revision,22);
++fs.writeFileSync(e+'/DEPLOYMENT.json',JSON.stringify({status:'PASS',mainCommit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),changed:files,backup:originalBackup,modifiedSourceAndRuntimeHashes:'PASS',originalBackupHashes:'PASS',configurationUnchangedAcrossProbe:true,fixtureModelListCalls:calls,inferenceCalls:0,realSupplierCalls:0,configurationWrites:0,restarted:true,resumedAfterInterruptedStart:true,sessions:75,running:0,bots:3,botRevision:22},null,2)+'\n');console.log('LIVE model_discovery=PASS files=3 hashes=PASS list_calls=1 config_unchanged=1 inference=0 sessions=75 running=0 bots=3');
++}finally{upstream.closeAllConnections();await new Promise(r=>upstream.close(r));}
 diff --git a/scripts/verify-model-discovery.mjs b/scripts/verify-model-discovery.mjs
 new file mode 100644
 index 0000000..0d3f44e
