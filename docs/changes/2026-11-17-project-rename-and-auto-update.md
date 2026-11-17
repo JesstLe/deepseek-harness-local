@@ -22,5 +22,9 @@
 
 未完成项与下一步：
 
-- 历史提交信息中 1 条含 "DeepSeek Harness" 字样待重写（需 force-push，已获用户授权）。
+- 历史提交信息清理已完成：main 与 v0.3.0/0.3.1/0.3.2 全链重写并强推
+  （298c80b→4cfce9f），提交信息 0 处 deepseek 字样；Releases 与资产验证完好，
+  旧仓库地址 301 且 latest.yml 双通道 200。本地旧历史分支
+  （feat/naumi-desktop-chromium、feat/naumi-team-panel、fix/naumi-resource-style
+  及 m55 worktree 分支）仍指向重写前历史，仅本地存在，待各负责人评审后处置。
 - 后续版本发布走 `desktop/` 下 `npm run release` 单命令流程。
