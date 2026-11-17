@@ -72,3 +72,5 @@ BotDirectory / 原生 Session、BotTaskStore、原生标题事件和工作区服
 - 根因是stock setIsTryToKeepShortcuts在allowToChangeInstallationDirectory时将所有手动安装置false，哪怕原目录已有支持保留链接的Naumi.exe。新增upgrade-shortcuts.nsh只调整该能力选择：原目录手动升级采用已有支持--keep-shortcuts的路径；新安装/更换目录仍保留stock行为，原生自动更新不变。
 - 原engine仍保留stock提取、旧卸载器、签名、大小检查、维护锁与注册，只追加精确校验的shortcut policy include；原始/修改engine hash重新生成。NSIS真实宏5例通过：baseline manual=false，modified manual=true，fresh=false，auto=true，changed-directory=false；没有注册表/用户快捷方式写入。
 - 安装器模块11/11通过。最终复测从已安装旧策略0.3.6覆盖到修订版0.3.6，保留最初0.3.5安装及退出回执；不把这次补测写成第二次干净的0.3.5起点。当前候选仍未公开。
+
+- 首个policy候选真实重试观察到旧卸载器参数仍缺少--keep-shortcuts，未认定修复：installUtil.nsh中的函数在include时已展开原宏，随后重定义只影响外层Section。已改为从固定upstream生成仅替换该宏的install-util.nsh，让原函数定义前就采用修订宏；构建校验原始/修改util双hash，原生fixture也从实际生成util取宏并先编译函数再调用。新增编译时序回归，模块12/12及原生5例通过；首个policy上传仍为草稿，后续替换。
