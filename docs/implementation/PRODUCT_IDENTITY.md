@@ -24,3 +24,11 @@ product-identity.js在现有Locale公开translate边界对44个明确namespace/k
 
 ## 主线同步与诊断
 基线68b4bb4；模块完成后整合d5033d4（Bot新动效），再提交本模块并普通merge e089a7a（退休账号上下文兼容），package新增压缩peer依赖与product-version.js均保留，不改对方任务代码。UI验证先修正新会话按钮/富文本输入器定位并创建隔离工作区，随后修正多请求SSE释放；失败轮不计通过。
+
+## 2026-11-17 Windows 快捷方式启动闪窗
+
+- 模块与职责。负责人 Codex，分支 `codex/naumi-shortcut-no-flash`。修复项目脚本生成的 Windows 快捷方式。旧快捷方式以 `pwsh.exe -WindowStyle Hidden` 启动时，实测 Windows Terminal 在 Naumi 主窗口前短暂显示。
+- 接口与依赖。[`install-naumi-shortcut.ps1`](../../scripts/install-naumi-shortcut.ps1) 用 Windows 自带的 .NET Framework 编译器生成 GUI 子系统启动器。启动器通过 `CreateNoWindow` 运行原有 `Start-NaumiDesktop.ps1`，沿用工作目录、环境、打包版选择和开发版回退。快捷方式及历史备份归生成脚本管理，启动器与同次回执存放在一起，供回滚引用。
+- 迁移。拉取主线后重新运行 `pwsh -NoProfile -File scripts/install-naumi-shortcut.ps1` 可更新本仓库已有的脚本快捷方式。NSIS 安装版的快捷方式直接指向已安装的 `Naumi.exe`。
+- 验证。`npm run app:test` 在安装根目录和 desktop 依赖后通过 484/484，测试进程使用规范化的临时目录路径。回归覆盖 Windows GUI 子系统、含空格的项目路径、真实脚本调用、旧链接迁移、幂等重装、备份目标和外部链接保护。本机对 0.3.2 实际窗口事件采样，旧脚本快捷方式出现一个终端，新脚本快捷方式两轮及正式安装版桌面快捷方式一轮均只出现 Naumi 主窗口。
+- 发布与同步。初始基线 `ed5653ef19cf6ef2fa3fde26703afde80d2f6e51`，集中验证前同步至 `ea0235b637cfd7ddf290b3daa7d16bc5fad5eb09`，模块计数 1。本机安装 GitHub 已发布的 0.3.2 并核对安装包 SHA-256。本次修复通过仓库快捷方式生成脚本交付，无需制作新的 NSIS 安装包。
