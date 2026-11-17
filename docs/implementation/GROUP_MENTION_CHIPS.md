@@ -37,3 +37,5 @@
 加载先等待真实生成结束（94 Sessions、0 running）才执行。服务重开后两个 Session 因正常 flush 追加了 82/80 字节，原逐文件整文件 hash 比较因此停止；已逐 zstd 帧证明旧文件 SHA256 对应完整字节前缀，原有事件未删改，校验器仅对 Session 追加开放此前缀证明，其余配置仍要求逐字节一致。
 
 任务公开投影会随 Session 标题/状态刷新而变化；持久任务账本已逐字节核验不变。运行验收分别记录 taskLedgerUnchanged 与 taskProjectionUnchanged，不用动态投影 hash 代替持久账本，也不声称投影完全不变。
+
+运行加载已通过：固定插件来源 d0412011003e0a8a80902d1b3912af66a1b6aba2，HTTP 200，原生引用 renderer 与 provider 均实际服务；94 Sessions、4 Bot、0 running，0 模型调用。原群表、模型/凭据/外观和持久任务账本不变；两个 Session 的旧压缩文件字节前缀保持，只追加正常 flush 帧。公开任务投影可刷新，未混称完全不变。
