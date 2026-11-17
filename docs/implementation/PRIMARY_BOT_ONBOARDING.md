@@ -37,3 +37,7 @@
 ## 主线同步
 
 首次实现基线 9f99b1d；集中验收前 fetch 得到 origin/main 4c44363，包含安装器路径加固与群 Markdown 流式修复。保留这些主线改动；本模块迭代计数仍为 1。共享 main 下 installer-path-fix 未跟踪证据不暂存、不清理。
+
+## 验收进度
+
+已整合 origin/main 4c44363，集中回归 573/573，exit 0。真实隔离 Harness：首次创建、旧账号认领、原生 home、默认群成员与原生 composer 均已通过，page errors=0，model calls=0。源码副本基线/回滚各38/38；正式数据未用于这些写入测试。新增历史文件规划按用户选择见 [迁移规划](BOT_WORKSPACE_MIGRATION.md)，规划不等于实际搬迁。
