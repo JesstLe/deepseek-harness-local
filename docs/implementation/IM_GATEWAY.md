@@ -21,10 +21,10 @@
 
 ## 验证命令、结果与证据层级
 基线：`node --test tests/naumi-bots.test.mjs tests/naumi-bot-groups.test.mjs tests/naumi-bot-groups-http.test.mjs tests/naumi-bot-runtime.test.mjs` → 38 tests / 38 pass / 0 fail，exit 0。记录 `E:/tmp/naumi-im-gateway-20261117/BASELINE.log`。
-集中验证：全仓 `node --test tests/*.test.mjs desktop/tests/*.test.cjs` 619/619，exit 0；其中 IM 新增 20 项覆盖真实原生 Session/runtime、真实上游协议驱动和本地持久化，平台服务为受控响应。真实隔离 Harness + 浏览器 15 项通过，0 page errors，0 model calls。首次 UI 脚本误用桌面快捷键，修正为网页 Ctrl+Alt+,，保留初始失败记录。迭代计数 3（网关路由/交互、双平台协议与文件、设置 UI），已 fetch origin/main，待整合 `541830103b4cd2782a3f8621f012c625932c95d1`。
+集中验证：全仓 `node --test tests/*.test.mjs desktop/tests/*.test.cjs` 619/619，exit 0；其中 IM 初轮新增 20 项覆盖真实原生 Session/runtime、真实上游协议驱动和本地持久化，平台服务为受控响应。真实隔离 Harness + 浏览器 15 项通过，0 page errors，0 model calls。首次 UI 脚本误用桌面快捷键，修正为网页 Ctrl+Alt+,，保留初始失败记录。迭代计数 3（网关路由/交互、双平台协议与文件、设置 UI），已 fetch origin/main，已整合 `541830103b4cd2782a3f8621f012c625932c95d1`，整合后 SHA `80402a972c4b8053a76d1430a3c46c02800d7016`，仅 `.gitattributes` 同尾追加冲突，保留双方规则。
 
 ## 未完成项与下一步
-源文件副本回滚、主线整合及运行入口核验待完成。真实外部账号未配置；本地受控协议验收不等于真实平台收发验收。首版不实现企业通讯录同步、全量历史同步和音视频通话。
+主线整合、副本回滚和实际运行入口的最终结果见 [本次交付记录](../changes/2026-11-17-im-gateway.md)。真实外部账号未配置；本地受控协议验收不等于真实平台收发验收。首版不实现企业通讯录同步、全量历史同步和音视频通话。
 
 
 ## 平台配置与使用
@@ -52,3 +52,5 @@
 绑定 revision 失效、原聊天原发起人交互授权、UNKNOWN 不盲重放，以及原有会话不回归。
 记录真实平台与受控协议验证的证据层级，禁止将受控响应记为真实账号收发验收。
 ```
+
+恢复边界补测后 IM 定向22/22通过。初次新增丢收据测试误断言中间必须停在 dispatching；网关已在同轮 kick 完成幂等重试，改为验证一次 native 投递及最终 accepted，不改变实现掩盖问题。
