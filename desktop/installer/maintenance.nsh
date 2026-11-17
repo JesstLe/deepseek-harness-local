@@ -1,3 +1,5 @@
+﻿!define NAUMI_WIZARD_DIR "${__FILEDIR__}"
+!include "${NAUMI_WIZARD_DIR}\presentation.nsh"
 ; Official customCheckAppRunning hook runs BEFORE uninstallOldVersion and before
 ; any installed-file removal. It replaces the builder's force-kill fallback.
 !define NAUMI_HELPER_DIR "${__FILEDIR__}\..\app"
@@ -51,4 +53,9 @@
     SetErrorLevel 42
     Quit
   ${endif}
+!macroend
+
+; Suppress per-file deletion paths without replacing the removal transaction.
+!macro customUnInstall
+  SetDetailsPrint none
 !macroend
