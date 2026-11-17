@@ -1,0 +1,13 @@
+diff --git a/scripts/verify-async-bot-ui.mjs b/scripts/verify-async-bot-ui.mjs
+index 947191a..d77f749 100644
+--- a/scripts/verify-async-bot-ui.mjs
++++ b/scripts/verify-async-bot-ui.mjs
+@@ -41,7 +41,7 @@ try{
+   for(const width of [1000,580,360]){await page.setViewportSize({width,height:950});await card.waitFor();check('task_layout_'+width,await card.evaluate(el=>el.scrollWidth<=el.clientWidth+2&&el.getBoundingClientRect().right<=innerWidth+2));}
+   await page.locator('.naumi-task-dock').screenshot({path:e+'/async-task-narrow.png',animations:'disabled'});await page.setViewportSize({width:1440,height:980});await page.locator('.naumi-task-dock').screenshot({path:e+'/async-task-desktop.png',animations:'disabled'});
+   await composer.fill('');check('no_business_or_model_posts',posts===0);check('no_page_errors',errors.length===0);
+-  fs.writeFileSync(e+'/UI_VERIFICATION.json',JSON.stringify({status:'PASS',tier:'real Harness shell with candidate frontend, controlled read-only task catalog and real local SSE; no model or business writes',checks,errors,eventFeedConnections:feedCount},null,2)+'\n');
++  fs.writeFileSync(e+'/UI_VERIFICATION.json',JSON.stringify({status:'PASS',tier:process.env.NAUMI_ASYNC_UI_LIVE_ASSETS?'actual deployed frontend/CSS, controlled read-only task catalog and real local SSE; no static interception or model/business writes':'real Harness shell with candidate frontend, controlled read-only task catalog and real local SSE; no model or business writes',liveAssets:!!process.env.NAUMI_ASYNC_UI_LIVE_ASSETS,checks,errors,eventFeedConnections:feedCount},null,2)+'\n');
+   console.log('UI_COMPLETE checks='+checks.length+' errors='+errors.length);
+ }catch(error){await page.screenshot({path:e+'/ui-failure.png',animations:'disabled'}).catch(()=>{});fs.writeFileSync(e+'/UI_FAILURE.json',JSON.stringify({error:error.message,checks,errors,body:(await page.locator('body').innerText()).slice(-4500)},null,2));throw error;}
+ finally{await context.close();await browser.close();for(const res of feeds)res.end();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
