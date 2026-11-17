@@ -50,7 +50,7 @@ export function taskDockRows(tasks,sessionId,{now=Date.now(),dismissed=[],pinned
   }
   return {current,history,nextExpiry,errors:history.filter(t=>t.status==='failed'||t.status==='interrupted').length};
 }
-export function filePreviewAddress(file){const enc=s=>encodeURIComponent(s).replace(/%3A/gi,':');return `dsh-resource://file/session/${enc(file.sessionId)}/${file.path.replaceAll('\\','/').split('/').map(enc).join('/')}`;}
+export function filePreviewAddress(file){const enc=s=>encodeURIComponent(s).replace(/%3A/gi,':');return `dsh-resource://file/session/${enc(file.sessionId)}/${(file.snapshot?.path??file.path).replaceAll('\\','/').split('/').map(enc).join('/')}`;}
 
 /** One owner-authenticated event subscription shared by task cards and employee activity. */
 export function createTaskActivity({fetcher=globalThis.fetch,eventSource=url=>new EventSource(url),windowTarget=globalThis.window}={}){

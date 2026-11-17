@@ -1,3 +1,4 @@
+import {openBotOverview,BOT_OVERVIEW_PANEL,selectedBotId} from './bot-overview.js';
 import {createBotAvatar} from './bot-avatar.js';
 import {EXPERIENCE_EVENT,EXPERIENCE_ACTIONS,advancedEmployeeAccess} from './employee-experience-model.js';
 import {taskActivity,employeeTaskState,employeeTasks,receptionTarget} from './bot-task-model.js';
@@ -30,8 +31,8 @@ function installNavigation(ctx,React,Icon,createPortal){
       }catch(error){if(alive.current)setError(error.message==='BOT_CONFLICT'?'Bot 已更新，请重试关联':error.message==='BOT_ARCHIVED'?'Bot 已归档':'任务关联失败，可重试或在线程模式查看');}
       finally{flight.current=false;if(alive.current)setBusy(false);}
     };
-    return h('div',{className:'naumi-bot-entry','data-bot-id':bot.id,'data-primary':primary,'data-pinned':!!pinned,'data-selected':botSelected(bot,currentId,sessions),'data-bot-state':state},
-      h('div',{className:'naumi-bot-row'},h('button',{type:'button',className:'naumi-bot-open',onClick:()=>{if(target)open(target);else{setHistory(true);setError('日常会话已归档，可新建聊天');}},'aria-label':bot.name+'，'+stateName,title:bot.name},h(Avatar,{bot,state}),h('span',{className:'naumi-bot-caption'},h('strong',null,bot.name),h('span',null,state!=='idle'&&state!=='unknown'?stateName:botSummary(bot,sessions))),state!=='idle'&&state!=='unknown'&&h('span',{className:'naumi-bot-state',title:stateName,'aria-label':stateName})),
+    return h('div',{className:'naumi-bot-entry','data-bot-id':bot.id,'data-primary':primary,'data-pinned':!!pinned,'data-selected':panelId===BOT_OVERVIEW_PANEL?selectedBotId()===bot.id:botSelected(bot,currentId,sessions),'data-bot-state':state},
+      h('div',{className:'naumi-bot-row'},h('button',{type:'button',className:'naumi-bot-open',onClick:()=>openBotOverview(ctx,bot.id),'aria-label':bot.name+'，'+stateName,title:bot.name},h(Avatar,{bot,state}),h('span',{className:'naumi-bot-caption'},h('strong',null,bot.name),h('span',null,state!=='idle'&&state!=='unknown'?stateName:botSummary(bot,sessions))),state!=='idle'&&state!=='unknown'&&h('span',{className:'naumi-bot-state',title:stateName,'aria-label':stateName})),
         active.length>0&&h('button',{type:'button',className:'naumi-bot-current','aria-label':'查看'+bot.name+'的当前任务（'+active.length+'）',title:'查看当前任务',onClick:()=>{const task=active[0];if(sessions.byId[task.targetSessionId])open(task.targetSessionId);else{setHistory(true);if(target)open(target);}}},active.length),
         h('button',{ref:menuButton,type:'button',className:'naumi-bot-menu-toggle','aria-label':bot.name+'的设置','aria-haspopup':'menu','aria-expanded':!!menu,onClick:e=>{const r=e.currentTarget.getBoundingClientRect();setMenu(v=>v?null:{left:Math.max(8,Math.min(window.innerWidth-205,r.left)),top:Math.max(8,Math.min(window.innerHeight-240,r.bottom+5))});}},'⋯'),h('button',{type:'button',className:'naumi-bot-history-toggle','aria-label':bot.name+'的任务记录','aria-expanded':history,onClick:()=>setHistory(v=>!v)},'⌄')),
       menu&&createPortal(h('div',{ref:menuRef,className:'nx-bot-menu',role:'menu','aria-label':bot.name+'的设置',style:menu},h('button',{type:'button',role:'menuitem',onClick:()=>{onPin(pinned?null:bot.id);setMenu(null);}},pinned?'取消置顶':'置顶'),[...EXPERIENCE_ACTIONS,...(advanced?[['advanced','高级管理']]:[])].map(([mode,label])=>h('button',{type:'button',key:mode,role:'menuitem','data-advanced':mode==='advanced'||undefined,onClick:()=>openSettings(mode)},label))),document.body),
@@ -63,7 +64,7 @@ function installNavigation(ctx,React,Icon,createPortal){
       useLayoutEffect(()=>{if(surface){surface.dataset.navigationMode=mode;surface.dataset.wide=String(wide);}},[surface,mode,wide]);
       useEffect(()=>{const change=e=>{if(e.key===MODE_KEY)setMode(navigationMode(e.newValue));};window.addEventListener('storage',change);return()=>window.removeEventListener('storage',change);},[]);
       const choose=(value,enter=true)=>{const intent=++entryIntent.current;setMode(value);setAdding(false);try{localStorage.setItem(MODE_KEY,value);}catch{}
-        if(value==='threads'&&[CHAT_PANEL,PRIMARY_PANEL].includes(panel)){if(lastNative.current)ctx.uiWorkspace.openSession(lastNative.current);else ctx.layout.selectPanel('naumi-workbench');}
+        if(value==='threads'&&[CHAT_PANEL,PRIMARY_PANEL,BOT_OVERVIEW_PANEL].includes(panel)){if(lastNative.current)ctx.uiWorkspace.openSession(lastNative.current);else ctx.layout.selectPanel('naumi-workbench');}
         if(value==='bot'&&enter)void source.refresh().then(()=>{if(entryIntent.current===intent)return enterBotMode(ctx,source.getSnapshot());}).catch(()=>setError('目录尚未读取，请重试。'));
       };
       useEffect(()=>{if(mode==='bot'&&catalog.status==='ready'&&!primaryBot(catalog)&&panel!==PRIMARY_PANEL){ctx.layout.beginNavigation?.();ctx.layout.selectPanel(PRIMARY_PANEL);}},[mode,catalog.status,catalog.primaryBotId,panel]);

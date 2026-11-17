@@ -1,3 +1,4 @@
+import {openBotOverview} from './bot-overview.js';
 import {botCatalog} from './bot-sidebar-model.js';
 import {createBotAvatar} from './bot-avatar.js';
 import {BOT_FORMS,BOT_PALETTES} from './bot-appearance-model.js';
@@ -7,7 +8,7 @@ export function primaryBot(catalog){return catalog.bots.find(b=>b.id===catalog.p
 export function enterBotMode(ctx,catalog){
  if(catalog.status!=='ready')throw Error('BOT_DIRECTORY_UNAVAILABLE');
  const bot=primaryBot(catalog),navigation=ctx.layout.beginNavigation?.();
- if(bot)return Promise.resolve((ctx.get?.('sessions')??ctx.sessions)?.refresh?.()).then(()=>{if(!navigation?.aborted)ctx.uiWorkspace.openSession(bot.homeSessionId);});ctx.layout.selectPanel(PRIMARY_PANEL);return Promise.resolve();
+ if(bot)return Promise.resolve((ctx.get?.('sessions')??ctx.sessions)?.refresh?.()).then(()=>{if(!navigation?.aborted)openBotOverview(ctx,bot.id);});ctx.layout.selectPanel(PRIMARY_PANEL);return Promise.resolve();
 }
 export function installPrimaryBotUI(ctx,React){
  const h=React.createElement,Dialog=createEmployeeDialog(ctx,React);
