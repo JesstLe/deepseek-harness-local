@@ -1,3 +1,4 @@
+import {createBotAvatar} from './bot-avatar.js';
 import {EXPERIENCE_EVENT,EXPERIENCE_ACTIONS,advancedEmployeeAccess} from './employee-experience-model.js';
 import {taskActivity,employeeTaskState,employeeTasks,receptionTarget} from './bot-task-model.js';
 import {MODE_KEY,navigationMode,botActivity,botSessions,botTone,newBotTaskRequest,botCatalog,currentSessionId,botSelected} from './bot-sidebar-model.js';
@@ -6,14 +7,14 @@ export function installBotSidebar(ctx,React,Icon,createPortal){
   return ctx.inject(['remote.session'],scope=>installNavigation(scope,React,Icon,createPortal));
 }
 function installNavigation(ctx,React,Icon,createPortal){
-  const h=React.createElement,{useState,useEffect,useLayoutEffect,useRef,useSyncExternalStore}=React,source=botCatalog(),activity=taskActivity();
+  const h=React.createElement,{useState,useEffect,useLayoutEffect,useRef,useSyncExternalStore}=React,source=botCatalog(),activity=taskActivity(),Avatar=createBotAvatar(React);
   function BotRow({bot,props}){
     const {useSessions,useSessionStatus,usePanelInfo,useWorkspaces}=props;
     const sessions=useSessions(s=>s),status=useSessionStatus(s=>s),workspaces=useWorkspaces(s=>s),panelId=usePanelInfo(s=>s.activePanelId),currentId=currentSessionId(sessions,panelId);
     const [history,setHistory]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(null),[unbound,setUnbound]=useState(null),[menu,setMenu]=useState(null),[advanced,setAdvanced]=useState(false),menuButton=useRef(null),menuRef=useRef(null),alive=useRef(true),flight=useRef(false);
     useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
     useEffect(()=>{if(!menu)return;const abort=new AbortController();setAdvanced(false);void advancedEmployeeAccess(globalThis.fetch,abort.signal).then(value=>{if(!abort.signal.aborted)setAdvanced(value);});menuRef.current?.querySelector('button')?.focus({preventScroll:true});const close=()=>setMenu(null),pointer=e=>{if(!menuRef.current?.contains(e.target)&&!menuButton.current?.contains(e.target))close();},key=e=>{if(e.key==='Escape'){e.preventDefault();close();menuButton.current?.focus({preventScroll:true});}else if(['ArrowDown','ArrowUp','Home','End'].includes(e.key)){const buttons=[...menuRef.current.querySelectorAll('button')],index=buttons.indexOf(document.activeElement),next=e.key==='Home'?0:e.key==='End'?buttons.length-1:(index+(e.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length;e.preventDefault();buttons[next]?.focus({preventScroll:true});}else if(e.key==='Tab')close();};document.addEventListener('pointerdown',pointer);document.addEventListener('keydown',key);window.addEventListener('resize',close);window.addEventListener('wheel',close,{passive:true});return()=>{abort.abort();document.removeEventListener('pointerdown',pointer);document.removeEventListener('keydown',key);window.removeEventListener('resize',close);window.removeEventListener('wheel',close);};},[menu]);
-    const openSettings=mode=>{setMenu(null);window.dispatchEvent(new CustomEvent(EXPERIENCE_EVENT,{detail:{bot:{id:bot.id,name:bot.name,status:bot.status},mode}}));};
+    const openSettings=mode=>{setMenu(null);window.dispatchEvent(new CustomEvent(EXPERIENCE_EVENT,{detail:{bot,mode}}));};
     const jobs=useSyncExternalStore(activity.subscribe,activity.getSnapshot,activity.getSnapshot);
     const target=receptionTarget(bot,jobs.tasks,sessions,workspaces),state=jobs.status==='ready'?employeeTaskState(bot,jobs.tasks,botActivity(bot,sessions,status)):botActivity(bot,sessions,status),rows=botSessions(bot,sessions,workspaces);
     const active=employeeTasks(bot,jobs.tasks).active.filter(t=>t.targetBotId===bot.id);
@@ -28,7 +29,7 @@ function installNavigation(ctx,React,Icon,createPortal){
       finally{flight.current=false;if(alive.current)setBusy(false);}
     };
     return h('div',{className:'naumi-bot-entry','data-bot-id':bot.id,'data-selected':botSelected(bot,currentId,sessions),'data-bot-state':state},
-      h('div',{className:'naumi-bot-row'},h('button',{type:'button',className:'naumi-bot-open',onClick:()=>{if(target)open(target);else{setHistory(true);setError('日常会话已归档，可新建聊天');}},'aria-label':bot.name+'，'+stateName,title:bot.name},h('span',{className:'naumi-bot-avatar '+botTone(bot.id),'aria-hidden':true},h(Icon,{name:bot.kind==='team'?'layers':'spark',size:21})),h('span',{className:'naumi-bot-caption'},h('strong',null,bot.name),h('span',null,stateName)),h('span',{className:'naumi-bot-state',title:stateName,'aria-label':stateName})),
+      h('div',{className:'naumi-bot-row'},h('button',{type:'button',className:'naumi-bot-open',onClick:()=>{if(target)open(target);else{setHistory(true);setError('日常会话已归档，可新建聊天');}},'aria-label':bot.name+'，'+stateName,title:bot.name},h(Avatar,{bot,state}),h('span',{className:'naumi-bot-caption'},h('strong',null,bot.name),h('span',null,stateName)),h('span',{className:'naumi-bot-state',title:stateName,'aria-label':stateName})),
         active.length>0&&h('button',{type:'button',className:'naumi-bot-current','aria-label':'查看'+bot.name+'的当前任务（'+active.length+'）',title:'查看当前任务',onClick:()=>{const task=active[0];if(sessions.byId[task.targetSessionId])open(task.targetSessionId);else{setHistory(true);if(target)open(target);}}},active.length),
         h('button',{ref:menuButton,type:'button',className:'naumi-bot-menu-toggle','aria-label':bot.name+'的设置','aria-haspopup':'menu','aria-expanded':!!menu,onClick:e=>{const r=e.currentTarget.getBoundingClientRect();setMenu(v=>v?null:{left:Math.max(8,Math.min(window.innerWidth-205,r.left)),top:Math.max(8,Math.min(window.innerHeight-240,r.bottom+5))});}},'⋯'),h('button',{type:'button',className:'naumi-bot-history-toggle','aria-label':bot.name+'的任务记录','aria-expanded':history,onClick:()=>setHistory(v=>!v)},'⌄')),
       menu&&createPortal(h('div',{ref:menuRef,className:'nx-bot-menu',role:'menu','aria-label':bot.name+'的设置',style:menu},[...EXPERIENCE_ACTIONS,...(advanced?[['advanced','高级管理']]:[])].map(([mode,label])=>h('button',{type:'button',key:mode,role:'menuitem','data-advanced':mode==='advanced'||undefined,onClick:()=>openSettings(mode)},label))),document.body),

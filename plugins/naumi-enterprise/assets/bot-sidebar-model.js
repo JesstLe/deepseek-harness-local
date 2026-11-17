@@ -55,6 +55,10 @@ export function createBotCatalog({fetcher=globalThis.fetch,eventSource=url=>new 
     getSnapshot:()=>snapshot,
     subscribe(listener){listeners.add(listener);if(!started){started=true;epoch++;windowTarget?.addEventListener('focus',focus);void refresh();}return()=>{listeners.delete(listener);if(listeners.size===0){started=false;epoch++;controller?.abort();stopEvents();pending=null;again=false;windowTarget?.removeEventListener('focus',focus);snapshot={status:'idle',bots:[],revision:0};}};},
     refresh,
+    async appearance(bot,appearance){
+      const response=await fetcher('/naumi/bots',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','x-naumi-bots':'1'},body:JSON.stringify({action:'appearance',botId:bot.id,expectedRevision:bot.revision,appearance}),signal:AbortSignal.timeout(12000)});
+      const value=await response.json().catch(()=>({error:'BOT_APPEARANCE_FAILED'}));if(!response.ok){await refresh();throw Error(value.error??'BOT_APPEARANCE_FAILED');}await refresh();return value;
+    },
     async bind(bot,sessionId){
       const response=await fetcher('/naumi/bots',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','x-naumi-bots':'1'},body:JSON.stringify({action:'bind',botId:bot.id,sessionId,expectedRevision:bot.revision}),signal:AbortSignal.timeout(12000)});
       const value=await response.json().catch(()=>({error:response.status===401||response.status===403?'BOT_AUTH_REQUIRED':'BOT_BIND_FAILED'}));if(!response.ok){await refresh();throw Error(value.error??'BOT_BIND_FAILED');}await refresh();return value;

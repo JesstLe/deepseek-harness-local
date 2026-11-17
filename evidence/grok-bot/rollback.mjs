@@ -1,0 +1,9 @@
+import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';import {createHash} from 'node:crypto';import assert from 'node:assert/strict';
+const evidence=path.dirname(fileURLToPath(import.meta.url)),source=path.resolve(evidence,'../..'),target=fs.realpathSync(path.resolve(process.argv[2]??'')),sha=b=>createHash('sha256').update(b).digest('hex');
+assert(process.argv[2]&&target!==fs.realpathSync(source),'SEPARATE_COPY_REQUIRED');assert(!fs.existsSync(path.join(target,'runtime/server.pid')),'RUNNING_TARGET_REJECTED');
+const manifest=JSON.parse(fs.readFileSync(path.join(evidence,'manifest.json'),'utf8'));
+for(const row of manifest.files){const dest=path.resolve(target,row.path);assert(dest.startsWith(target+path.sep));assert.equal(sha(fs.readFileSync(dest)),row.modifiedSHA256,'MODIFIED_COPY_HASH_MISMATCH '+row.path);if(row.originalSHA256)assert.equal(sha(fs.readFileSync(path.join(evidence,'original',row.path))),row.originalSHA256);}
+// Older strict schema does not accept appearance. Preserve a receipt before stripping only that field.
+const botsFile=path.join(target,'.dsh/naumi/bots.json');let fields=0;if(fs.existsSync(botsFile)){const before=fs.readFileSync(botsFile),doc=JSON.parse(before);for(const bot of doc.bots??[])if(Object.hasOwn(bot,'appearance')){delete bot.appearance;fields++;}if(fields){fs.writeFileSync(botsFile+'.before-avatar-rollback.json',before,{flag:'wx'});fs.writeFileSync(botsFile,JSON.stringify(doc,null,2)+'\n');}}
+let restored=0,removed=0;for(const row of manifest.files){const dest=path.resolve(target,row.path);if(row.originalSHA256){fs.copyFileSync(path.join(evidence,'original',row.path),dest);assert.equal(sha(fs.readFileSync(dest)),row.originalSHA256);restored++;}else{fs.unlinkSync(dest);assert(!fs.existsSync(dest));removed++;}}
+console.log(`ROLLBACK restored=${restored} removed=${removed} appearance_fields_removed=${fields} hashes=match modified_source=retained`);
