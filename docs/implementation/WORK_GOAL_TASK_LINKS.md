@@ -24,3 +24,5 @@
 最终壳验收15/15、exit0：原Native TaskCard补充要求→已受理回包故意丢失→刷新最新投影→重试同一key和goal revision仍只有attempt2；人工退回/新版条件/逐项验收和旧文件/旧条件保留；真实原生会话打开后关闭工作弹窗并复用原dock。最后中文taskLabel版再次15项通过，无供应商/3080请求。完整主线749/749已通过；后续纳入最新creation MCP/安装器上游增量，再固定树集中回归，不修改其源码或凭据。17路径ZIP、12原文件恢复/5新增删除和副本原23/23均exit0。
 
 最终主线固定验收：3f170b8整合origin/main aad77ec（creation MCP与安装器增量保留），node --test --test-concurrency=4 tests/*.test.mjs desktop/tests/*.test.cjs，757/757、0skip、exit0；原34/34模块、两轮749/749与最终壳15项记录均保留。本切片功能迭代1；没有变更企业模块或真实模型配置。
+
+主线与加载：源码普通merge/push e7fe7a5，含最新58ccccd安装器修订（仅该上游定向12/12、exit0；不是14，协作口误已工具更正）；757全仓对应固定3f170b8，新增安装器源码单列复测。空闲104sessions/0running/0activeTasks窗口，10文件精确增量exit0/HTTP200/X-Naumi-Work-Goal-Links=1，136无关运行文件/113权威数据配置/90其他证据hash保持；tasks/groups/员工export/模型保持。host/client/package、企业、真实目标/派单/模型不动。当前生产无新关联数据写入，空数组读取契约通过；完整写入业务链以隔离原生壳15项为证，不制造真实任务验收。加载窗口已释放。
