@@ -34,8 +34,10 @@ node scripts/probe-ccswitch-models.mjs
 node scripts/probe-reasoning-models.mjs
 node scripts/probe-reasoning-models.mjs --remaining
 node scripts/verify-reasoning-ui.mjs
-node scripts/package-reasoning-audit.mjs 2ae583a
+node scripts/package-reasoning-audit.mjs a4c89c3
 ```
 前三类供应商探测会产生小额真实请求；审计与 UI 本身不发供应商推理。ROLLBACK.sh 仅接受带 .naumi-reasoning-copy 标记且不含 .git 的单独副本；先核对全部修改与原件 hash，再恢复。运行配置私有原件与修改件由部署脚本单独保存在 .dsh 下，不加入公共证据。
 
 测试期间发现并修复自定义档位 schema 的稀疏 Record 问题，增加回归；Windows worktree junction 的 import.meta.main 检查偶发未执行入口，夹具改为显式调用原 CLI 的 runCli，并复制单个原生适配器包后扩展，不改共享依赖。空白 Session 即使改名也不以该标题显示，原生 UI 验收改用正式 Bot/home Session 入口，而不是创建消息或修改原生导航规则。
+
+主线同步：5418301 → e16b369 → a4c89c3，集成提交 944eb18；只将 .gitattributes 两个独立证据段合并并保留 package 的并行新增项。集中全量 node --test tests/*.test.mjs desktop/tests/*.test.cjs：668/668、exit 0；包闭包 132 文件 PASS。功能迭代仍为 1。
