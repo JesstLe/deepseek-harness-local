@@ -6,8 +6,8 @@
 - 官方运行包：`@deepseek-ai/dsh@0.2.2-rc.1`，精确锁定版本；不是从源码构建。
 - Node.js：24.19.0；官方要求 >=24.9.0。
 - 本地地址：`http://127.0.0.1:3080`。
-- 部署目录：`E:/Workspace/deepseek-harness-local`。
-- 数据目录：`E:/Workspace/deepseek-harness-local/.dsh`，不提交 Git。
+- 部署目录：`E:/Workspace/naumi-desktop`。
+- 数据目录：`E:/Workspace/naumi-desktop/.dsh`，不提交 Git。
 - 配置文件：`config/local.json`；默认关闭遥测环境变量，只监听本机。
 - 浅色主题：`.dsh/cordis.patch.yml` 中 `ui-theme.preference=light`；DeepSeek 会话日志上传关闭。
 - GitHub 私有备份：https://github.com/JesstLe/deepseek-harness-local。
@@ -17,7 +17,7 @@
 在 PowerShell 中执行：
 
 ```powershell
-cd E:\Workspace\deepseek-harness-local
+cd E:\Workspace\naumi-desktop
 .\Start-DeepSeek.ps1           # 后台运行；重复运行不会启动第二个实例
 .\Start-DeepSeek.ps1 -Open     # 同时打开浏览器
 .\Stop-DeepSeek.ps1            # 校验 PID 所属命令后停止本部署

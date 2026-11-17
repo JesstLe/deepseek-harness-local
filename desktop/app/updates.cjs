@@ -3,7 +3,7 @@
 // repository's GitHub Releases "latest" assets: a measured CN mirror first and
 // GitHub direct as automatic fallback. NAUMI_UPDATE_URL replaces the list with
 // one https static feed; loopback http is allowed for local staging.
-const GITHUB_LATEST='https://github.com/JesstLe/deepseek-harness-local/releases/latest/download';
+const GITHUB_LATEST='https://github.com/JesstLe/naumi-desktop/releases/latest/download';
 const DEFAULT_FEED_BASES=['https://gh.ddlc.top/'+GITHUB_LATEST,GITHUB_LATEST];
 function feedOverride(){
  const url=process.env.NAUMI_UPDATE_URL;

@@ -62,7 +62,7 @@ test('later choice and missing update reset state without installing',async()=>{
  updates.stop();assert.equal(updates.snapshot().status,'disabled');
 });
 test('manual check is deduplicated while one is in flight',async()=>{
- const {updates,updater}=harness();updates.start();
+ const {updates,updater}=harness({fetcher:feedFetcher([{ok:true,body:manifest}])});updates.start();
  const first=await updates.check();assert.deepEqual(first,{ok:true,status:'checking'});assert.equal(updater.checks,1);
 });
 test('feed resolution prefers the CN mirror and validates the manifest',async()=>{
@@ -74,7 +74,7 @@ test('feed resolution prefers the CN mirror and validates the manifest',async()=
 test('feed resolution falls back to GitHub direct when the mirror fails',async()=>{
  const {updates,updater}=harness({fetcher:feedFetcher([{ok:false,body:''},{ok:true,body:manifest}])});
  updates.start();const result=await updates.check();
- assert.equal(result.ok,true);assert.match(updater.feeds[0].url,/^https:\/\/github\.com\/JesstLe\/deepseek-harness-local\/releases\/latest\/download$/);
+ assert.equal(result.ok,true);assert.match(updater.feeds[0].url,/^https:\/\/github\.com\/JesstLe\/naumi-desktop\/releases\/latest\/download$/);
 });
 test('feed resolution rejects malformed manifests and reports unreachable when all fail',async()=>{
  const broken=harness({fetcher:feedFetcher([{ok:true,body:'version: 9.9.9\n'},{ok:true,body:'<html>blocked</html>'}])});

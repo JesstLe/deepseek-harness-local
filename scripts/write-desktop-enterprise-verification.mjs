@@ -61,7 +61,7 @@ Exit status: 0.
 Restored behavior/status: original protocol1 proof, prior relay/clone behavior, original293 tests PASS, UUID/key/persona/memory/schema1 retained. Actual modified files remain changed and active employee profiles are untouched. This is source-copy rollback, not installed-version or business-schema downgrade.
 
 Actual-service read-only probe:
-Command: node scripts/check-bot-runtime.mjs E:/Workspace/deepseek-harness-local 2
+Command: node scripts/check-bot-runtime.mjs E:/Workspace/naumi-desktop 2
 Literal output/result: RUNTIME sessions=62 running=0 bots=3 revision=10 http=200 contract=2
 Exit status: 0. Actual3080 source/service not replaced by this module.
 

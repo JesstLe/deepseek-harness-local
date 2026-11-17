@@ -19,7 +19,7 @@ try{
     const request=route.request(),u=new URL(request.url()),r=await fetch(f.origin+u.pathname+u.search,{method:request.method(),headers:{cookie:'fixture-owner',origin:f.origin,'Content-Type':'application/json','x-naumi-employees':'1','x-naumi-employee-work':'1','x-naumi-employee-activity':'1'},...(request.method()==='POST'?{body:request.postData()}:{})});
     await route.fulfill({status:r.status,contentType:'application/json',body:await r.text()});
   });
-  const logs=(await Promise.all(['server.out.log','server.err.log'].map(n=>fs.readFile('E:/Workspace/deepseek-harness-local/logs/'+n,'utf8')))).join('\n'),launch=[...logs.matchAll(/http:\/\/127\.0\.0\.1:3080\/?\?token=[A-Za-z0-9_~.%-]+/g)].at(-1)?.[0];assert(launch);
+  const logs=(await Promise.all(['server.out.log','server.err.log'].map(n=>fs.readFile('E:/Workspace/naumi-desktop/logs/'+n,'utf8')))).join('\n'),launch=[...logs.matchAll(/http:\/\/127\.0\.0\.1:3080\/?\?token=[A-Za-z0-9_~.%-]+/g)].at(-1)?.[0];assert(launch);
   await page.goto(launch,{waitUntil:'domcontentloaded'});await page.getByText('员工中心',{exact:true}).first().click();await page.getByRole('tab',{name:'运行',exact:true}).click();
   const panel=page.locator('[data-employee-activity]');await panel.getByRole('heading',{name:'主动规则',exact:true}).waitFor();await panel.getByText('钉钉 CLI',{exact:true}).waitFor();
   check('capability_states_are_independent',await panel.getByText('未核验',{exact:true}).count()>0);

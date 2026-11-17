@@ -1,4 +1,4 @@
-param([string]$RuntimeRoot='E:\Workspace\deepseek-harness-local',[string]$EvidenceRoot='E:\Workspace\naumi-design-ops-digital-employees\evidence\digital-employees',[string]$PriorManifest='')
+param([string]$RuntimeRoot='E:\Workspace\naumi-desktop',[string]$EvidenceRoot='E:\Workspace\naumi-design-ops-digital-employees\evidence\digital-employees',[string]$PriorManifest='')
 $ErrorActionPreference='Stop';$source=Split-Path -Parent $PSScriptRoot;$runtime=(Resolve-Path -LiteralPath $RuntimeRoot).Path
 $target=(Resolve-Path -LiteralPath (Join-Path $runtime '.dsh/profiles/web/node_modules/@naumi/dsh-enterprise')).Path
 if(!$target.StartsWith($runtime+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw 'TARGET_ESCAPE'}

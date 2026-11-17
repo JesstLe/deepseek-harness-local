@@ -2,7 +2,7 @@
 
 ## 对象与归属
 
-- Harness 定制工程：`E:/Workspace/deepseek-harness-local`，官方 npm 发行包作为底座，新增独立 Cordis bundle，不改 node_modules。
+- Harness 定制工程：`E:/Workspace/naumi-desktop`，官方 npm 发行包作为底座，新增独立 Cordis bundle，不改 node_modules。
 - 设计中心：`https://47.105.59.142/dashboard`；本地 `E:/Workspace/naumi`。本次只读核对，不发布47。
 - 企业协作：`http://127.0.0.1:3112/workbench`；运行源码经进程核对为 `E:/Workspace/naumi-design-ops`，不是旧 naumi-co。现有未提交修改保持原样。
 
@@ -31,7 +31,7 @@ Naumi 品牌和浅色外壳、原生业务工作台/项目需求/交付/设计�
 ## 运行与维护
 
 ```powershell
-cd E:\Workspace\deepseek-harness-local
+cd E:\Workspace\naumi-desktop
 .\Start-Naumi.ps1 -Open
 .\Stop-Naumi.ps1
 npm run naumi:test

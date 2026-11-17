@@ -9,7 +9,7 @@ import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const REPO = 'JesstLe/deepseek-harness-local';
+const REPO = 'JesstLe/naumi-desktop';
 
 export function extractReleaseNotes(changelog, version) {
   if (typeof changelog !== 'string' || !/^\d+\.\d+\.\d+$/.test(String(version))) return '';

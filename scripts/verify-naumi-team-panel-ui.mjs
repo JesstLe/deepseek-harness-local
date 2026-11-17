@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
-const root=path.resolve(import.meta.dirname,'..'),runtime=process.env.NAUMI_RUNTIME_ROOT??'E:/Workspace/deepseek-harness-local';process.chdir(root);
+const root=path.resolve(import.meta.dirname,'..'),runtime=process.env.NAUMI_RUNTIME_ROOT??'E:/Workspace/naumi-desktop';process.chdir(root);
 const dir=path.join(root,'evidence/naumi-team-panel');
 const {chromium}=await import(pathToFileURL(process.env.NAUMI_PLAYWRIGHT_MODULE??'E:/Workspace/naumi/node_modules/playwright/index.mjs').href);
 const logs=['logs/server.out.log','logs/server.err.log'].map(p=>fs.readFileSync(path.join(runtime,p),'utf8')).join('\n');

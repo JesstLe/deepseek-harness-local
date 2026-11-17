@@ -37,7 +37,7 @@
 
 ```powershell
 # 本机已有部署：复用现有模型、会话和端口，不复制凭证进安装包
-pwsh -NoProfile -File E:/Workspace/deepseek-harness-local/Start-NaumiDesktop.ps1
+pwsh -NoProfile -File E:/Workspace/naumi-desktop/Start-NaumiDesktop.ps1
 
 # 从源码构建员工端的离线运行时和安装包
 npm --prefix desktop ci

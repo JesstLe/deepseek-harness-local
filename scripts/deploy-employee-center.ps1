@@ -1,4 +1,4 @@
-param([string]$RuntimeRoot='E:\Workspace\deepseek-harness-local')
+param([string]$RuntimeRoot='E:\Workspace\naumi-desktop')
 $ErrorActionPreference='Stop';$root=Split-Path -Parent $PSScriptRoot;$e=Join-Path $root 'evidence/employee-center';$runtime=(Resolve-Path -LiteralPath $RuntimeRoot).Path;$target=(Resolve-Path -LiteralPath (Join-Path $runtime '.dsh/profiles/web/node_modules/@naumi/dsh-enterprise')).Path
 if(!$target.StartsWith($runtime+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw 'TARGET_ESCAPE'}
 $manifest=Get-Content -Raw -LiteralPath (Join-Path $e 'hashes.json')|ConvertFrom-Json

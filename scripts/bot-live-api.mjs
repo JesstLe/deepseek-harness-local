@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-export async function botLiveApi(runtime='E:/Workspace/deepseek-harness-local'){
+export async function botLiveApi(runtime='E:/Workspace/naumi-desktop'){
   const base='http://127.0.0.1:3080';
   const logs=['server.out.log','server.err.log'].map(p=>fs.readFileSync(path.join(runtime,'logs',p),'utf8')).join('\n');
   const launch=[...logs.matchAll(/http:\/\/127\.0\.0\.1:3080\/?\?token=[A-Za-z0-9_~.%-]+/g)].at(-1)?.[0];assert(launch,'launch URL missing');

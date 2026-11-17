@@ -3,7 +3,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 
 // Read-only application probe. Never prints or saves launch tokens, cookies or task contents.
-const root=path.resolve(process.argv[2]??'E:/Workspace/deepseek-harness-local');
+const root=path.resolve(process.argv[2]??'E:/Workspace/naumi-desktop');
 const expectedContract=process.argv[3],base='http://127.0.0.1:3080';
 const logs=['server.out.log','server.err.log'].map(p=>fs.readFileSync(path.join(root,'logs',p),'utf8')).join('\n');
 const launch=[...logs.matchAll(/http:\/\/127\.0\.0\.1:3080\/?\?token=[A-Za-z0-9_~.%-]+/g)].at(-1)?.[0];

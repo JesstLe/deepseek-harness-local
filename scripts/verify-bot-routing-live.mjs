@@ -33,7 +33,7 @@ try{
 assert.equal(task.status,'completed');assert(task.result.includes(attempt.marker));
 const parent=await api.rpc('session/wait',{request:{sessionId:attempt.sourceSessionId,timeoutMs:120000,limit:5}},125000);assert.equal(parent.reason,'idle');
 function read(id){
-  const root='E:/Workspace/deepseek-harness-local/.dsh/sessions';let file;
+  const root='E:/Workspace/naumi-desktop/.dsh/sessions';let file;
   for(const project of fs.readdirSync(root)){const p=path.join(root,project,id,'session.v4.jsonl.zstd');if(fs.existsSync(p)){file=p;break;}}assert(file);
   const buffer=fs.readFileSync(file),parts=[];let offset=0;
   while(offset<buffer.length){const frame=zstdDecompressSync(buffer.subarray(offset),{info:true});offset+=frame.engine.bytesWritten;parts.push(frame.buffer);}

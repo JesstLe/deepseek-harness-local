@@ -12,7 +12,7 @@
 
 ### 基线（2026-11-16）
 
-- 源仓库 `E:/Workspace/deepseek-harness-local`，基线 `66c432b`，工作树干净。
+- 源仓库 `E:/Workspace/naumi-desktop`，基线 `66c432b`，工作树干净。
 - 隔离源副本 `E:/Workspace/deepseek-harness-team-panel-20261116`，分支 `feat/naumi-team-panel-20261116`。
 - 原有模块测试 52 / 52 通过。首次工作树自动 CRLF 转换导致字节一致性断言失败；只对新工作树恢复 Git 原始 LF 后重跑通过，保留首次记录。
 - `agentTeam` 已包含成员和任务；团队成员名由 Lead 创建；没有团队级显示名称字段。

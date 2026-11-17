@@ -1,4 +1,4 @@
-param([string]$RuntimeRoot='E:\Workspace\deepseek-harness-local',[string]$ConfigPath='')
+param([string]$RuntimeRoot='E:\Workspace\naumi-desktop',[string]$ConfigPath='')
 $ErrorActionPreference='Stop'
 $root=(Resolve-Path -LiteralPath $RuntimeRoot).Path
 if(!$ConfigPath){$ConfigPath=Join-Path $root '.dsh/model-gateway/config.json'}

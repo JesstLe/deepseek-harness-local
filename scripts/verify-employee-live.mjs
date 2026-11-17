@@ -37,7 +37,7 @@ const automatic=memories.find(m=>m.source.kind==='user'&&m.source.sessionId===so
 const targetId=await session('readSessionId','员工连续性联调 · 新会话读取');
 await prompt(targetId,`调用 employee_memory_search 搜索 ${attempt.marker}，只返回记忆里的验证标记，不新增或修改任何记忆。这是联调验证，不执行其他业务。`,'readRequestId');
 function read(id){
-  const root='E:/Workspace/deepseek-harness-local/.dsh/sessions';let file;
+  const root='E:/Workspace/naumi-desktop/.dsh/sessions';let file;
   for(const project of fs.readdirSync(root)){const p=path.join(root,project,id,'session.v4.jsonl.zstd');if(fs.existsSync(p)){file=p;break;}}assert(file);
   const b=fs.readFileSync(file),parts=[];let offset=0;
   while(offset<b.length){const r=zstdDecompressSync(b.subarray(offset),{info:true});offset+=r.engine.bytesWritten;parts.push(r.buffer);}

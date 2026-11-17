@@ -1,4 +1,4 @@
-param([string]$RuntimeRoot='E:\Workspace\deepseek-harness-local')
+param([string]$RuntimeRoot='E:\Workspace\naumi-desktop')
 $ErrorActionPreference='Stop'
 $root=Split-Path -Parent $PSScriptRoot
 $e=Join-Path $root 'evidence/employee-foundation'

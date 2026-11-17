@@ -69,7 +69,7 @@ exit=0
 restored behavior/status=pre-M5 packaging/capability implementation restored in copy; bundled DingTalk integration absent; 251 baseline tests pass; persona/memory/schema1 retained; active implementation remains modified. This is source/bundle-module rollback, not application data migration or installed-version downgrade acceptance.
 
 LIVE READ-ONLY CHECK
-command=node scripts/check-bot-runtime.mjs E:/Workspace/deepseek-harness-local 2
+command=node scripts/check-bot-runtime.mjs E:/Workspace/naumi-desktop 2
 literal output/result=RUNTIME sessions=62 running=0 bots=3 revision=10 http=200 contract=2
 exit=0
 

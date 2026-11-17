@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
 import {employeeHost} from '../tests/helpers/employee-host.mjs';
 
-const e=path.resolve('evidence/employee-center'),runtime='E:/Workspace/deepseek-harness-local';
+const e=path.resolve('evidence/employee-center'),runtime='E:/Workspace/naumi-desktop';
 const {chromium}=await import(pathToFileURL('E:/Workspace/naumi/node_modules/playwright/index.mjs').href);
 const fixture=await employeeHost(),browser=await chromium.launch({headless:true}),context=await browser.newContext({viewport:{width:1440,height:1000},colorScheme:'light',timezoneId:'Asia/Shanghai'}),page=await context.newPage();
 const checks=[],errors=[];page.on('pageerror',error=>errors.push(error.message));page.on('console',message=>{if(message.type()==='error'&&/employee|Error|slot|React/.test(message.text()))errors.push(message.text().slice(0,1000));});page.setDefaultTimeout(15000);

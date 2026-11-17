@@ -79,7 +79,7 @@ exit=0
 restored behavior/status=8 original files restored, 4 new files removed, original Logo-only attachment behavior restored in the copy, instance protocol absent; 268 baseline tests pass; persona/memory/schema1 retained; live profile untouched and modified implementation retained. Source-module rollback only: installed-version/application-schema downgrade remains a whole-M5 gate.
 
 LIVE READ-ONLY CHECK
-command=node scripts/check-bot-runtime.mjs E:/Workspace/deepseek-harness-local 2
+command=node scripts/check-bot-runtime.mjs E:/Workspace/naumi-desktop 2
 literal output/result=${read('LIVE_RUNTIME.log').trim()}
 exit=0
 
