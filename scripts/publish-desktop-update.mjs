@@ -35,12 +35,14 @@ function argValue(name) {
 }
 
 function run(command, args, {cwd = root, env} = {}) {
-  const result = spawnSync(command, args, {cwd, env, stdio: 'inherit', shell: process.platform === 'win32'});
+  const shell = process.platform === 'win32' && /\.cmd$/i.test(command);
+  const result = spawnSync(command, args, {cwd, env, stdio: 'inherit', shell});
   if (result.status !== 0) throw Error('RELEASE_COMMAND_FAILED ' + command + ' ' + args.join(' '));
 }
 
 function capture(command, args) {
-  const result = spawnSync(command, args, {encoding: 'utf8', shell: process.platform === 'win32'});
+  const shell = process.platform === 'win32' && /\.cmd$/i.test(command);
+  const result = spawnSync(command, args, {encoding: 'utf8', shell});
   return {ok: result.status === 0, output: (result.stdout ?? '') + (result.stderr ?? '')};
 }
 

@@ -25,7 +25,8 @@ app.whenReady().then(async()=>{
  if(app.isPackaged||process.env.NAUMI_UPDATE_DEV==='1'){
   try{
    const {autoUpdater}=require('electron-updater');
-   updates=createDesktopUpdates({app,updater:autoUpdater,notify:showUpdateNotice,canInstall:canInstallUpdate,broadcast:snapshot=>{if(window&&!window.isDestroyed())window.webContents.send('naumi:update-state',snapshot);}});
+   if(process.env.NAUMI_UPDATE_DEV==='1')autoUpdater.forceDevUpdateConfig=true;
+   updates=createDesktopUpdates({app,updater:autoUpdater,notify:showUpdateNotice,canInstall:canInstallUpdate,broadcast:snapshot=>{if(window&&!window.isDestroyed())window.webContents.send('naumi:update-state',snapshot);},log:(...args)=>{if(process.env.NAUMI_UPDATE_DEV==='1')console.warn('[updates]',...args);}});
    const started=updates.start();if(!started.ok)console.warn('[updates] disabled:',started.error);
   }catch(error){console.warn('[updates] unavailable:',error.message);}
  }
