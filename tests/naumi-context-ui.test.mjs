@@ -46,11 +46,13 @@ test('preexisting enterprise front-end remains byte-equivalent apart from declar
  assert.equal(source.split(desktopAction).length,2);
  const start=source.indexOf('window.__ModuleLoader__.load');
  const lazy="    const BotGroups=React.lazy(()=>import('/naumi/assets/bot-groups.js').then(module=>({default:module.createBotGroupsPage(ctx,React)}))\n      .catch(()=>({default:()=>h('p',{className:'naumi-page',role:'alert'},'群聊界面加载失败，请刷新页面。')})));\n";
- const grouped="      for(const [id]of PANELS)yield ctx.slots.register({name:'main',key:id},()=>id==='naumi-bot-groups'\n        ? h(React.Suspense,{fallback:h('p',{role:'status',className:'naumi-page'},'正在载入群聊…')},h(BotGroups)) : h(Page,{page:id}));";
- assert(source.includes(lazy));assert(source.includes(grouped));assert(source.includes("['naumi-bot-groups','Bot 群聊','chat'],"));
+ const privatePanel="      yield ctx.slots.register({name:'main',key:'naumi-conversation'},()=>h(React.Suspense,{fallback:null},h(BotGroups)));\n";
+ assert(source.includes(lazy));assert(source.includes(privatePanel));assert(!source.includes("['naumi-bot-groups','Bot 群聊','chat'],"));
+ const migration="      const previous=sessionStorage.getItem('naumi.activePanel');\n      const saved=previous==='naumi-bot-groups'?'naumi-conversation':previous;";
+ assert(source.includes(migration));
  const identityHelper=source.slice(source.indexOf('    function IdentityAccount(){'),source.indexOf('    function DesignGrid()'));
  assert(identityHelper.includes('if(!identity)return null;'));assert(identityHelper.includes('value.available'));assert.equal(source.split(',h(IdentityAccount)').length,2);
- const restored=source.slice(start).replace(identityHelper,'').replace(',h(IdentityAccount)','').replace(desktopAction,'').replace(lazy,'').replace("['naumi-bot-groups','Bot 群聊','chat'],",'').replace(grouped,"      for(const [id]of PANELS)yield ctx.slots.register({name:'main',key:id},()=>h(Page,{page:id}));").split('\n').filter(line=>!line.includes("void import('/naumi/assets/browser-client.js')")).join('\n').replace("    installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);\n",'');
+ const restored=source.slice(start).replace(identityHelper,'').replace(',h(IdentityAccount)','').replace(desktopAction,'').replace(lazy,'').replace(privatePanel,'').replace("const known=new Set([...PANELS.map(x=>x[0]),'naumi-conversation']);","const known=new Set(PANELS.map(x=>x[0]));").replace(migration,"      const saved=sessionStorage.getItem('naumi.activePanel');").split('\n').filter(line=>!line.includes("void import('/naumi/assets/browser-client.js')")).join('\n').replace("    installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);\n",'');
  assert.equal(restored.replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'));
 });
 test('team presentation has no direct credential, model, permission or persistence writes',()=>{

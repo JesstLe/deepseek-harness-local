@@ -93,3 +93,7 @@ P2接不可变subject与服务端产品授权，P3接设备网关，P4接签名�
 ## 登录视觉追加决定
 
 用户指定复用 http://127.0.0.1:3112/login 的实际样式，仅移除左上角DESIGN OS；该运行页面来自naumi-design-ops，而非旧naumi-co源码。背景使用相同smoke shader，胶囊导航／按钮使用相同liquid shader，CSS与品牌斜体字标复用，React effect转为DOM生命周期；渲染预算、隐藏暂停、reduced-motion、context loss降级及清理保留。来源hash见desktop/app/identity-style/SOURCE.json。应用离线自带这些文件，不运行时依赖3112，不嵌iframe，也不改变账号校验API。注册胶囊只打开已配置Naumi账号平台首页，由平台控制是否开放注册，不调用协作系统的企业注册接口。
+
+## 主线同步
+
+初始8314ecb；模块1完成后整合86a29bb，保留统一Bot聊天入口、历史面板迁移及所有聊天资产。仅解决本任务账号入口与既有前端逐字节保护测试、gitattributes追加条目的交叠；不回退聊天实现。功能计数仍为1。

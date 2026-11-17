@@ -35,6 +35,8 @@ export function apply(ctx,config) {
   assets.set('bot-task-ui.js','text/javascript; charset=utf-8');
   assets.set('bot-task-model.js','text/javascript; charset=utf-8');
   assets.set('bot-task.css','text/css; charset=utf-8');
+  assets.set('bot-chat-model.js','text/javascript; charset=utf-8');
+  assets.set('bot-chat-markdown.js','text/javascript; charset=utf-8');
   assets.set('bot-groups.js','text/javascript; charset=utf-8');
   assets.set('bot-groups.css','text/css; charset=utf-8');
   assets.set('employee-experience-model.js','text/javascript; charset=utf-8');
