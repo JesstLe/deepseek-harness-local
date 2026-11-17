@@ -1,4 +1,4 @@
-# DeepSeek Harness 本地部署
+# Naumi Desktop 本地部署
 
 ## 部署方式
 
@@ -10,7 +10,7 @@
 - 数据目录：`E:/Workspace/naumi-desktop/.dsh`，不提交 Git。
 - 配置文件：`config/local.json`；默认关闭遥测环境变量，只监听本机。
 - 浅色主题：`.dsh/cordis.patch.yml` 中 `ui-theme.preference=light`；DeepSeek 会话日志上传关闭。
-- GitHub 私有备份：https://github.com/JesstLe/deepseek-harness-local。
+- GitHub 私有备份：https://github.com/JesstLe/naumi-desktop。
 
 ## 操作
 
@@ -18,14 +18,14 @@
 
 ```powershell
 cd E:\Workspace\naumi-desktop
-.\Start-DeepSeek.ps1           # 后台运行；重复运行不会启动第二个实例
-.\Start-DeepSeek.ps1 -Open     # 同时打开浏览器
-.\Stop-DeepSeek.ps1            # 校验 PID 所属命令后停止本部署
+.\Start-Naumi.ps1           # 后台运行；重复运行不会启动第二个实例
+.\Start-Naumi.ps1 -Open     # 同时打开浏览器
+.\Stop-Naumi.ps1            # 校验 PID 所属命令后停止本部署
 ```
 
 依赖恢复：`npm ci --no-audit --no-fund`。运行日志位于 `logs/server.out.log` 和 `logs/server.err.log`。本次不配置开机自启。
 
-桌面已有 `DeepSeek Harness` 快捷方式，双击会启动服务并打开带本次启动认证令牌的地址。首次直接打开无令牌的地址不会自动取得 API 访问凭据；使用桌面快捷方式或 `Start-DeepSeek.ps1 -Open`。不要分享 `runtime` 中的快捷方式或服务原始日志。
+桌面已有 `Naumi 工作台` 快捷方式，双击会启动服务并打开带本次启动认证令牌的地址。首次直接打开无令牌的地址不会自动取得 API 访问凭据；使用桌面快捷方式或 `Start-Naumi.ps1 -Open`。不要分享 `runtime` 中的快捷方式或服务原始日志。
 
 ## 模型与工作区
 
