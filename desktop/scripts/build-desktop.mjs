@@ -20,7 +20,7 @@ export function installPathBudget(files){
 export function presentationScript(raw,engine,metadata){
  const normalized=raw.replaceAll('\r\n','\n');
  if(sha(normalized)!==metadata.originalEngineSHA256 || sha(engine)!==metadata.modifiedEngineSHA256 ||
- engine!==normalized.replace('!include "assistedInstaller.nsh"','!include "${NAUMI_WIZARD_DIR}\\pages.nsh"'))throw Error('NSIS_PRESENTATION_SOURCE_CHANGED');
+ engine!==normalized.replace('!include "assistedInstaller.nsh"','!include "${NAUMI_WIZARD_DIR}\\pages.nsh"').replace('!include "installUtil.nsh"','!include "installUtil.nsh"\n  !include "${NAUMI_WIZARD_DIR}\\upgrade-shortcuts.nsh"'))throw Error('NSIS_PRESENTATION_SOURCE_CHANGED');
  return engine;
 }
 export function installPresentationHook(Target,engine,metadata){
@@ -38,7 +38,7 @@ export async function buildDesktop(args=process.argv.slice(2)){
  const pkg=JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json')));
  if(pkg.build.nsis.script)throw Error('NSIS_CUSTOM_SCRIPT_BYPASSES_STOCK_UNINSTALLER');
  if(require('app-builder-lib/package.json').version!==metadata.version)throw Error('NSIS_BUILDER_VERSION_CHANGED');
- for(const arg of args)if(arg!=='--dir'&&!arg.startsWith('--output='))throw Error('UNKNOWN_BUILD_ARGUMENT '+arg);
+ for(const arg of args)if(arg!=='--dir'&&arg!=='--reuse-packaged'&&!arg.startsWith('--output='))throw Error('UNKNOWN_BUILD_ARGUMENT '+arg);
  const output=args.find(a=>a.startsWith('--output='))?.slice('--output='.length);
  const callerCwd=process.cwd();
  const budget=installPathBudget(JSON.parse(fs.readFileSync(path.join(root,'runtime/desktop-backend/runtime-files.json'))));
@@ -47,8 +47,8 @@ export async function buildDesktop(args=process.argv.slice(2)){
  const restore=installPresentationHook(NsisTarget,fs.readFileSync(path.join(dir,'engine.nsi'),'utf8'),metadata);
  try{
   process.chdir(path.join(root,'desktop'));
-  console.log('NAUMI_BUILDER stock_uninstaller=1 stock_signing=1 stock_size_check=1 engine_delta=1');
-  return await build({projectDir:path.join(root,'desktop'),targets:Platform.WINDOWS.createTarget(args.includes('--dir')?'dir':'nsis',Arch.x64),publish:'never',...(output?{config:{directories:{output}}}:{})});
+  console.log('NAUMI_BUILDER stock_uninstaller=1 stock_signing=1 stock_size_check=1 engine_delta=2');
+  return await build({...args.includes('--reuse-packaged')?{prepackaged:path.join(root,'runtime/naumi-desktop-release/win-unpacked')}:{},projectDir:path.join(root,'desktop'),targets:Platform.WINDOWS.createTarget(args.includes('--dir')?'dir':'nsis',Arch.x64),publish:'never',...(output?{config:{directories:{output}}}:{})});
  }finally{restore();process.chdir(callerCwd);}
 }
 if(process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url)await buildDesktop();
