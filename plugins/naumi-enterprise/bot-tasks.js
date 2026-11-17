@@ -54,6 +54,7 @@ export function installBotTasks(ctx,directory,{store,runtime,readWorkGoal,workGo
     const ledger=store??new BotTaskStore(path.join(process.env.DSH_HOME??path.join(os.homedir(),'.dsh'),'naumi','bot-tasks.json'));
     const adapter=runtime??createBotTaskRuntime(scope);
     const service=new BotTaskService({ctx:scope,directory,store:ledger,runtime:adapter,readWorkGoal,workGoalsReady,onError:()=>scope.logger.warn('BOT_TASK_BACKGROUND_ERROR')});
+    scope.provide('naumiBotTasks',service);
     // Presets isolate their compaction service in a child scope. Install once on
     // its documented summary hook; route selection still comes from the owner.
     const llm=scope.get('llm');if(llm)scope.effect(()=>installRetiredModelCompaction({ctx:{get:()=>BasicCompactionEngine.prototype}},llm));
