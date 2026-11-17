@@ -44,3 +44,5 @@ D1运行接续：4静态资源已从main406277c加载，HTTP200/117无关文件h
 整合主线406277c→ba4ee2a（模型审计最终证据与暂缓的常驻自主Bot愿景保留），功能计数1。node --test --test-concurrency=4 tests/*.test.mjs desktop/tests/*.test.cjs：686/686，exit0；没有跳过测试，降低跨文件并发以避免Windows临时目录句柄争用。本地固定触发/明确批准工作不是BOT-AUTONOMY-001长期自主规划，该愿景仍暂缓。
 
 接续整合：6761e61→f518cdd，纳入origin/main b825ed7的Blender/Cloud47既有变更，不修改其实现或配置；只保留package新增模块清单，.gitattributes两方追加均保留。最终集中全仓712/712、exit0（INTEGRATED_MAIN.log）；独立壳16/16、exit0，桌面1360/580/360图片已逐张重开检查。真实3080只读检查98sessions/1running/0activeTasks，因此未执行停止、加载、真实规则创建或模型调用，等待空闲窗口。
+
+实际加载：空闲窗口101sessions/0running，固定main cf56ad3执行node scripts/deploy-local-proactive.mjs apply E:/Workspace/naumi-desktop，exit0。仅7个目标文件，package只追加employee-local-proactive.js；PID53684、HTTP200、X-Naumi-Local-Proactive=1、4bots/revision46。126无关运行文件、110个权威会话/配置文件、模型组、员工export、任务/群账本与46个其他未跟踪证据hash保持。未创建/启用真实规则，0模型/企业登记/同步配置变更；窗口已工具通知释放。Source主线、实际加载、真实供应商自然语言和最终安装仍分别记证；后两者本切片未完成。
