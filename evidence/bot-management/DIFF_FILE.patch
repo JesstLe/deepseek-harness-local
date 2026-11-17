@@ -1,0 +1,565 @@
+diff --git a/docs/implementation/BOT_CREATION_MANAGEMENT.md b/docs/implementation/BOT_CREATION_MANAGEMENT.md
+new file mode 100644
+index 0000000..e5c9f43
+--- /dev/null
++++ b/docs/implementation/BOT_CREATION_MANAGEMENT.md
+@@ -0,0 +1,42 @@
++# 主 Bot 员工管理与手动创建
++
++## 模块与职责
++
++负责人：primary-bot-management。本任务分支 `codex/primary-bot-management`，独立目录 `E:/Workspace/naumi-primary-bot-management`；开工/远端基线 `7de781ffac355e360c4a418d2947da7873ea2367`。功能切片计数 1。
++
++范围：bots.js（目录、创建/管理、原工具和 owner HTTP）、bot-task-service.js 的生命周期准入守卫、侧栏加号及原 primary 资源中的创建弹窗/共享目录、测试与本模块脚本。host/client、package、图标、模型位置和原生 composer 不变。共享 main 的 group-rename/PACKAGE.txt 修改与安装器未跟踪文件归原线程，保留不暂存。
++
++## 调研结论
++
++原 `bot_create` 把调用根 Session 绑定成 Bot。主 Bot 自己已绑定，再创建不同名称会报 BOT_SESSION_ALREADY_BOUND；若通过重绑定绕开，会丢失主管身份。原“新增员工”只是开启一个含创建指令的 AI 草稿，不等于手动创建。
++
++保留原目录与 Session 引擎，不新增并行员工系统。主 Bot 侧的创建与加号表单共用 PrimaryBotService.createBot；普通线程原有建立自身 Bot 的工具行为仍兼容。
++
++## 公共接口、依赖方向、数据/状态/事务归属
++
++- BotDirectory 增加可选 `creations[]` 受理/完成记录，保存 actor+requestId、稳定 Bot/Session ID、名称/职责/类型/头像、专属路径和已有默认 model/preset（无 API Key）。先落盘 reservation，再原生创建，最后原子发布 Bot+completed 回执。
++- `POST /naumi/bots` 增加 `create`（UUID、目录 CAS、fields）与 `update`（目标 Bot ID、目标 Bot CAS、白名单 patch）。沿用 owner、Origin、自定义 header、4096 字节上限；不接收客户端 actor、cwd、model、permissions、密钥。
++- 新员工工作区为当前账号 DSH_HOME 下 `naumi/workspaces/<stable Bot ID>`。使用原 WorkspaceRegistry.create/attachSession 与 task runtime.ensure；创建独立 root home，无 prompt、无业务任务。仅继承既有默认 model/preset 与 preset 默认权限，不复制主管的会话授权。
++- 原 `bot_create`：真实 Lead 的根身份属于 primaryBotId 时，新建另一个 Bot，不调用 bot_use、不重绑主管会话；普通未绑定线程保留原 create 行为。稳定 idempotencyKey（缺省原生 callId）用于重试。
++- 原 `bot_update`：未指定 targetBotId 时修改自己；只有账号主 Bot 的 Lead 可以指定其他 Bot。支持名称、职责、头像和归档/恢复；禁止更换主身份、会话、工作区、模型、权限或硬删除历史。
++- archive 不取消业务任务。管理器先检查在途任务，设置短期目录生命周期锁，等待已准入任务账本写入排空后复核，再 CAS 更新。dispatch/continue/retry 在持久化准入时再次检查锁与身份状态，避免归档并发接受一个无法运行的新任务。原始 sourceSessionId 写隔离仍保留。
++
++## 本次实现与迁移状态
++
++- 加号位置与“新增员工”菜单保留，点击打开浅色真实表单（名称、类型、职责）；不新增编辑器或模型设置页。创建成功直接打开员工自己的原生接待会话。
++- 失败保留输入与请求 ID，已受理但尚未完成的 owner reservation 可重新打开后继续；丢回执重试不重复员工、目录或 Session。头像仍可由原设置入口编辑，也可让主 Bot 通过 bot_update 调整。
++- Bot 名称与岗位由用户/主 Bot 决定，无硬编码员工模板。新 Bot 成功后不自动执行任务、不连接外部账号。
++- 只为本次新创建员工生成专属工作区，不擅自搬旧 3 个 Bot 的历史文件；原历史迁移规划保持，见 [迁移规划](BOT_WORKSPACE_MIGRATION.md)。
++
++## 验证命令、结果及证据层级
++
++- 基线：`node --test tests/naumi-bots.test.mjs tests/naumi-bot-runtime.test.mjs tests/naumi-primary-bot.test.mjs`，41/41，exit 0。
++- 单元/集成覆盖：主 Bot 身份保留、分离工作区/home、手动/工具统一创建、并发幂等、重启恢复、ensure/写盘失败、actor/账号隔离、目标管理与 Lead 校验、在途归档拒绝及归档/派单并发。
++- `node scripts/verify-bot-management.mjs`：真实隔离 Harness+原生 Agent 工具执行+React 壳。推理仅访问脚本内本地 SSE fixture；真实供应商调用 0。主 Bot 实际执行 bot_create/bot_update，不用模拟 DOM 或直接写用户目录冒充工具成功。手动表单创建和重试无推理请求。
++- 最终全仓、源码副本回滚、main 与本地增量加载凭证收口在 `evidence/bot-management/VERIFICATION.txt`；不把 fixture 的原生工具执行冒充真实模型自然语言选工具验收。
++
++## 未完成项与下一步
++
++以最终凭证区分源码/加载状态。正式加载不自动创建员工、不替账号选择 primary；用户刷新后使用入口。历史文件迁移、任意专业能力安装与真正供应商的语言理解不由创建成功代替。
++
++原读取器不识别新增 creations metadata；本模块回滚脚本仅验证另一个源码副本，不用旧读取器直接降级已创建新员工的真实目录。
+diff --git a/plugins/naumi-enterprise/assets/bot-sidebar-model.js b/plugins/naumi-enterprise/assets/bot-sidebar-model.js
+index 48f9d30..a5331b6 100644
+--- a/plugins/naumi-enterprise/assets/bot-sidebar-model.js
++++ b/plugins/naumi-enterprise/assets/bot-sidebar-model.js
+@@ -44,7 +44,7 @@ export function createBotCatalog({fetcher=globalThis.fetch,eventSource=url=>new
+           if(!response.ok){if(response.status===401||response.status===403){stopEvents();publish({status:'forbidden',bots:[],revision:0});}else publish({...snapshot,status:'error'});return;}
+           const value=await response.json();if(generation!==epoch)return;
+           if(value.version!==1||!Array.isArray(value.bots))throw Error('BOT_DIRECTORY_INVALID');
+-          publish({status:'ready',bots:value.bots,revision:value.revision,primaryBotId:value.primaryBotId??null,primarySetup:value.primarySetup??null});
++          publish({status:'ready',bots:value.bots,revision:value.revision,primaryBotId:value.primaryBotId??null,primarySetup:value.primarySetup??null,creations:value.creations??[]});
+           if(started&&!events){events=eventSource('/naumi/bots/events');events.onmessage=()=>void refresh();events.onerror=()=>{if(started&&generation===epoch){stopEvents();publish({...snapshot,status:'error'});void refresh();}};}
+         }catch(error){if(generation===epoch&&!controller.signal.aborted)publish({...snapshot,status:'error'});}
+       }while(again&&generation===epoch);
+diff --git a/plugins/naumi-enterprise/assets/bot-sidebar.js b/plugins/naumi-enterprise/assets/bot-sidebar.js
+index 08f58c7..862c133 100644
+--- a/plugins/naumi-enterprise/assets/bot-sidebar.js
++++ b/plugins/naumi-enterprise/assets/bot-sidebar.js
+@@ -3,7 +3,7 @@ import {EXPERIENCE_EVENT,EXPERIENCE_ACTIONS,advancedEmployeeAccess} from './empl
+ import {taskActivity,employeeTaskState,employeeTasks,receptionTarget} from './bot-task-model.js';
+ import {MODE_KEY,navigationMode,botActivity,botSessions,botSummary,botTone,newBotTaskRequest,botCatalog,currentSessionId,botSelected} from './bot-sidebar-model.js';
+ import {CHAT_PANEL,CHAT_EVENT,PIN_KEY,groupCatalog,conversationRows,roomPreview,roomWorking} from './bot-chat-model.js';
+-import {PRIMARY_PANEL,primaryBot,enterBotMode} from './primary-bot.js';
++import {PRIMARY_PANEL,CREATE_BOT_EVENT,primaryBot,enterBotMode} from './primary-bot.js';
+ 
+ export function installBotSidebar(ctx,React,Icon,createPortal){
+   return ctx.inject(['remote.session'],scope=>installNavigation(scope,React,Icon,createPortal));
+@@ -71,7 +71,7 @@ function installNavigation(ctx,React,Icon,createPortal){
+       useEffect(()=>{if(!adding)return;const close=e=>{if(e.type==='keydown'&&e.key!=='Escape')return;if(e.type!=='keydown'&&addRef.current?.contains(e.target))return;setAdding(false);};document.addEventListener('pointerdown',close);document.addEventListener('keydown',close);return()=>{document.removeEventListener('pointerdown',close);document.removeEventListener('keydown',close);};},[adding]);
+       const pin=id=>{setPinned(id);try{if(id)localStorage.setItem(PIN_KEY,id);else localStorage.removeItem(PIN_KEY);}catch{}};
+       const bots=catalog.bots.filter(bot=>bot.status==='active'&&(!search||bot.name.toLocaleLowerCase().includes(search.toLocaleLowerCase())));
+-      const create=()=>{setError(null);if(!primaryBot(catalog)){void enterBotMode(ctx,catalog).catch(()=>setError('目录尚未读取，请重试。'));return;}try{ctx.uiWorkspace.startSession(undefined,{prompt:'请根据我的需求创建一个可长期复用的 Bot（独立智能体或团队），由你自主确定名称与职责，并使用 bot_create 保存身份。不要预置固定岗位，也不要执行尚未确认的业务操作。\n\n我的需求：',whenDraftExists:'append'});}catch{setError('请先选择一个工作区');}};
++      const create=()=>{setError(null);if(!primaryBot(catalog)){void enterBotMode(ctx,catalog).catch(()=>setError('目录尚未读取，请重试。'));return;}window.dispatchEvent(new CustomEvent(CREATE_BOT_EVENT));};
+       if(!surface)return null;
+       return createPortal(h(React.Fragment,null,
+         h('div',{className:'naumi-navigation-switch','data-naumi-navigation-owned':true,role:'group','aria-label':'导航模式'},h('button',{type:'button','aria-pressed':mode==='threads',onClick:()=>choose('threads'),title:'线程模式'},wide?'线程':h(Icon,{name:'chat',size:16})),h('button',{type:'button','aria-pressed':mode==='bot',onClick:()=>choose('bot'),title:'Bot 模式'},wide?'Bot':h(Icon,{name:'spark',size:16}))),
+diff --git a/plugins/naumi-enterprise/assets/primary-bot.css b/plugins/naumi-enterprise/assets/primary-bot.css
+index 13a463f..f565f5f 100644
+--- a/plugins/naumi-enterprise/assets/primary-bot.css
++++ b/plugins/naumi-enterprise/assets/primary-bot.css
+@@ -1 +1,5 @@
+ .npb-page{display:grid;place-items:center;min-width:0;height:100%;overflow:auto;background:radial-gradient(ellipse at 50% 25%,#f4f0fa 0,transparent 58%),#fff;color:#34303f;padding:36px 22px;font-family:Inter,"Segoe UI","Microsoft YaHei",sans-serif}.npb-page *{box-sizing:border-box}.npb-card{width:min(420px,100%);display:flex;flex-direction:column;gap:23px}.npb-mark{align-self:center;width:84px;height:84px;display:grid;place-items:center}.npb-mark .naumi-bot-avatar{width:78px;height:78px;box-shadow:none}.npb-card h1{font-size:25px;letter-spacing:-.7px;font-weight:600;text-align:center;margin:0 0 14px}.npb-card button,.npb-card input{font:inherit}.npb-card button{cursor:pointer}.npb-card button:disabled{opacity:.45;cursor:default}.npb-card :focus-visible{outline:2px solid #9883b5;outline-offset:3px}.npb-tabs{display:flex;padding:4px;border-radius:11px;background:#f0edf4;gap:4px}.npb-tabs button{flex:1;border:0;background:transparent;border-radius:8px;padding:10px;font-size:13px;color:#8f879b}.npb-tabs button[aria-pressed=true]{background:white;color:#554267;box-shadow:0 2px 8px #352d4808}.npb-field{display:grid;gap:11px;font-size:12px;color:#83788e}.npb-field input{padding:14px 15px;border:1px solid #e2dce9;border-radius:12px;background:#fff;color:#34303f;font-size:15px;width:100%}.npb-field input::placeholder{color:#b4adbd}.npb-submit{padding:14px;border:0;border-radius:12px;background:#78628f;color:white;font-size:14px;box-shadow:0 6px 20px #76618e15}.npb-submit:hover{background:#6b557f}.npb-appearance{border:0;background:transparent;display:flex;align-items:center;justify-content:space-between;padding:0;color:#93859e;font-size:12px}.npb-appearance span{font-size:20px}.npb-appearance-options{display:grid;gap:12px}.npb-appearance-options>div{display:flex;flex-wrap:wrap;gap:7px}.npb-appearance-options button{border:1px solid #e9e3ef;border-radius:8px;background:#fff;color:#8a7b95;padding:7px 10px;font-size:12px}.npb-appearance-options button[aria-pressed=true]{border-color:#aa97bf;background:#f3eff8;color:#6c5383}.npb-options{display:grid;gap:9px;max-height:280px;overflow:auto}.npb-options label{display:flex;align-items:center;gap:12px;padding:13px;border:1px solid #e7e2ed;border-radius:12px;font-size:14px;cursor:pointer;background:#fff}.npb-options label[data-selected=true]{background:#f4f0f9;border-color:#b5a1c8}.npb-options input{accent-color:#89719e}.npb-options .naumi-bot-avatar{width:35px;height:35px}.npb-error{font-size:12px;color:#b35163;line-height:1.6}.naumi-bot-entry[data-primary=true] .naumi-bot-caption strong{font-weight:650}@media(max-width:480px){.npb-page{padding:28px 20px}.npb-card{gap:20px}.npb-card h1{font-size:23px}}
++
++.npb-staff textarea{resize:vertical;min-height:90px;border:1px solid #e2dce9;border-radius:10px;padding:11px 12px;background:#fff;color:#34303f;font:inherit;line-height:1.6}.npb-staff textarea:focus-visible{outline:2px solid #9883b5;outline-offset:2px}
++
++.npb-staff{width:min(440px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;box-sizing:border-box;min-width:0}
+diff --git a/plugins/naumi-enterprise/assets/primary-bot.js b/plugins/naumi-enterprise/assets/primary-bot.js
+index b67ba57..c88e460 100644
+--- a/plugins/naumi-enterprise/assets/primary-bot.js
++++ b/plugins/naumi-enterprise/assets/primary-bot.js
+@@ -2,14 +2,40 @@ import {botCatalog} from './bot-sidebar-model.js';
+ import {createBotAvatar} from './bot-avatar.js';
+ import {BOT_FORMS,BOT_PALETTES} from './bot-appearance-model.js';
+ export const PRIMARY_PANEL='naumi-primary-bot';
++export const CREATE_BOT_EVENT='naumi:create-bot';
+ export function primaryBot(catalog){return catalog.bots.find(b=>b.id===catalog.primaryBotId&&b.status==='active')??null;}
+ export function enterBotMode(ctx,catalog){
+  if(catalog.status!=='ready')throw Error('BOT_DIRECTORY_UNAVAILABLE');
+  const bot=primaryBot(catalog),navigation=ctx.layout.beginNavigation?.();
+  if(bot)return Promise.resolve((ctx.get?.('sessions')??ctx.sessions)?.refresh?.()).then(()=>{if(!navigation?.aborted)ctx.uiWorkspace.openSession(bot.homeSessionId);});ctx.layout.selectPanel(PRIMARY_PANEL);return Promise.resolve();
+ }
+-export function installPrimaryBotUI(ctx,React){return ctx.slots.inject('main',()=>ctx.slots.register({name:'main',key:PRIMARY_PANEL},createPrimaryBotPage(ctx,React)));}
+-export const primaryError=e=>({BOT_CONFLICT:'目录已更新，请确认后重试。',BOT_PRIMARY_PENDING:'主 Bot 正在准备，请刷新后继续。',BOT_PRIMARY_REQUEST_CONFLICT:'这次创建已有记录，请继续原来的设置。',BOT_NAME_EXISTS:'这个名称已在使用。',BOT_WORKSPACE_REQUIRED:'请先在线程模式中选择一个工作区。',BOT_PRIMARY_HOME_ARCHIVED:'请先恢复这个 Bot 的接待会话。',BOT_PRIMARY_REQUIRED:'主 Bot 需要保持启用。',BOT_ARCHIVED:'请选择启用中的 Bot。'}[e.message]??'创建尚未确认，请重试。');
++export function installPrimaryBotUI(ctx,React){
++ const h=React.createElement,Dialog=createEmployeeDialog(ctx,React);
++ function CreationOverlay(){const [open,setOpen]=React.useState(false);React.useEffect(()=>{const show=()=>setOpen(true);window.addEventListener(CREATE_BOT_EVENT,show);return()=>window.removeEventListener(CREATE_BOT_EVENT,show);},[]);return open?h(Dialog,{onClose:()=>setOpen(false)}):null;}
++ const main=ctx.slots.inject('main',()=>ctx.slots.register({name:'main',key:PRIMARY_PANEL},createPrimaryBotPage(ctx,React)));
++ const overlay=ctx.slots.inject('shell.overlay',()=>ctx.slots.register({name:'shell.overlay',id:'naumi-create-bot',order:95},CreationOverlay));
++ return()=>{main();overlay();};
++}
++export function createEmployeeDialog(ctx,React){
++ const h=React.createElement,source=botCatalog();return function EmployeeDialog({onClose}){
++  const catalog=React.useSyncExternalStore(source.subscribe,source.getSnapshot,source.getSnapshot),[name,setName]=React.useState(''),[purpose,setPurpose]=React.useState(''),[kind,setKind]=React.useState('agent'),[busy,setBusy]=React.useState(false),[error,setError]=React.useState(''),form=React.useRef(null),request=React.useRef(null),flight=React.useRef(false),alive=React.useRef(true),prior=React.useRef(document.activeElement);
++  React.useEffect(()=>{alive.current=true;form.current?.querySelector('input')?.focus();return()=>{alive.current=false;prior.current?.isConnected&&prior.current.focus();};},[]);
++  const pending=catalog.creations?.find(c=>c.actor==='owner'&&c.state==='pending'),locked=busy||!!pending;
++  React.useEffect(()=>{if(pending){request.current=pending.requestId;setName(pending.name);setPurpose(pending.purpose);setKind(pending.kind);}},[pending?.requestId]);
++  const change=fn=>{request.current=null;setError('');fn();};
++  const submit=async e=>{e.preventDefault();if(flight.current)return;flight.current=true;setBusy(true);setError('');request.current??=crypto.randomUUID();try{
++    const bot=await source.primary({action:'create',requestId:request.current,expectedRevision:catalog.revision,fields:{name:name.trim(),purpose:purpose.trim(),kind}});
++    if(alive.current){await (ctx.get?.('sessions')??ctx.sessions)?.refresh?.();ctx.layout.beginNavigation?.();ctx.uiWorkspace.openSession(bot.homeSessionId);onClose();}
++   }catch(e){if(alive.current)setError(primaryError(e));}finally{flight.current=false;if(alive.current)setBusy(false);}};
++  const keys=e=>{if(e.key==='Escape'&&!busy){e.preventDefault();onClose();}if(e.key==='Tab'){const list=[...form.current.querySelectorAll('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled)')],first=list[0],last=list.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}};
++  return h('div',{className:'nbc-modal-backdrop',onMouseDown:e=>{if(e.target===e.currentTarget&&!busy)onClose();}},h('form',{ref:form,className:'nbc-create npb-staff',role:'dialog','aria-modal':true,'aria-label':'创建 Bot',onSubmit:submit,onKeyDown:keys},h('header',null,h('h2',null,'创建 Bot'),h('button',{type:'button',className:'nbc-icon','aria-label':'关闭创建',disabled:busy,onClick:onClose},'×')),
++   h('label',{className:'nbc-field'},'名称',h('input',{value:name,maxLength:80,required:true,disabled:locked,onChange:e=>change(()=>setName(e.target.value))})),
++   h('label',{className:'nbc-field'},'类型',h('select',{value:kind,disabled:locked,onChange:e=>change(()=>setKind(e.target.value))},h('option',{value:'agent'},'智能体'),h('option',{value:'team'},'团队'))),
++   h('label',{className:'nbc-field'},'职责',h('textarea',{value:purpose,maxLength:2000,rows:4,required:true,disabled:locked,onChange:e=>change(()=>setPurpose(e.target.value))})),error&&h('p',{className:'nbc-error',role:'alert'},error),
++   h('footer',null,h('button',{type:'button',disabled:busy,onClick:onClose},'取消'),h('button',{type:'submit',className:'nbc-primary',disabled:busy||catalog.status!=='ready'||!name.trim()||!purpose.trim()},busy?'创建中…':pending?'继续创建':'创建'))));
++ };
++}
++export const primaryError=e=>({BOT_CONFLICT:'目录已更新，请确认后重试。',BOT_PRIMARY_PENDING:'主 Bot 正在准备，请刷新后继续。',BOT_PRIMARY_REQUEST_CONFLICT:'这次创建已有记录，请继续原来的设置。',BOT_NAME_EXISTS:'这个名称已在使用。',BOT_WORKSPACE_REQUIRED:'请先在线程模式中选择一个工作区。',BOT_PRIMARY_HOME_ARCHIVED:'请先恢复这个 Bot 的接待会话。',BOT_PRIMARY_REQUIRED:'请先设置主 Bot。',BOT_CREATION_REQUEST_CONFLICT:'这次创建已被受理，请按原信息重试。',BOT_BUSY:'这个 Bot 仍有进行中的任务。',BOT_PRIMARY_MANAGER_REQUIRED:'请由主 Bot 管理其他 Bot。',BOT_ARCHIVED:'请选择启用中的 Bot。'}[e.message]??'创建尚未确认，请重试。');
+ 
+ export function createPrimaryBotPage(ctx,React){
+  const h=React.createElement,{useState,useEffect,useRef,useSyncExternalStore}=React,source=botCatalog(),Avatar=createBotAvatar(React);
+diff --git a/plugins/naumi-enterprise/bot-task-service.js b/plugins/naumi-enterprise/bot-task-service.js
+index f8c5b1d..f1bf4fc 100644
+--- a/plugins/naumi-enterprise/bot-task-service.js
++++ b/plugins/naumi-enterprise/bot-task-service.js
+@@ -27,11 +27,13 @@ export class BotTaskService{
+     const bot=this.directory.forSession(member.root.id);if(!bot)fail('BOT_NOT_BOUND');
+     if(write&&bot.status!=='active')fail('BOT_ARCHIVED');return {root:member.root,bot};
+   }
++  assertAdmission(...ids){for(const id of ids){if(this.directory.lifecycleLocks?.has(id))fail('BOT_BUSY');if(this.directory.list().bots.find(b=>b.id===id)?.status!=='active')fail('BOT_ARCHIVED');}}
+   current(taskId){const task=this.store.read().tasks.find(t=>t.id===taskId);if(!task)fail('BOT_TASK_NOT_FOUND');return task;}
+   authorized(agent,taskId,write=false){const caller=this.caller(agent,write),task=this.current(taskId);
+     if(![task.sourceBotId,task.targetBotId].includes(caller.bot.id))fail('BOT_TASK_FORBIDDEN');
+     // Bot-wide reads are intentional; writes belong to the exact task endpoints.
+     // A new reception/test Session bound to the same Bot is not a write grant.
++    if(write)this.assertAdmission(task.sourceBotId,task.targetBotId);
+     if(write&&caller.bot.id===task.sourceBotId&&caller.root.id!==task.sourceSessionId)fail('BOT_TASK_SESSION_REQUIRED');
+     return {caller,task};}
+   serial(taskId,fn){
+@@ -54,7 +56,7 @@ export class BotTaskService{
+       if(task.targetBotId===args.targetBotId)fail('BOT_HANDOFF_DIFFERENT_BOT_REQUIRED');
+     }
+     const target=this.directory.list().bots.find(b=>b.id===args.targetBotId);
+-    if(!target)fail('BOT_NOT_FOUND');if(target.status!=='active')fail('BOT_ARCHIVED');
++    if(!target)fail('BOT_NOT_FOUND');this.assertAdmission(source.id,target.id);if(target.status!=='active')fail('BOT_ARCHIVED');
+     const lineage=parent?.lineage??[source.id];
+     if(parent&&TERMINAL.has(parent.status))fail('BOT_PARENT_TASK_CLOSED');
+     if(lineage.includes(target.id))fail('BOT_TASK_CYCLE');if(lineage.length>=5)fail('BOT_TASK_DEPTH_LIMIT');
+@@ -62,6 +64,7 @@ export class BotTaskService{
+     const intent={...(args.goal?{goal:args.goal}:{}),...(args.acceptance!==undefined?{acceptance:args.acceptance}:{}),...(sourceMessage?{source:sourceMessage}:{})};
+     const profile=await this.runtime.profile(target);signal?.throwIfAborted();
+     const value=await this.store.change(doc=>{
++      this.assertAdmission(source.id,target.id);
+       const existing=doc.tasks.find(t=>t.sourceSessionId===root.id&&t.key===args.idempotencyKey);
+       if(existing){if(!sameDispatch(existing,args))fail('BOT_TASK_IDEMPOTENCY_CONFLICT');return {value:existing,unchanged:true};}
+       if(doc.tasks.length>=1000)fail('BOT_TASK_CAPACITY');
+@@ -151,7 +154,7 @@ export class BotTaskService{
+       if(this.directory.list().bots.find(b=>b.id===current.targetBotId)?.status!=='active')fail('BOT_ARCHIVED');
+       if(current.status==='completed'&&this.runtime.isRunning(current.targetSessionId))fail('BOT_TASK_STILL_RUNNING');
+       await this.store.change(doc=>{
+-        const t=doc.tasks.find(t=>t.id===task.id);if(t.revision!==args.expectedRevision)fail('BOT_TASK_CONFLICT');
++        const t=doc.tasks.find(t=>t.id===task.id);this.assertAdmission(t.sourceBotId,t.targetBotId);if(t.revision!==args.expectedRevision)fail('BOT_TASK_CONFLICT');
+         const acceptance=args.acceptance??t.amendment?.acceptance;
+         t.amendment={text:args.message,...(acceptance!==undefined?{acceptance}:{}),...(sourceMessage?{source:sourceMessage}:{})};
+         if(t.status==='completed'){
+@@ -176,7 +179,7 @@ export class BotTaskService{
+       if(this.runtime.isRunning(current.targetSessionId))fail('BOT_TASK_STILL_RUNNING');
+       // An explicit retry clears stale parked input before adding a new attempt message.
+       await this.runtime.cancel(current.targetSessionId);
+-      await this.store.change(doc=>{const task=doc.tasks.find(t=>t.id===taskId);
++      await this.store.change(doc=>{const task=doc.tasks.find(t=>t.id===taskId);this.assertAdmission(task.sourceBotId,task.targetBotId);
+         if(caller.bot.id!==task.sourceBotId)fail('BOT_TASK_SENDER_REQUIRED');if(task.revision!==expectedRevision)fail('BOT_TASK_CONFLICT');
+         if(!['failed','interrupted','cancelled'].includes(task.status))fail('BOT_TASK_NOT_RETRYABLE');
+         if(task.attempt>=100)fail('BOT_TASK_RETRY_LIMIT');if(this.runtime.isRunning(task.targetSessionId))fail('BOT_TASK_STILL_RUNNING');
+diff --git a/plugins/naumi-enterprise/bots.js b/plugins/naumi-enterprise/bots.js
+index 179919d..c4ef3c1 100644
+--- a/plugins/naumi-enterprise/bots.js
++++ b/plugins/naumi-enterprise/bots.js
+@@ -12,12 +12,16 @@ import {BOT_FORMS,BOT_PALETTES} from './assets/bot-appearance-model.js';
+ const name=z.string().trim().min(1).max(80).refine(v=>!/[\u0000-\u001f\u007f]/u.test(v));
+ const id=z.string().min(1).max(200),revision=z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+ const appearanceSchema=z.object({shape:z.enum(BOT_FORMS.map(f=>f.id)),palette:z.enum(BOT_PALETTES.map(p=>p.id))}).strict();
++const creationFields=z.object({name,kind:z.enum(['agent','team']),purpose:z.string().trim().min(1).max(4000),appearance:appearanceSchema.optional()}).strict();
++const updateFields=z.object({expectedRevision:revision,name:name.optional(),purpose:z.string().trim().min(1).max(4000).optional(),status:z.enum(['active','archived']).optional(),appearance:appearanceSchema.optional()}).strict();
+ const botSchema=z.object({id,kind:z.enum(['agent','team']),name,purpose:z.string().trim().min(1).max(4000),status:z.enum(['active','archived']),revision,cwd:z.string().min(1),agentPreset:z.string().optional(),homeSessionId:id,sessionIds:z.array(id).min(1).max(1000),createdAt:z.string().datetime(),updatedAt:z.string().datetime(),appearance:appearanceSchema.optional()}).strict();
+ const primarySetupSchema=z.object({requestId:z.uuid(),botId:id,sessionId:id,name,appearance:appearanceSchema.optional(),cwd:z.string().min(1),
+   profile:z.object({agentPreset:id.optional(),model:z.object({provider:id,model:id,reasoningEffort:id.optional()}).strict(),permissions:z.array(z.never()).max(0)}).strict()}).strict();
+-const documentSchema=z.object({version:z.literal(1),revision:z.number().int().nonnegative(),bots:z.array(botSchema).max(1000),primaryBotId:id.optional(),primarySetup:primarySetupSchema.optional()}).strict().superRefine((value,ctx)=>{
++const creationSchema=primarySetupSchema.omit({requestId:true}).extend({requestId:id,actor:id,kind:z.enum(['agent','team']),purpose:z.string().trim().min(1).max(4000),state:z.enum(['pending','completed'])}).strict();
++const documentSchema=z.object({version:z.literal(1),revision:z.number().int().nonnegative(),bots:z.array(botSchema).max(1000),primaryBotId:id.optional(),primarySetup:primarySetupSchema.optional(),creations:z.array(creationSchema).max(1000).optional()}).strict().superRefine((value,ctx)=>{
+   const bots=new Set(),sessions=new Set();for(const bot of value.bots){if(bots.has(bot.id)||!bot.sessionIds.includes(bot.homeSessionId))ctx.addIssue({code:'custom',message:'Invalid Bot identity'});bots.add(bot.id);for(const session of bot.sessionIds){if(sessions.has(session))ctx.addIssue({code:'custom',message:'Session belongs to two Bots'});sessions.add(session);}}
+   if(value.primaryBotId&&!value.bots.some(b=>b.id===value.primaryBotId&&b.status==='active')||value.primaryBotId&&value.primarySetup)ctx.addIssue({code:'custom',message:'Invalid primary Bot'});
++  const requests=new Set();for(const pending of value.creations??[]){const key=pending.actor+'\0'+pending.requestId;if(requests.has(key))ctx.addIssue({code:'custom',message:'Duplicate creation request'});requests.add(key);if(pending.state==='pending'){if(bots.has(pending.botId)||sessions.has(pending.sessionId))ctx.addIssue({code:'custom',message:'Invalid creation reservation'});bots.add(pending.botId);sessions.add(pending.sessionId);}else if(!value.bots.some(b=>b.id===pending.botId&&b.homeSessionId===pending.sessionId))ctx.addIssue({code:'custom',message:'Missing created identity'});}
+   if(value.primarySetup&&(bots.has(value.primarySetup.botId)||sessions.has(value.primarySetup.sessionId)))ctx.addIssue({code:'custom',message:'Invalid primary reservation'});
+ });
+ const clone=value=>structuredClone(value),fail=code=>{throw Error(code);};
+@@ -25,7 +29,7 @@ const clone=value=>structuredClone(value),fail=code=>{throw Error(code);};
+ /** Local owner directory. Bot IDs are independent from Sessions; one Bot can own many task threads. */
+ export class BotDirectory {
+   constructor(file,{write,now=()=>new Date().toISOString(),uuid=randomUUID}={}){
+-    this.file=file;this.now=now;this.uuid=uuid;this.listeners=new Set();this.tail=Promise.resolve();this.closed=false;
++    this.file=file;this.lifecycleLocks=new Set();this.now=now;this.uuid=uuid;this.listeners=new Set();this.tail=Promise.resolve();this.closed=false;
+     this.write=write??(async value=>{
+       await fs.promises.mkdir(path.dirname(file),{recursive:true});const temp=file+'.'+randomUUID()+'.tmp';
+       try{const handle=await fs.promises.open(temp,'wx',0o600);try{await handle.writeFile(JSON.stringify(value,null,2)+'\n');await handle.sync();}finally{await handle.close();}await fs.promises.rename(temp,file);}
+@@ -61,25 +65,47 @@ export class BotDirectory {
+           &&(agentPreset??undefined)===existing.agentPreset)return {bot:existing,unchanged:true};
+         fail('BOT_SESSION_ALREADY_BOUND');
+       }
++      if(next.bots.length+(next.creations??[]).filter(c=>c.state==='pending').length>=1000)fail('BOT_DIRECTORY_FULL');
+       if(next.bots.some(b=>b.status==='active'&&b.name.toLocaleLowerCase()===fields.name.toLocaleLowerCase()))fail('BOT_NAME_EXISTS');
+-      if(next.primarySetup?.name.toLocaleLowerCase()===fields.name.toLocaleLowerCase())fail('BOT_NAME_EXISTS');
++      if(next.primarySetup?.name.toLocaleLowerCase()===fields.name.toLocaleLowerCase()||(next.creations??[]).some(c=>c.state==='pending'&&c.name.toLocaleLowerCase()===fields.name.toLocaleLowerCase()))fail('BOT_NAME_EXISTS');
+       const time=this.now(),bot=botSchema.parse({id:'bot-'+this.uuid(),...fields,status:'active',revision:1,cwd,...(agentPreset?{agentPreset}:{}),homeSessionId:sessionId,sessionIds:[sessionId],createdAt:time,updatedAt:time});next.bots.push(bot);return {bot};
+     });
+   }
+   update(sessionId,input){
+-    const patch=z.object({expectedRevision:revision,name:name.optional(),purpose:z.string().trim().min(1).max(4000).optional(),status:z.enum(['active','archived']).optional()}).strict().parse(input);
++    const bot=this.forSession(sessionId);if(!bot)fail('BOT_NOT_BOUND');return this.updateBot(bot.id,input);
++  }
++  updateBot(botId,input){
++    const patch=updateFields.parse(input);
+     return this.transact(next=>{
+-      const bot=next.bots.find(b=>b.sessionIds.includes(sessionId));if(!bot)fail('BOT_NOT_BOUND');if(bot.revision!==patch.expectedRevision)fail('BOT_CONFLICT');
+-      const fields=Object.fromEntries(Object.entries(patch).filter(([key])=>key!=='expectedRevision'));
+-      if(!Object.keys(fields).length)fail('BOT_EMPTY_UPDATE');
++      const bot=next.bots.find(b=>b.id===botId);if(!bot)fail('BOT_NOT_FOUND');if(bot.revision!==patch.expectedRevision)fail('BOT_CONFLICT');
++      const fields=Object.fromEntries(Object.entries(patch).filter(([key])=>key!=='expectedRevision'));if(!Object.keys(fields).length)fail('BOT_EMPTY_UPDATE');
+       const nextName=fields.name??bot.name,nextStatus=fields.status??bot.status;
+       if(bot.id===next.primaryBotId&&nextStatus!=='active')fail('BOT_PRIMARY_REQUIRED');
+-      if(next.primarySetup?.name.toLocaleLowerCase()===nextName.toLocaleLowerCase())fail('BOT_NAME_EXISTS');
++      if(nextStatus==='active'&&(next.primarySetup?.name.toLocaleLowerCase()===nextName.toLocaleLowerCase()||(next.creations??[]).some(c=>c.state==='pending'&&c.name.toLocaleLowerCase()===nextName.toLocaleLowerCase())))fail('BOT_NAME_EXISTS');
+       if(nextStatus==='active'&&next.bots.some(b=>b.id!==bot.id&&b.status==='active'&&b.name.toLocaleLowerCase()===nextName.toLocaleLowerCase()))fail('BOT_NAME_EXISTS');
+-      if(Object.entries(fields).every(([key,value])=>bot[key]===value))return {bot,unchanged:true};
++      if(Object.entries(fields).every(([key,value])=>JSON.stringify(bot[key])===JSON.stringify(value)))return {bot,unchanged:true};
+       Object.assign(bot,fields,{revision:bot.revision+1,updatedAt:this.now()});return {bot};
+     });
+   }
++  reserveCreation(input){
++    const fields=creationFields.parse(input.fields);id.parse(input.requestId);id.parse(input.actor);
++    return this.transact(next=>{
++      const prior=(next.creations??[]).find(c=>c.actor===input.actor&&c.requestId===input.requestId);
++      if(prior){if(JSON.stringify(creationFields.parse(Object.fromEntries(['name','kind','purpose','appearance'].filter(k=>prior[k]!==undefined).map(k=>[k,prior[k]]))))!==JSON.stringify(fields))fail('BOT_CREATION_REQUEST_CONFLICT');return {bot:prior,unchanged:true};}
++      if(next.revision!==input.expectedRevision)fail('BOT_CONFLICT');
++      if(next.bots.length+(next.creations??[]).filter(c=>c.state==='pending').length>=1000||(next.creations??[]).length>=1000)fail('BOT_DIRECTORY_FULL');
++      if(next.bots.some(b=>b.status==='active'&&b.name.toLocaleLowerCase()===fields.name.toLocaleLowerCase())||next.primarySetup?.name.toLocaleLowerCase()===fields.name.toLocaleLowerCase()||(next.creations??[]).some(c=>c.state==='pending'&&c.name.toLocaleLowerCase()===fields.name.toLocaleLowerCase()))fail('BOT_NAME_EXISTS');
++      const botId='bot-'+this.uuid(),cwd=path.resolve(path.dirname(this.file),'workspaces',botId),entry=creationSchema.parse({requestId:input.requestId,actor:input.actor,botId,sessionId:'session-'+this.uuid(),...fields,cwd,profile:input.profile,state:'pending'});
++      next.creations??=[];next.creations.push(entry);return {bot:entry};
++    });
++  }
++  completeCreation(actor,requestId){
++    return this.transact(next=>{const pending=(next.creations??[]).find(c=>c.actor===actor&&c.requestId===requestId);if(!pending)fail('BOT_CREATION_NOT_FOUND');
++      if(pending.state==='completed')return {bot:next.bots.find(b=>b.id===pending.botId),unchanged:true};
++      const time=this.now(),bot=botSchema.parse({id:pending.botId,...Object.fromEntries(['name','kind','purpose','appearance'].filter(k=>pending[k]!==undefined).map(k=>[k,pending[k]])),status:'active',revision:1,cwd:pending.cwd,agentPreset:pending.profile.agentPreset,homeSessionId:pending.sessionId,sessionIds:[pending.sessionId],createdAt:time,updatedAt:time});
++      next.bots.push(bot);pending.state='completed';return {bot};
++    });
++  }
+   appearance(botId,expectedRevision,input){
+     id.parse(botId);revision.parse(expectedRevision);const appearance=appearanceSchema.parse(input);
+     return this.transact(next=>{
+@@ -110,7 +136,7 @@ export class BotDirectory {
+       }
+       if(next.revision!==input.expectedRevision)fail('BOT_CONFLICT');
+       if(next.bots.length>=1000)fail('BOT_DIRECTORY_FULL');
+-      if(next.bots.some(b=>b.status==='active'&&b.name.toLocaleLowerCase()===input.name.toLocaleLowerCase()))fail('BOT_NAME_EXISTS');
++      if(next.bots.some(b=>b.status==='active'&&b.name.toLocaleLowerCase()===input.name.toLocaleLowerCase())||(next.creations??[]).some(c=>c.state==='pending'&&c.name.toLocaleLowerCase()===input.name.toLocaleLowerCase()))fail('BOT_NAME_EXISTS');
+       next.primarySetup=primarySetupSchema.parse({requestId:input.requestId,botId:'bot-'+this.uuid(),sessionId:'session-'+this.uuid(),name:input.name,
+         ...(input.appearance?{appearance:input.appearance}:{}),cwd:input.cwd,profile:input.profile});return {bot:next.primarySetup};
+     });
+@@ -142,6 +168,27 @@ export class BotDirectory {
+ export class PrimaryBotService{
+   constructor(options){Object.assign(this,options);this.tail=Promise.resolve();}
+   execute(input){const run=this.tail.then(()=>this.perform(input));this.tail=run.catch(()=>{});return run;}
++  defaultProfile(){return Promise.resolve(this.agentPresets.resolve()).then(selected=>({agentPreset:selected.id,model:(this.agentDefaultModel??this.context?.get('agentDefaultModel')).currentSelection(),permissions:[]}));}
++  createBot(input,actor='owner'){
++    const run=this.tail.then(async()=>{
++      if(!this.directory.primary())fail('BOT_PRIMARY_REQUIRED');const runtime=this.getRuntime(),registry=this.workspaceRegistry??this.context?.get('workspaceRegistry');if(!runtime||!registry?.create)fail('BOT_PRIMARY_UNAVAILABLE');
++      const fields=creationFields.parse(input.fields),prior=(this.directory.list().creations??[]).find(c=>c.actor===actor&&c.requestId===input.requestId);
++      const pending=await this.directory.reserveCreation({...input,actor,fields,profile:prior?.profile??await this.defaultProfile()});
++      if(pending.state==='completed')return this.directory.list().bots.find(b=>b.id===pending.botId);
++      const base=path.resolve(path.dirname(this.directory.file),'workspaces'),cwd=path.resolve(pending.cwd);if(path.dirname(cwd)!==base)fail('BOT_WORKSPACE_MISMATCH');
++      await fs.promises.mkdir(base,{recursive:true});if((await fs.promises.lstat(base)).isSymbolicLink())fail('BOT_WORKSPACE_MISMATCH');await fs.promises.mkdir(cwd,{recursive:true});if((await fs.promises.lstat(cwd)).isSymbolicLink())fail('BOT_WORKSPACE_MISMATCH');
++      const workspace=await registry.create(cwd,pending.name);if(path.resolve(workspace.path).toLowerCase()!==cwd.toLowerCase())fail('BOT_WORKSPACE_MISMATCH');
++      await runtime.ensure(pending.sessionId,{create:true,cwd,profile:pending.profile});const stored=await runtime.snapshot(pending.sessionId);if(!stored)fail('BOT_PRIMARY_SESSION_PENDING');
++      if(stored.header?.origin==='subagent'||(stored.header?.delegationDepth??0)>0)fail('BOT_ROOT_SESSION_REQUIRED');if(path.resolve(stored.header.cwd).toLowerCase()!==cwd.toLowerCase())fail('BOT_WORKSPACE_MISMATCH');
++      await workspace.attachSession(pending.sessionId);return this.directory.completeCreation(actor,input.requestId);
++    });this.tail=run.catch(()=>{});return run;
++  }
++  async manageBot(botId,input){
++    const patch=updateFields.parse(input),service=this.getTasks?.(),busy=()=>service?.store.read().tasks.some(t=>[t.sourceBotId,t.targetBotId].includes(botId)&&['queued','starting','running','waiting'].includes(t.status));
++    if(patch.status!=='archived')return this.directory.updateBot(botId,patch);
++    if(busy()||this.directory.lifecycleLocks.has(botId))fail('BOT_BUSY');this.directory.lifecycleLocks.add(botId);
++    try{await service?.store.tail;if(busy())fail('BOT_BUSY');return await this.directory.updateBot(botId,patch);}finally{this.directory.lifecycleLocks.delete(botId);}
++  }
+   async perform(input){
+     if(input.action==='select-primary'){
+       const bot=this.directory.list().bots.find(b=>b.id===input.botId);if(!bot)fail('BOT_NOT_FOUND');
+@@ -177,14 +224,23 @@ export class PrimaryBotService{
+   }
+ }
+ 
+-export function createBotTools(ctx,directory){
++export function createBotTools(ctx,directory,operations){
+   const membership=exec=>{if(!exec.agent)fail('BOT_CALLER_REQUIRED');return ctx.agentTeams.membership(exec.agent);};
+   const lead=exec=>{const m=membership(exec);if(m.role!=='lead')fail('BOT_LEAD_REQUIRED');return m.root;};
+   const output={schema:{type:'json'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]};
+   return [
+     defineTool({name:'bot_directory',description:'Read the local owner\'s persistent Bot directory and this task\'s Bot. A Bot is a reusable agent or team identity across task Sessions, not a conversation title.',parameters:{},output,execute:(_args,exec)=>{const m=membership(exec);return {...directory.list(),currentBotId:directory.forSession(m.root.id)?.id??null};}}),
+-    defineTool({name:'bot_create',description:'Create and persist a reusable Bot immediately from the user request. The Lead autonomously chooses its name, kind and purpose; no source search, shell commands, implementation task or fixed employee templates are needed. Identical retries for the same task return the same Bot ID. Success saves identity and binds this task; it does not provision external accounts or start business operations. Do not create Bots for ordinary conversations or temporary teammates.',parameters:{name:{type:'string',required:true},kind:{type:'string',enum:['agent','team'],required:true},purpose:{type:'string',required:true,description:'The reusable responsibility agreed with the user, not claims of unavailable skills or permissions.'}},output,execute:(args,exec)=>{const root=lead(exec);exec.signal?.throwIfAborted();return directory.create({sessionId:root.id,cwd:root.session.header.cwd,agentPreset:ctx.agentPresets.presetForSession(root.session)??undefined},args);}}),
+-    defineTool({name:'bot_update',description:'Update this task\'s persistent Bot name, responsibility or lifecycle. Lead only; use the Bot revision from bot_directory. Archiving hides the directory entry and prevents new task bindings; it never stops or deletes existing Sessions.',parameters:{expectedRevision:{type:'integer',required:true},name:{type:'string'},purpose:{type:'string'},status:{type:'string',enum:['active','archived']}},output,execute:(args,exec)=>directory.update(lead(exec).id,args)}),
++    defineTool({name:'bot_create',description:'Create a persistent Bot only when requested by the user. In the primary Bot, create a NEW employee identity with its own workspace and native home Session without binding or renaming the primary caller. Supply a stable idempotencyKey for retries. Choose name/kind/purpose from the user request, not fixed staff templates. Success is durable identity creation, not execution or external account provisioning; do not use shell/source edits.',parameters:{name:{type:'string',required:true},kind:{type:'string',enum:['agent','team'],required:true},purpose:{type:'string',required:true},idempotencyKey:{type:'string'}},output,execute:(args,exec)=>{
++      const root=lead(exec);exec.signal?.throwIfAborted();const {idempotencyKey,...fields}=args,current=directory.forSession(root.id);
++      if(current&&current.id===directory.primary()?.id){if(!operations)fail('BOT_PRIMARY_UNAVAILABLE');return operations.createBot({fields,requestId:idempotencyKey??exec.callId,expectedRevision:directory.list().revision},'primary:'+current.id);}
++      return directory.create({sessionId:root.id,cwd:root.session.header.cwd,agentPreset:ctx.agentPresets.presetForSession(root.session)??undefined},fields);
++    }}),
++    defineTool({name:'bot_update',description:'Update name, responsibility, appearance or lifecycle using the current Bot revision. Omit targetBotId to update yourself. Only the account primary Bot may target other Bots. Archiving preserves history and is rejected while that Bot has active tasks; it does not stop tasks or delete files. Primary identity, model and permissions never change here.',parameters:{targetBotId:{type:'string'},expectedRevision:{type:'integer',required:true},name:{type:'string'},purpose:{type:'string'},status:{type:'string',enum:['active','archived']},avatarShape:{type:'string',enum:BOT_FORMS.map(f=>f.id)},avatarPalette:{type:'string',enum:BOT_PALETTES.map(p=>p.id)}},output,execute:(args,exec)=>{
++      const root=lead(exec);exec.signal?.throwIfAborted();const caller=directory.forSession(root.id),{targetBotId,avatarShape,avatarPalette,...patch}=args;if(!caller)fail('BOT_NOT_BOUND');
++      const target=targetBotId??caller.id;if(target!==caller.id&&caller.id!==directory.primary()?.id)fail('BOT_PRIMARY_MANAGER_REQUIRED');
++      if(avatarShape||avatarPalette){if(!avatarShape||!avatarPalette)fail('BOT_INVALID_APPEARANCE');patch.appearance={shape:avatarShape,palette:avatarPalette};}
++      return operations?operations.manageBot(target,patch):directory.updateBot(target,patch);
++    }}),
+     defineTool({name:'bot_use',description:'Associate this root task with an existing active Bot at the user\'s request. Use bot_directory first. This task must use the Bot\'s working directory and must not already belong to another Bot. No model, permissions or task contents are changed.',parameters:{botId:{type:'string',required:true},expectedRevision:{type:'integer',required:true}},output,execute:(args,exec)=>{const root=lead(exec);return directory.bind(args.botId,root.id,args.expectedRevision,root.session.header.cwd);}}),
+   ];
+ }
+@@ -197,13 +253,13 @@ export function installBots(ctx,{directory,collaborationOrigin}={}){
+     const groupRuntime=installBotGroups(scope,store,()=>taskService);
+     const employeeRuntime=installEmployees(scope,store,{collaborationOrigin});
+     const primary=new PrimaryBotService({directory:store,context:scope,getRuntime:()=>taskService?.runtime,
+-      workspaceRegistry:scope.get?.('workspaceRegistry'),workspaceController:scope.get?.('workspaceController'),agentPresets:scope.agentPresets,agentDefaultModel:scope.get?.('agentDefaultModel')});
++      workspaceRegistry:scope.get?.('workspaceRegistry'),workspaceController:scope.get?.('workspaceController'),agentPresets:scope.agentPresets,agentDefaultModel:scope.get?.('agentDefaultModel'),getTasks:()=>taskService});
+     const installed=new Map(),streams=new Set();
+     const install=agent=>{
+       if(installed.has(agent)||!scope.agentTeams.tryMembership(agent))return;const disposers=[];
+       try{
+-        for(const tool of createBotTools(scope,store))disposers.push(agent.ctx.tools.register(tool));
+-        disposers.push(agent.ctx.systemPrompt.section({name:'naumi:bots',order:agent.ctx.systemPrompt.getSectionOrder('TEAM_POLICY')+2,text:'Naumi has Thread and Bot navigation modes over the same Session engine. Only establish a persistent Bot when the user requests a reusable agent/team; use bot_create directly and choose its name and responsibilities yourself from that request. Creating a Bot is an existing product operation, not a software development task: do not search source code, run shell commands or edit internal files to create it. If creation fails, check bot_directory once for a saved identity, report the actual failure and stop this creation attempt; do not improvise a file-based replacement. A successful bot_create completes identity creation; report it concisely and wait for the user task, without additional setup interviews or claiming that external integrations were provisioned. Never promote every temporary teammate or ordinary chat into a Bot. Use bot_directory / bot_update / bot_use to manage the real directory. The name is not a model tool address. Starting a new task for an existing Bot creates another Session linked to the same Bot ID. Do not claim cross-session memory beyond the Bot purpose and the actually available linked resources/history.'}));
++        for(const tool of createBotTools(scope,store,primary))disposers.push(agent.ctx.tools.register(tool));
++        disposers.push(agent.ctx.systemPrompt.section({name:'naumi:bots',order:agent.ctx.systemPrompt.getSectionOrder('TEAM_POLICY')+2,text:'Naumi has Thread and Bot navigation modes over the same Session engine. Only establish a persistent Bot when the user requests a reusable agent/team; use bot_create directly and choose its name and responsibilities yourself from that request. Creating a Bot is an existing product operation, not a software development task: do not search source code, run shell commands or edit internal files to create it. If creation fails, check bot_directory once for a saved identity, report the actual failure and stop this creation attempt; do not improvise a file-based replacement. A successful bot_create completes identity creation; report it concisely and wait for the user task, without additional setup interviews or claiming that external integrations were provisioned. Never promote every temporary teammate or ordinary chat into a Bot. Use bot_directory / bot_update / bot_use to manage the real directory. The primary Bot may create other Bots without changing its own identity, and manage a specific targetBotId using bot_update; only do so on the user request. Reuse creation idempotencyKey for retries. Never use bot_use to become an employee you just created. The name is not a model tool address. Starting a new task for an existing Bot creates another Session linked to the same Bot ID. Do not claim cross-session memory beyond the Bot purpose and the actually available linked resources/history.'}));
+         disposers.push(agent.ctx.systemPrompt.context({name:'naumi:bot-identity',order:agent.ctx.systemPrompt.getContextOrder('TEAM_IDENTITY')+1,required:true,text:()=>{try{const m=scope.agentTeams.membership(agent),bot=store.forSession(m.root.id);return bot?`Persistent Naumi Bot: ${JSON.stringify({id:bot.id,name:bot.name,kind:bot.kind,purpose:bot.purpose,status:bot.status,isPrimary:store.primary()?.id===bot.id})}\nThis is the identity for this task; preserve its stable ID across tasks. Use bot_update for name/purpose changes, not a conversation-title rename. ${store.primary()?.id===bot.id?'You are this owner account primary reception Bot. Receive the user request, coordinate EXISTING Bots for independent work, promptly acknowledge durable dispatch and continue chatting. Amend the same task via bot_task_continue from its original sender Session. Do not create staff or external accounts unless requested; primary status grants no extra model, tool or filesystem permissions.':''}`:'';}catch{return '';}}}));
+         installed.set(agent,()=>{for(const dispose of disposers.reverse())dispose();});
+       }catch(error){for(const dispose of disposers.reverse())dispose();throw error;}
+@@ -226,11 +282,15 @@ export function installBots(ctx,{directory,collaborationOrigin}={}){
+         if(req.headers.origin&&![`http://${req.headers.host}`,`https://${req.headers.host}`].includes(req.headers.origin)){send(403,{error:'BOT_SAME_ORIGIN_REQUIRED'});return;}
+         let text='',size=0;for await(const chunk of req){size+=chunk.length;if(size>4096){send(413,{error:'BOT_REQUEST_TOO_LARGE'});return;}text+=chunk.toString();}
+         let input;try{input=z.discriminatedUnion('action',[
++          z.object({action:z.literal('create'),requestId:z.uuid(),expectedRevision:z.number().int().nonnegative(),fields:creationFields}).strict(),
++          z.object({action:z.literal('update'),botId:id,patch:updateFields}).strict(),
+           z.object({action:z.literal('bind'),botId:id,sessionId:id,expectedRevision:revision}).strict(),
+           z.object({action:z.literal('appearance'),botId:id,expectedRevision:revision,appearance:appearanceSchema}).strict(),
+           z.object({action:z.literal('select-primary'),botId:id,expectedRevision:z.number().int().nonnegative()}).strict(),
+           z.object({action:z.literal('create-primary'),requestId:z.uuid(),expectedRevision:z.number().int().nonnegative(),name,appearance:appearanceSchema.optional(),workspaceId:id.optional()}).strict(),
+         ]).parse(JSON.parse(text));}catch{send(400,{error:'BOT_INVALID_REQUEST'});return;}
++        if(input.action==='create'){send(200,await primary.createBot(input));return;}
++        if(input.action==='update'){send(200,await primary.manageBot(input.botId,input.patch));return;}
+         if(input.action==='appearance'){send(200,await store.appearance(input.botId,input.expectedRevision,input.appearance));return;}
+         if(['create-primary','select-primary'].includes(input.action)){send(200,await primary.execute(input));return;}
+         const header=scope.sessions.get(input.sessionId)?.header??(await scope.sessionPersistence.stat(input.sessionId))?.header;
+@@ -246,6 +306,6 @@ export function installBots(ctx,{directory,collaborationOrigin}={}){
+       const heartbeat=setInterval(()=>{if(!res.destroyed)res.write(': keepalive\n\n');},25000);heartbeat.unref?.();
+       res.on('close',()=>{clearInterval(heartbeat);unsubscribe();streams.delete(res);});
+     }}));
+-    scope.effect(()=>async()=>{await groupRuntime.dispose();await employeeRuntime.dispose();await taskRuntime.dispose();for(const dispose of installed.values())dispose();installed.clear();for(const res of streams)res.end();streams.clear();await store.close();});
++    scope.effect(()=>async()=>{await primary.tail;await groupRuntime.dispose();await employeeRuntime.dispose();await taskRuntime.dispose();for(const dispose of installed.values())dispose();installed.clear();for(const res of streams)res.end();streams.clear();await store.close();});
+   });
+ }
+diff --git a/scripts/bot-management-evidence.mjs b/scripts/bot-management-evidence.mjs
+new file mode 100644
+index 0000000..27f689e
+--- /dev/null
++++ b/scripts/bot-management-evidence.mjs
+@@ -0,0 +1,21 @@
++import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';import assert from 'node:assert/strict';
++const root=process.cwd(),out=path.join(root,'evidence/bot-management'),base='7de781ffac355e360c4a418d2947da7873ea2367',sha=b=>createHash('sha256').update(b).digest('hex');fs.mkdirSync(out,{recursive:true});
++const files=execFileSync('git',['diff','--name-only',base,'HEAD','--','plugins/naumi-enterprise','tests/naumi-bot-management.test.mjs','scripts/verify-bot-management.mjs','scripts/deploy-bot-management.mjs','scripts/bot-management-evidence.mjs','docs/implementation/BOT_CREATION_MANAGEMENT.md'],{encoding:'utf8'}).trim().split('\n').filter(Boolean);
++// Limit scope to this slice; the integrated streaming Markdown fix belongs to main.
++const own=files.filter(f=>!f.endsWith('/bot-chat-markdown.js')),manifest=[];
++for(const file of own){let before=null;try{before=execFileSync('git',['show',base+':'+file],{stdio:['ignore','pipe','ignore']});}catch{}const after=Buffer.from(fs.readFileSync(path.join(root,file),'utf8').replaceAll('\r\n','\n'));for(const[kind,bytes]of[['original',before],['modified',after]])if(bytes){const p=path.join(out,kind,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);}manifest.push({file,before:before?sha(before):null,after:sha(after)});}
++fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify({base,fields:['creations','bot_create primary branch','bot_update targetBotId','CREATE_BOT_EVENT','task lifecycle admission'],branch:'codex/primary-bot-management',files:manifest},null,2)+'\n');
++fs.writeFileSync(path.join(out,'DIFF_FILE.patch'),execFileSync('git',['diff','--binary',base,'HEAD','--',...own]));
++const zip=spawnSync('python',['-c',`import pathlib,zipfile; root=pathlib.Path(r'${out}'); z=zipfile.ZipFile(root/'MODIFIED_FILE.zip','w',zipfile.ZIP_DEFLATED); [(z.write(p,p.relative_to(root/'modified').as_posix())) for p in (root/'modified').rglob('*') if p.is_file()]; z.close()`],{encoding:'utf8'});assert.equal(zip.status,0,zip.stderr);
++const restore=`import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash} from 'node:crypto';\nconst evidence=path.resolve(import.meta.dirname),root=path.resolve(process.argv[2]??''),m=JSON.parse(fs.readFileSync(path.join(evidence,'manifest.json'))),sha=b=>createHash('sha256').update(b).digest('hex');assert(fs.existsSync(path.join(root,'.bot-management-source-copy')),'SOURCE_COPY_MARKER_REQUIRED');assert(root!==path.resolve(evidence,'../..'),'NEVER_RESTORE_TASK_WORKTREE');for(const row of m.files){const target=path.resolve(root,row.file);assert(target.startsWith(root+path.sep));if(row.before){const bytes=fs.readFileSync(path.join(evidence,'original',row.file));assert.equal(sha(bytes),row.before);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,bytes);}else if(fs.existsSync(target))fs.unlinkSync(target);}for(const row of m.files){const target=path.join(root,row.file);if(row.before)assert.equal(sha(fs.readFileSync(target)),row.before);else assert(!fs.existsSync(target));}console.log('ROLLBACK_SOURCE restored='+m.files.length+' hashes=PASS metadata=UNTOUCHED');\n`;
++fs.writeFileSync(path.join(out,'restore-source.mjs'),restore);fs.writeFileSync(path.join(out,'ROLLBACK.sh'),'#!/usr/bin/env bash\nset -euo pipefail\nDIR="$(cd -- "$(dirname -- "$0")" && pwd)"\nnode "$DIR/restore-source.mjs" "${1:?Pass a marked source-copy directory}"\n');fs.chmodSync(path.join(out,'ROLLBACK.sh'),0o755);
++const copy=path.join(root,'runtime/management-source-rollback');fs.mkdirSync(copy,{recursive:true});fs.writeFileSync(path.join(root,'runtime/management-baseline.zip'),execFileSync('git',['archive','--format=zip',base],{maxBuffer:128*1024*1024}));const extract=spawnSync('python',['-c',`import zipfile;zipfile.ZipFile(r'${path.join(root,'runtime/management-baseline.zip')}').extractall(r'${copy}')`]);assert.equal(extract.status,0);fs.writeFileSync(path.join(copy,'.bot-management-source-copy'),base+'\n');
++if(!fs.existsSync(path.join(copy,'node_modules')))fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');
++const args=['--test','tests/naumi-bots.test.mjs','tests/naumi-bot-runtime.test.mjs','tests/naumi-primary-bot.test.mjs'];
++const run=(name)=>{const r=spawnSync(process.execPath,args,{cwd:copy,encoding:'utf8'});fs.writeFileSync(path.join(out,name+'.log'),(r.stdout??'')+(r.stderr??''));assert.equal(r.status,0,name);console.log(name+' tests=41 pass=41 fail=0 exit=0');};run('BASELINE-COPY');
++for(const row of manifest){const p=path.join(copy,row.file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.copyFileSync(path.join(out,'modified',row.file),p);}
++const rollback=spawnSync('D:/DEV/Git/bin/bash.exe',[path.join(out,'ROLLBACK.sh'),copy],{cwd:root,encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK-COMMAND.log'),(rollback.stdout??'')+(rollback.stderr??''));assert.equal(rollback.status,0,rollback.stderr);process.stdout.write(rollback.stdout);run('ROLLBACK');
++for(const row of manifest)assert.equal(sha(Buffer.from(fs.readFileSync(path.join(root,row.file),'utf8').replaceAll('\r\n','\n'))),row.after,'SOURCE_MUST_REMAIN_MODIFIED');
++// Reopen each claimed artifact, not only its directory entry.
++for(const p of ['MODIFIED_FILE.zip','DIFF_FILE.patch','ROLLBACK.sh','manifest.json','restore-source.mjs'])assert(fs.readFileSync(path.join(out,p)).length>0,p);
++console.log('MANAGEMENT_ARTIFACTS reopened=5 modified_source=RETAINED');
+diff --git a/scripts/deploy-bot-management.mjs b/scripts/deploy-bot-management.mjs
+new file mode 100644
+index 0000000..4c23c26
+--- /dev/null
++++ b/scripts/deploy-bot-management.mjs
+@@ -0,0 +1,43 @@
++// Narrow main-only runtime delta. No account enrollment, provider calls, or task writes.
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';import {DatabaseSync} from 'node:sqlite';import {botLiveApi} from './bot-live-api.mjs';
++const root=process.cwd(),mode=process.argv[2]??'prepare',runtime=path.resolve(process.argv[3]??root),baseline='7de781ffac355e360c4a418d2947da7873ea2367';
++const installed=path.join(runtime,'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise'),backup=path.join(runtime,'runtime/bot-management-load-'+randomUUID()),out=path.join(root,'evidence/bot-management');
++const files=['bots.js','bot-task-service.js','assets/bot-sidebar.js','assets/bot-sidebar-model.js','assets/primary-bot.js','assets/primary-bot.css'];
++const read=p=>fs.readFileSync(p),sha=v=>createHash('sha256').update(v).digest('hex'),norm=v=>v.toString().replaceAll('\r\n','\n');
++const inventory=()=>Object.fromEntries(fs.readdirSync(installed,{recursive:true}).filter(f=>fs.statSync(path.join(installed,f)).isFile()).map(f=>[f.replaceAll('\\','/'),sha(read(path.join(installed,f)))]));
++const sourceCommit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
++fs.mkdirSync(backup,{recursive:true});fs.mkdirSync(out,{recursive:true});const original=inventory(),rows=[];
++for(const file of files){const target=path.join(installed,file),before=fs.existsSync(target)?read(target):null,source=read(path.join(root,'plugins/naumi-enterprise',file));let after=source;assert.equal(norm(source),norm(execFileSync('git',['show',sourceCommit+':plugins/naumi-enterprise/'+file])),'SOURCE_NOT_COMMITTED '+file);
++ assert(before,'RUNTIME_FILE_MISSING '+file);assert.equal(norm(before),norm(execFileSync('git',['show',baseline+':plugins/naumi-enterprise/'+file])),'RUNTIME_DRIFT '+file);
++ for(const[kind,bytes]of[['before',before],['after',after]])if(bytes){const p=path.join(backup,kind,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);}
++ rows.push({file,beforeSHA256:before?sha(before):null,afterSHA256:sha(after)});
++}
++fs.writeFileSync(path.join(backup,'manifest.json'),JSON.stringify({baseline,rows},null,2));
++if(mode==='prepare'){console.log('MANAGEMENT_LOAD_PREPARED files=6 host_client=UNCHANGED backup='+backup);process.exit(0);}assert.equal(mode,'apply');
++assert.equal(execFileSync('git',['branch','--show-current'],{encoding:'utf8'}).trim(),'main');const unrelatedTracked=execFileSync('git',['diff','HEAD','--name-only','-z'],{encoding:'utf8'}).split('\0').filter(Boolean);assert(unrelatedTracked.every(f=>!files.map(p=>'plugins/naumi-enterprise/'+p).includes(f)),'TASK_SOURCE_DIRTY');
++const untracked=execFileSync('git',['ls-files','--others','--exclude-standard','-z'],{encoding:'utf8'}).split('\0').filter(Boolean),untrackedHashes=Object.fromEntries(untracked.map(f=>[f,sha(read(path.join(root,f)))]));
++const api=await botLiveApi(runtime),sessions=await api.rpc('session/list',{_request:{}}),bots=await api.json('/naumi/bots'),tasks=await api.json('/naumi/bot-tasks'),models=sha(JSON.stringify(await api.json('/naumi/model-connections')));
++assert(!sessions.items.some(s=>s.running),'RUNNING_SESSIONS');assert(!tasks.tasks.some(t=>['queued','starting','running','waiting'].includes(t.status)),'ACTIVE_TASKS');
++const groupRows=()=>{const db=new DatabaseSync(path.join(runtime,'.dsh/naumi/bot-groups.sqlite'),{readOnly:true});try{const rows=Object.fromEntries(['rooms','members','posts','replies','post_context','room_name_operations'].map(t=>[t,db.prepare('SELECT * FROM '+t+' ORDER BY rowid').all()]));assert(!rows.replies.some(r=>['queued','starting','sent'].includes(r.state)),'GROUP_BUSY');return sha(JSON.stringify(rows));}finally{db.close();}};
++const groupsBefore=groupRows(),employees=async api=>Object.fromEntries(await Promise.all(bots.bots.map(async b=>{const {exportedAt,...v}=await api.json('/naumi/employees?view=export&botId='+encodeURIComponent(b.id));return[b.id,sha(JSON.stringify(v))];}))),employeesBefore=await employees(api);
++const protectedPaths=['.dsh/.credentials.yaml','.dsh/cordis.patch.yml','.dsh/profiles/web/package.json','.dsh/profiles/web/cordis.yml','.dsh/profiles/web/cordis.patch.yml','.dsh/naumi/bots.json','.dsh/naumi/bot-tasks.json','config/local.json','node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'];
++for(const f of fs.readdirSync(path.join(runtime,'.dsh/sessions'),{recursive:true}))if(f.endsWith('.jsonl.zstd'))protectedPaths.push('.dsh/sessions/'+f);
++const protectedBefore=Object.fromEntries(protectedPaths.filter(f=>fs.existsSync(path.join(runtime,f))).map(f=>[f,sha(read(path.join(runtime,f)))]));
++const shell=name=>{const r=spawnSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-File',path.join(runtime,name)],{windowsHide:true,stdio:'ignore',timeout:150000});assert.equal(r.status,0,'SERVICE_COMMAND '+name);};
++const atomic=(p,bytes)=>{fs.mkdirSync(path.dirname(p),{recursive:true});const tmp=p+'.'+randomUUID()+'.tmp';fs.writeFileSync(tmp,bytes);fs.renameSync(tmp,p);};let complete=false;
++try{
++ shell('Stop-Naumi.ps1');for(const[f,h]of Object.entries(protectedBefore))assert.equal(sha(read(path.join(runtime,f))),h,'PRELOAD_DATA_DRIFT '+f);
++ for(const r of rows){const p=path.join(installed,r.file);if(r.beforeSHA256)assert.equal(sha(read(p)),r.beforeSHA256,'PRELOAD_RUNTIME_DRIFT');else assert(!fs.existsSync(p));}
++ for(const r of rows)atomic(path.join(installed,r.file),read(path.join(backup,'after',r.file)));shell('Start-Naumi.ps1');
++ const loaded=await botLiveApi(runtime),afterSessions=await loaded.rpc('session/list',{_request:{}});assert(!afterSessions.items.some(s=>s.running));assert.equal(afterSessions.items.length,sessions.items.length);
++ for(const f of ['primary-bot.js','primary-bot.css'])assert.equal((await loaded.request('/naumi/assets/'+f)).status,200);
++ assert.deepEqual(await loaded.json('/naumi/bots'),bots);assert.deepEqual(await loaded.json('/naumi/bot-tasks'),tasks);assert.equal(sha(JSON.stringify(await loaded.json('/naumi/model-connections'))),models);assert.deepEqual(await employees(loaded),employeesBefore);assert.equal(groupRows(),groupsBefore);
++ const after=inventory();for(const r of rows)assert.equal(after[r.file],r.afterSHA256);for(const[f,h]of Object.entries(original))if(!files.includes(f))assert.equal(after[f],h,'UNRELATED_RUNTIME '+f);
++ for(const[f,h]of Object.entries(protectedBefore))assert.equal(sha(read(path.join(runtime,f))),h,'PROTECTED_DATA '+f);for(const f of Object.keys(untrackedHashes))assert(fs.existsSync(path.join(root,f)),'OTHER_EVIDENCE_MISSING '+f);
++ fs.writeFileSync(path.join(out,'DEPLOYMENT.json'),JSON.stringify({status:'PASS',sourceCommit,files:rows,backup,http:200,sessions:afterSessions.items.length,running:0,bots:bots.bots.length,revision:bots.revision,automaticPrimarySelection:false,automaticStaffCreation:false,modelCalls:0,modelGroupsUnchanged:true,employeeExportsUnchanged:true,taskAndGroupRowsUnchanged:true,protectedFilesUnchanged:Object.keys(protectedBefore).length,unrelatedRuntimeUnchanged:Object.keys(original).filter(f=>!files.includes(f)).length,otherUntrackedFilesPreserved:untracked.length,unrelatedTrackedEditsNotTouched:unrelatedTracked,nativeComposerUnchanged:true,packageUnchanged:true},null,2)+'\n');
++ complete=true;console.log('MANAGEMENT_LOADED files=6 http=200 running=0 models=UNCHANGED employees=UNCHANGED tasks=UNCHANGED groups=UNCHANGED account_data=UNCHANGED model_calls=0');
++}finally{if(!complete){
++ const dataFile=path.join(runtime,'.dsh/naumi/bots.json'),expected=protectedBefore['.dsh/naumi/bots.json'];
++ if(expected&&sha(read(dataFile))!==expected)console.error('MANAGEMENT_LOAD_INCOMPLETE new_directory_metadata=RETAINED compatible_reader=RETAINED backup='+backup);
++ else{try{shell('Stop-Naumi.ps1');}catch{}for(const r of rows){const p=path.join(installed,r.file);if(r.beforeSHA256)atomic(p,read(path.join(backup,'before',r.file)));else if(fs.existsSync(p))fs.unlinkSync(p);}shell('Start-Naumi.ps1');console.error('MANAGEMENT_LOAD_FAILED runtime=RESTORED backup='+backup);}
++}}
+diff --git a/scripts/verify-bot-management.mjs b/scripts/verify-bot-management.mjs
+new file mode 100644
+index 0000000..d394c95
+--- /dev/null
++++ b/scripts/verify-bot-management.mjs
+@@ -0,0 +1,32 @@
++// Full isolated Harness, native Agent tool execution, SQLite/HTTP and real React shell.
++// The only inference endpoint is this script's deterministic loopback SSE fixture.
++import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';import {spawn} from 'node:child_process';import {stringify} from 'yaml';import {chromium} from '../desktop/node_modules/playwright/index.mjs';
++const root=process.cwd(),out=path.join(root,'evidence/bot-management'),temp=path.join(root,'runtime/management-'+randomUUID()),home=path.join(temp,'home'),profile=path.join(home,'profiles/web');fs.mkdirSync(path.join(profile,'node_modules/@naumi'),{recursive:true});fs.mkdirSync(out,{recursive:true});
++for(const [name,folder]of [['dsh-enterprise','naumi-enterprise'],['dsh-ui-layout','naumi-ui-layout'],['dsh-sidebar-browser','naumi-sidebar-browser']])fs.symlinkSync(path.join(root,'plugins',folder),path.join(profile,'node_modules/@naumi',name),'junction');fs.symlinkSync(path.join(root,'node_modules/@deepseek-ai'),path.join(profile,'node_modules/@deepseek-ai'),'junction');
++fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'naumi-management-fixture',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}}));
++let mode='create',targetBotId;const requests=[];
++const upstream=http.createServer(async(req,res)=>{let raw='';for await(const b of req)raw+=b;const body=JSON.parse(raw);requests.push({path:req.url,tools:body.tools?.map(t=>t.function.name)});if(req.url!=='/v1/chat/completions'){res.writeHead(404).end();return;}
++ const afterTool=body.messages.at(-1)?.role==='tool',name=mode==='create'?'bot_create':'bot_update',args=mode==='create'?{name:'主助手创建的运营',kind:'agent',purpose:'规划内容与核对交付',idempotencyKey:'native-create-once'}:{targetBotId,expectedRevision:1,name:'主助手管理后的运营',purpose:'更新后的运营职责',avatarShape:'creator',avatarPalette:'pink'};
++ const delta=afterTool?{role:'assistant',content:'已完成。'}:{role:'assistant',tool_calls:[{index:0,id:'call-'+mode,type:'function',function:{name,arguments:JSON.stringify(args)}}]};
++ res.writeHead(200,{'Content-Type':'text/event-stream'});for(const part of [{choices:[{index:0,delta,finish_reason:null}]},{choices:[{index:0,delta:{},finish_reason:afterTool?'stop':'tool_calls'}],usage:{prompt_tokens:1,completion_tokens:1,total_tokens:2}}])res.write('data: '+JSON.stringify({id:'fixture-'+randomUUID(),object:'chat.completion.chunk',created:1,model:'fixture-model',...part})+'\n\n');res.end('data: [DONE]\n\n');
++});await new Promise(r=>upstream.listen(0,'127.0.0.1',r));
++fs.writeFileSync(path.join(home,'cordis.patch.yml'),stringify([{id:'ui-theme',config:{preference:'light'}},{id:'agent-default-model',config:{provider:'fixture',model:'fixture-model'}}]));fs.writeFileSync(path.join(profile,'cordis.patch.yml'),stringify([{id:'ui-settings-general',config:{welcomeNoticeVersion:'2026-09-28.1'}},{id:'llm-pi-ai',config:{providers:{fixture:{displayName:'隔离测试连接',api:'openai-completions',baseURL:'http://127.0.0.1:'+upstream.address().port+'/v1',apiKeyEnv:'NAUMI_MANAGEMENT_FIXTURE_KEY',models:[{id:'fixture-model',name:'同一模型',contextWindow:128000,maxTokens:2048,reasoningEfforts:false}]}}}}]));
++const sock=http.createServer();await new Promise(r=>sock.listen(0,'127.0.0.1',r));const port=sock.address().port;await new Promise(r=>sock.close(r));const base='http://127.0.0.1:'+port,child=spawn(process.execPath,[path.join(root,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'web','--host','127.0.0.1','--port',String(port),'--no-open'],{cwd:root,env:{...process.env,DSH_HOME:home,DSH_TELEMETRY_MODE:'DISABLED',NAUMI_MANAGEMENT_FIXTURE_KEY:'local-fixture-only'},windowsHide:true});let output='',browser;child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);const checks=[];const check=(name,value)=>{assert(value,name);checks.push(name);console.log('MANAGEMENT_PASS '+name);};
++try{
++ let launch;for(let i=0;i<180;i++){launch=output.match(new RegExp(base.replaceAll('.','\\.')+'/?\\?token=[A-Za-z0-9_~.%-]+'))?.[0];if(launch)break;if(child.exitCode!==null)throw Error('HOST_BOOT_FAILED');await new Promise(r=>setTimeout(r,300));}assert(launch,'HOST_BOOT_TIMEOUT');
++ const exchange=await fetch(launch,{redirect:'manual'}),cookie=exchange.headers.getSetCookie().map(s=>s.split(';')[0]).join('; '),headers={cookie,'Content-Type':'application/json','x-naumi-bots':'1',origin:base};
++ const call=async(url,body)=>{const r=await fetch(base+url,{headers,...body?{method:'POST',body:JSON.stringify(body)}:{}}),v=await r.json();assert(r.ok,JSON.stringify(v));return v;};const rpc=async(method,args)=>{const v=await call('/api/'+method,{type:'client-request',rpcId:randomUUID(),method,payload:{args}});assert(v.result?.ok,JSON.stringify(v));return v.result.value;};
++ const primaryCwd=path.join(temp,'primary');fs.mkdirSync(primaryCwd);const workspace=await rpc('workspace/create',{request:{path:primaryCwd}});const primary=await call('/naumi/bots',{action:'create-primary',requestId:randomUUID(),expectedRevision:0,name:'我的主助手',workspaceId:workspace.workspace.workspaceId});check('primary_bootstrap_no_inference',requests.length===0);
++ browser=await chromium.launch({headless:true,channel:'chrome'});const context=await browser.newContext({viewport:{width:1360,height:900},colorScheme:'light'}),page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(launch);await page.locator('.naumi-navigation-switch').waitFor();await page.locator('.naumi-navigation-switch button').nth(1).click();
++ await page.getByRole('button',{name:'新建对话',exact:true}).click();await page.getByRole('menuitem',{name:'新增员工',exact:true}).click();const dialog=page.getByRole('dialog',{name:'创建 Bot',exact:true});await dialog.waitFor();check('plus_opens_real_manual_form',await dialog.isVisible());await dialog.getByLabel('名称',{exact:true}).fill('手动创建的员工');await dialog.getByLabel('职责',{exact:true}).fill('负责整理资料');
++ for(const width of [1360,580,360]){await page.setViewportSize({width,height:900});check('manual_dialog_width_'+width,await dialog.evaluate(el=>{const r=el.getBoundingClientRect();return r.left>=-1&&r.right<=innerWidth+1;}));}await page.setViewportSize({width:1360,height:900});
++ await dialog.getByRole('button',{name:'创建',exact:true}).click();await dialog.waitFor({state:'hidden'});let catalog=await call('/naumi/bots');const manual=catalog.bots.find(b=>b.name==='手动创建的员工');check('manual_persists_native_home_and_dedicated_workspace',!!manual&&manual.id!==primary.id&&manual.cwd!==primary.cwd&&fs.statSync(manual.cwd).isDirectory());check('manual_creation_zero_inference',requests.length===0);check('manual_preserves_primary',catalog.primaryBotId===primary.id&&JSON.stringify(catalog.bots.find(b=>b.id===primary.id))===JSON.stringify(primary));
++ let dropped=true,retriedKey;await page.route('**/naumi/bots',async route=>{const request=route.request();if(request.method()==='POST'){const b=request.postDataJSON();if(b.action==='create'){if(dropped){dropped=false;retriedKey=b.requestId;await route.fetch();await route.abort('failed');return;}check('manual_retry_reuses_request_id',b.requestId===retriedKey);}}await route.continue();});
++ await page.getByRole('button',{name:'新建对话',exact:true}).click();await page.getByRole('menuitem',{name:'新增员工',exact:true}).click();await dialog.getByLabel('名称',{exact:true}).fill('丢回执重试员工');await dialog.getByLabel('职责',{exact:true}).fill('验证原请求重试');await dialog.getByRole('button',{name:'创建',exact:true}).click();await dialog.getByRole('alert').waitFor();await dialog.getByRole('button',{name:'创建',exact:true}).click();await dialog.waitFor({state:'hidden'});catalog=await call('/naumi/bots');check('lost_receipt_creates_exactly_one_employee',catalog.bots.filter(b=>b.name==='丢回执重试员工').length===1);await page.unroute('**/naumi/bots');check('manual_retry_zero_inference',requests.length===0);
++ const prompt=async text=>{await rpc('session/prompt',{request:{requestId:randomUUID(),sessionId:primary.homeSessionId,mode:'queue',content:[{type:'text',text}],clientTimeZone:'Asia/Shanghai'}});return rpc('session/wait',{request:{sessionId:primary.homeSessionId,timeoutMs:30000,limit:1}});};
++ await prompt('请创建一位运营 Bot。');catalog=await call('/naumi/bots');const created=catalog.bots.find(b=>b.name==='主助手创建的运营');if(!created)fs.writeFileSync(path.join(temp,'tool-debug.json'),JSON.stringify({requests,catalog,output}));check('real_primary_agent_tool_creates_employee',!!created);targetBotId=created.id;check('agent_creation_keeps_primary_identity',catalog.primaryBotId===primary.id&&JSON.stringify(catalog.bots.find(b=>b.id===primary.id))===JSON.stringify(primary));check('manual_and_agent_workspaces_are_distinct',new Set([primary.cwd,manual.cwd,created.cwd]).size===3);
++ mode='update';await prompt('请修改刚才那位运营的名称、职责和头像。');catalog=await call('/naumi/bots');const updated=catalog.bots.find(b=>b.id===created.id);check('real_primary_agent_tool_manages_target',updated.name==='主助手管理后的运营'&&updated.purpose==='更新后的运营职责'&&updated.appearance.palette==='pink');check('management_keeps_home_and_primary',updated.homeSessionId===created.homeSessionId&&catalog.primaryBotId===primary.id);
++ const denied=await fetch(base+'/naumi/bots',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'create'})});check('owner_auth_required',[401,403].includes(denied.status));const invalid=await fetch(base+'/naumi/bots',{method:'POST',headers,body:JSON.stringify({action:'create',requestId:randomUUID(),expectedRevision:catalog.revision,fields:{name:'非法配置',kind:'agent',purpose:'x',apiKey:'never'}})});check('no_model_or_secret_fields_in_create',invalid.status===400);
++ const sessions=await rpc('session/list',{_request:{}});check('all_sessions_idle_and_no_business_tasks',!sessions.items.some(s=>s.running)&&(await call('/naumi/bot-tasks')).tasks.length===0);check('no_page_errors',errors.length===0);
++ fs.writeFileSync(path.join(out,'INTEGRATION.json'),JSON.stringify({status:'PASS',checks,errors,localFixtureInferenceRequests:requests.length,realSupplierCalls:0,realAccountWrites:0,realNativeAgentToolExecution:true,manualCreationInference:0,dedicatedWorkspaces:true},null,2)+'\n');console.log('MANAGEMENT_INTEGRATION checks='+checks.length+' errors=0 supplier_calls=0');
++}finally{await browser?.close();child.kill();await new Promise(r=>child.exitCode!==null?r():child.once('close',r));upstream.closeAllConnections();await new Promise(r=>upstream.close(r));fs.writeFileSync(path.join(out,'HOST.log'),output.replace(/token=[A-Za-z0-9_~.%-]+/g,'token=REDACTED'));}
+diff --git a/tests/naumi-bot-management.test.mjs b/tests/naumi-bot-management.test.mjs
+new file mode 100644
+index 0000000..f8b6475
+--- /dev/null
++++ b/tests/naumi-bot-management.test.mjs
+@@ -0,0 +1,61 @@
++import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {randomUUID} from 'node:crypto';
++import {BotDirectory,PrimaryBotService,createBotTools} from '../plugins/naumi-enterprise/bots.js';
++import {taskFixture} from './helpers/bot-task-fixture.mjs';
++function fixture(t){
++ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-management-')),directory=new BotDirectory(path.join(dir,'naumi/bots.json')),sessions=new Map(),workspaces=new Map(),created=[],tasks=[];
++ const runtime={snapshot:async id=>sessions.get(id),async ensure(id,options){if(!sessions.has(id)){created.push({id,options});sessions.set(id,{header:{cwd:options.cwd},events:[]});}},deliver(){throw Error('NO_MODEL');}};
++ const options={directory,getRuntime:()=>runtime,getTasks:()=>({store:{read:()=>({tasks})}}),workspaceRegistry:{async create(cwd,name){if(!workspaces.has(cwd))workspaces.set(cwd,{path:cwd,name,ids:[],async attachSession(id){if(!this.ids.includes(id))this.ids.push(id);}});return workspaces.get(cwd);}},agentPresets:{resolve:async()=>({id:'standard'}),presetForSession:()=>null},agentDefaultModel:{currentSelection:()=>({provider:'existing',model:'same-id'})}};
++ const operations=new PrimaryBotService(options),root={id:'primary-home',session:{header:{cwd:dir}}},member={id:'child'};const ctx={agentPresets:options.agentPresets,agentTeams:{membership(agent){return{root:agent===member?root:agent,role:agent===member?'teammate':'lead'};}}};
++ const tools=Object.fromEntries(createBotTools(ctx,directory,operations).map(t=>[t.name,t])),fields={name:'运营员工',kind:'agent',purpose:'内容规划与复核'},create=()=>operations.createBot({requestId:randomUUID(),expectedRevision:directory.list().revision,fields});
++ const primary=async()=>{const bot=await directory.create({sessionId:root.id,cwd:dir},{name:'主助手',kind:'agent',purpose:'接待与协调'});await directory.choosePrimary(bot.id,directory.list().revision);return bot;};
++ t.after(async()=>{await operations.tail;await directory.close();assert(dir.startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(dir,{recursive:true,force:true});});
++ return{dir,directory,root,member,ctx,tools,fields,operations,options,runtime,sessions,workspaces,created,tasks,primary,create};
++}
++test('primary tool creates distinct employee/home/workspace without stealing caller identity or starting work',async t=>{
++ const f=fixture(t),primary=await f.primary(),before=f.directory.primary(),bot=await f.tools.bot_create.execute({...f.fields,idempotencyKey:'hire-1'},{agent:f.root,callId:'call-1'});
++ assert.notEqual(bot.id,primary.id);assert.notEqual(bot.homeSessionId,primary.homeSessionId);assert.notEqual(bot.cwd,primary.cwd);assert(bot.cwd.startsWith(path.join(f.dir,'naumi/workspaces')+path.sep));assert(fs.statSync(bot.cwd).isDirectory());assert.deepEqual(f.directory.primary(),before);assert.equal(f.directory.forSession(f.root.id).id,primary.id);assert.equal(f.directory.forSession(bot.homeSessionId).id,bot.id);assert.deepEqual(f.created[0].options.profile,{agentPreset:'standard',model:{provider:'existing',model:'same-id'},permissions:[]});assert.equal(f.workspaces.get(bot.cwd).ids[0],bot.homeSessionId);
++});
++test('manual and primary use one provisioning service, exact request retries are durable after restart',async t=>{
++ const f=fixture(t);await f.primary();const input={requestId:randomUUID(),expectedRevision:f.directory.list().revision,fields:f.fields},bots=await Promise.all(Array.from({length:8},()=>f.operations.createBot(input)));
++ assert.equal(new Set(bots.map(b=>b.id)).size,1);assert.equal(f.created.length,1);assert.equal(f.directory.list().bots.length,2);const reopened=new BotDirectory(f.directory.file);try{const again=await new PrimaryBotService({...f.options,directory:reopened}).createBot(input);assert.equal(again.id,bots[0].id);assert.equal(f.created.length,1);}finally{await reopened.close();}
++});
++test('different payload cannot reuse accepted key; name conflicts and stale revisions create no duplicate Session',async t=>{
++ const f=fixture(t);await f.primary();const input={requestId:randomUUID(),expectedRevision:2,fields:f.fields};await f.operations.createBot(input);
++ await assert.rejects(f.operations.createBot({...input,fields:{...f.fields,purpose:'changed'}}),/BOT_CREATION_REQUEST_CONFLICT/);
++ await assert.rejects(f.operations.createBot({...input,requestId:randomUUID(),expectedRevision:4}),/BOT_NAME_EXISTS/);
++ await assert.rejects(f.operations.createBot({...input,requestId:randomUUID(),fields:{...f.fields,name:'另一个'}}),/BOT_CONFLICT/);assert.equal(f.created.length,1);
++});
++test('ensure/registration/checkpoint failure is recoverable using the same reserved identity',async t=>{
++ const f=fixture(t);await f.primary();const input={requestId:randomUUID(),expectedRevision:2,fields:f.fields},ensure=f.runtime.ensure;f.runtime.ensure=async()=>{throw Error('ENSURE_FAILURE');};await assert.rejects(f.operations.createBot(input),/ENSURE_FAILURE/);const pending=f.directory.list().creations[0];assert.equal(pending.state,'pending');assert.equal(f.directory.list().bots.length,1);
++ f.runtime.ensure=ensure;const write=f.directory.write;f.directory.write=async next=>{if(next.creations[0].state==='completed')throw Error('COMMIT_FAILURE');return write(next);};await assert.rejects(f.operations.createBot(input),/COMMIT_FAILURE/);assert.equal(f.created.length,1);f.directory.write=write;const bot=await f.operations.createBot(input);assert.equal(bot.id,pending.botId);assert.equal(bot.homeSessionId,pending.sessionId);assert.equal(f.created.length,1);
++});
++test('first checkpoint failure performs no filesystem/native provisioning',async t=>{const f=fixture(t);await f.primary();f.directory.write=async()=>{throw Error('DISK');};await assert.rejects(f.create(),/DISK/);assert.equal(f.created.length,0);assert(!fs.existsSync(path.join(f.dir,'naumi/workspaces')));});
++test('legacy thread creation cannot consume the last seat held by a durable employee reservation',async t=>{
++ const f=fixture(t);await f.primary();await f.directory.transact(next=>{const example=next.bots[0];for(let i=0;i<998;i++)next.bots.push({...example,id:'existing-'+i,name:'已有员工'+i,homeSessionId:'old-'+i,sessionIds:['old-'+i]});return{bot:next.bots[0]};});
++ const ensure=f.runtime.ensure;f.runtime.ensure=async()=>{throw Error('PENDING');};const input={requestId:randomUUID(),expectedRevision:f.directory.list().revision,fields:f.fields};await assert.rejects(f.operations.createBot(input),/PENDING/);
++ await assert.rejects(f.directory.create({sessionId:'legacy-new',cwd:f.dir},{name:'抢占名额',kind:'agent',purpose:'legacy'}),/BOT_DIRECTORY_FULL/);f.runtime.ensure=ensure;await f.operations.createBot(input);assert.equal(f.directory.list().bots.length,1000);
++});
++test('primary manages a named target; ordinary employee and teammate cannot manage another Bot',async t=>{
++ const f=fixture(t),primary=await f.primary(),bot=await f.create(),input={targetBotId:bot.id,expectedRevision:1,name:'新运营',purpose:'新的职责',avatarShape:'creator',avatarPalette:'pink'};
++ const result=await f.tools.bot_update.execute(input,{agent:f.root});assert.equal(result.name,'新运营');assert.equal(result.appearance.palette,'pink');assert.equal(f.directory.primary().id,primary.id);assert.deepEqual(primary,f.directory.primary());
++ await assert.rejects(Promise.resolve().then(()=>f.tools.bot_update.execute({...input,targetBotId:primary.id},{agent:{id:bot.homeSessionId}})),/BOT_PRIMARY_MANAGER_REQUIRED/);
++ await assert.rejects(Promise.resolve().then(()=>f.tools.bot_update.execute(input,{agent:f.member})),/BOT_LEAD_REQUIRED/);
++});
++test('managed archive preserves files/Sessions, refuses active tasks and keeps primary enabled',async t=>{
++ const f=fixture(t),primary=await f.primary(),bot=await f.create();fs.writeFileSync(path.join(bot.cwd,'file.md'),'retained');f.tasks.push({sourceBotId:primary.id,targetBotId:bot.id,status:'running'});
++ await assert.rejects(f.operations.manageBot(bot.id,{expectedRevision:1,status:'archived'}),/BOT_BUSY/);f.tasks[0].status='completed';const archived=await f.operations.manageBot(bot.id,{expectedRevision:1,status:'archived'});assert.equal(archived.status,'archived');assert.deepEqual(archived.sessionIds,bot.sessionIds);assert.equal(fs.readFileSync(path.join(bot.cwd,'file.md'),'utf8'),'retained');await f.operations.manageBot(bot.id,{expectedRevision:2,status:'active'});await assert.rejects(f.operations.manageBot(primary.id,{expectedRevision:1,status:'archived'}),/BOT_PRIMARY_REQUIRED/);
++});
++test('primary identity in group reception may create/manage; no target identity may be supplied by the caller',async t=>{
++ const f=fixture(t),primary=await f.primary();f.directory.groupSessionOwner=id=>id==='group-home'?primary.id:undefined;
++ const bot=await f.tools.bot_create.execute({...f.fields,idempotencyKey:'group-create'},{agent:{id:'group-home'}});const edited=await f.tools.bot_update.execute({targetBotId:bot.id,expectedRevision:1,name:'群内创建的员工'},{agent:{id:'group-home'}});assert.equal(edited.id,bot.id);assert.equal(f.directory.forSession('group-home').id,primary.id);
++});
++test('account directories isolate provisioning receipts, names, management and dedicated workspaces',async t=>{const a=fixture(t),b=fixture(t);await a.primary();await b.primary();const first=await a.create(),second=await b.create();assert.notEqual(first.cwd,second.cwd);await assert.rejects(b.operations.manageBot(first.id,{expectedRevision:1,name:'cross-account'}),/BOT_NOT_FOUND/);});
++test('manual plus uses a real form and shared owner API, not an AI draft or duplicate native editor',()=>{
++ const sidebar=fs.readFileSync('plugins/naumi-enterprise/assets/bot-sidebar.js','utf8'),ui=fs.readFileSync('plugins/naumi-enterprise/assets/primary-bot.js','utf8');assert(sidebar.includes('new CustomEvent(CREATE_BOT_EVENT)'));assert(!sidebar.includes('startSession(undefined,{prompt:'));assert(ui.includes("action:'create'"));assert(ui.includes("'aria-label':'创建 Bot'"));assert(!ui.includes('contentEditable'));assert(!ui.includes('session.prompt'));
++});
++test('archiving while dispatch profile lookup is in flight cannot accept a task for the archived target',async()=>{
++ const f=await taskFixture();try{let entered,release;const ready=new Promise(r=>entered=r),gate=new Promise(r=>release=r),profile=f.runtime.profile;f.runtime.profile=async bot=>{entered();await gate;return profile(bot);};
++ const pending=f.service.dispatch(f.sender,f.input());await ready;
++ const management=new PrimaryBotService({directory:f.directory,getTasks:()=>f.service});await management.manageBot(f.targetBot.id,{expectedRevision:1,status:'archived'});release();await assert.rejects(pending,/BOT_ARCHIVED/);assert.equal(f.store.read().tasks.length,0);assert.equal(f.directory.forSession(f.sender.id).id,f.sourceBot.id);
++ }finally{await f.cleanup();}
++});
