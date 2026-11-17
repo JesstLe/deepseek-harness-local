@@ -1,0 +1,58 @@
+Group streaming duplicate Markdown fix - 2026-11-17
+Task branch: codex/group-stream-repeat-fix-20261117
+Base main/origin/main: 9f99b1d86d52c651f414007e75f3156b384a0346
+Changed branch/field: paragraph inline reconciliation; replace flatMap of per-line duplicate keys with keyed React.Fragment per line. No persisted fields changed.
+Original SHA256: c36d6386367cd7e284051b7c3cb6693dbea40ee735cbaf38ae7273297f6cb846
+Modified SHA256: 580bc4f718e1ec0a990b43370b1642b5f027388aef3e0391d84bcdb4cbfef905
+
+Four final artifacts:
+MODIFIED_FILE=E:/Workspace/naumi-desktop/evidence/group-render-repeat/MODIFIED_FILE.js
+DIFF_FILE=E:/Workspace/naumi-desktop/evidence/group-render-repeat/DIFF_FILE.patch
+VERIFICATION=E:/Workspace/naumi-desktop/evidence/group-render-repeat/VERIFICATION.txt
+ROLLBACK=E:/Workspace/naumi-desktop/evidence/group-render-repeat/ROLLBACK.sh
+
+Executed cwd: E:/Workspace/naumi-group-stream-fix (isolated worktree).
+BASELINE command: node scripts/verify-group-markdown-repeat.mjs BASELINE
+Input: original Markdown component; production React/ReactDOM; 89 consecutive single-character prefixes, each compared to a fresh root render of the same prefix; multiline bold structure matching the reported case. No real user text is copied into fixture artifacts.
+Literal output: BASELINE frames=89 first_mismatch=29 repeated_heading=9 errors=0
+Exit status: 0 (expected defect reproduction; React incremental DOM diverged at frame29).
+
+MODIFIED command: node scripts/verify-group-markdown-repeat.mjs MODIFIED
+Input: modified Markdown component, identical fixture and comparison procedure.
+Literal output: MODIFIED frames=89 first_mismatch=none repeated_heading=1 errors=0
+Exit status: 0. All incremental frames equal one-shot rendering, without remounting the streaming root, deduplicating content, truncating output or changing messages.
+Module command: node --test tests/naumi-group-markdown.test.mjs tests/naumi-unified-chat.test.mjs tests/naumi-group-collaboration.test.mjs
+Literal summary: tests 22; pass 22; fail 0. Exit status: 0.
+Full regression command: npm run app:test
+Literal summary: tests 559; pass 559; fail 0. Exit status: 0. Full literal log FULL_TESTS.log.
+
+ROLLBACK preparation: Copy-Item evidence/group-render-repeat/MODIFIED_FILE.js evidence/group-render-repeat/rollback-copy.js
+Output: empty; exit status: 0.
+ROLLBACK command: & D:/DEV/Git/bin/bash.exe evidence/group-render-repeat/ROLLBACK.sh rollback-copy.js
+Input: separate modified module copy plus original hash-guarded bytes.
+Literal output: ROLLBACK original_sha256=match modified_source=retained
+Exit status: 0.
+Restored behavior command: node scripts/verify-group-markdown-repeat.mjs ROLLBACK evidence/group-render-repeat/rollback-copy.js
+Literal output: ROLLBACK frames=89 first_mismatch=29 repeated_heading=9 errors=0
+Exit status: 0 (old behavior reproduced intentionally).
+Restored status: original module bytes/old defect restored on separate copy; modified source and MODIFIED_FILE remain changed. Rollback script is executable in Git and only accepts explicit copy filename.
+
+Root cause: createChatMarkdown.inline resets key=i on each paragraph line; flatMap merged those keys into one sibling list. Streaming reconciliation can retain stale keyed strong/code/a nodes. A keyed Fragment per line preserves local token identity with no extra HTML wrapper.
+Prior read-only diagnosis found actual finalized reply length1033 and repeated phrases once in SQLite and original Session. Reproduction confirms presentation reconciliation, not duplicate model output or a proven transport delta fault. No stored messages, provider request, retry, group route or input/composer behavior were changed.
+Static screenshots baseline.png / modified.png / rollback.png were rendered by actual Chromium and reopened. All four artifacts reopened. Actual fixed-main loading/served-source browser verification appended after deployment; installer EXE not rebuilt.
+
+Pre-merge integration: origin/main=df6f1b3712f89cd7fb1958b5e86ddfecff18c8cc; integrated installer main changes with ordinary merge, no shared user files overwritten.
+Post-integration command: node --test tests/naumi-group-markdown.test.mjs tests/naumi-unified-chat.test.mjs tests/naumi-group-collaboration.test.mjs desktop/tests/installer-ui.test.cjs
+Literal summary: tests 33; pass 33; fail 0. Exit status: 0. INTEGRATION.log.
+
+ACTUAL FIXED-MAIN LOAD
+Deployed source main: 0dc1e41f2edc617b4f498e5a7335b30ca6806de1.
+Deployment command: node evidence/group-render-repeat/load-runtime.mjs E:/Workspace/naumi-desktop
+Input: actual running module guarded against original bytes, fixed-main replacement and complete plugin hash inventory.
+Literal output: DEPLOY files=1 unrelated_unchanged=100 restarted=false http=200
+Exit status: 0. Only bot-chat-markdown.js replaced atomically; 100 unrelated runtime files unchanged, no service restart.
+Live command: node scripts/verify-group-markdown-repeat.mjs LIVE
+Input: module body fetched from actual HTTP /naumi/assets/bot-chat-markdown.js, verified equal to fixed source; same real React/Chromium streaming comparison fixture.
+Literal output: LIVE frames=89 first_mismatch=none repeated_heading=1 errors=0
+Exit status: 0. LIVE_SERVED.js and LIVE.json preserve the served module / result; live.png reopened and inspected.
+No model calls or business/chat writes were issued. Existing open tabs must refresh to replace the already instantiated renderer and stale DOM.

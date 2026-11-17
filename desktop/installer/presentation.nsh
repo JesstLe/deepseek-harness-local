@@ -3,6 +3,12 @@
 !include MUI2.nsh
 !include nsDialogs.nsh
 !include FileFunc.nsh
+; Generated from the final staged payload by build-desktop.mjs. Native fixtures
+; use the same pinned-layout fallback when no staged runtime exists.
+!if /FileExists "${NAUMI_WIZARD_DIR}\..\..\runtime\installer-path-budget.nsh"
+  !include "${NAUMI_WIZARD_DIR}\..\..\runtime\installer-path-budget.nsh"
+!endif
+!define /IfNDef NAUMI_MAX_INSTALLDIR_CHARS 66
 !define /IfNDef MUI_ICON "${NAUMI_WIZARD_DIR}\..\app\assets\naumi.ico"
 !define /IfNDef MUI_UNICON "${NAUMI_WIZARD_DIR}\..\app\assets\naumi.ico"
 !define MUI_BGCOLOR FFFFFF
@@ -251,6 +257,12 @@ Function ${PREFIX}NaumiCanonicalPath
       StrCpy $0 $0 -1
     ${EndIf}
   ${EndIf}
+  !if "${PREFIX}" == ""
+    StrLen $1 $0
+    ${If} $1 > ${NAUMI_MAX_INSTALLDIR_CHARS}
+      Goto naumi_path_invalid
+    ${EndIf}
+  !endif
   StrCpy $R0 $0
   Goto naumi_path_return
   naumi_path_invalid:
@@ -300,7 +312,7 @@ Function NaumiInstallLeave
   Call NaumiCanonicalPath
   Pop $NaumiCandidatePath
   ${If} $NaumiCandidatePath == ""
-    MessageBox MB_OK|MB_ICONEXCLAMATION "请选择完整的本机安装路径。"
+    MessageBox MB_OK|MB_ICONEXCLAMATION "安装位置无效或过长，请选择较短的完整本机路径（最多 ${NAUMI_MAX_INSTALLDIR_CHARS} 个字符）。"
     Abort
   ${EndIf}
   ${GetFileName} "$NaumiCandidatePath" $0
@@ -310,7 +322,7 @@ Function NaumiInstallLeave
     Pop $NaumiCandidatePath
   ${EndIf}
   ${If} $NaumiCandidatePath == ""
-    MessageBox MB_OK|MB_ICONEXCLAMATION "请选择完整的本机安装路径。"
+    MessageBox MB_OK|MB_ICONEXCLAMATION "安装位置无效或过长，请选择较短的完整本机路径（最多 ${NAUMI_MAX_INSTALLDIR_CHARS} 个字符）。"
     Abort
   ${EndIf}
   ; Commit only a checked, nonempty, drive-absolute result. NSIS GetFullPathName
