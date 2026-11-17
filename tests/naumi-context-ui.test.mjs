@@ -46,7 +46,7 @@ test('preexisting enterprise front-end remains byte-equivalent apart from declar
  assert.equal(source.split(desktopAction).length,2);
  const start=source.indexOf('window.__ModuleLoader__.load');
  const lazy="    const BotGroups=React.lazy(()=>import('/naumi/assets/bot-groups.js').then(module=>({default:module.createBotGroupsPage(ctx,React)}))\n      .catch(()=>({default:()=>h('p',{className:'naumi-page',role:'alert'},'群聊界面加载失败，请刷新页面。')})));\n";
- const privatePanel="      yield ctx.slots.register({name:'main',key:'naumi-conversation'},()=>h(React.Suspense,{fallback:null},h(BotGroups)));\n";
+ const privatePanel="      yield ctx.slots.register({name:'main',key:'naumi-conversation',children:{'naumi.group.controls':{kind:'single',scope:'session'}}},props=>h(React.Suspense,{fallback:null},h(BotGroups,{native:props})));\n";
  assert(source.includes(lazy));assert(source.includes(privatePanel));assert(!source.includes("['naumi-bot-groups','Bot 群聊','chat'],"));
  const migration="      const previous=sessionStorage.getItem('naumi.activePanel');\n      const saved=previous==='naumi-bot-groups'?'naumi-conversation':previous;";
  assert(source.includes(migration));

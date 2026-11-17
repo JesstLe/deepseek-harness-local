@@ -159,7 +159,7 @@ window.__ModuleLoader__.load({id:'@naumi/dsh-enterprise',factory(require){
     ctx.slots.inject('conversation.header.leading',()=>ctx.slots.register({name:'conversation.header.leading'},()=>h('button',{className:'naumi-back',onClick:()=>ctx.layout.selectPanel('naumi-workbench')},h(Icon,{name:'grid',size:15}),'工作台')));
     ctx.slots.inject('main',function*(){
       for(const [id]of PANELS)yield ctx.slots.register({name:'main',key:id},()=>h(Page,{page:id}));
-      yield ctx.slots.register({name:'main',key:'naumi-conversation'},()=>h(React.Suspense,{fallback:null},h(BotGroups)));
+      yield ctx.slots.register({name:'main',key:'naumi-conversation',children:{'naumi.group.controls':{kind:'single',scope:'session'}}},props=>h(React.Suspense,{fallback:null},h(BotGroups,{native:props})));
       yield ctx.slots.inject('sidebar.panellist',function*(){for(const [id,label,icon]of PANELS)yield ctx.slots.register({name:'sidebar.panellist',id,order:-100+PANELS.findIndex(x=>x[0]===id),label:()=>label},()=>h(Icon,{name:icon}));});
       const known=new Set([...PANELS.map(x=>x[0]),'naumi-conversation']);
       const previous=sessionStorage.getItem('naumi.activePanel');
