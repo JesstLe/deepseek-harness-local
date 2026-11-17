@@ -8,7 +8,7 @@
 
 设计：文件 artifact 保存原生ref集合、taskId/attempt/targetSession/message、当时Goal revision/criteria与集合摘要；review固定当前artifact与来源。退回后同任务新attempt自动形成同delivery的新版本；已提交/审核/验收版本不被后台覆盖。读旧版/下载/提交/验收重新核验原Session事件和已保存快照，原工作文件删除仍可下载，篡改或错误来源阻止验收。原任务JSON与SQLite不是分布式事务：异步只读验证后在SQLite提交前同步复核任务身份/轮次/引用，稳定来源操作键支持崩溃后对账，无模型或工具重放。
 
-本次实现与迁移状态：开发中；既有文本交付兼容，原记录不改写，旧文件无snapshot不伪造历史。模块迭代0。
+本次实现与迁移状态：源码已实现，集中验证通过，待主线/实际加载；既有文本交付兼容，原记录不改写，旧文件无snapshot不伪造历史。模块迭代0。
 
 验证命令、结果及证据层级：基线 `node --test tests/naumi-employee-work.test.mjs tests/naumi-work-goal-task-links.test.mjs tests/naumi-bot-file-versions.test.mjs` 24/24 exit0。完整模块后集中验证，来源和写入只用隔离任务。
 
@@ -25,3 +25,13 @@
 原生TaskCard在文件交付详情中直接复用。文件版本链接按真实ArrayBuffer校验并下载，不经TextEncoder/Markdown改变二进制；现有文本下载仍兼容。source轮次与集合摘要在审核记录中可核验。原模型、输入框、图标、导航、企业模块保持现状。
 
 模块集中验证38/38，包括24项基线+14项新增；初轮失配来自Zod解析重排对象key顺序，已用语义规范化比较来源ref而不是依赖JSON对象key顺序，失败日志保留。全仓798/798、0skip。原生壳首轮12项（真实PNG、present、版本下载、退回同task/Session attempt2、丢验收回包重试、逐项验收、1360/390布局），现追加宿主重启与旧版本取回后集中最终验收。实际模型为隔离loopback，真实供应商0。模块迭代1。
+
+最终集中验收：38模块（24基线+14新增）、798全仓/0skip；原生壳14项/2 boots，同task/Session、attempt2、文件version2、真实PNG旧/新字节下载、丢验收回包不重复、owner review精确来源、宿主重启后旧版下载与验收保留。模型连接为确定性loopback，合计7入口请求（包含原生员工执行与主管relay），真实供应商0，不记成7收费请求。ZIP15路径CRC、8原文件恢复/7新增删除、恢复后原24测试通过；源码副本回滚不修改真实业务。主线/加载固定版本以VERIFICATION追加为准。
+
+复用接续指令：
+```text
+继续D3/D5，复用原BotTaskService和EmployeeWorkStore、原生snapshot/inspectBotMessage/verifyVersion及TaskCard。
+每次交付与审核固定taskId/attempt/messageId/Session/turn/seq/index/文件hash及当时条件；file artifact不是Markdown替身。
+不重放任务，不自审；未知或文件校验失败保留原账本并阻止新验收。企业保持现状。
+接续完整隔离真实日常使用，最终从固定main构建并验证含全部最新切片的安装/升级/卸载/更新。
+```
