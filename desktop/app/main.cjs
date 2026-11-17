@@ -11,6 +11,7 @@ const installerState=require('./installer-state.cjs');
 const {createDesktopUpdates}=require('./updates.cjs');
 const {IdentityRuntime}=require('./identity-runtime.cjs');
 const {MarketSession}=require('./market.cjs');
+const {CloudSession,CloudBackup}=require('./cloud.cjs');
 const {identityOrigin}=require('./identity.cjs');
 const {randomUUID}=require('node:crypto');
 app.setName('Naumi');app.setAppUserModelId('com.naumi.desktop');
@@ -19,6 +20,9 @@ if(process.env.NAUMI_TEST_HIDDEN==='1'){app.commandLine.appendSwitch('disable-ba
 const locked=app.requestSingleInstanceLock();
 let identityRuntime=null,identityUserData=null;
 const market=new MarketSession({identity:()=>identityRuntime});
+const cloud=new CloudSession({identity:()=>identityRuntime});
+const DEFAULT_IDENTITY_ORIGIN='https://47.105.59.142';
+let cloudBusy=0;
 let window,primarySession,guests,bridge,backend,settings,enterprise,login,loginAfterBoot=false,booting=false,closing=false,connecting=false,editingConnection=false,connectionFlight,maintenanceTicket=null,maintenanceUntil=0,updates=null;
 if(!locked){app.quit();}else{
 app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.show();window.focus();}});
@@ -77,7 +81,7 @@ app.whenReady().then(async()=>{
    const checked=await verifyConnection(origin,(url,options)=>primarySession.fetch(url,options),{signal:connectionFlight.signal});
    const state=workspaceSummary(identityUserData??app.getPath('userData')),changed=state.configured&&state.origin!==checked.origin;
    if(changed){
-    if((enterprise?.running??0)>0||market.running>0||(bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');
+    if((enterprise?.running??0)>0||market.running>0||cloud.running>0||cloudBusy>0||(bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');
     if(backend?.owned){const r=require('./profile.cjs').runtimeReceipt(settings.home,settings.identity.id);if(!r||r.pid===null||isAlive(r.pid))await assertWorkspaceIdle(settings,(url,options)=>primarySession.fetch(url,options));connectionFlight.signal.throwIfAborted();await stopBackend(backend);backend=null;}
     else {const r=require('./profile.cjs').runtimeReceipt(settings.home,settings.identity.id);if(r&&(r.pid===null||isAlive(r.pid)))throw Error('WORKSPACE_BACKEND_STOP_REQUIRED');}
     await bridge?.close();bridge=null;
@@ -89,6 +93,18 @@ app.whenReady().then(async()=>{
   finally{connecting=false;connectionFlight=null;}
  });
  ipcMain.handle('naumi:identity-state',e=>{if(!accountPage(e))trusted(e);return identityRuntime?.status()??{available:false};});
+ ipcMain.handle('naumi:cloud',async(e,input)=>{
+  if(!accountPage(e))throw Error('INVALID_DESKTOP_SENDER');
+  if(!identityRuntime?.active)return{ok:false,error:'CLOUD_LOGIN_REQUIRED'};
+  if(!input||Object.keys(input).some(k=>!['action','id'].includes(k))||!['list','backup','download'].includes(input.action)||cloudBusy)return{ok:false,error:'CLOUD_BUSY'};
+  const active=identityRuntime.active;cloudBusy++;
+  try{
+   const backup=new CloudBackup({root:active.root,cloud,identity:()=>identityRuntime?.active,readLocal:async endpoint=>{if(!settings)throw Error('CLOUD_WORKSPACE_REQUIRED');const response=await primarySession.fetch(settings.url+endpoint,{credentials:'include',cache:'no-store',redirect:'error',signal:AbortSignal.timeout(10000)});if(!response.ok)throw Error('CLOUD_LOCAL_RESPONSE_INVALID');const raw=await response.text();if(Buffer.byteLength(raw)>2*1024*1024)throw Error('CLOUD_LOCAL_RESPONSE_TOO_LARGE');return JSON.parse(raw);}});
+   if(input.action==='list')return{ok:true,result:await backup.list()};
+   if(input.action==='backup'){if(!settings)throw Error('CLOUD_WORKSPACE_REQUIRED');await assertWorkspaceIdle(settings,(url,options)=>primarySession.fetch(url,options));return{ok:true,result:await backup.backup()};}
+   const value=await backup.download(input.id);const chosen=await dialog.showSaveDialog(window,{defaultPath:'Naumi-backup-'+input.id+'.json',filters:[{name:'Naumi 数据副本',extensions:['json']}]});if(chosen.canceled)return{ok:true,canceled:true};if(identityRuntime.active!==active)throw Error('CLOUD_ACCOUNT_CHANGED');fs.writeFileSync(chosen.filePath,JSON.stringify(value,null,2)+'\n',{flag:'wx',mode:0o600});return{ok:true,saved:true};
+  }catch(error){return{ok:false,error:/^(CLOUD|MARKET|WORKSPACE)_[A-Z_]+$/.test(error.message)?error.message:'CLOUD_UNAVAILABLE'};}finally{cloudBusy--;}
+ });
  ipcMain.handle('naumi:identity-register',async(e,value)=>{
   if(!accountPage(e)||!identityRuntime)throw Error('INVALID_DESKTOP_SENDER');
   try{const origin=identityOrigin(value||identityRuntime.origin());if(identityRuntime.managedOrigin&&origin!==identityRuntime.managedOrigin)throw Error('IDENTITY_MANAGED_ORIGIN');await shell.openExternal(origin+'/');return {ok:true};}
@@ -138,11 +154,12 @@ async function boot(){
  try{
   if(!settings){
    const candidate=localSettings(app);
-   if(candidate.isolated){
-    identityRuntime??=new IdentityRuntime({userData:app.getPath('userData'),sessionFor:name=>session.fromPartition(name),managedOrigin:process.env.NAUMI_IDENTITY_ORIGIN??''});
+   if(candidate.isolated||app.isPackaged||process.env.NAUMI_IDENTITY_ORIGIN){
+    identityRuntime??=new IdentityRuntime({userData:app.getPath('userData'),sessionFor:name=>session.fromPartition(name),managedOrigin:process.env.NAUMI_IDENTITY_ORIGIN??(app.isPackaged?DEFAULT_IDENTITY_ORIGIN:''),legacyHome:candidate.isolated?undefined:candidate.home});
     const active=await identityRuntime.restore();
     if(!active){await window.loadFile(path.join(__dirname,'identity.html'));return;}
-    identityUserData=active.root;settings=localSettings(accountApp());
+    identityUserData=active.root;
+    if(candidate.isolated)settings=localSettings(accountApp());else settings=candidate;
    }else settings=candidate;
   }
   if(settings.isolated){
@@ -166,15 +183,15 @@ async function boot(){
 }
 function accountApp(){return {isPackaged:app.isPackaged,getPath:name=>name==='userData'&&identityUserData?identityUserData:app.getPath(name)};}
 async function assertAccountIdle(){
- if((enterprise?.running??0)>0||market.running>0||(bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');
- if(backend&&!backend.owned)throw Error('WORKSPACE_BACKEND_STOP_REQUIRED');
- if(backend?.owned)await assertWorkspaceIdle(settings,(url,options)=>primarySession.fetch(url,options));
+ if((enterprise?.running??0)>0||market.running>0||cloud.running>0||cloudBusy>0||(bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');
+ if(backend&&!backend.owned&&settings?.isolated)throw Error('WORKSPACE_BACKEND_STOP_REQUIRED');
+ if(backend)await assertWorkspaceIdle(settings,(url,options)=>primarySession.fetch(url,options));
 }
 function maintenanceBlocked(){if(maintenanceTicket&&Date.now()>=maintenanceUntil){maintenanceTicket=null;}return !!maintenanceTicket;}
 async function canInstallUpdate(){
  if(closing||booting||connecting)return {ok:false,reason:'WORKSPACE_BUSY'};
  if(maintenanceBlocked())return {ok:false,reason:'INSTALL_MAINTENANCE_ACTIVE'};
- if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0||market.running>0)return {ok:false,reason:'WORKSPACE_OPERATIONS_IN_FLIGHT'};
+ if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0||market.running>0||cloud.running>0||cloudBusy>0)return {ok:false,reason:'WORKSPACE_OPERATIONS_IN_FLIGHT'};
  const ticket=randomUUID().replaceAll('-','')+randomUUID().replaceAll('-','');
  try{await performMaintenance('quiesce',ticket);return {ok:true,release:()=>performMaintenance('resume',ticket)};}
  catch{return {ok:false,reason:'INSTALL_ACTIVITY_UNKNOWN'};}
@@ -190,7 +207,7 @@ async function performMaintenance(action,ticket,{accountTransition=false}={}){
  if(action==='resume'){if(backend&&settings)await maintenanceRequest(settings,'resume',ticket);maintenanceTicket=null;return;}
  if(booting||(connecting&&!accountTransition)||closing||!settings?.isolated||!backend?.owned)throw Error('INSTALL_ACTIVITY_UNKNOWN');
  maintenanceTicket=ticket;maintenanceUntil=Date.now()+30000;
- try{if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0||market.running>0)throw Error('INSTALL_OPERATIONS_IN_FLIGHT');await maintenanceRequest(settings,'quiesce',ticket);}
+ try{if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0||market.running>0||cloud.running>0||cloudBusy>0)throw Error('INSTALL_OPERATIONS_IN_FLIGHT');await maintenanceRequest(settings,'quiesce',ticket);}
  catch(error){maintenanceTicket=null;throw error;}
 }
 function isAlive(pid){try{process.kill(pid,0);return true;}catch(error){return error.code!=='ESRCH';}}
