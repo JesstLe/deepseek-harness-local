@@ -1,0 +1,118 @@
+diff --git a/.gitattributes b/.gitattributes
+index ee18674..b92c2a4 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -346,3 +346,7 @@ plugins/naumi-enterprise/third-party/ds-bot-im/** -text
+ /evidence/file-delivery-single-path/*.log -text whitespace=-blank-at-eol
+ /evidence/file-delivery-single-path/ROLLBACK.sh text eol=lf
+ /evidence/file-delivery-single-path/live-*/generated/** binary
++
++/evidence/daily-release-037/DIFF_FILE.patch -text whitespace=-blank-at-eol
++/evidence/daily-release-037/*.log -text whitespace=-blank-at-eol
++/evidence/daily-release-037/ROLLBACK.sh text eol=lf
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 4f6265e..fe061c8 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -5,6 +5,15 @@
+ 面向用户书写，中文，每个版本一个小节，格式固定为 `## x.y.z - 日期`。
+ 
+ 
++## 0.3.7 - 2026-11-18
++
++- 工作目标关联原生委派任务，支持同一任务退回修改、版本文件交付及逐项人工验收
++- 文件任务统一使用原生文件卡片，保留旧版本与来源，不再重复生成一份文本交付
++- 支持从本机 Codex、Claude 会话预览后导入，并使用 Naumi 原生会话继续工作；历史工具操作不重放
++- 已确认的工作经验可在新会话和重启后检索复用；本地主动工作需明确启用，未知执行结果不自动重跑
++- 修复部分 Windows 新工作区无法启动受限命令的问题，保留工作区边界与原有权限审批
++- 保留 Naumi 安装／卸载界面、Logo、内置工具与浏览器；升级和卸载保留个人数据
++
+ ## 0.3.6 - 2026-11-18
+ 
+ - 修复手动原目录升级时旧卸载器删除已有桌面快捷方式的问题，继续使用标准安装与卸载事务
+diff --git a/desktop/package-lock.json b/desktop/package-lock.json
+index 9784945..c76a8c9 100644
+--- a/desktop/package-lock.json
++++ b/desktop/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "naumi-desktop",
+-  "version": "0.3.6",
++  "version": "0.3.7",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "naumi-desktop",
+-      "version": "0.3.6",
++      "version": "0.3.7",
+       "license": "UNLICENSED",
+       "dependencies": {
+         "electron-updater": "^6.6.2"
+diff --git a/desktop/package.json b/desktop/package.json
+index bc4728c..2f15c26 100644
+--- a/desktop/package.json
++++ b/desktop/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "naumi-desktop",
+-  "version": "0.3.6",
++  "version": "0.3.7",
+   "private": true,
+   "description": "Naumi 企业协作桌面端",
+   "author": "Naumi",
+diff --git a/docs/implementation/DAILY_RELEASE_037.md b/docs/implementation/DAILY_RELEASE_037.md
+new file mode 100644
+index 0000000..bc89a5b
+--- /dev/null
++++ b/docs/implementation/DAILY_RELEASE_037.md
+@@ -0,0 +1,11 @@
++# Naumi 0.3.7 日常数字员工完整候选
++
++模块与职责：本线程负责D5最后候选版本、固定main构建、包含最新D1–D4/会话导入/单一文件交付的安装更新验收。基线8715b7d97c5a3ea08f8dde777ab948fe16b5bc42，分支codex/daily-release-037-20261118，独立工作树E:/Workspace/naumi-daily-release-037。企业模块保持现状，不扩展/迁移或自动启用。
++
++公共接口/依赖/数据归属：复用现有electron-builder固定NSIS engine、标准卸载器/维护锁、原更新器与GitHub latest.yml，不新写安装事务。只调整desktop/package、lock根版本、product-version和用户更新日志；不改导航/Logo、原输入器、登录/权限/企业路由。原有Codex/Claude导入、目标/任务/交付、记忆和主动机制随最新main完整打包，不用旧stage冒充。
++
++本次状态：0.3.7版本元数据已准备；GitHub只读确认当前Latest稳定0.3.6。原0.3.6公开包不含后来的目标关联/会话导入/原生文件验收；新版本必须从合入本元数据的固定main重新stage/build，runtime inventory和全部plugins hash核对，不能只改版本名。继承最新main810/810全仓、21完整隔离真实链路及9单一路径真实回归；本版本集中跑更新/安装器模块与真实安装包，不重复收费模型。
++
++验收矩阵：固定main构建 -> staged closure/隐私扫描/Logo/CLI/浏览器与关键模块入包 -> 原生安装包源码版本与文件hash -> 独立当前用户slot从公开0.3.6升级0.3.7 -> 隔离profile会话/员工记忆/人设/文件保留 -> 原生打包应用登录、工作页/导入入口/检查更新 -> 卸载保留数据且原HKLM/ProgramFiles/快捷方式保持 -> 新版本公开资产和latest.yml -> 匿名下载hash -> 旧0.3.6客户端获取真实新版本 -> PRD逐项审计。发布前不把构建或测试exit0当公开发布。
++
++未完成：候选元数据验证、源码副本回滚/四件套与main、实际build/install/update全部门槛。旧安装器slot验收脚本会写HKCU和快捷方式，须先只读快照确认没有现存用户slot，不覆盖用户已有安装；只用自有隔离profile，不读取/复制真实密码、密钥或业务会话。整体Goal active。
+diff --git a/plugins/naumi-enterprise/product-version.js b/plugins/naumi-enterprise/product-version.js
+index 452f5de..2aab04d 100644
+--- a/plugins/naumi-enterprise/product-version.js
++++ b/plugins/naumi-enterprise/product-version.js
+@@ -1 +1 @@
+-export const PRODUCT_VERSION="0.3.6";
++export const PRODUCT_VERSION="0.3.7";
+diff --git a/scripts/package-daily-release-037.mjs b/scripts/package-daily-release-037.mjs
+new file mode 100644
+index 0000000..4c78a14
+--- /dev/null
++++ b/scripts/package-daily-release-037.mjs
+@@ -0,0 +1,25 @@
++import fs from 'node:fs';import path from 'node:path';import {createHash,randomUUID} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';
++const root=process.cwd(),out=path.join(root,'evidence/daily-release-037'),baseline='8715b7d97c5a3ea08f8dde777ab948fe16b5bc42';
++const paths=[".gitattributes", "desktop/package.json", "desktop/package-lock.json", "plugins/naumi-enterprise/product-version.js", "CHANGELOG.md", "docs/implementation/DAILY_RELEASE_037.md", "scripts/package-daily-release-037.mjs"];
++const hash=b=>createHash('sha256').update(b).digest('hex'),manifest={baseline,branch:'codex/daily-release-037-20261118',changedFields:['desktop/package version0.3.7','lock root/package version0.3.7','PRODUCT_VERSION0.3.7','CHANGELOG0.3.7'],entries:[]};
++for(const file of paths){let before=null;try{before=execFileSync('git',['show',baseline+':'+file],{stdio:['ignore','pipe','ignore']});}catch{}if(before){const target=path.join(out,'original',file);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,before);}manifest.entries.push({path:file,original:before?hash(before):null,modified:hash(fs.readFileSync(file))});}
++fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
++fs.writeFileSync(path.join(out,'ROLLBACK.sh'),`#!/usr/bin/env bash
++set -euo pipefail
++HERE="$(cd "$(dirname "$0")" && pwd)"
++node - "$1" "$HERE" <<'NODE'
++const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');const target=path.resolve(process.argv[2]),out=path.resolve(process.argv[3]);if(!fs.existsSync(path.join(target,'.naumi-release-037-rollback-copy')))throw Error('MARKED_COPY_REQUIRED');if(target===path.resolve(out,'../..'))throw Error('SOURCE_TARGET_REJECTED');const m=JSON.parse(fs.readFileSync(path.join(out,'manifest.json'))),hash=b=>crypto.createHash('sha256').update(b).digest('hex');for(const e of m.entries){const file=path.resolve(target,e.path);if(!file.startsWith(target+path.sep))throw Error('INVALID_TARGET');if(!fs.existsSync(file)||hash(fs.readFileSync(file))!==e.modified)throw Error('COPY_CHANGED '+e.path);}for(const e of m.entries){const file=path.resolve(target,e.path);if(e.original){const bytes=fs.readFileSync(path.join(out,'original',e.path));if(hash(bytes)!==e.original)throw Error('ORIGINAL_CHANGED');fs.writeFileSync(file,bytes);}else fs.unlinkSync(file);}for(const e of m.entries){const file=path.join(target,e.path);if(e.original?hash(fs.readFileSync(file))!==e.original:fs.existsSync(file))throw Error('RESTORE_FAILED');}console.log('ROLLBACK_SOURCE originals='+m.entries.filter(e=>e.original).length+' new_removed='+m.entries.filter(e=>!e.original).length+' hashes=PASS live_data=UNTOUCHED');
++NODE
++`);
++fs.writeFileSync(path.join(out,'DIFF_FILE.patch'),execFileSync('git',['diff',baseline,'--binary','--',...paths]));
++execFileSync('python',['-X','utf8','-c',"import json,zipfile,pathlib,hashlib; r=pathlib.Path('.');o=r/'evidence/daily-release-037';m=json.loads((o/'manifest.json').read_text());z=zipfile.ZipFile(o/'MODIFIED_FILE.zip','w',zipfile.ZIP_DEFLATED);[z.write(r/e['path'],e['path']) for e in m['entries']];z.close();z=zipfile.ZipFile(o/'MODIFIED_FILE.zip');assert z.testzip() is None;assert all(hashlib.sha256(z.read(e['path'])).hexdigest()==e['modified'] for e in m['entries']);print('ZIP entries='+str(len(z.namelist()))+' CRC=PASS hashes=PASS')"],{stdio:'inherit'});
++if(process.argv.includes('--rollback-test')){
++ const copy=path.join(root,'runtime/release-037-source-rollback-'+randomUUID());fs.mkdirSync(copy,{recursive:true});fs.writeFileSync(path.join(copy,'.naumi-release-037-rollback-copy'),'source-only');
++ for(const dir of ['plugins','tests','scripts','services','desktop/app','desktop/tests','desktop/scripts','desktop/installer'])fs.cpSync(path.join(root,dir),path.join(copy,dir),{recursive:true});
++ for(const file of ['package.json','desktop/package.json','Start-Naumi.ps1','Stop-Naumi.ps1','Start-NaumiDesktop.ps1',...paths]){fs.mkdirSync(path.dirname(path.join(copy,file)),{recursive:true});fs.copyFileSync(path.join(root,file),path.join(copy,file));}
++ fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');fs.symlinkSync(path.join(root,'desktop/node_modules'),path.join(copy,'desktop/node_modules'),'junction');
++ const rb=spawnSync('D:/DEV/Git/bin/bash.exe',[path.join(out,'ROLLBACK.sh'),copy],{encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK.log'),rb.stdout+rb.stderr);if(rb.status!==0)throw Error('ROLLBACK_FAILED '+rb.stdout+rb.stderr);console.log(rb.stdout.trim());
++ const args=['--test','desktop/tests/updates.test.cjs','desktop/tests/installer-maintenance.test.cjs','desktop/tests/installer-ui.test.cjs'],t=spawnSync(process.execPath,args,{cwd:copy,encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK_TESTS.log'),t.stdout+t.stderr);if(t.status!==0)throw Error('ROLLBACK_TESTS_FAILED '+t.stdout);const tests=Number(t.stdout.match(/tests (\d+)/)?.[1]);console.log('ROLLBACK tests='+tests+' pass='+tests+' fail=0 exit=0');
++ fs.writeFileSync(path.join(out,'ROLLBACK_RESULT.json'),JSON.stringify({status:'PASS',copy,command:'node '+args.join(' '),tests,restored:manifest.entries.filter(e=>e.original).length,removed:manifest.entries.filter(e=>!e.original).length,modifiedSource:'retained',behavior:'original desktop/client/lock0.3.6 source version restored; product behavior unchanged; no installed downgrade',liveACLsMigrated:0,liveDataTouched:false},null,2)+'\n');
++}
++for(const e of manifest.entries)if(hash(fs.readFileSync(path.join(root,e.path)))!==e.modified)throw Error('MODIFIED_SOURCE_CHANGED');console.log('ARTIFACTS paths='+paths.length+' modified=RETAINED enterprise=UNCHANGED');
