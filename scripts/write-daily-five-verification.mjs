@@ -1,5 +1,6 @@
 import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';
 const root=process.cwd(),out=path.join(root,'evidence/daily-five'),read=n=>JSON.parse(fs.readFileSync(path.join(out,n),'utf8').replace(/^\uFEFF/,'')),manifest=read('MANIFEST.json'),rollback=read('ROLLBACK_RESULT.json'),build=read('BUILD.json'),install=read('INSTALLATION.json'),publish=read('PUBLISH.json'),download=read('DOWNLOAD.json'),ui=read('UI.json'),runtime=read('CURRENT_RUNTIME.json');for(const v of [rollback,build,install,publish,download,ui,runtime])assert.equal(v.status,'PASS');const here=f=>path.join(path.resolve(process.argv[2]??root),'evidence/daily-five',f).replaceAll('\\','/'),baseline='node --test tests/naumi-async-bot.test.mjs tests/naumi-bot-task-continuity.test.mjs tests/naumi-bot-deliverables.test.mjs tests/naumi-primary-bot.test.mjs tests/naumi-workspace-plan.test.mjs';
+const full=fs.readFileSync(path.join(out,'FULL_CANDIDATE_FINAL.log'),'utf8'),finalTests=Number(full.match(/(?:ℹ |# )tests (\d+)/)?.[1]);assert(finalTests>0&&/(?:ℹ |# )fail 0/.test(full));
 const lines=[
  '# DAILY FIVE VERIFICATION',
  'Branch: codex/daily-five-closeout-20261117',
@@ -13,8 +14,8 @@ const lines=[
  'BASELINE input: initial isolated source tree at ba4ee2a; original Bot home navigation / legacy mutable file references.',
  'BASELINE literal result: tests 43; pass 43; fail 0; exit 0. Full literal output: BASELINE.log.',
  'MODIFIED command: node --test --test-concurrency=1 tests/*.test.mjs desktop/tests/*.test.cjs',
- 'MODIFIED input: integrated feature tree before D2; deterministic isolated fixtures, no real supplier requests.',
- 'MODIFIED literal result: tests 733; pass 733; fail 0; exit 0. Full literal output: FULL_FINAL.log.',
+ 'MODIFIED input: fixed candidate tree including D2 and corrected installer policy; deterministic isolated fixtures, no real supplier requests.',
+ 'MODIFIED literal result: tests '+finalTests+'; pass '+finalTests+'; fail 0; exit 0. Full literal output: FULL_CANDIDATE_FINAL.log. Earlier integrated 733/733 result remains in FULL_FINAL.log.',
  'D2 integrated regression: 738/738 in evidence/employee-continuity/INTEGRATED.log, verified from main; not rerun with paid models here.',
  'MODIFIED UI command: node scripts/verify-daily-five-ui.mjs',
  'MODIFIED UI input: isolated native Harness, real SQLite/HTTP/Session/React and native present, deterministic loopback SSE.',
@@ -56,4 +57,4 @@ const lines=[
  'DEFERRED: DingTalk robot private-chat live-account acceptance was explicitly postponed by user. No credentials collected, no IM configuration, no external messages. Long-term autonomous vision and complete Goal/import acceptance remain separate.',
  'D2 counting correction: 22 isolated connection entry observations, not an exact upstream billable request count; native durable events show 18 committed model responses. Existing 13 checks / 10 turns / 2 host starts retained without rerun.',
  'Rollback script is copy-only and marker/hash guarded; it is not authorization to overwrite a future live ledger or another thread\'s source.',
- ];fs.writeFileSync(path.join(out,'VERIFICATION.txt'),lines.join('\n')+'\n');console.log('VERIFICATION_WRITTEN paths=4 baseline=43 modified=733 native_ui=18 rollback=43 installer=PASS public=PASS download=PASS');
+ ];fs.writeFileSync(path.join(out,'VERIFICATION.txt'),lines.join('\n')+'\n');console.log('VERIFICATION_WRITTEN paths=4 baseline=43 modified='+finalTests+' native_ui=18 rollback=43 installer=PASS public=PASS download=PASS');
