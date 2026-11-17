@@ -6,15 +6,17 @@ const {readConnection,connect,EnterpriseSession}=require('./enterprise.cjs');
 const {workspaceSummary,selectWorkspace,verifyConnection,assertWorkspaceIdle}=require('./workspaces.cjs');
 const {Guests}=require('./guests.cjs');
 const {startBridge}=require('./tools.cjs');
-const {localSettings,ensureBackend,stopBackend,createQuitGate}=require('./backend.cjs');
+const {localSettings,ensureBackend,stopBackend,createQuitGate,maintenanceRequest}=require('./backend.cjs');
+const installerState=require('./installer-state.cjs');
 app.setName('Naumi');app.setAppUserModelId('com.naumi.desktop');
 if(process.env.NAUMI_USER_DATA)app.setPath('userData',path.resolve(process.env.NAUMI_USER_DATA));
 if(process.env.NAUMI_TEST_HIDDEN==='1'){app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');app.commandLine.appendSwitch('disable-renderer-backgrounding');}
 const locked=app.requestSingleInstanceLock();
-let window,primarySession,guests,bridge,backend,settings,enterprise,login,loginAfterBoot=false,booting=false,closing=false,connecting=false,editingConnection=false,connectionFlight;
+let window,primarySession,guests,bridge,backend,settings,enterprise,login,loginAfterBoot=false,booting=false,closing=false,connecting=false,editingConnection=false,connectionFlight,maintenanceTicket=null,maintenanceUntil=0;
 if(!locked){app.quit();}else{
 app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.show();window.focus();}});
 app.whenReady().then(async()=>{
+ if(app.isPackaged){try{installerState.assertStartupAllowed(path.resolve(process.resourcesPath,'..'));}catch(error){if(error.message==='INSTALL_MAINTENANCE_ACTIVE'){app.exit(42);return;}throw error;}}
  nativeTheme.themeSource='light';Menu.setApplicationMenu(null);
  const icon=path.join(__dirname,'assets/naumi.ico');
  window=new BrowserWindow({width:1460,height:930,minWidth:1000,minHeight:640,show:false,title:'Naumi',backgroundColor:'#f7f9fc',icon,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webviewTag:true,partition:'persist:naumi-workbench',spellcheck:false,backgroundThrottling:false}});
@@ -35,7 +37,7 @@ app.whenReady().then(async()=>{
  window.webContents.on('did-fail-load',(_e,code,description,_url,main)=>{if(main&&code!==-3&&!booting)void showStartup(description+' ('+code+')');});
  const ownFrame=event=>{if(event.sender!==window.webContents||event.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');};
  const localPage=(event,names)=>{ownFrame(event);const u=new URL(event.senderFrame.url);return u.protocol==='file:'&&names.some(name=>u.pathname===require('node:url').pathToFileURL(path.join(__dirname,name)).pathname);};
- const trusted=event=>{ownFrame(event);if(!settings||new URL(event.senderFrame.url).origin!==settings.url||connecting)throw Error('INVALID_DESKTOP_ORIGIN');};
+ const trusted=event=>{ownFrame(event);if(!settings||new URL(event.senderFrame.url).origin!==settings.url||connecting||maintenanceBlocked())throw Error('INVALID_DESKTOP_ORIGIN');};
  ipcMain.handle('naumi:browser-acquire',(e,workspace)=>{trusted(e);return guests.acquire(e.sender,workspace);});
  ipcMain.handle('naumi:browser-release',(e,lease)=>{trusted(e);return guests.release(e.sender,lease);});
  ipcMain.handle('naumi:browser-bind',(e,value)=>{trusted(e);return guests.bind(e.sender,value);});
@@ -81,10 +83,11 @@ async function showStartup(error=''){
  await window.loadFile(path.join(__dirname,'startup.html'),{query:error?{error}:{}});
 }
 async function boot(){
- if(booting||closing||connecting)return;booting=true;
+ if(booting||closing||connecting||maintenanceBlocked())return;booting=true;
  try{
   settings??=localSettings(app);
   if(settings.isolated){
+   installerState.registerProfile(path.resolve(process.resourcesPath,'..'),app.getPath('userData'));
    let connection=readConnection(settings.home);
    if(process.env.NAUMI_ENTERPRISE_ORIGIN)connection=connect(settings.home,process.env.NAUMI_ENTERPRISE_ORIGIN);
    if(!connection){await window.loadFile(path.join(__dirname,'connect.html'));return;}
@@ -96,11 +99,20 @@ async function boot(){
   const account=!settings.isolated||settings.workspaceId==='default'?'local':'enterprise-'+settings.workspaceId;
   if(!guests){guests=new Guests({hostURL:settings.url,account,timeout:process.env.NAUMI_TEST==='1'?Number(process.env.NAUMI_TEST_TIMEOUT??30000):30000});guests.attach(window);}
   else if(guests.hostURL!==settings.url||guests.account!==account)await guests.reset({hostURL:settings.url,account});
-  if(!bridge)bridge=await startBridge({home:settings.home,guests,window,enterprise});
+  if(!bridge)bridge=await startBridge({home:settings.home,guests,window,enterprise,maintenance:{blocked:maintenanceBlocked,perform:performMaintenance,quit:ticket=>{if(maintenanceBlocked()&&ticket===maintenanceTicket)app.quit();}}});
   editingConnection=false;await window.loadURL(backend.launchURL);
   if(loginAfterBoot){loginAfterBoot=false;openEnterpriseLogin();}
  }catch(error){await showStartup(error.message);}
  finally{booting=false;if(process.env.NAUMI_TEST==='1')globalThis.__naumiTest={window,guests,bridge,settings,backend,enterprise,get login(){return login;}};}
+}
+function maintenanceBlocked(){if(maintenanceTicket&&Date.now()>=maintenanceUntil){maintenanceTicket=null;}return !!maintenanceTicket;}
+async function performMaintenance(action,ticket){
+ if(maintenanceBlocked()&&maintenanceTicket!==ticket)throw Error('INSTALL_MAINTENANCE_BUSY');
+ if(action==='resume'){if(backend&&settings)await maintenanceRequest(settings,'resume',ticket);maintenanceTicket=null;return;}
+ if(booting||connecting||closing||!settings?.isolated||!backend?.owned)throw Error('INSTALL_ACTIVITY_UNKNOWN');
+ maintenanceTicket=ticket;maintenanceUntil=Date.now()+30000;
+ try{if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0)throw Error('INSTALL_OPERATIONS_IN_FLIGHT');await maintenanceRequest(settings,'quiesce',ticket);}
+ catch(error){maintenanceTicket=null;throw error;}
 }
 function isAlive(pid){try{process.kill(pid,0);return true;}catch(error){return error.code!=='ESRCH';}}
 function openEnterpriseLogin(){

@@ -54,7 +54,7 @@ class BrowserTools {
   return info(entry);
  }
 }
-async function startBridge({home,guests,window,enterprise}){
+async function startBridge({home,guests,window,enterprise,maintenance}){
  const token=randomBytes(32).toString('hex'),runtime=new BrowserTools(guests,window);
  const file=path.join(home,'naumi-desktop-bridge.json');
  const server=http.createServer(async(req,res)=>{
@@ -63,6 +63,11 @@ async function startBridge({home,guests,window,enterprise}){
   const received=Buffer.from(req.headers.authorization??''),expected=Buffer.from('Bearer '+token);
   if(req.headers.origin||received.length!==expected.length||!timingSafeEqual(received,expected)){send(403,{error:'NATIVE_BROWSER_AUTH_REQUIRED'});return;}
   if(req.method==='GET'&&req.url==='/health'){send(200,{ok:true,protocolVersion:1,pid:process.pid,engine:'chromium'});return;}
+  if(req.method==='POST'&&req.url==='/maintenance'){
+   try{const ticket=req.headers['x-naumi-maintenance-ticket'],action=req.headers['x-naumi-maintenance-action'];if(!maintenance||typeof ticket!=='string'||!/^[a-f0-9]{64}$/.test(ticket)||!['quiesce','resume','stop'].includes(action))throw Error('INSTALL_MAINTENANCE_UNSUPPORTED');await maintenance.perform(action,ticket);if(action==='stop')res.once('finish',()=>setImmediate(()=>maintenance.quit(ticket)));send(200,{ok:true,maintenanceProtocol:1,pid:process.pid});}
+   catch(error){send(409,{error:/^INSTALL_[A-Z_]+$/.test(error.message)?error.message:'INSTALL_ACTIVITY_UNKNOWN'});}return;
+  }
+  if(maintenance?.blocked()){send(503,{error:'INSTALL_MAINTENANCE_ACTIVE'});return;}
   if(req.method==='POST'&&req.url==='/enterprise/request'){
    if(!enterprise){send(503,{error:'ENTERPRISE_SESSION_NOT_CONFIGURED'});return;}
    const controller=new AbortController(),abort=()=>{if(!res.writableEnded)controller.abort();};res.on('close',abort);

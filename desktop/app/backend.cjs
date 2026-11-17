@@ -40,6 +40,12 @@ async function probeIdentity(settings,{fetcher=fetch}={}){
   return timingSafeEqual(proof,Buffer.from(v.proof,'hex'))?v:null;
  }catch{return null;}
 }
+async function maintenanceRequest(settings,action,ticket){
+ const remote=await probeIdentity(settings);if(!remote)throw Error('INSTALL_BACKEND_IDENTITY_UNKNOWN');
+ const nonce=randomBytes(32).toString('hex'),proof=createHmac('sha256',settings.identity.key).update([2,action,nonce,settings.identity.id,remote.pid,remote.bundleId,settings.identity.homeHash,Number(new URL(settings.url).port),settings.enterpriseOrigin??'',ticket].join('|')).digest('hex');
+ const response=await fetch(settings.url+'/naumi/desktop-instance',{method:'POST',redirect:'error',headers:{'x-naumi-desktop-challenge':nonce,'x-naumi-desktop-action':action,'x-naumi-desktop-ticket':ticket,'x-naumi-desktop-stop':proof},signal:AbortSignal.timeout(3000)});
+ const value=await response.json();if(!response.ok||value.maintenanceProtocol!==1)throw Error(/^INSTALL_[A-Z_]+$/.test(value.error??'')?value.error:'INSTALL_BACKEND_MAINTENANCE_UNKNOWN');return {pid:remote.pid,...value};
+}
 async function logoProbe(settings,{fetcher=fetch}={}){
  const expected=createHash('sha256').update(fs.readFileSync(path.join(settings.root,'plugins/naumi-enterprise/assets/symbol.svg'))).digest('hex');
  try{const r=await fetcher(settings.url+'/naumi/assets/symbol.svg',{signal:AbortSignal.timeout(1500),redirect:'error'});if(!r.ok)return false;return createHash('sha256').update(Buffer.from(await r.arrayBuffer())).digest('hex')===expected;}catch{return false;}
@@ -94,7 +100,7 @@ async function ensureBackend(settings,{fetcher=fetch,startTimeoutMs=90000,pollMs
  const target=new URL(settings.url),runId=randomUUID(),env={...process.env,PATH:path.join(settings.root,'bin')+path.delimiter+settings.root+path.delimiter+(process.env.PATH??''),DSH_HOME:settings.home,DSH_TELEMETRY_MODE:'DISABLED'};
  delete env.ELECTRON_RUN_AS_NODE;delete env.NAUMI_DESKTOP_INSTANCE_ID;delete env.NAUMI_DESKTOP_BUNDLE_ID;delete env.NAUMI_ENTERPRISE_ORIGIN;
  const base={pid:null,port:Number(target.port),bundleId:settings.runtime?.bundleId,phase:'starting',runId};
- if(settings.isolated){env.NAUMI_DESKTOP_INSTANCE_ID=settings.identity.id;env.NAUMI_DESKTOP_BUNDLE_ID=settings.runtime.bundleId;if(settings.enterpriseOrigin)env.NAUMI_ENTERPRISE_ORIGIN=settings.enterpriseOrigin;}
+ if(settings.isolated){env.NAUMI_DESKTOP_MAINTENANCE='1';env.NAUMI_DESKTOP_INSTANCE_ID=settings.identity.id;env.NAUMI_DESKTOP_BUNDLE_ID=settings.runtime.bundleId;if(settings.enterpriseOrigin)env.NAUMI_ENTERPRISE_ORIGIN=settings.enterpriseOrigin;}
  let out,err;try{out=fs.openSync(path.join(settings.logDir,'server.out.log'),'w');err=fs.openSync(path.join(settings.logDir,'server.err.log'),'w');}catch(e){if(out!==undefined)fs.closeSync(out);throw e;}
  let child;
  // Windows libuv's non-detached child job dies with the GUI. Standalone workers have an
@@ -125,4 +131,4 @@ async function ensureBackend(settings,{fetcher=fetch,startTimeoutMs=90000,pollMs
   throw e;
  }
 }
-module.exports={localSettings,ensureBackend,launchFromLog,localURL,probeIdentity,stopBackend,portTaken,createQuitGate};
+module.exports={maintenanceRequest,localSettings,ensureBackend,launchFromLog,localURL,probeIdentity,stopBackend,portTaken,createQuitGate};
