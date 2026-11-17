@@ -1,0 +1,853 @@
+diff --git a/.gitattributes b/.gitattributes
+index 10ea11b..77a66bb 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -252,6 +252,10 @@ plugins/naumi-ui-layout/UPSTREAM.json text eol=lf
+ /evidence/installer-path-fix/DIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab,cr-at-eol
+ /evidence/installer-path-fix/*.txt -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
+ /evidence/installer-path-fix/ROLLBACK.sh text eol=lf
++/evidence/plugin-market/** -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab,cr-at-eol
++/evidence/plugin-market/ROLLBACK.sh text eol=lf
++/evidence/plugin-market/FULL_MERGE_FAILURE.log -diff
++/scripts/plugin-market-evidence.mjs text eol=lf
+ 
+ # Vendored IM protocol sources: preserve audited bytes.
+ plugins/naumi-enterprise/im-adapters/** -text
+diff --git a/desktop/app/main.cjs b/desktop/app/main.cjs
+index 253b485..b0b9828 100644
+--- a/desktop/app/main.cjs
++++ b/desktop/app/main.cjs
+@@ -10,6 +10,7 @@ const {localSettings,ensureBackend,stopBackend,createQuitGate,maintenanceRequest
+ const installerState=require('./installer-state.cjs');
+ const {createDesktopUpdates}=require('./updates.cjs');
+ const {IdentityRuntime}=require('./identity-runtime.cjs');
++const {MarketSession}=require('./market.cjs');
+ const {identityOrigin}=require('./identity.cjs');
+ const {randomUUID}=require('node:crypto');
+ app.setName('Naumi');app.setAppUserModelId('com.naumi.desktop');
+@@ -17,6 +18,7 @@ if(process.env.NAUMI_USER_DATA)app.setPath('userData',path.resolve(process.env.N
+ if(process.env.NAUMI_TEST_HIDDEN==='1'){app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');app.commandLine.appendSwitch('disable-renderer-backgrounding');}
+ const locked=app.requestSingleInstanceLock();
+ let identityRuntime=null,identityUserData=null;
++const market=new MarketSession({identity:()=>identityRuntime});
+ let window,primarySession,guests,bridge,backend,settings,enterprise,login,loginAfterBoot=false,booting=false,closing=false,connecting=false,editingConnection=false,connectionFlight,maintenanceTicket=null,maintenanceUntil=0,updates=null;
+ if(!locked){app.quit();}else{
+ app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.show();window.focus();}});
+@@ -75,7 +77,7 @@ app.whenReady().then(async()=>{
+    const checked=await verifyConnection(origin,(url,options)=>primarySession.fetch(url,options),{signal:connectionFlight.signal});
+    const state=workspaceSummary(identityUserData??app.getPath('userData')),changed=state.configured&&state.origin!==checked.origin;
+    if(changed){
+-    if((enterprise?.running??0)>0||(bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');
++    if((enterprise?.running??0)>0||market.running>0||(bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');
+     if(backend?.owned){const r=require('./profile.cjs').runtimeReceipt(settings.home,settings.identity.id);if(!r||r.pid===null||isAlive(r.pid))await assertWorkspaceIdle(settings,(url,options)=>primarySession.fetch(url,options));connectionFlight.signal.throwIfAborted();await stopBackend(backend);backend=null;}
+     else {const r=require('./profile.cjs').runtimeReceipt(settings.home,settings.identity.id);if(r&&(r.pid===null||isAlive(r.pid)))throw Error('WORKSPACE_BACKEND_STOP_REQUIRED');}
+     await bridge?.close();bridge=null;
+@@ -156,7 +158,7 @@ async function boot(){
+   const account=identityRuntime?.active?'identity-'+identityRuntime.active.profileId+'-'+settings.workspaceId:!settings.isolated||settings.workspaceId==='default'?'local':'enterprise-'+settings.workspaceId;
+   if(!guests){guests=new Guests({hostURL:settings.url,account,timeout:process.env.NAUMI_TEST==='1'?Number(process.env.NAUMI_TEST_TIMEOUT??30000):30000});guests.attach(window);}
+   else if(guests.hostURL!==settings.url||guests.account!==account)await guests.reset({hostURL:settings.url,account});
+-  if(!bridge)bridge=await startBridge({home:settings.home,guests,window,enterprise,maintenance:{blocked:maintenanceBlocked,perform:performMaintenance,quit:ticket=>{if(maintenanceBlocked()&&ticket===maintenanceTicket)app.quit();}}});
++  if(!bridge)bridge=await startBridge({home:settings.home,guests,window,enterprise,market,maintenance:{blocked:maintenanceBlocked,perform:performMaintenance,quit:ticket=>{if(maintenanceBlocked()&&ticket===maintenanceTicket)app.quit();}}});
+   editingConnection=false;await window.loadURL(backend.launchURL);
+   if(loginAfterBoot){loginAfterBoot=false;openEnterpriseLogin();}
+  }catch(error){await showStartup(error.message);}
+@@ -164,7 +166,7 @@ async function boot(){
+ }
+ function accountApp(){return {isPackaged:app.isPackaged,getPath:name=>name==='userData'&&identityUserData?identityUserData:app.getPath(name)};}
+ async function assertAccountIdle(){
+- if((enterprise?.running??0)>0||(bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');
++ if((enterprise?.running??0)>0||market.running>0||(bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');
+  if(backend&&!backend.owned)throw Error('WORKSPACE_BACKEND_STOP_REQUIRED');
+  if(backend?.owned)await assertWorkspaceIdle(settings,(url,options)=>primarySession.fetch(url,options));
+ }
+@@ -172,7 +174,7 @@ function maintenanceBlocked(){if(maintenanceTicket&&Date.now()>=maintenanceUntil
+ async function canInstallUpdate(){
+  if(closing||booting||connecting)return {ok:false,reason:'WORKSPACE_BUSY'};
+  if(maintenanceBlocked())return {ok:false,reason:'INSTALL_MAINTENANCE_ACTIVE'};
+- if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0)return {ok:false,reason:'WORKSPACE_OPERATIONS_IN_FLIGHT'};
++ if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0||market.running>0)return {ok:false,reason:'WORKSPACE_OPERATIONS_IN_FLIGHT'};
+  const ticket=randomUUID().replaceAll('-','')+randomUUID().replaceAll('-','');
+  try{await performMaintenance('quiesce',ticket);return {ok:true,release:()=>performMaintenance('resume',ticket)};}
+  catch{return {ok:false,reason:'INSTALL_ACTIVITY_UNKNOWN'};}
+@@ -188,7 +190,7 @@ async function performMaintenance(action,ticket,{accountTransition=false}={}){
+  if(action==='resume'){if(backend&&settings)await maintenanceRequest(settings,'resume',ticket);maintenanceTicket=null;return;}
+  if(booting||(connecting&&!accountTransition)||closing||!settings?.isolated||!backend?.owned)throw Error('INSTALL_ACTIVITY_UNKNOWN');
+  maintenanceTicket=ticket;maintenanceUntil=Date.now()+30000;
+- try{if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0)throw Error('INSTALL_OPERATIONS_IN_FLIGHT');await maintenanceRequest(settings,'quiesce',ticket);}
++ try{if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0||market.running>0)throw Error('INSTALL_OPERATIONS_IN_FLIGHT');await maintenanceRequest(settings,'quiesce',ticket);}
+  catch(error){maintenanceTicket=null;throw error;}
+ }
+ function isAlive(pid){try{process.kill(pid,0);return true;}catch(error){return error.code!=='ESRCH';}}
+diff --git a/desktop/app/market.cjs b/desktop/app/market.cjs
+new file mode 100644
+index 0000000..8d5d71b
+--- /dev/null
++++ b/desktop/app/market.cjs
+@@ -0,0 +1,14 @@
++'use strict';
++// Same-origin Canvas session remains inside its existing Chromium partition.
++const MAX=3*1024*1024,ROOT='/api/plugin-market/v1';
++function validate(input){if(!input||typeof input!=='object'||Object.keys(input).some(k=>!['endpoint','method','body'].includes(k)))throw Error('MARKET_REQUEST_FORBIDDEN');const method=input.method??'GET';if(typeof input.endpoint!=='string'||input.endpoint.length>2048)throw Error('MARKET_REQUEST_FORBIDDEN');const u=new URL(input.endpoint,'http://market.invalid');if(u.origin!=='http://market.invalid'||u.hash||u.username||!u.pathname.startsWith(ROOT+'/'))throw Error('MARKET_REQUEST_FORBIDDEN');
++ const route=u.pathname.slice(ROOT.length);if(!(method==='GET'&&(/^\/(?:me|packages)$/.test(route)||/^\/(?:packages|downloads)\/[a-f0-9-]{36}$/.test(route))||method==='POST'&&/^\/(?:drafts|publish|visibility|download|installed|feedback)$/.test(route)))throw Error('MARKET_REQUEST_FORBIDDEN');if(method==='GET'&&input.body!==undefined||method==='POST'&&(typeof input.body!=='string'||Buffer.byteLength(input.body)>MAX))throw Error('MARKET_BODY_INVALID');return{endpoint:u.pathname+u.search,method,body:input.body};}
++class MarketSession{
++ constructor({identity}){this.identity=identity;this.running=0;}
++ descriptor(){const i=this.identity();return i?.active?{protocolVersion:1,origin:i.active.origin}:null;}
++ async perform(input,{signal}={}){const request=validate(input),identity=this.identity();if(!identity?.active||!identity.client)throw Error('MARKET_LOGIN_REQUIRED');const active=identity.active,client=identity.client,issuer=active.origin;this.running++;
++  try{const response=await client.session.fetch(issuer+request.endpoint,{method:request.method,credentials:'include',redirect:'error',cache:'no-store',headers:{Accept:'application/json',...(request.method==='POST'?{'Content-Type':'application/json','x-naumi-market':'1',Origin:issuer}:{})},...(request.body===undefined?{}:{body:request.body}),signal:AbortSignal.any([AbortSignal.timeout(20000),...(signal?[signal]:[])])});if(!response.headers.get('content-type')?.includes('application/json'))throw Error('MARKET_RESPONSE_INVALID');const chunks=[];let size=0;for await(const chunk of response.body){size+=chunk.length;if(size>MAX+65536)throw Error('MARKET_RESPONSE_TOO_LARGE');chunks.push(Buffer.from(chunk));}if(this.identity()!==identity||identity.active!==active||identity.client!==client)throw Error('MARKET_ACCOUNT_CHANGED');return{status:response.status,body:Buffer.concat(chunks).toString('utf8')};
++  }catch(error){throw Error(/^MARKET_/.test(error.message)?error.message:'MARKET_UNAVAILABLE_NO_REPLAY');}finally{this.running--;}
++ }
++}
++module.exports={MarketSession,validate};
+diff --git a/desktop/app/tools.cjs b/desktop/app/tools.cjs
+index 78408ca..6e20524 100644
+--- a/desktop/app/tools.cjs
++++ b/desktop/app/tools.cjs
+@@ -54,7 +54,7 @@ class BrowserTools {
+   return info(entry);
+  }
+ }
+-async function startBridge({home,guests,window,enterprise,maintenance}){
++async function startBridge({home,guests,window,enterprise,market,maintenance}){
+  const token=randomBytes(32).toString('hex'),runtime=new BrowserTools(guests,window);
+  const file=path.join(home,'naumi-desktop-bridge.json');
+  const server=http.createServer(async(req,res)=>{
+@@ -68,6 +68,12 @@ async function startBridge({home,guests,window,enterprise,maintenance}){
+    catch(error){send(409,{error:/^INSTALL_[A-Z_]+$/.test(error.message)?error.message:'INSTALL_ACTIVITY_UNKNOWN'});}return;
+   }
+   if(maintenance?.blocked()){send(503,{error:'INSTALL_MAINTENANCE_ACTIVE'});return;}
++  if(req.method==='POST'&&req.url==='/market/request'){
++   if(!market){send(503,{error:'MARKET_LOGIN_REQUIRED'});return;}
++   const controller=new AbortController(),abort=()=>{if(!res.writableEnded)controller.abort();};res.on('close',abort);
++   try{let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>3*1024*1024+8192)throw Error('MARKET_BODY_INVALID');chunks.push(chunk);}send(200,{ok:true,data:await market.perform(JSON.parse(Buffer.concat(chunks)),{signal:controller.signal})});}
++   catch(error){send(502,{ok:false,error:/^MARKET_[A-Z_]+$/.test(error.message)?error.message:'MARKET_UNAVAILABLE_NO_REPLAY'});}finally{res.off('close',abort);}return;
++  }
+   if(req.method==='POST'&&req.url==='/enterprise/request'){
+    if(!enterprise){send(503,{error:'ENTERPRISE_SESSION_NOT_CONFIGURED'});return;}
+    const controller=new AbortController(),abort=()=>{if(!res.writableEnded)controller.abort();};res.on('close',abort);
+@@ -80,7 +86,7 @@ async function startBridge({home,guests,window,enterprise,maintenance}){
+   catch(error){send(400,{ok:false,error:/^[A-Z_0-9]{3,80}$/.test(error.message)?error.message:'NATIVE_BROWSER_OPERATION_FAILED_NO_REPLAY'});}
+  });
+  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
+- fs.mkdirSync(home,{recursive:true});fs.writeFileSync(file,JSON.stringify({version:1,port:server.address().port,token,pid:process.pid,...(enterprise?{enterprise:enterprise.descriptor()}:{})}),{mode:0o600});
++ fs.mkdirSync(home,{recursive:true});fs.writeFileSync(file,JSON.stringify({version:1,port:server.address().port,token,pid:process.pid,...(enterprise?{enterprise:enterprise.descriptor()}:{}),...(market?.descriptor()?{market:market.descriptor()}:{})}),{mode:0o600});
+  return {runtime,close:async()=>{server.closeAllConnections();await new Promise(r=>server.close(r));try{if(JSON.parse(fs.readFileSync(file,'utf8')).token===token)fs.unlinkSync(file);}catch{}}};
+ }
+ module.exports={BrowserTools,startBridge,snapshotScript};
+diff --git a/desktop/tests/market.test.cjs b/desktop/tests/market.test.cjs
+new file mode 100644
+index 0000000..ba25adb
+--- /dev/null
++++ b/desktop/tests/market.test.cjs
+@@ -0,0 +1,21 @@
++'use strict';
++const test=require('node:test'),assert=require('node:assert/strict');
++const {MarketSession,validate}=require('../app/market.cjs');
++test('market native adapter only exposes market routes on the signed-in authority',()=>{
++ for(const endpoint of ['https://evil.test/api/plugin-market/v1/me','/api/auth/session','/api/plugin-market/v1/../../auth/session','/api/plugin-market/v1/me#fragment','//evil.test/api/plugin-market/v1/me'])assert.throws(()=>validate({endpoint}),/FORBIDDEN/);
++ assert.throws(()=>validate({endpoint:'/api/plugin-market/v1/publish',method:'GET'}),/FORBIDDEN/);
++ assert.throws(()=>validate({endpoint:'/api/plugin-market/v1/me',cookie:'forged'}),/FORBIDDEN/);
++ assert.equal(validate({endpoint:'/api/plugin-market/v1/packages?q=test'}).method,'GET');
++});
++test('native market uses existing Chromium session and returns no raw credential fields',async()=>{
++ const identity={active:{origin:'https://accounts.test',profileId:'alice'},client:{session:{async fetch(url,options){assert.equal(url,'https://accounts.test/api/plugin-market/v1/me');assert.equal(options.credentials,'include');assert.equal(options.redirect,'error');assert.equal(options.headers.cookie,undefined);return Response.json({user:{id:'opaque',name:'Alice'}});}}}};
++ const market=new MarketSession({identity:()=>identity});assert.equal(market.descriptor().origin,identity.active.origin);const result=await market.perform({endpoint:'/api/plugin-market/v1/me'});assert.equal(result.status,200);assert.equal(JSON.parse(result.body).user.name,'Alice');assert.equal(market.running,0);
++});
++test('same-origin account switch discards stale response and always releases in-flight count',async()=>{
++ let release;const identity={active:{origin:'https://accounts.test',profileId:'alice'},client:{session:{fetch:()=>new Promise(r=>release=r)}}};const market=new MarketSession({identity:()=>identity});const result=market.perform({endpoint:'/api/plugin-market/v1/me'});assert.equal(market.running,1);identity.active={origin:'https://accounts.test',profileId:'bob'};release(Response.json({user:{name:'Alice'}}));await assert.rejects(result,/MARKET_ACCOUNT_CHANGED/);assert.equal(market.running,0);
++});
++test('market login, oversized response and network failures remain bounded and do not replay',async()=>{
++ const empty=new MarketSession({identity:()=>null});assert.equal(empty.descriptor(),null);await assert.rejects(empty.perform({endpoint:'/api/plugin-market/v1/me'}),/LOGIN_REQUIRED/);
++ let calls=0;const identity={active:{origin:'https://accounts.test'},client:{session:{async fetch(){calls++;throw Error('sensitive upstream details');}}}},market=new MarketSession({identity:()=>identity});await assert.rejects(market.perform({endpoint:'/api/plugin-market/v1/me'}),/^Error: MARKET_UNAVAILABLE_NO_REPLAY$/);assert.equal(calls,1);assert.equal(market.running,0);
++ identity.client.session.fetch=async()=>new Response('x'.repeat(3*1024*1024+65537),{headers:{'content-type':'application/json'}});await assert.rejects(market.perform({endpoint:'/api/plugin-market/v1/me'}),/TOO_LARGE/);assert.equal(market.running,0);
++});
+diff --git a/docs/implementation/PLUGIN_MARKET.md b/docs/implementation/PLUGIN_MARKET.md
+new file mode 100644
+index 0000000..b552325
+--- /dev/null
++++ b/docs/implementation/PLUGIN_MARKET.md
+@@ -0,0 +1,52 @@
++# 员工共享插件市场
++
++## 模块与职责
++
++负责人：本线程 employee-plugin-market。延续既有独立 worktree `E:/Workspace/naumi-employee-plugin-market`，分支 `codex/employee-plugin-market`。接续基线 `e620bd9`；2026-11-17 刷新后的 origin/main 为 `d0412011003e0a8a80902d1b3912af66a1b6aba2`。共享 main 的安装器与群聊证据保持原状。
++
++用户已选择：与 Naumi 账号服务同域部署，复用员工登录态；作品显示真实创作者、下载量与安装用户数。浅色布局复用原生插件页面 tabs，不另造导航或输入器，不修改 Bot 任务、模型配置或品牌图标。
++
++## 公共接口、依赖方向、数据与事务归属
++
++- `market/server.mjs`：仅 `/api/plugin-market/` 前缀；每次请求通过固定账号 origin 的 `/api/auth/session` 校验。作者不是客户端字段，账号标识沿用现有 email 主键契约的哈希命名空间。账号停用、会话撤销与到期继续由原账号服务负责。
++- `market/store.mjs`：独立 SQLite/WAL。拥有草稿、不可变版本、下载票据、安装回执、收藏评价和请求幂等回执；不访问模型账务、员工文件、Bot 账本或账号密码。
++- `desktop/app/market.cjs`：复用 `IdentityRuntime` 及其 Chromium session，仅允许市场 API 白名单。Cookie 不进入网页、插件、普通配置或日志；不提供通用 URL/HTTP 代理。相同 origin 下更换账号也丢弃旧在途响应。
++- `market-native.js`：复用现有受 token 保护的 loopback bridge；请求不会自动重放。账号切换、更新与维护期间检查在途市场操作。
++- `market-installer.js`：安装仍调用原生 `pluginManager.installBundle/removeBundle/listBundles`，不另写插件运行时。技能与工作流复用 `dsh-skill-filesystem`；Bot 模板只预填已有创建表单，不自动创建员工、不携带作者权限。
++- UI 在原有 `plugins.tab` slot 增加“市场”和“我的作品”，保留“已安装”。提供搜索、分类、排序、创作者筛选、详情、版本、能力确认、导入发布、草稿、下架、更新、回滚、卸载、收藏与安装后评价。
++
++服务端写入通过 SQLite `BEGIN IMMEDIATE` 和 actor+operationId 幂等；草稿 revision CAS，版本不可覆盖。下载在文件响应 `finish` 后按票据记账；安装用户按账号+作品去重，不按点击或更新次数累计。
++
++一期一个市场部署对应一个企业命名空间；只接受固定服务端 tenant，不信任请求中的组织或角色。它不是多企业成员授权系统。账号不可变 subject 和组织授权由统一身份后续阶段提供，见 [UNIFIED_IDENTITY.md](UNIFIED_IDENTITY.md)。
++
++## 本次实现与迁移状态
++
++服务、契约、原生桥接、安装器、打包命令与界面已接续；不迁移旧插件、员工数据、历史会话或工作区。发布包仅包含显式文件清单，拒绝路径穿越、大小写重名、环境文件、保留清单和已知密钥格式。安装前确认版本摘要和声明能力；能力声明是用户确认信息，不冒充 Host 代码沙箱。
++
++2026-11-17 接续时发现旧隔离 UI 测试停在作者按钮的可访问名称断言；头像首字母参与了名称，现为装饰头像设置 aria-hidden。保留首次失败日志，并重跑完整集成，不将旧失败计为通过。
++
++发布位置：现有 Naumi 账号 HTTPS origin 下新增 `/api/plugin-market/`；独立服务监听 loopback 3190。生产配置与验收命令见 [market/README.md](../../market/README.md)，不替换账号应用，不重启 3080。
++
++## 验证命令、结果及证据层级
++
++- 单元/本地 HTTP：`node --test tests/naumi-plugin-market.test.mjs desktop/tests/market.test.cjs`。
++- 隔离真实 Harness + 原生 package manager + Chrome：`node scripts/verify-plugin-market.mjs`。账号权威为两账号受控 HTTP，底层安装、升级与回滚真实执行；不是生产员工账号验收，不调用真实模型。
++- 全仓回归及副本回滚结果由 `evidence/plugin-market/VERIFICATION.txt` 记录，不把 HTTP 200、构建或 Git 合并当作远端部署。
++
++## 未完成项与下一步
++
++远端首次只读 SSH 探测返回 publickey 拒绝，尚无已验证的部署连接；不记录为已上线。取得部署凭据后，固定 main SHA 构建独立服务、备份原 nginx 配置、只增加市场路由、先 nginx -t 再 reload，验收未登录 401、健康接口与真实双账号发布/下载/安装。生产账号应用和本地 3080 保持不动。
++
++模块计数：服务端、原生客户端、市场 UI 共 3 个切片；已刷新并整合主线至 `e16b369ff0e8384dcb921d5efbf0ecd5b12679bb`，保留 IM 网关、员工日常工作、原生点名及其实际加载证据。首次合并的样式表冲突已通过后续修复提交解决；保留初始失败日志，最终全仓 `649/649`、隔离 UI/原生安装 `14/14`，`page_errors=0`。最后一次主线增量仅文档/证据，不变更已测试业务源文件。
++
++真实隔离安装、升级、回滚已执行；两个受控账号互相看见作品，下载量1、安装用户1，升级不增加安装人数；1360/580/360宽度无市场内容横向溢出。全部隔离测试宿主已关闭，真实模型调用0，未重启3080。
++
++## 可复用接续提示
++
++```text
++继续 Naumi 员工插件市场：先读本文件、market/README.md 和 evidence/plugin-market/VERIFICATION.txt。
++作者只取现有账号 session；市场与账号同域，Cookie 留在 Chromium session。
++复用原生插件 tabs 和 pluginManager，不新增执行引擎或通用网络代理。
++分清隔离双账号/真实原生安装与生产员工/远端部署证据。
++保留共享 checkout、3080、Bot 账本和模型凭据。只提交本任务明确路径。
++```
+diff --git a/market/Dockerfile b/market/Dockerfile
+new file mode 100644
+index 0000000..a37ac83
+--- /dev/null
++++ b/market/Dockerfile
+@@ -0,0 +1,10 @@
++FROM node:24.19.0-alpine
++WORKDIR /app
++COPY market/package.json ./package.json
++COPY market ./market
++COPY plugins/naumi-enterprise/market-contract.js ./plugins/naumi-enterprise/market-contract.js
++RUN mkdir /data && chown node:node /data
++USER node
++ENV HOST=0.0.0.0 PORT=3190 NAUMI_MARKET_DB=/data/market.sqlite
++EXPOSE 3190
++CMD ["node","market/server.mjs"]
+diff --git a/market/README.md b/market/README.md
+new file mode 100644
+index 0000000..47fc802
+--- /dev/null
++++ b/market/README.md
+@@ -0,0 +1,72 @@
++# Naumi 员工插件市场服务
++
++使用 Node 24 的内置 SQLite，无第三方服务端依赖。生产端与现有账号服务同域，通过新增 `/api/plugin-market/` 前缀反代，不重启或替换账号应用。
++
++```sh
++NAUMI_MARKET_AUTH_ORIGIN=http://127.0.0.1:ACCOUNT_PORT \
++NAUMI_MARKET_PUBLIC_ORIGIN=https://ACCOUNT_HOST \
++NAUMI_MARKET_DB=/opt/naumi-market/data/market.sqlite \
++HOST=127.0.0.1 PORT=3190 node market/server.mjs
++```
++
++`AUTH_ORIGIN` 由部署配置固定，必须指向真实账号 `/api/auth/session`，不是客户端传入的地址。账号服务负责会话撤销、停用、到期；市场不会维护第二套密码。此版本以单个部署代表一个企业市场，`NAUMI_MARKET_TENANT` 为服务端固定命名空间，不接受客户端自选 tenant。有效账号默认可创作；全局下架权限仅由服务器 `NAUMI_MARKET_MODERATORS` 邮箱列表指定，不信任账号接口的其他 role 字段或用户提交的作者。多企业共享一套市场服务前需接入账号权威的组织成员校验，不能把部署命名空间当成成员资格。
++
++将 `nginx-location.conf` include 到现有账号 HTTPS server 块，仅新增市场前缀；`nginx -t` 成功后 reload。保留原配置哈希和备份，不修改账号、作品、计费、媒体、模型和 Worker。健康检查 `GET /api/plugin-market/health`；业务接口未登录应返回 401。
++
++容器方式从仓库根 `docker build -f market/Dockerfile -t naumi-market:<MAIN_SHA> .`，以独立容器和持久化 `/data` 启动，固定主线 SHA。若使用 host 网络，显式 `HOST=127.0.0.1`；绑定已有账号应用的本机端口作 auth introspection。不要为通过检查关闭 TLS 验证。
++
++也可使用 `naumi-market.service` 和 `config.example.env`：在服务器创建专用 `naumi-market` 用户及其拥有的 `/var/lib/naumi-market`，将固定 main 版本放入 `/opt/naumi-market/releases/<MAIN_SHA>`，`current` 指向该版本。确认 `/usr/bin/node` >=24.9 后安装 unit；环境文件位于 `/etc/naumi-market.env`（实际账号端口和公开 HTTPS origin 由原部署确定）。首次上线先启动独立服务检查 loopback 健康，再加 nginx 路由。回退代码时切回已验收的 release 并重启**本服务**，不重启账号服务或本地 3080；有数据库变更时先备份并按 schema 兼容性选择恢复，不覆盖活跃 WAL。
++
++同域验收：
++
++```sh
++curl --fail http://127.0.0.1:3190/api/plugin-market/health
++curl --fail https://ACCOUNT_HOST/api/plugin-market/health
++# 未登录必须为 401，不用 --fail 掩盖返回体：
++curl -i https://ACCOUNT_HOST/api/plugin-market/v1/me
++```
++
++当前部署状态以 `evidence/plugin-market/VERIFICATION.txt` 为准；配置模板与隔离验收不代表远端已经上线。
++
++数据库使用 WAL、外键、原子事务和用户请求幂等回执。发布后版本不可覆盖；下架不删除已发布版本与下载/安装记录。升级前使用 SQLite backup API 或暂停本服务后的完整 SQLite+WAL 快照，不仅复制活跃主库文件。
++
++下载计数在完整响应 finish 后去重记账，不计创建下载票据、点击、失败响应或安装尝试。安装用户以账号+作品去重，只有该账号已完成下载且哈希匹配的安装回执才计入。客户端回执是应用层确认，不宣称恶意客户端不可伪造的硬件证明。评价需要该账号安装记录，创作者不能给自己的作品评分。
++
++包由显式文件清单创建：
++
++```sh
++node scripts/package-market.mjs SOURCE_DIR OUTPUT.naumi-plugin.json
++```
++
++`SOURCE_DIR/naumi.market.json`：
++
++```json
++{
++  "schemaVersion": 1,
++  "slug": "employee-organizer",
++  "title": "资料整理",
++  "summary": "按规则整理项目资料",
++  "kind": "plugin",
++  "version": "1.0.0",
++  "description": "填写实际使用方法。",
++  "changelog": "首次发布",
++  "capabilities": ["files-read"],
++  "tags": ["资料"],
++  "entry": "plugin.js",
++  "files": ["plugin.js", "README.md"]
++}
++```
++
++技能/工作流用 `kind=skill/workflow`，包含有合法 name/description frontmatter 的 `SKILL.md`；安装生成原生 `dsh-skill-filesystem` provider，不另写技能引擎。Bot 模板用 `kind=bot-template` 加 `template:{name,kind,purpose}`，由已有员工创建表单创建自己的实例，不复制作者的账号、API Key、登录态或权限。
++
++主 Bot 可复用的打包提示：
++
++```text
++把当前已经验证的能力准备成 Naumi 插件市场包。
++先阅读本仓库 market/README.md 和 market-contract.js。
++只选择本任务明确需要的源文件，列出 naumi.market.json 的 files；
++填写真实名称、职责、能力声明、版本、使用说明和更新记录。
++不得包含环境文件、密钥、Cookie、会话历史或员工私有工作数据。
++调用 scripts/package-market.mjs 生成 .naumi-plugin.json，检查内容后交给用户。
++发布由用户在“我的作品”导入、确认署名和权限后完成，不自动发布。
++```
+diff --git a/market/config.example.env b/market/config.example.env
+new file mode 100644
+index 0000000..c082759
+--- /dev/null
++++ b/market/config.example.env
+@@ -0,0 +1,7 @@
++HOST=127.0.0.1
++PORT=3190
++NAUMI_MARKET_AUTH_ORIGIN=http://127.0.0.1:ACCOUNT_PORT
++NAUMI_MARKET_PUBLIC_ORIGIN=https://ACCOUNT_HOST
++NAUMI_MARKET_TENANT=naumi
++NAUMI_MARKET_DB=/var/lib/naumi-market/market.sqlite
++NAUMI_MARKET_MODERATORS=
+diff --git a/market/naumi-market.service b/market/naumi-market.service
+new file mode 100644
+index 0000000..ef02aa8
+--- /dev/null
++++ b/market/naumi-market.service
+@@ -0,0 +1,23 @@
++[Unit]
++Description=Naumi Employee Plugin Market
++After=network-online.target
++Wants=network-online.target
++
++[Service]
++Type=simple
++User=naumi-market
++Group=naumi-market
++WorkingDirectory=/opt/naumi-market/current
++EnvironmentFile=/etc/naumi-market.env
++ExecStart=/usr/bin/node market/server.mjs
++Restart=on-failure
++RestartSec=3
++UMask=0077
++NoNewPrivileges=true
++PrivateTmp=true
++ProtectSystem=strict
++ProtectHome=true
++ReadWritePaths=/var/lib/naumi-market
++
++[Install]
++WantedBy=multi-user.target
+diff --git a/market/nginx-location.conf b/market/nginx-location.conf
+new file mode 100644
+index 0000000..28c01e8
+--- /dev/null
++++ b/market/nginx-location.conf
+@@ -0,0 +1,12 @@
++# Include inside the EXISTING Naumi account HTTPS server block.
++# Preserve all existing auth/app/media routes; this owns only its new prefix.
++location ^~ /api/plugin-market/ {
++    client_max_body_size 3m;
++    proxy_pass http://127.0.0.1:3190;
++    proxy_set_header Host $host;
++    proxy_set_header X-Forwarded-Proto $scheme;
++    proxy_set_header Cookie $http_cookie;
++    proxy_read_timeout 35s;
++    proxy_send_timeout 35s;
++    proxy_buffering off;
++}
+diff --git a/market/package.json b/market/package.json
+new file mode 100644
+index 0000000..1f7422f
+--- /dev/null
++++ b/market/package.json
+@@ -0,0 +1,7 @@
++{
++  "name": "@naumi/employee-plugin-market-service",
++  "version": "1.0.0",
++  "private": true,
++  "type": "module",
++  "engines": { "node": ">=24.9.0" }
++}
+diff --git a/market/server.mjs b/market/server.mjs
+new file mode 100644
+index 0000000..41ecbf8
+--- /dev/null
++++ b/market/server.mjs
+@@ -0,0 +1,32 @@
++import http from 'node:http';import path from 'node:path';import {pathToFileURL} from 'node:url';import {MarketStore} from './store.mjs';import {digest,fail,MAX_PACKAGE_BYTES} from '../plugins/naumi-enterprise/market-contract.js';
++const PREFIX='/api/plugin-market/v1';
++export function canvasAuthentication({origin,tenant='naumi',moderators=[],fetcher=fetch}){
++ const issuer=new URL(origin);if(!(issuer.protocol==='https:'||issuer.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(issuer.hostname))||issuer.username||issuer.password||issuer.pathname!=='/'||issuer.search||issuer.hash)fail('MARKET_AUTH_ORIGIN_INVALID');
++ const privileged=new Set(moderators.map(v=>v.trim().toLowerCase()).filter(Boolean));
++ return async req=>{
++  const cookie=req.headers.cookie;if(!cookie||cookie.length>16384)fail('MARKET_AUTH_REQUIRED',401);
++  let r;try{r=await fetcher(issuer.origin+'/api/auth/session',{headers:{cookie},redirect:'error',signal:AbortSignal.timeout(8000)});}catch{fail('MARKET_IDENTITY_UNAVAILABLE',503);}
++  if(!r.ok)fail([401,403].includes(r.status)?'MARKET_AUTH_REQUIRED':'MARKET_IDENTITY_UNAVAILABLE',[401,403].includes(r.status)?401:503);
++  if(!r.headers.get('content-type')?.toLowerCase().includes('application/json'))fail('MARKET_IDENTITY_INVALID',503);
++  const chunks=[];let size=0;try{for await(const chunk of r.body){size+=chunk.length;if(size>65536)fail('MARKET_IDENTITY_INVALID',503);chunks.push(Buffer.from(chunk));}}catch(e){if(e.status)throw e;fail('MARKET_IDENTITY_UNAVAILABLE',503);}
++  let value;try{value=JSON.parse(Buffer.concat(chunks));}catch{fail('MARKET_IDENTITY_INVALID',503);}
++  const user=value?.user;if(!user||typeof user.email!=='string'||user.email.length>254||/[\s\x00-\x1f]/.test(user.email)||!user.email.includes('@'))fail('MARKET_AUTH_REQUIRED',401);
++  const subject=user.email.toLowerCase();return{id:digest([issuer.origin,tenant,subject]),tenant,name:typeof user.name==='string'&&user.name.trim()?user.name.slice(0,160):subject.split('@')[0],moderator:privileged.has(subject)};
++ };
++}
++export function marketServer({store,authenticate,publicOrigin}){return http.createServer(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Type','application/json; charset=utf-8');const send=(status,value)=>res.writeHead(status).end(JSON.stringify(value));try{
++ const url=new URL(req.url,'http://localhost');if(url.pathname==='/health'||url.pathname==='/api/plugin-market/health'){send(200,{product:'Naumi Market',protocol:1});return;}if(!url.pathname.startsWith(PREFIX+'/')){send(404,{error:'NOT_FOUND'});return;}
++ if(!['GET','POST'].includes(req.method)){res.setHeader('Allow','GET, POST');send(405,{error:'MARKET_METHOD'});return;}
++ if(req.method==='POST'&&(req.headers['x-naumi-market']!=='1'||req.headers.origin&&req.headers.origin!==(publicOrigin??'http://'+req.headers.host)))fail('MARKET_SAME_ORIGIN_REQUIRED',403);
++ const actor=await authenticate(req);store.account(actor);const endpoint=url.pathname.slice(PREFIX.length);
++ if(req.method==='GET'){
++  if(endpoint==='/me'){send(200,{user:{id:actor.id,name:actor.name,moderator:!!actor.moderator}});return;}
++  if(endpoint==='/packages'){send(200,store.list(actor,{mine:url.searchParams.get('view')==='mine',search:url.searchParams.get('q')??'',kind:url.searchParams.get('kind')??'',author:url.searchParams.get('author')??'',sort:url.searchParams.get('sort')??'popular'}));return;}
++  const detail=endpoint.match(/^\/packages\/([a-f0-9-]{36})$/);if(detail){send(200,store.detail(actor,detail[1]));return;}
++  const download=endpoint.match(/^\/downloads\/([a-f0-9-]{36})$/);if(download){const value=store.downloadBody(actor,download[1]);res.once('finish',()=>{try{store.served(actor,download[1]);}catch{}});send(200,value);return;}
++  send(404,{error:'NOT_FOUND'});return;
++ }
++ let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>MAX_PACKAGE_BYTES+8192)fail('MARKET_PACKAGE_TOO_LARGE',413);chunks.push(chunk);}let input;try{input=JSON.parse(Buffer.concat(chunks));}catch{fail('MARKET_INVALID_REQUEST');}
++ const handlers={'/drafts':()=>store.saveDraft(actor,input),'/publish':()=>store.publish(actor,input),'/visibility':()=>store.visibility(actor,input),'/download':()=>store.download(actor,input),'/installed':()=>store.installed(actor,input),'/feedback':()=>store.feedback(actor,input)};if(!handlers[endpoint])fail('NOT_FOUND',404);send(200,handlers[endpoint]());
++ }catch(error){if(!res.headersSent&&!res.destroyed)send(error.status??500,{error:/^MARKET_[A-Z_]+$/.test(error.message)?error.message:'MARKET_UNAVAILABLE'});else res.destroy();}});}
++if(import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){const origin=process.env.NAUMI_MARKET_AUTH_ORIGIN;if(!origin)throw Error('NAUMI_MARKET_AUTH_ORIGIN_REQUIRED');const store=new MarketStore(path.resolve(process.env.NAUMI_MARKET_DB??'market-data/market.sqlite')),server=marketServer({store,authenticate:canvasAuthentication({origin,tenant:process.env.NAUMI_MARKET_TENANT??'naumi',moderators:(process.env.NAUMI_MARKET_MODERATORS??'').split(',').filter(Boolean)}),publicOrigin:process.env.NAUMI_MARKET_PUBLIC_ORIGIN});server.requestTimeout=15000;server.headersTimeout=10000;server.listen(Number(process.env.PORT??3190),process.env.HOST??'127.0.0.1',()=>console.log('NAUMI_MARKET_READY port='+server.address().port));const stop=()=>{server.closeAllConnections();server.close(()=>{store.close();process.exit(0);});};process.on('SIGTERM',stop);process.on('SIGINT',stop);}
+diff --git a/market/store.mjs b/market/store.mjs
+new file mode 100644
+index 0000000..b33e45c
+--- /dev/null
++++ b/market/store.mjs
+@@ -0,0 +1,33 @@
++import fs from 'node:fs';import path from 'node:path';import {DatabaseSync} from 'node:sqlite';import {randomUUID} from 'node:crypto';
++import {validatePackage,packageMetadata,digest,exact,text,slug,version,uuid,fail} from '../plugins/naumi-enterprise/market-contract.js';
++export class MarketStore{
++ constructor(file){fs.mkdirSync(path.dirname(file),{recursive:true});this.db=new DatabaseSync(file);this.db.exec(`PRAGMA foreign_keys=ON;PRAGMA journal_mode=WAL;PRAGMA busy_timeout=5000;
++ CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY,tenant TEXT NOT NULL,name TEXT NOT NULL);
++ CREATE TABLE IF NOT EXISTS packages(id TEXT PRIMARY KEY,tenant TEXT NOT NULL,slug TEXT NOT NULL,author TEXT NOT NULL REFERENCES accounts(id),visibility TEXT NOT NULL,created_at TEXT NOT NULL,UNIQUE(tenant,slug));
++ CREATE TABLE IF NOT EXISTS versions(package_id TEXT NOT NULL REFERENCES packages(id),version TEXT NOT NULL,digest TEXT NOT NULL,metadata TEXT NOT NULL,body TEXT NOT NULL,published_at TEXT NOT NULL,PRIMARY KEY(package_id,version));
++ CREATE TABLE IF NOT EXISTS drafts(id TEXT PRIMARY KEY,tenant TEXT NOT NULL,author TEXT NOT NULL REFERENCES accounts(id),revision INTEGER NOT NULL,body TEXT NOT NULL,updated_at TEXT NOT NULL);
++ CREATE TABLE IF NOT EXISTS operations(actor TEXT NOT NULL,operation_id TEXT NOT NULL,fingerprint TEXT NOT NULL,result TEXT NOT NULL,PRIMARY KEY(actor,operation_id));
++ CREATE TABLE IF NOT EXISTS downloads(id TEXT PRIMARY KEY,tenant TEXT NOT NULL,actor TEXT NOT NULL,package_id TEXT NOT NULL REFERENCES packages(id),version TEXT NOT NULL,served INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL);
++ CREATE TABLE IF NOT EXISTS installs(tenant TEXT NOT NULL,actor TEXT NOT NULL,package_id TEXT NOT NULL REFERENCES packages(id),version TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(tenant,actor,package_id));
++ CREATE TABLE IF NOT EXISTS feedback(tenant TEXT NOT NULL,actor TEXT NOT NULL,package_id TEXT NOT NULL REFERENCES packages(id),favorite INTEGER NOT NULL DEFAULT 0,rating INTEGER,comment TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL,PRIMARY KEY(tenant,actor,package_id));
++ PRAGMA user_version=1;`);}
++ transaction(fn){this.db.exec('BEGIN IMMEDIATE');try{const value=fn();this.db.exec('COMMIT');return value;}catch(e){this.db.exec('ROLLBACK');throw e;}}
++ account(actor){if(!actor?.id||!actor.tenant)fail('MARKET_AUTH_REQUIRED',401);this.db.prepare('INSERT INTO accounts VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name').run(actor.id,actor.tenant,text(actor.name,160));}
++ mutate(actor,operationId,input,fn){uuid(operationId);this.account(actor);return this.transaction(()=>{const fingerprint=digest(input),prior=this.db.prepare('SELECT * FROM operations WHERE actor=? AND operation_id=?').get(actor.id,operationId);if(prior){if(prior.fingerprint!==fingerprint)fail('MARKET_OPERATION_CONFLICT',409);return JSON.parse(prior.result);}const result=fn();this.db.prepare('INSERT INTO operations VALUES(?,?,?,?)').run(actor.id,operationId,fingerprint,JSON.stringify(result));return result;});}
++ package(actor,id,{owner=false,hidden=false}={}){const row=this.db.prepare('SELECT * FROM packages WHERE id=? AND tenant=?').get(id,actor.tenant);if(!row)fail('MARKET_NOT_FOUND',404);if(owner&&row.author!==actor.id&&!actor.moderator)fail('MARKET_AUTHOR_REQUIRED',403);if(row.visibility!=='published'&&row.author!==actor.id&&!actor.moderator&&!hidden)fail('MARKET_NOT_FOUND',404);return row;}
++ stats(id){const db=this.db;return{downloads:db.prepare('SELECT count(*) AS n FROM downloads WHERE package_id=? AND served=1').get(id).n,installUsers:db.prepare('SELECT count(*) AS n FROM installs WHERE package_id=?').get(id).n,favorites:db.prepare('SELECT count(*) AS n FROM feedback WHERE package_id=? AND favorite=1').get(id).n,rating:db.prepare('SELECT avg(rating) AS mean,count(rating) AS count FROM feedback WHERE package_id=?').get(id)};}
++ detail(actor,id){const row=this.package(actor,id),versions=this.db.prepare('SELECT version,digest,metadata,published_at FROM versions WHERE package_id=?').all(id).sort((a,b)=>{const aa=a.version.split('.').map(Number),bb=b.version.split('.').map(Number);return bb[0]-aa[0]||bb[1]-aa[1]||bb[2]-aa[2];});
++  const reviews=this.db.prepare("SELECT f.rating,f.comment,f.updated_at,a.id AS authorId,a.name AS authorName FROM feedback f JOIN accounts a ON f.actor=a.id WHERE f.package_id=? AND f.rating IS NOT NULL ORDER BY f.updated_at DESC LIMIT 30").all(id);
++  return{id:row.id,slug:row.slug,author:{id:row.author,name:this.db.prepare('SELECT name FROM accounts WHERE id=?').get(row.author).name},visibility:row.visibility,createdAt:row.created_at,...JSON.parse(versions[0].metadata),digest:versions[0].digest,versions:versions.map(v=>({version:v.version,digest:v.digest,publishedAt:v.published_at,changelog:JSON.parse(v.metadata).changelog,capabilities:JSON.parse(v.metadata).capabilities})),stats:this.stats(id),mine:row.author===actor.id,feedback:this.db.prepare('SELECT favorite,rating,comment FROM feedback WHERE actor=? AND package_id=?').get(actor.id,id)??null,reviews};
++ }
++ list(actor,{mine=false,search='',kind='',author='',sort='popular'}={}){this.account(actor);let rows=this.db.prepare('SELECT id FROM packages WHERE tenant=? AND (visibility=? OR author=?) ORDER BY created_at DESC LIMIT 1000').all(actor.tenant,'published',actor.id).map(r=>this.detail(actor,r.id));if(mine)rows=rows.filter(r=>r.mine);if(kind)rows=rows.filter(r=>r.kind===kind);if(author)rows=rows.filter(r=>r.author.id===author);if(search){const query=text(search,120).toLowerCase();rows=rows.filter(r=>(r.title+' '+r.summary+' '+r.author.name+' '+r.tags.join(' ')).toLowerCase().includes(query));}if(sort==='popular')rows.sort((a,b)=>b.stats.installUsers-a.stats.installUsers||b.stats.downloads-a.stats.downloads);return{items:rows,drafts:mine?this.db.prepare('SELECT id,revision,body,updated_at FROM drafts WHERE tenant=? AND author=? ORDER BY updated_at DESC LIMIT 100').all(actor.tenant,actor.id).map(r=>({id:r.id,revision:r.revision,package:JSON.parse(r.body),updatedAt:r.updated_at})):[]};}
++ saveDraft(actor,input){exact(input,['operationId','id','expectedRevision','package']);const bundle=validatePackage(input.package);return this.mutate(actor,input.operationId,{action:'draft',...input,package:bundle},()=>{const id=input.id??randomUUID(),old=this.db.prepare('SELECT * FROM drafts WHERE id=?').get(id);if(old&&(old.author!==actor.id||old.tenant!==actor.tenant))fail('MARKET_AUTHOR_REQUIRED',403);if((old?.revision??0)!==input.expectedRevision)fail('MARKET_DRAFT_CONFLICT',409);const revision=(old?.revision??0)+1;this.db.prepare('INSERT INTO drafts VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,body=excluded.body,updated_at=excluded.updated_at').run(id,actor.tenant,actor.id,revision,JSON.stringify(bundle),new Date().toISOString());return{id,revision};});}
++ publish(actor,input){exact(input,['operationId','draftId','expectedRevision']);return this.mutate(actor,input.operationId,{action:'publish',...input},()=>{const draft=this.db.prepare('SELECT * FROM drafts WHERE id=? AND tenant=? AND author=?').get(input.draftId,actor.tenant,actor.id);if(!draft)fail('MARKET_DRAFT_NOT_FOUND',404);if(draft.revision!==input.expectedRevision)fail('MARKET_DRAFT_CONFLICT',409);const bundle=validatePackage(JSON.parse(draft.body)),old=this.db.prepare('SELECT * FROM packages WHERE tenant=? AND slug=?').get(actor.tenant,bundle.slug);if(old&&old.author!==actor.id)fail('MARKET_AUTHOR_REQUIRED',403);const id=old?.id??randomUUID();if(old&&JSON.parse(this.db.prepare('SELECT metadata FROM versions WHERE package_id=? LIMIT 1').get(id).metadata).kind!==bundle.kind)fail('MARKET_KIND_IMMUTABLE',409);if(this.db.prepare('SELECT 1 FROM versions WHERE package_id=? AND version=?').get(id,bundle.version))fail('MARKET_VERSION_IMMUTABLE',409);if(!old)this.db.prepare('INSERT INTO packages VALUES(?,?,?,?,?,?)').run(id,actor.tenant,bundle.slug,actor.id,'published',new Date().toISOString());else this.db.prepare("UPDATE packages SET visibility='published' WHERE id=?").run(id);const hash=digest(bundle);this.db.prepare('INSERT INTO versions VALUES(?,?,?,?,?,?)').run(id,bundle.version,hash,JSON.stringify(packageMetadata(bundle)),JSON.stringify(bundle),new Date().toISOString());return{id,version:bundle.version,digest:hash};});}
++ visibility(actor,input){exact(input,['operationId','id','visibility']);if(!['published','withdrawn'].includes(input.visibility))fail('MARKET_INVALID_REQUEST');return this.mutate(actor,input.operationId,{action:'visibility',...input},()=>{this.package(actor,input.id,{owner:true,hidden:true});this.db.prepare('UPDATE packages SET visibility=? WHERE id=?').run(input.visibility,input.id);return{id:input.id,visibility:input.visibility};});}
++ download(actor,input){exact(input,['operationId','id','version']);version(input.version);return this.mutate(actor,input.operationId,{action:'download',...input},()=>{this.package(actor,input.id);const row=this.db.prepare('SELECT digest FROM versions WHERE package_id=? AND version=?').get(input.id,input.version);if(!row)fail('MARKET_VERSION_NOT_FOUND',404);const id=randomUUID();this.db.prepare('INSERT INTO downloads VALUES(?,?,?,?,?,0,?)').run(id,actor.tenant,actor.id,input.id,input.version,new Date().toISOString());return{ticket:id,digest:row.digest};});}
++ downloadBody(actor,ticket){const row=this.db.prepare('SELECT * FROM downloads WHERE id=? AND tenant=? AND actor=?').get(ticket,actor.tenant,actor.id);if(!row)fail('MARKET_DOWNLOAD_NOT_FOUND',404);this.package(actor,row.package_id);const v=this.db.prepare('SELECT digest,body FROM versions WHERE package_id=? AND version=?').get(row.package_id,row.version);return{ticket,digest:v.digest,package:JSON.parse(v.body)};}
++ served(actor,ticket){this.db.prepare('UPDATE downloads SET served=1 WHERE id=? AND tenant=? AND actor=?').run(ticket,actor.tenant,actor.id);}
++ installed(actor,input){exact(input,['operationId','ticket','digest']);return this.mutate(actor,input.operationId,{action:'installed',...input},()=>{const d=this.db.prepare('SELECT d.*,v.digest FROM downloads d JOIN versions v ON d.package_id=v.package_id AND d.version=v.version WHERE d.id=? AND d.actor=? AND d.tenant=? AND d.served=1').get(input.ticket,actor.id,actor.tenant);if(!d||d.digest!==input.digest)fail('MARKET_INSTALL_RECEIPT_INVALID',409);this.db.prepare('INSERT INTO installs VALUES(?,?,?,?,?) ON CONFLICT(tenant,actor,package_id) DO UPDATE SET version=excluded.version,updated_at=excluded.updated_at').run(actor.tenant,actor.id,d.package_id,d.version,new Date().toISOString());return{installed:true,id:d.package_id,version:d.version};});}
++ feedback(actor,input){exact(input,['operationId','id','favorite','rating','comment']);if(input.favorite!==undefined&&typeof input.favorite!=='boolean'||input.rating!==undefined&&(!Number.isInteger(input.rating)||input.rating<1||input.rating>5))fail('MARKET_INVALID_FEEDBACK');return this.mutate(actor,input.operationId,{action:'feedback',...input},()=>{const pkg=this.package(actor,input.id),prior=this.db.prepare('SELECT * FROM feedback WHERE actor=? AND package_id=?').get(actor.id,input.id);if(input.rating!==undefined){if(pkg.author===actor.id)fail('MARKET_SELF_REVIEW',409);if(!this.db.prepare('SELECT 1 FROM installs WHERE actor=? AND package_id=?').get(actor.id,input.id))fail('MARKET_INSTALL_REQUIRED',403);}const next={favorite:input.favorite===undefined?prior?.favorite??0:Number(input.favorite),rating:input.rating??prior?.rating??null,comment:input.comment===undefined?prior?.comment??'':text(input.comment,2000,{empty:true})};this.db.prepare('INSERT INTO feedback VALUES(?,?,?,?,?,?,?) ON CONFLICT(tenant,actor,package_id) DO UPDATE SET favorite=excluded.favorite,rating=excluded.rating,comment=excluded.comment,updated_at=excluded.updated_at').run(actor.tenant,actor.id,input.id,next.favorite,next.rating,next.comment,new Date().toISOString());return next;});}
++ close(){this.db.close();}
++}
+diff --git a/plugins/naumi-enterprise/assets/plugin-market.css b/plugins/naumi-enterprise/assets/plugin-market.css
+new file mode 100644
+index 0000000..d0c3243
+--- /dev/null
++++ b/plugins/naumi-enterprise/assets/plugin-market.css
+@@ -0,0 +1 @@
++.nmk{--mk-line:#ece9f1;--mk-ink:#352f40;--mk-muted:#8b8295;--mk-accent:#79628e;width:100%;max-width:1240px;margin:0 auto;padding:24px 28px 56px;color:var(--mk-ink);font:13px/1.6 Inter,"Segoe UI","Microsoft YaHei",sans-serif}.nmk *{box-sizing:border-box}.nmk button,.nmk input,.nmk select,.nmk textarea{font:inherit}.nmk button{cursor:pointer;border:1px solid var(--mk-line);border-radius:9px;padding:8px 13px;background:#fff;color:var(--mk-ink)}.nmk button:disabled{opacity:.45;cursor:default}.nmk :focus-visible{outline:2px solid #a68db9;outline-offset:3px}.nmk input,.nmk textarea,.nmk select{border:1px solid var(--mk-line);border-radius:9px;padding:9px 11px;background:#fff;color:var(--mk-ink);min-width:0}.nmk .nmk-primary{background:var(--mk-accent);border-color:var(--mk-accent);color:#fff}.nmk-toolbar{display:flex;gap:10px;align-items:center;margin-bottom:27px}.nmk-search{display:flex;align-items:center;gap:8px;flex:1;background:#f7f5f9;border-radius:11px;padding:0 13px}.nmk-search span{font-size:24px;color:#a397b0}.nmk-search input{width:100%;border:0;background:transparent;outline:none;padding:11px 0}.nmk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:18px}.nmk-card{border:1px solid var(--mk-line);border-radius:17px;background:#fff;padding:21px;transition:box-shadow .18s,border-color .18s}.nmk-card:hover{box-shadow:0 8px 28px #35204609;border-color:#d6c9e0}.nmk .nmk-card-main{display:flex;text-align:left;width:100%;gap:14px;border:0;padding:0;background:transparent}.nmk-icon{width:48px;height:48px;flex-shrink:0;display:grid;place-items:center;border-radius:14px;font-size:22px;font-weight:600;color:#85639e;background:#f0e9f7}.nmk-icon[data-kind=workflow]{color:#538c86;background:#eaf6f2}.nmk-icon[data-kind=skill]{color:#a68b4a;background:#fcf5e4}.nmk-icon[data-kind=bot-template]{color:#6385ad;background:#edf3fb}.nmk h3{font-size:15px;font-weight:600;margin:0}.nmk h2{font-size:23px;font-weight:600;margin:0}.nmk-category{font-size:10px;color:#b0a6b9}.nmk-card-main p{font-size:12px;color:var(--mk-muted);margin:10px 0 0;min-height:39px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.nmk .nmk-author{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--mk-muted);padding:0;border:0;background:transparent;margin:18px 0}.nmk-avatar{display:grid;place-items:center;width:22px;height:22px;background:#f0edf3;border-radius:50%;font-size:10px;color:#8c7e99}.nmk-card footer{display:flex;gap:15px;border-top:1px solid #f3f0f5;padding-top:13px;align-items:center;font-size:11px;color:#a198aa}.nmk-card footer button{font-size:11px;padding:0;border:0;background:none;color:#a198aa}.nmk-card footer .nmk-open{margin-left:auto;color:var(--mk-accent);font-weight:600}.nmk-empty{min-height:230px;display:flex;justify-content:center;align-items:center;gap:18px;color:#aaa0b5}.nmk-error{font-size:12px;color:#b55a68;background:#fdf4f5;border-radius:10px;padding:12px;margin-bottom:16px}.nmk-error button{margin-left:10px;font-size:11px;padding:3px 8px}.nmk-notice{padding:10px 13px;border-radius:9px;background:#f2f8f3;color:#668a70;margin-bottom:14px}.nmk-filter{margin-bottom:16px}.nmk-backdrop{position:fixed;inset:0;z-index:400;display:grid;place-items:center;background:#2c243c28;backdrop-filter:blur(5px);padding:22px}.nmk-editor,.nmk-detail{width:min(700px,100%);max-height:calc(100dvh - 44px);overflow:auto;background:#fff;border-radius:22px;box-shadow:0 20px 100px #2c1e3e1a;padding:30px;display:grid;gap:20px}.nmk-editor header,.nmk-detail header{display:flex;justify-content:space-between;align-items:start}.nmk-editor header button,.nmk-detail header>button{border:0;font-size:22px;padding:0 4px;color:#b0a6b9}.nmk-editor label{display:grid;gap:7px;font-size:12px;color:var(--mk-muted)}.nmk-editor label textarea{resize:vertical;min-height:70px;width:100%}.nmk-upload{border:1px dashed #d6cbdf;border-radius:12px;padding:15px;background:#fcfafe;cursor:pointer}.nmk-upload input{width:100%;font-size:11px}.nmk-editor-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.nmk-editor footer{display:flex;gap:9px;justify-content:flex-end}.nmk-facts,.nmk-capabilities{display:flex;gap:9px;flex-wrap:wrap;color:var(--mk-muted);font-size:11px}.nmk-facts span,.nmk-capabilities span{border-radius:6px;padding:4px 8px;background:#f6f3f8}.nmk-description{white-space:pre-wrap;color:#756a80;margin:0}.nmk-detail .nmk-author{margin:8px 0 0}.nmk-version{display:flex;align-items:center;gap:12px;font-size:12px;color:var(--mk-muted)}.nmk-changelog{margin:0;font-size:12px;white-space:pre-wrap;color:var(--mk-muted)}.nmk-consent{display:flex;gap:9px;align-items:center;font-size:12px}.nmk-consent input{accent-color:var(--mk-accent)}.nmk-actions{display:flex;gap:9px;flex-wrap:wrap}.nmk-reviews{border-top:1px solid var(--mk-line);padding-top:20px}.nmk-reviews article{padding:15px 0;border-bottom:1px solid var(--mk-line)}.nmk-reviews article span{margin-left:15px;color:#b99e5e}.nmk-reviews p{margin:6px 0;color:var(--mk-muted);white-space:pre-wrap}.nmk-reviews form{display:grid;grid-template-columns:90px 1fr;gap:10px;padding-top:20px}.nmk-reviews textarea{resize:vertical;min-height:60px}.nmk-reviews form button{grid-column:2;justify-self:end}.nmk-drafts{margin-top:30px}.nmk-drafts>button{display:flex;gap:15px;width:100%;text-align:left;margin-top:10px;padding:13px}.nmk-drafts button span{margin-left:auto;color:var(--mk-muted)}.nmk-history{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.nmk-history h3{font-size:12px;color:var(--mk-muted);font-weight:400}@media(max-width:650px){.nmk{padding:15px}.nmk-toolbar{flex-wrap:wrap}.nmk-search{flex-basis:100%}.nmk-toolbar select{flex:1}.nmk-grid{grid-template-columns:1fr}.nmk-detail,.nmk-editor{padding:22px}.nmk-editor-grid{grid-template-columns:1fr}.nmk-reviews form{grid-template-columns:1fr}.nmk-reviews form button{grid-column:1}.nmk-backdrop{padding:12px}.nmk-editor,.nmk-detail{max-height:calc(100dvh - 24px)}}
+diff --git a/plugins/naumi-enterprise/assets/plugin-market.js b/plugins/naumi-enterprise/assets/plugin-market.js
+new file mode 100644
+index 0000000..d7e1573
+--- /dev/null
++++ b/plugins/naumi-enterprise/assets/plugin-market.js
+@@ -0,0 +1,37 @@
++import {CREATE_BOT_EVENT} from './primary-bot.js';
++const API='/api/plugin-market/v1';
++const kinds={plugin:'工具插件',skill:'技能包',workflow:'工作流','bot-template':'Bot 模板'},caps={'files-read':'读取文件','files-write':'写入文件',network:'访问网络',browser:'操作浏览器',commands:'执行命令'};
++const errors={MARKET_LOGIN_REQUIRED:'请先登录 Naumi 账号',MARKET_AUTH_REQUIRED:'请重新登录 Naumi 账号',MARKET_UNAVAILABLE_NO_REPLAY:'市场连接尚未确认，请重试',MARKET_IDENTITY_UNAVAILABLE:'账号服务暂未连接',MARKET_VERSION_IMMUTABLE:'这个版本已发布，请使用新版本号',MARKET_DRAFT_CONFLICT:'草稿已更新，请重新载入',MARKET_AUTHOR_REQUIRED:'仅创作者可以修改作品',MARKET_SELF_REVIEW:'可以收藏自己的作品，评分由使用者提供',MARKET_INSTALL_REQUIRED:'安装后可以评价',MARKET_RUNNING_TASKS:'请先结束运行中的任务',MARKET_CAPABILITY_CONFIRMATION_REQUIRED:'请确认插件声明的能力',MARKET_PRIVATE_OR_RESERVED_FILE:'包中包含私密文件或保留文件',MARKET_SECRET_IN_PACKAGE:'包中包含密钥，请移除后重新打包',MARKET_NATIVE_INSTALL_FAILED:'安装未完成，原版本已保留或恢复',MARKET_RESTORE_REQUIRED:'安装状态需要检查，请打开已安装列表',MARKET_PACKAGE_INTEGRITY:'文件校验未通过，请重新下载',MARKET_CACHE_INTEGRITY:'本地版本校验未通过',MARKET_EXISTING_PACKAGE_UNMANAGED:'已存在同名插件，请先在已安装中核对'};
++async function local(body,signal){const response=await fetch('/naumi/plugin-market',{credentials:'same-origin',cache:'no-store',signal,...body?{method:'POST',headers:{'Content-Type':'application/json','x-naumi-market':'1'},body:JSON.stringify(body)}:{}}),value=await response.json();if(!response.ok)throw Object.assign(Error(errors[value.error]??'操作尚未完成，请重试'),{code:value.error});return value;}
++async function remote(endpoint,body,signal){if(body)return local({action:'remote',endpoint:API+endpoint,body},signal);const response=await fetch('/naumi/plugin-market?endpoint='+encodeURIComponent(API+endpoint),{credentials:'same-origin',cache:'no-store',signal}),value=await response.json();if(!response.ok)throw Object.assign(Error(errors[value.error]??'市场暂未连接，请重试'),{code:value.error});return value;}
++const id=()=>crypto.randomUUID();
++export function installPluginMarketUI(ctx,React){const h=React.createElement,{useState,useEffect,useRef}=React;
++ function Publisher({initial,onClose,onSaved}){const [bundle,setBundle]=useState(initial?.package??null),[draft,setDraft]=useState(initial?{id:initial.id,revision:initial.revision}:null),[error,setError]=useState(''),[busy,setBusy]=useState(false);const operation=useRef({}),flight=useRef(false);
++  const change=(field,value)=>{setBundle(b=>({...b,[field]:value}));operation.current={};setError('');};
++  const load=async event=>{try{const file=event.target.files?.[0];if(!file)return;if(file.size>2*1024*1024)throw Error('文件超过 2 MB');const b=JSON.parse(await file.text());if(b.schemaVersion!==1||!b.slug||!Array.isArray(b.files))throw Error('请选择 Naumi 插件包');setBundle(b);setDraft(null);operation.current={};setError('');}catch(e){setError(e.message);}};
++  const save=async publish=>{if(flight.current||!bundle)return;flight.current=true;setBusy(true);setError('');try{operation.current.save??=id();operation.current.savePayload??={operationId:operation.current.save,...(draft?{id:draft.id}:{}),expectedRevision:draft?.revision??0,package:bundle};const d=operation.current.saved??await remote('/drafts',operation.current.savePayload);operation.current.saved=d;setDraft(d);if(publish){operation.current.publish??=id();await remote('/publish',{operationId:operation.current.publish,draftId:d.id,expectedRevision:d.revision});onSaved();onClose();}else{operation.current={};onSaved();}}catch(e){setError(e.message);}finally{flight.current=false;setBusy(false);}};
++  return h('div',{className:'nmk-backdrop',onMouseDown:e=>{if(e.target===e.currentTarget&&!busy)onClose();}},h('section',{className:'nmk-editor',role:'dialog','aria-modal':true,'aria-label':'发布作品'},h('header',null,h('h2',null,'发布作品'),h('button',{type:'button',onClick:onClose,disabled:busy,'aria-label':'关闭发布'},'×')),h('label',{className:'nmk-upload'},h('input',{type:'file',accept:'.json,.naumi-plugin',disabled:busy,onChange:load}),'导入插件包'),bundle&&h(React.Fragment,null,h('div',{className:'nmk-editor-grid'},[['title','名称',80],['slug','标识',64],['version','版本',30],['summary','简介',180]].map(([key,label,max])=>h('label',{key},label,h('input',{value:bundle[key]??'',maxLength:max,disabled:busy,onChange:e=>change(key,e.target.value)})))),h('label',null,'更新记录',h('textarea',{value:bundle.changelog??'',maxLength:4000,disabled:busy,onChange:e=>change('changelog',e.target.value)})),h('label',null,'详情',h('textarea',{value:bundle.description??'',maxLength:20000,rows:5,disabled:busy,onChange:e=>change('description',e.target.value)})),h('div',{className:'nmk-facts'},h('span',null,kinds[bundle.kind]??bundle.kind),h('span',null,bundle.files.length+' 个文件'),(bundle.capabilities??[]).map(c=>h('span',{key:c},caps[c]??c)))),error&&h('p',{role:'alert',className:'nmk-error'},error),h('footer',null,h('button',{disabled:busy,onClick:onClose},'取消'),h('button',{disabled:busy||!bundle,onClick:()=>save(false)},'保存草稿'),h('button',{className:'nmk-primary',disabled:busy||!bundle,onClick:()=>save(true)},busy?'提交中…':'发布'))));
++ }
++ function Market({mine=false}){const [data,setData]=useState(null),[me,setMe]=useState(null),[installed,setInstalled]=useState({}),[search,setSearch]=useState(''),[kind,setKind]=useState(''),[sort,setSort]=useState('popular'),[author,setAuthor]=useState(''),[detail,setDetail]=useState(null),[version,setVersion]=useState(''),[consent,setConsent]=useState(false),[publisher,setPublisher]=useState(null),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[epoch,setEpoch]=useState(0),[rating,setRating]=useState(5),[comment,setComment]=useState('');const flight=useRef(false),operation=useRef(null),generation=useRef(0);
++  const refresh=()=>setEpoch(v=>v+1);
++  useEffect(()=>{const controller=new AbortController(),g=++generation.current;setError('');const timer=setTimeout(()=>{void(async()=>{try{const [who,list,state]=await Promise.all([remote('/me',undefined,controller.signal),remote('/packages?'+new URLSearchParams({view:mine?'mine':'market',q:search,kind,sort,author}),undefined,controller.signal),local(undefined,controller.signal)]);if(g!==generation.current)return;setMe(who.user);setData(list);setInstalled(state.installed);}catch(e){if(!controller.signal.aborted){setError(e.message);if(['MARKET_LOGIN_REQUIRED','MARKET_AUTH_REQUIRED'].includes(e.code)){setData(null);setMe(null);setDetail(null);}}}})();},search?220:0);return()=>{clearTimeout(timer);controller.abort();};},[mine,search,kind,sort,author,epoch]);
++  const open=async item=>{setError('');setNotice('');setConsent(false);operation.current=null;try{const d=await remote('/packages/'+item.id);setDetail(d);setVersion(d.version);setComment(d.feedback?.comment??'');setRating(d.feedback?.rating??5);}catch(e){setError(e.message);}};
++  const run=async fn=>{if(flight.current)return;flight.current=true;setBusy(true);setError('');try{await fn();refresh();}catch(e){setError(e.message);}finally{flight.current=false;setBusy(false);}};
++  const install=()=>run(async()=>{if(!consent)return;operation.current??={download:id()};operation.current.install??=id();const request=operation.current,ticket=await remote('/download',{operationId:request.download,id:detail.id,version}),response=await remote('/downloads/'+ticket.ticket);const result=await local({action:'install',operationId:request.install,id:detail.id,ticket:ticket.ticket,expectedDigest:detail.versions.find(v=>v.version===version).digest,capabilities:response.package.capabilities});operation.current=null;setNotice(result.application==='restart-required'?'已安装，重启后生效':'已安装');});
++  const download=()=>run(async()=>{operation.current??={download:id()};const ticket=await remote('/download',{operationId:operation.current.download,id:detail.id,version}),body=await remote('/downloads/'+ticket.ticket);const url=URL.createObjectURL(new Blob([JSON.stringify(body.package,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download=detail.slug+'-'+version+'.naumi-plugin.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);operation.current=null;setNotice('已下载');});
++  const rollback=v=>run(async()=>{const result=await local({action:'rollback',operationId:id(),id:detail.id,version:v});setNotice(result.application==='restart-required'?'已回滚，重启后生效':'已回滚');});
++  const useTemplate=()=>{setDetail(null);window.dispatchEvent(new CustomEvent(CREATE_BOT_EVENT,{detail:{fields:installed[detail.id].current.template}}));};
++  const favorite=item=>run(async()=>{await remote('/feedback',{operationId:id(),id:item.id,favorite:!item.feedback?.favorite});if(detail?.id===item.id)setDetail(await remote('/packages/'+item.id));});
++  return h('section',{className:'nmk','aria-label':mine?'我的作品':'员工插件市场'},h('div',{className:'nmk-toolbar'},h('label',{className:'nmk-search'},h('span',{'aria-hidden':true},'⌕'),h('input',{'aria-label':'搜索插件',placeholder:'搜索插件或创作者',value:search,onChange:e=>setSearch(e.target.value)})),h('select',{'aria-label':'作品类型',value:kind,onChange:e=>setKind(e.target.value)},h('option',{value:''},'全部类型'),Object.entries(kinds).map(([id,label])=>h('option',{key:id,value:id},label))),h('select',{'aria-label':'排序',value:sort,onChange:e=>setSort(e.target.value)},h('option',{value:'popular'},'热门'),h('option',{value:'new'},'最新')),h('button',{className:'nmk-primary',disabled:!me||busy,onClick:()=>setPublisher({})},'发布作品')),author&&h('button',{className:'nmk-filter',onClick:()=>setAuthor('')},'全部创作者 ×'),
++   error&&h('div',{className:'nmk-error',role:'alert'},error,h('button',{onClick:refresh},'重试'),!me&&globalThis.naumiDesktop?.openIdentity&&h('button',{onClick:()=>globalThis.naumiDesktop.openIdentity()},'登录 Naumi')),notice&&h('div',{className:'nmk-notice',role:'status'},notice),
++   !data&&!error&&h('div',{className:'nmk-empty',role:'status'},'载入中…'),data&&data.items.length===0&&h('div',{className:'nmk-empty'},mine?'暂无已发布作品':'暂无插件',me&&h('button',{onClick:()=>setPublisher({})},'发布作品')),
++   h('div',{className:'nmk-grid'},(data?.items??[]).map(item=>h('article',{key:item.id,className:'nmk-card'},h('button',{className:'nmk-card-main',onClick:()=>open(item)},h('span',{className:'nmk-icon','data-kind':item.kind},item.title.slice(0,1)),h('div',null,h('h3',null,item.title),h('span',{className:'nmk-category'},kinds[item.kind]),h('p',null,item.summary))),h('button',{className:'nmk-author',onClick:()=>setAuthor(item.author.id)},h('span',{className:'nmk-avatar','aria-hidden':true},item.author.name.slice(0,1)),item.author.name),h('footer',null,h('span',{'aria-label':'下载量'},'↓ '+item.stats.downloads),h('span',{'aria-label':'安装用户'},'安装 '+item.stats.installUsers),h('button',{'aria-label':'收藏 '+item.title,onClick:()=>favorite(item),disabled:busy},item.feedback?.favorite?'♥':'♡',item.stats.favorites),h('button',{className:'nmk-open',onClick:()=>open(item)},installed[item.id]?'已安装':'查看'))))),
++   mine&&data?.drafts.length>0&&h('section',{className:'nmk-drafts'},h('h3',null,'草稿'),data.drafts.map(d=>h('button',{key:d.id,onClick:()=>setPublisher(d)},h('strong',null,d.package.title),h('span',null,d.package.version),'继续编辑'))),
++   detail&&h('div',{className:'nmk-backdrop',onMouseDown:e=>{if(e.target===e.currentTarget&&!busy)setDetail(null);}},h('section',{className:'nmk-detail',role:'dialog','aria-modal':true,'aria-label':detail.title},h('header',null,h('div',null,h('h2',null,detail.title),h('button',{className:'nmk-author',onClick:()=>{setAuthor(detail.author.id);setDetail(null);}},detail.author.name)),h('button',{'aria-label':'关闭详情',disabled:busy,onClick:()=>setDetail(null)},'×')),h('p',{className:'nmk-description'},detail.description||detail.summary),h('div',{className:'nmk-facts'},h('span',null,'下载 '+detail.stats.downloads),h('span',null,'安装用户 '+detail.stats.installUsers),h('span',null,'评分 '+(detail.stats.rating.mean?.toFixed(1)??'—')),h('span',null,kinds[detail.kind])),h('label',{className:'nmk-version'},'版本',h('select',{value:version,disabled:busy,onChange:e=>{setVersion(e.target.value);setConsent(false);operation.current=null;}},detail.versions.map(v=>h('option',{key:v.version,value:v.version},v.version)))),h('p',{className:'nmk-changelog'},detail.versions.find(v=>v.version===version)?.changelog),h('div',{className:'nmk-capabilities'},(detail.versions.find(v=>v.version===version)?.capabilities??[]).length?(detail.versions.find(v=>v.version===version)?.capabilities??[]).map(c=>h('span',{key:c},caps[c])):h('span',null,'未声明额外能力')),h('label',{className:'nmk-consent'},h('input',{type:'checkbox',checked:consent,disabled:busy,onChange:e=>setConsent(e.target.checked)}),'确认安装此版本及其声明的能力'),
++    h('div',{className:'nmk-actions'},h('button',{className:'nmk-primary',disabled:busy||!consent,onClick:install},busy?'处理中…':installed[detail.id]?.current.version===version?'重新安装':installed[detail.id]?'更新到此版本':'安装'),h('button',{disabled:busy,onClick:download},'下载包'),installed[detail.id]&&h('button',{disabled:busy,onClick:()=>run(async()=>{await local({action:'uninstall',operationId:id(),id:detail.id});setNotice('已卸载');})},'卸载'),detail.kind==='bot-template'&&installed[detail.id]&&h('button',{disabled:busy,onClick:useTemplate},'用模板创建 Bot'),detail.mine&&h('button',{disabled:busy,onClick:()=>run(async()=>{await remote('/visibility',{operationId:id(),id:detail.id,visibility:detail.visibility==='published'?'withdrawn':'published'});setDetail(null);})},detail.visibility==='published'?'下架':'重新上架')),
++    installed[detail.id]?.history.length>0&&h('div',{className:'nmk-history'},h('h3',null,'本地历史版本'),installed[detail.id].history.map(v=>h('button',{key:v.digest,disabled:busy,onClick:()=>rollback(v.version)},'回滚到 '+v.version))),
++    h('section',{className:'nmk-reviews'},h('h3',null,'使用评价'),detail.reviews.map((r,i)=>h('article',{key:i},h('strong',null,r.authorName),h('span',null,'★ '+r.rating),h('p',null,r.comment))),!detail.mine&&installed[detail.id]&&h('form',{onSubmit:e=>{e.preventDefault();void run(async()=>{await remote('/feedback',{operationId:id(),id:detail.id,rating:Number(rating),comment});setDetail(await remote('/packages/'+detail.id));});}},h('select',{'aria-label':'评分',value:rating,onChange:e=>setRating(e.target.value)},[5,4,3,2,1].map(n=>h('option',{key:n,value:n},n+' 星'))),h('textarea',{'aria-label':'评价',value:comment,maxLength:2000,onChange:e=>setComment(e.target.value)}),h('button',{disabled:busy},'提交评价'))),error&&h('p',{className:'nmk-error',role:'alert'},error),notice&&h('p',{role:'status'},notice))),
++   publisher&&h(Publisher,{initial:publisher.id?publisher:null,onClose:()=>setPublisher(null),onSaved:refresh}));
++ }
++ return ctx.slots.inject('plugins.tab',function*(){yield ctx.slots.register({name:'plugins.tab',id:'naumi-market',order:-20,label:()=> '市场'},()=>h(Market));yield ctx.slots.register({name:'plugins.tab',id:'naumi-my-works',order:-10,label:()=> '我的作品'},()=>h(Market,{mine:true}));});
++}
+diff --git a/plugins/naumi-enterprise/assets/primary-bot.js b/plugins/naumi-enterprise/assets/primary-bot.js
+index c88e460..3fda960 100644
+--- a/plugins/naumi-enterprise/assets/primary-bot.js
++++ b/plugins/naumi-enterprise/assets/primary-bot.js
+@@ -11,14 +11,14 @@ export function enterBotMode(ctx,catalog){
+ }
+ export function installPrimaryBotUI(ctx,React){
+  const h=React.createElement,Dialog=createEmployeeDialog(ctx,React);
+- function CreationOverlay(){const [open,setOpen]=React.useState(false);React.useEffect(()=>{const show=()=>setOpen(true);window.addEventListener(CREATE_BOT_EVENT,show);return()=>window.removeEventListener(CREATE_BOT_EVENT,show);},[]);return open?h(Dialog,{onClose:()=>setOpen(false)}):null;}
++ function CreationOverlay(){const [open,setOpen]=React.useState(false);React.useEffect(()=>{const show=e=>setOpen({fields:e.detail?.fields});window.addEventListener(CREATE_BOT_EVENT,show);return()=>window.removeEventListener(CREATE_BOT_EVENT,show);},[]);return open?h(Dialog,{initialFields:open.fields,onClose:()=>setOpen(false)}):null;}
+  const main=ctx.slots.inject('main',()=>ctx.slots.register({name:'main',key:PRIMARY_PANEL},createPrimaryBotPage(ctx,React)));
+  const overlay=ctx.slots.inject('shell.overlay',()=>ctx.slots.register({name:'shell.overlay',id:'naumi-create-bot',order:95},CreationOverlay));
+  return()=>{main();overlay();};
+ }
+ export function createEmployeeDialog(ctx,React){
+- const h=React.createElement,source=botCatalog();return function EmployeeDialog({onClose}){
+-  const catalog=React.useSyncExternalStore(source.subscribe,source.getSnapshot,source.getSnapshot),[name,setName]=React.useState(''),[purpose,setPurpose]=React.useState(''),[kind,setKind]=React.useState('agent'),[busy,setBusy]=React.useState(false),[error,setError]=React.useState(''),form=React.useRef(null),request=React.useRef(null),flight=React.useRef(false),alive=React.useRef(true),prior=React.useRef(document.activeElement);
++ const h=React.createElement,source=botCatalog();return function EmployeeDialog({onClose,initialFields}){
++  const catalog=React.useSyncExternalStore(source.subscribe,source.getSnapshot,source.getSnapshot),[name,setName]=React.useState(initialFields?.name??''),[purpose,setPurpose]=React.useState(initialFields?.purpose??''),[kind,setKind]=React.useState(initialFields?.kind??'agent'),[busy,setBusy]=React.useState(false),[error,setError]=React.useState(''),form=React.useRef(null),request=React.useRef(null),flight=React.useRef(false),alive=React.useRef(true),prior=React.useRef(document.activeElement);
+   React.useEffect(()=>{alive.current=true;form.current?.querySelector('input')?.focus();return()=>{alive.current=false;prior.current?.isConnected&&prior.current.focus();};},[]);
+   const pending=catalog.creations?.find(c=>c.actor==='owner'&&c.state==='pending'),locked=busy||!!pending;
+   React.useEffect(()=>{if(pending){request.current=pending.requestId;setName(pending.name);setPurpose(pending.purpose);setKind(pending.kind);}},[pending?.requestId]);
+diff --git a/plugins/naumi-enterprise/client.js b/plugins/naumi-enterprise/client.js
+index eb2510a..b61c043 100644
+--- a/plugins/naumi-enterprise/client.js
++++ b/plugins/naumi-enterprise/client.js
+@@ -1,5 +1,6 @@
+ /** Async presentation-only module; the original enterprise app below stays intact. */
+ function installNaumiContextUI(ctx,React,createPortal,Icon){
++  ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/plugin-market.js').then(module=>{if(!closed)dispose=module.installPluginMarketUI(ctx,React);}).catch(error=>console.error('Naumi plugin market:',error));return()=>{closed=true;dispose?.();};});
+   ctx.effect(()=>{
+     let dispose,closed=false;
+     void import('/naumi/assets/im-settings.js').then(module=>{if(!closed)dispose=module.installIMSettingsUI(ctx,React);}).catch(error=>console.error('Naumi IM settings:',error));
+diff --git a/plugins/naumi-enterprise/host.js b/plugins/naumi-enterprise/host.js
+index b344779..367867f 100644
+--- a/plugins/naumi-enterprise/host.js
++++ b/plugins/naumi-enterprise/host.js
+@@ -1,3 +1,4 @@
++import {installPluginMarket} from './plugin-market.js';
+ import {PRODUCT_VERSION} from './product-version.js';
+ import {installModelConnections} from './model-connections.js';
+ import {readFile} from 'node:fs/promises';
+@@ -15,6 +16,7 @@ export const inject=['webServer','connection'];
+ export function apply(ctx,config) {
+   installDesktopIdentity(ctx);
+   installModelConnections(ctx);
++  installPluginMarket(ctx);
+   installAgentDesktop(ctx);
+   installEgoBrowser(ctx);
+   installDingTalk(ctx);
+@@ -44,6 +46,8 @@ export function apply(ctx,config) {
+   assets.set('bot-chat-markdown.js','text/javascript; charset=utf-8');
+   assets.set('bot-groups.js','text/javascript; charset=utf-8');
+   assets.set('bot-groups.css','text/css; charset=utf-8');
++  assets.set('plugin-market.js','text/javascript; charset=utf-8');
++  assets.set('plugin-market.css','text/css; charset=utf-8');
+   assets.set('primary-bot.js','text/javascript; charset=utf-8');
+   assets.set('primary-bot.css','text/css; charset=utf-8');
+   assets.set('employee-experience-model.js','text/javascript; charset=utf-8');
+@@ -78,7 +82,7 @@ export function apply(ctx,config) {
+   }}));
+   ctx.on('webserver/index-inject',table=>{
+     table.push({kind:'global',name:'__NAUMI__',value:{collaborationOrigin,designOrigin,version:'0.3.0',product:'Naumi',productVersion:PRODUCT_VERSION}});
+-    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/bot-groups.css"><link rel="stylesheet" href="/naumi/assets/primary-bot.css"><link rel="stylesheet" href="/naumi/assets/desktop-updates.css">'});
++    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/bot-groups.css"><link rel="stylesheet" href="/naumi/assets/primary-bot.css"><link rel="stylesheet" href="/naumi/assets/plugin-market.css"><link rel="stylesheet" href="/naumi/assets/desktop-updates.css">'});
+     table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/product-identity.css"><link rel="stylesheet" href="/naumi/assets/model-connections.css"><link rel="stylesheet" href="/naumi/assets/im-settings.css"><link rel="stylesheet" href="/naumi/assets/employee-center.css"><link rel="stylesheet" href="/naumi/assets/employee-experience.css"><link rel="stylesheet" href="/naumi/assets/browser.css"><link rel="stylesheet" href="/naumi/assets/browser-native.css"><link rel="stylesheet" href="/naumi/assets/team-panel.css"><link rel="stylesheet" href="/naumi/assets/bot-sidebar.css"><link rel="stylesheet" href="/naumi/assets/bot-task.css"><link rel="stylesheet" href="/naumi/assets/bot-avatar.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
+   });
+   ctx.effect(()=>ctx.webServer.tapIndex(html=>html.replace(/<title>[^<]*<\/title>/i,'<title>Naumi</title>').replace(/<link[^>]+rel="(?:shortcut )?icon"[^>]*href="(?!\/naumi\/)[^"]*"[^>]*>/g,'')));
+diff --git a/plugins/naumi-enterprise/market-contract.js b/plugins/naumi-enterprise/market-contract.js
+new file mode 100644
+index 0000000..7567af4
+--- /dev/null
++++ b/plugins/naumi-enterprise/market-contract.js
+@@ -0,0 +1,35 @@
++import {createHash} from 'node:crypto';
++export const MARKET_PROTOCOL=1,MAX_PACKAGE_BYTES=2*1024*1024;
++export const fail=(code,status=400)=>{throw Object.assign(Error(code),{status});};
++export const digest=value=>createHash('sha256').update(typeof value==='string'||Buffer.isBuffer(value)?value:JSON.stringify(value)).digest('hex');
++export const text=(value,max=200,{empty=false}={})=>{if(typeof value!=='string'||value.length>max||(!empty&&!value.trim())||/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/u.test(value))fail('MARKET_INVALID_TEXT');return value.trim();};
++export function exact(value,keys){if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!keys.includes(k)))fail('MARKET_INVALID_REQUEST');return value;}
++export function slug(value){if(typeof value!=='string'||!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(value)||value.length>64)fail('MARKET_INVALID_SLUG');return value;}
++export function version(value){if(typeof value!=='string'||!/^(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})$/.test(value))fail('MARKET_INVALID_VERSION');return value;}
++export function uuid(value){if(typeof value!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value))fail('MARKET_OPERATION_ID_REQUIRED');return value;}
++export function filePath(value){if(typeof value!=='string'||value.length>240||!value||value.includes('\\')||value.startsWith('/')||value.split('/').some(p=>!p||p==='.'||p==='..'||/[<>:"|?*\x00-\x1f]/.test(p)||/[ .]$/.test(p)||/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(p)))fail('MARKET_INVALID_PATH');
++ if(/(?:^|\/)(?:\.env(?:\.|$)|\.git|\.dsh|node_modules|\.credentials|credentials(?:\.|$)|cookies|id_rsa|id_ed25519)|\.(?:pem|pfx|key)$/i.test(value)||['package.json','cordis.patch.yml','market-host.js','.naumi-market.json'].includes(value))fail('MARKET_PRIVATE_OR_RESERVED_FILE');return value;}
++export function fileBytes(file){return file.encoding==='base64'?Buffer.from(file.content,'base64'):Buffer.from(file.content,'utf8');}
++export function validatePackage(input){
++ exact(input,['schemaVersion','slug','title','summary','kind','version','description','changelog','capabilities','tags','entry','template','files']);if(input.schemaVersion!==1)fail('MARKET_PACKAGE_VERSION');
++ const value={schemaVersion:1,slug:slug(input.slug),title:text(input.title,80),summary:text(input.summary,180),kind:input.kind,version:version(input.version),description:text(input.description??'',20000,{empty:true}),changelog:text(input.changelog??'',4000,{empty:true})};
++ if(!['plugin','skill','workflow','bot-template'].includes(value.kind))fail('MARKET_INVALID_KIND');
++ if(!Array.isArray(input.capabilities)||input.capabilities.length>8||input.capabilities.some(c=>!['files-read','files-write','network','browser','commands'].includes(c)))fail('MARKET_CAPABILITIES_REQUIRED');value.capabilities=[...new Set(input.capabilities)].sort();
++ if(!Array.isArray(input.tags??[])||(input.tags??[]).length>5)fail('MARKET_INVALID_TAGS');value.tags=[...new Set((input.tags??[]).map(t=>text(t,20)))];
++ if(!Array.isArray(input.files)||input.files.length>100)fail('MARKET_INVALID_FILES');const names=new Set();value.files=input.files.map(f=>{exact(f,['path','content','encoding']);const p=filePath(f.path);if(names.has(p.toLowerCase()))fail('MARKET_DUPLICATE_FILE');names.add(p.toLowerCase());if(typeof f.content!=='string'||f.content.length>MAX_PACKAGE_BYTES||!['utf8','base64'].includes(f.encoding??'utf8'))fail('MARKET_INVALID_FILE');
++  const next={path:p,encoding:f.encoding??'utf8',content:f.content};if(next.encoding==='base64'&&(!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(next.content)))fail('MARKET_INVALID_ENCODING');
++  if((/-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{24,}|AKIA[A-Z0-9]{16})\b/.test(fileBytes(next).toString('utf8'))))fail('MARKET_SECRET_IN_PACKAGE');return next;}).sort((a,b)=>a.path.localeCompare(b.path,'en'));
++ for(const name of names){const parts=name.split('/');while(parts.length>1){parts.pop();if(names.has(parts.join('/')))fail('MARKET_FILE_DIRECTORY_COLLISION');}}
++ if(value.kind==='plugin'){value.entry=filePath(input.entry??'plugin.js');if(!/\.(?:mjs|js)$/.test(value.entry)||!value.files.some(f=>f.path===value.entry&&f.encoding==='utf8'))fail('MARKET_ENTRY_MISSING');}
++ if(['skill','workflow'].includes(value.kind)){const skill=value.files.find(f=>f.path==='SKILL.md'&&f.encoding==='utf8');if(!skill||!/^---\r?\n[\s\S]*?\bname:\s*\S+[\s\S]*?\bdescription:\s*\S+[\s\S]*?\r?\n---/m.test(skill.content))fail('MARKET_SKILL_MANIFEST_REQUIRED');}
++ if(value.kind==='bot-template'){exact(input.template,['name','kind','purpose']);if(!['agent','team'].includes(input.template.kind))fail('MARKET_INVALID_TEMPLATE');value.template={name:text(input.template.name,80),kind:input.template.kind,purpose:text(input.template.purpose,2000)};}
++ if(Buffer.byteLength(JSON.stringify(value))>MAX_PACKAGE_BYTES)fail('MARKET_PACKAGE_TOO_LARGE',413);return value;
++}
++export function packageMetadata(bundle){const {files,...metadata}=bundle;return metadata;}
++export function compilePackage(bundle,sha){
++ const name='@naumi-market/'+bundle.slug,generated={'package.json':JSON.stringify({name,version:bundle.version,type:'module',description:bundle.summary,main:bundle.kind==='plugin'?bundle.entry:'market-host.js',exports:{'.':bundle.kind==='plugin'?'./'+bundle.entry:'./market-host.js'},dsh:{bundle:{patch:'./cordis.patch.yml'},meta:{name:bundle.title,description:bundle.summary}},naumiMarket:{digest:sha,slug:bundle.slug,kind:bundle.kind},peerDependencies:{'@deepseek-ai/cordis':'~4.1.0',...(bundle.kind==='plugin'?{'@deepseek-ai/dsh-tools':'0.2.2-rc.1'}:{}),...(['skill','workflow'].includes(bundle.kind)?{'@deepseek-ai/dsh-skill-filesystem':'0.2.2-rc.1'}:{})}},null,2)+'\n',
++  'cordis.patch.yml':JSON.stringify([{insert:[{id:'naumi-market-'+bundle.slug,name}]}],null,2)+'\n'};
++ if(bundle.kind==='bot-template')generated['market-host.js']='export function apply(){}\n';
++ if(['skill','workflow'].includes(bundle.kind))generated['market-host.js']="import {apply as installSkills} from '@deepseek-ai/dsh-skill-filesystem';import {fileURLToPath} from 'node:url';export const inject=['skills'];export function apply(ctx){installSkills(ctx,{providerName:"+JSON.stringify('naumi-market-'+bundle.slug)+",includeDefaultRoots:false,bundledSkillDir:fileURLToPath(new URL('./skills/',import.meta.url)),watch:false});}\n";
++ return{...Object.fromEntries(bundle.files.map(f=>[(['skill','workflow'].includes(bundle.kind)?'skills/'+bundle.slug+'/':'')+f.path,fileBytes(f)])),...Object.fromEntries(Object.entries(generated).map(([p,c])=>[p,Buffer.from(c)]))};
++}
+diff --git a/plugins/naumi-enterprise/market-installer.js b/plugins/naumi-enterprise/market-installer.js
+new file mode 100644
+index 0000000..eb100f5
+--- /dev/null
++++ b/plugins/naumi-enterprise/market-installer.js
+@@ -0,0 +1,34 @@
++import fs from 'node:fs';import path from 'node:path';import {randomUUID} from 'node:crypto';import {validatePackage,compilePackage,digest,uuid,exact,fail} from './market-contract.js';
++function noLinks(home,target){const base=path.resolve(home),end=path.resolve(target);if(end!==base&&!end.startsWith(base+path.sep))fail('MARKET_CACHE_INTEGRITY');for(let p=end;;p=path.dirname(p)){try{if(fs.lstatSync(p).isSymbolicLink())fail('MARKET_CACHE_INTEGRITY');}catch(e){if(e.code!=='ENOENT')throw e;}if(p===base)break;}}
++const atomic=(file,value)=>{fs.mkdirSync(path.dirname(file),{recursive:true});const temp=file+'.'+randomUUID()+'.tmp';fs.writeFileSync(temp,JSON.stringify(value,null,2)+'\n',{mode:0o600});fs.renameSync(temp,file);};
++export class MarketInstaller{
++ constructor({home,manager,transport,idle=()=>true}){Object.assign(this,{home,manager,transport,idle});this.root=path.resolve(home,'naumi/market-cache');this.file=path.resolve(home,'naumi/market-installs.json');this.tail=Promise.resolve();try{this.value=JSON.parse(fs.readFileSync(this.file));if(this.value.version!==1||!this.value.installed||!this.value.operations)fail('MARKET_INSTALL_STATE_INVALID');}catch(e){if(e.code!=='ENOENT')throw e;this.value={version:1,installed:{},operations:{}};}}
++ save(value){noLinks(this.home,this.file);atomic(this.file,value);this.value=value;}
++ installed(){return structuredClone(this.value.installed);}
++ async observed(){const bundles=await this.manager.listBundles(),result=this.installed();for(const [id,record] of Object.entries(result)){const native=bundles.find(b=>b.name==='@naumi-market/'+record.current.slug&&b.installed);if(!native||native.version!==record.current.version)delete result[id];}return result;}
++ verifyCache(dir,sha){noLinks(this.home,dir);const file=path.join(dir,'.naumi-market.json');if(!fs.existsSync(file)||fs.lstatSync(dir).isSymbolicLink())fail('MARKET_CACHE_INTEGRITY');noLinks(this.home,file);const marker=JSON.parse(fs.readFileSync(file));if(marker.digest!==sha||!marker.files)fail('MARKET_CACHE_INTEGRITY');for(const [p,h]of Object.entries(marker.files)){const target=path.resolve(dir,p);noLinks(this.home,target);if(!target.startsWith(path.resolve(dir)+path.sep)||fs.lstatSync(target).isSymbolicLink()||digest(fs.readFileSync(target))!==h)fail('MARKET_CACHE_INTEGRITY');}return dir;}
++ cache(bundle,sha){if(digest(bundle)!==sha)fail('MARKET_PACKAGE_INTEGRITY');const dir=path.join(this.root,bundle.slug,bundle.version,sha),files=compilePackage(bundle,sha),marker=path.join(dir,'.naumi-market.json');noLinks(this.home,dir);if(fs.existsSync(dir)){this.verifyCache(dir,sha);
++  if(fs.lstatSync(dir).isSymbolicLink()||!fs.existsSync(marker)||JSON.parse(fs.readFileSync(marker)).digest!==sha)fail('MARKET_CACHE_CONFLICT');for(const [p,bytes]of Object.entries(files))if(digest(fs.readFileSync(path.join(dir,p)))!==digest(bytes))fail('MARKET_CACHE_INTEGRITY');return dir;
++ }fs.mkdirSync(this.root,{recursive:true});for(let p=this.root;p.startsWith(this.root);p=path.dirname(p))if(fs.existsSync(p)&&fs.lstatSync(p).isSymbolicLink())fail('MARKET_CACHE_CONFLICT');const temp=path.join(this.root,'stage-'+randomUUID());fs.mkdirSync(temp);try{for(const [p,bytes]of Object.entries(files)){const target=path.join(temp,p);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,bytes,{flag:'wx'});}fs.writeFileSync(path.join(temp,'.naumi-market.json'),JSON.stringify({digest:sha,files:Object.fromEntries(Object.entries(files).map(([p,b])=>[p,digest(b)]))}));fs.mkdirSync(path.dirname(dir),{recursive:true});fs.renameSync(temp,dir);}finally{if(fs.existsSync(temp))fs.rmSync(temp,{recursive:true});}return dir;}
++ perform(input){const run=this.tail.then(()=>this.apply(input));this.tail=run.catch(()=>{});return run;}
++ async apply(input){exact(input,['action','operationId','ticket','expectedDigest','capabilities','id','version']);uuid(input.operationId);if(!['install','rollback','uninstall'].includes(input.action))fail('MARKET_INSTALL_ACTION');const fingerprint=digest(input),old=this.value.operations[input.operationId];if(old&&old.fingerprint!==fingerprint)fail('MARKET_OPERATION_CONFLICT',409);if(old?.result){await this.report(input.operationId);return old.result;}if(!this.idle())fail('MARKET_RUNNING_TASKS',409);
++  const state=structuredClone(this.value);if(Object.keys(state.operations).length>=2000)fail('MARKET_INSTALL_HISTORY_FULL');state.operations[input.operationId]??={fingerprint,input,status:'pending'};this.save(state);
++  let release,dir,body;
++  if(input.action==='install'){
++   body=await this.transport.request('/api/plugin-market/v1/downloads/'+input.ticket);const bundle=validatePackage(body.package);if(body.digest!==input.expectedDigest||digest(bundle)!==body.digest)fail('MARKET_PACKAGE_INTEGRITY');if(JSON.stringify([...new Set(input.capabilities??[])].sort())!==JSON.stringify(bundle.capabilities))fail('MARKET_CAPABILITY_CONFIRMATION_REQUIRED');
++   const ticket=await this.transport.request('/api/plugin-market/v1/packages/'+input.id);if(ticket.slug!==bundle.slug||!ticket.versions.some(v=>v.version===bundle.version&&v.digest===body.digest))fail('MARKET_PACKAGE_INTEGRITY');
++   release={id:input.id,slug:bundle.slug,version:bundle.version,digest:body.digest,title:bundle.title,capabilities:bundle.capabilities,...(bundle.template?{template:bundle.template}:{})};dir=this.cache(bundle,body.digest);
++  }else{
++   const record=this.value.installed[input.id];if(!record)fail('MARKET_NOT_INSTALLED',404);release=input.action==='rollback'?record.history.find(v=>v.version===input.version):record.current;if(!release)fail('MARKET_ROLLBACK_NOT_CACHED');dir=path.join(this.root,release.slug,release.version,release.digest);this.verifyCache(dir,release.digest);
++  }
++  const name='@naumi-market/'+release.slug,bundles=await this.manager.listBundles(),native=bundles.find(b=>b.name===name&&b.installed),prior=this.value.installed[release.id],staged=structuredClone(this.value);staged.operations[input.operationId].previous??=native&&prior?{release:prior.current,enabled:native.enabled}:null;this.save(staged);
++  if(native&&!prior&&native.version===release.version&&typeof native.source==='string'&&path.resolve(native.source.replace(/^file:/,'')).toLowerCase()===path.resolve(dir).toLowerCase()){await this.commit(input,release,{application:'restart-required',changed:false},body);return this.value.operations[input.operationId].result;}if(native&&!prior)fail('MARKET_EXISTING_PACKAGE_UNMANAGED',409);if(native&&input.action!=='uninstall'&&native.version===release.version&&prior?.current.digest===release.digest){await this.commit(input,release,{application:prior.application??'applied',changed:false},body);return this.value.operations[input.operationId].result;}
++  if(!this.idle())fail('MARKET_RUNNING_TASKS',409);
++  if(native){const removed=await this.manager.removeBundle(name);if(removed.error||['failed','cancelled'].includes(removed.application))fail('MARKET_NATIVE_REMOVE_FAILED',409);}
++  if(input.action==='uninstall'){const next=structuredClone(this.value);delete next.installed[input.id];next.operations[input.operationId].result={id:input.id,application:'removed'};next.operations[input.operationId].status='complete';this.save(next);return next.operations[input.operationId].result;}
++  let result;try{result=await this.manager.installBundle(dir,{enabled:this.value.operations[input.operationId].previous?.enabled??true,saveExact:true,requestId:input.operationId});if(result.error||!['applied','restart-required'].includes(result.application))throw Error('MARKET_NATIVE_INSTALL_FAILED');}catch(error){const remaining=(await this.manager.listBundles()).find(b=>b.name===name&&b.installed);if(remaining){const removal=await this.manager.removeBundle(name);if(removal.error||['failed','cancelled'].includes(removal.application))fail('MARKET_RESTORE_REQUIRED',503);}const previous=this.value.operations[input.operationId].previous;if(previous){const p=previous.release;this.verifyCache(path.join(this.root,p.slug,p.version,p.digest),p.digest);const restore=await this.manager.installBundle(path.join(this.root,p.slug,p.version,p.digest),{enabled:previous.enabled,saveExact:true,requestId:input.operationId+'-restore'});if(restore.error||!['applied','restart-required'].includes(restore.application))fail('MARKET_RESTORE_REQUIRED',503);}fail('MARKET_NATIVE_INSTALL_FAILED',409);}
++  await this.commit(input,release,result,body);return this.value.operations[input.operationId].result;
++ }
++ async commit(input,release,result,body){const next=structuredClone(this.value),prior=next.installed[release.id],history=[...(prior?.history??[]),...(prior?.current?[prior.current]:[])].filter((v,i,a)=>v.digest!==release.digest&&a.findIndex(x=>x.digest===v.digest)===i).slice(-10);next.installed[release.id]={current:release,history,application:result.application};Object.assign(next.operations[input.operationId],{status:'complete',result:{id:release.id,version:release.version,application:result.application},...(body?{report:{ticket:body.ticket,digest:body.digest,operationId:input.operationId}}:{})});this.save(next);await this.report(input.operationId);}
++ async report(id){const report=this.value.operations[id]?.report;if(!report)return;try{await this.transport.request('/api/plugin-market/v1/installed',{method:'POST',body:report});const next=structuredClone(this.value);delete next.operations[id].report;this.save(next);}catch{}}
++}
+diff --git a/plugins/naumi-enterprise/market-native.js b/plugins/naumi-enterprise/market-native.js
+new file mode 100644
+index 0000000..30a8f25
+--- /dev/null
++++ b/plugins/naumi-enterprise/market-native.js
+@@ -0,0 +1,6 @@
++import fs from 'node:fs';import path from 'node:path';import {fail} from './market-contract.js';
++export class DesktopMarketTransport{
++ constructor({home=process.env.DSH_HOME,fetcher=fetch}={}){this.home=home;this.fetcher=fetcher;}
++ descriptor(){try{if(!this.home)return null;const file=path.join(this.home,'naumi-desktop-bridge.json');if(fs.lstatSync(file).isSymbolicLink())fail('MARKET_BRIDGE_INVALID');const value=JSON.parse(fs.readFileSync(file));if(!value.market)return null;if(value.version!==1||!Number.isInteger(value.port)||value.port<1||value.port>65535||!/^[a-f0-9]{64}$/.test(value.token)||value.market.protocolVersion!==1)fail('MARKET_BRIDGE_INVALID');return value;}catch(e){if(e.code==='ENOENT')return null;throw e;}}
++ async request(endpoint,{method='GET',body}={}){const d=this.descriptor();if(!d)fail('MARKET_LOGIN_REQUIRED',401);let response;try{response=await this.fetcher('http://127.0.0.1:'+d.port+'/market/request',{method:'POST',headers:{Authorization:'Bearer '+d.token,'Content-Type':'application/json'},body:JSON.stringify({endpoint,method,...(body===undefined?{}:{body:JSON.stringify(body)})}),redirect:'error',signal:AbortSignal.timeout(25000)});}catch{fail('MARKET_UNAVAILABLE_NO_REPLAY',503);}const raw=await response.text();if(raw.length>3*1024*1024+65536)fail('MARKET_RESPONSE_TOO_LARGE',503);let envelope;try{envelope=JSON.parse(raw);}catch{fail('MARKET_RESPONSE_INVALID',503);}if(!response.ok||!envelope.ok)fail(/^MARKET_/.test(envelope.error)?envelope.error:'MARKET_UNAVAILABLE_NO_REPLAY',503);let value;try{value=JSON.parse(envelope.data.body);}catch{fail('MARKET_RESPONSE_INVALID',503);}if(envelope.data.status<200||envelope.data.status>=300)fail(/^MARKET_/.test(value.error)?value.error:'MARKET_UNAVAILABLE',envelope.data.status);return value;}
++}
+diff --git a/plugins/naumi-enterprise/package.json b/plugins/naumi-enterprise/package.json
+index 006e83c..7396101 100644
+--- a/plugins/naumi-enterprise/package.json
++++ b/plugins/naumi-enterprise/package.json
+@@ -62,6 +62,10 @@
+     "desktop-enterprise.js",
+     "model-connections.js",
+     "product-version.js",
++    "plugin-market.js",
++    "market-contract.js",
++    "market-installer.js",
++    "market-native.js",
+     "model-specs.js",
+     "official-model-specs.json",
+     "im-gateway.js",
+diff --git a/plugins/naumi-enterprise/plugin-market.js b/plugins/naumi-enterprise/plugin-market.js
+new file mode 100644
+index 0000000..a0d3629
+--- /dev/null
++++ b/plugins/naumi-enterprise/plugin-market.js
+@@ -0,0 +1,11 @@
++import os from 'node:os';import path from 'node:path';import {DesktopMarketTransport} from './market-native.js';import {MarketInstaller} from './market-installer.js';import {MAX_PACKAGE_BYTES,fail} from './market-contract.js';
++export function installPluginMarket(ctx,{transport,home=process.env.DSH_HOME??path.join(os.homedir(),'.dsh')}={}){
++ const remote=transport??new DesktopMarketTransport({home});return ctx.inject(['pluginManager','agents'],scope=>{const installer=new MarketInstaller({home,manager:scope.pluginManager,transport:remote,idle:()=>!scope.agents.list().some(a=>a.status==='running')});
++ scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/plugin-market',handler:async(req,res)=>{res.setHeader('Content-Type','application/json');res.setHeader('Cache-Control','no-store');const send=(s,v)=>res.writeHead(s).end(JSON.stringify(v));try{const a=scope.connection.admit(req);if('rejection'in a){send(a.rejection,{error:'MARKET_OWNER_REQUIRED'});return;}if(a.peer.principal.kind!=='owner')fail('MARKET_OWNER_REQUIRED',403);
++  if(req.method==='GET'){const url=new URL(req.url,'http://localhost'),endpoint=url.searchParams.get('endpoint');if(!endpoint){send(200,{installed:await installer.observed(),available:!!remote.descriptor?.()});return;}if(!/^\/api\/plugin-market\/v1\/(?:me|packages(?:\/[a-f0-9-]{36})?|downloads\/[a-f0-9-]{36})(?:\?[^#]*)?$/.test(endpoint))fail('MARKET_REQUEST_FORBIDDEN',403);send(200,await remote.request(endpoint));return;}
++  if(req.method!=='POST')fail('MARKET_METHOD',405);if(req.headers['x-naumi-market']!=='1'||req.headers.origin&&![`http://${req.headers.host}`,`https://${req.headers.host}`].includes(req.headers.origin))fail('MARKET_SAME_ORIGIN_REQUIRED',403);
++  const chunks=[];let size=0;for await(const b of req){size+=b.length;if(size>MAX_PACKAGE_BYTES+8192)fail('MARKET_PACKAGE_TOO_LARGE',413);chunks.push(b);}let input;try{input=JSON.parse(Buffer.concat(chunks));}catch{fail('MARKET_INVALID_REQUEST');}
++  if(input.action==='remote'){if(Object.keys(input).some(k=>!['action','endpoint','body'].includes(k))||!/^\/api\/plugin-market\/v1\/(?:drafts|publish|visibility|download|installed|feedback)$/.test(input.endpoint))fail('MARKET_REQUEST_FORBIDDEN',403);send(200,await remote.request(input.endpoint,{method:'POST',body:input.body}));return;}
++  send(200,await installer.perform(input));
++ }catch(e){if(!res.headersSent)send(e.status??500,{error:/^MARKET_/.test(e.message)?e.message:'MARKET_UNAVAILABLE'});}}}));scope.effect(()=>async()=>{await installer.tail;});});
++}
+diff --git a/scripts/package-market.mjs b/scripts/package-market.mjs
+new file mode 100644
+index 0000000..a01e237
+--- /dev/null
++++ b/scripts/package-market.mjs
+@@ -0,0 +1,4 @@
++import fs from 'node:fs';import path from 'node:path';import {validatePackage,filePath,MAX_PACKAGE_BYTES} from '../plugins/naumi-enterprise/market-contract.js';
++const root=fs.realpathSync(path.resolve(process.argv[2]??'.')),manifest=JSON.parse(fs.readFileSync(path.join(root,'naumi.market.json'),'utf8'));if(!Array.isArray(manifest.files))throw Error('MANIFEST_FILES_REQUIRED');
++const files=[];for(const declared of manifest.files){const relative=filePath(typeof declared==='string'?declared:declared.path),target=path.resolve(root,relative);if(!target.startsWith(root+path.sep)||fs.lstatSync(target).isSymbolicLink()||!fs.realpathSync(target).startsWith(root+path.sep)||!fs.statSync(target).isFile())throw Error('SOURCE_FILE_OUTSIDE_PACKAGE');const bytes=fs.readFileSync(target);if(bytes.length>MAX_PACKAGE_BYTES)throw Error('SOURCE_FILE_TOO_LARGE');const binary=/\.(?:png|jpe?g|webp|gif|woff2?)$/i.test(relative);files.push({path:relative,encoding:binary?'base64':'utf8',content:bytes.toString(binary?'base64':'utf8')});}
++const bundle=validatePackage({...manifest,files}),out=path.resolve(process.argv[3]??path.join(root,bundle.slug+'-'+bundle.version+'.naumi-plugin.json'));if(fs.existsSync(out))throw Error('OUTPUT_ALREADY_EXISTS');fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,JSON.stringify(bundle,null,2)+'\n',{flag:'wx'});console.log('NAUMI_PACKAGE_READY files='+files.length+' output='+out);
+diff --git a/scripts/plugin-market-evidence.mjs b/scripts/plugin-market-evidence.mjs
+new file mode 100644
+index 0000000..8fe840f
+--- /dev/null
++++ b/scripts/plugin-market-evidence.mjs
+@@ -0,0 +1,48 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import assert from 'node:assert/strict';
++import {createHash,randomUUID} from 'node:crypto';
++import {execFileSync,spawnSync} from 'node:child_process';
++
++const root=process.cwd(),out=path.join(root,'evidence/plugin-market'),base=process.argv[2];
++if(!/^[a-f0-9]{40}$/.test(base??''))throw Error('BASE_SHA_REQUIRED');
++const hash=b=>createHash('sha256').update(b).digest('hex');
++const git=(...args)=>execFileSync('git',args,{cwd:root,stdio:['ignore','pipe','pipe']});
++const write=(p,b)=>{fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,b);};
++const paths=git('diff','--name-only',base,'HEAD').toString().trim().split('\n').filter(Boolean);
++assert(paths.length>20&&paths.every(p=>!p.startsWith('evidence/')&&!p.includes('..')),'UNEXPECTED_TASK_PATHS');
++const stage=path.join(root,'runtime/market-package-'+randomUUID());
++fs.mkdirSync(stage,{recursive:true});fs.mkdirSync(out,{recursive:true});
++const manifest=paths.map(p=>{
++ let original=null;try{original=git('show',base+':'+p);}catch{}
++ const modified=fs.readFileSync(path.join(root,p));write(path.join(stage,p),modified);
++ if(original)write(path.join(out,'original',p),original);
++ return{path:p,originalSHA256:original?hash(original):null,modifiedSHA256:hash(modified)};
++});
++write(path.join(out,'HASHES.json'),JSON.stringify({base,source:git('rev-parse','HEAD').toString().trim(),files:manifest},null,2)+'\n');
++write(path.join(out,'DIFF_FILE.patch'),git('diff','--binary',base,'HEAD','--',...paths));
++write(path.join(out,'rollback.mjs'),`import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash} from 'node:crypto';import {fileURLToPath} from 'node:url';
++const evidence=path.dirname(fileURLToPath(import.meta.url)),target=fs.realpathSync(process.argv[2]),marker=path.join(target,'.naumi-market-copy.json');assert(fs.existsSync(marker),'COPY_TARGET_REQUIRED');assert.equal(JSON.parse(fs.readFileSync(marker)).target,target,'COPY_TARGET_MISMATCH');const manifest=JSON.parse(fs.readFileSync(path.join(evidence,'HASHES.json'))).files,hash=b=>createHash('sha256').update(b).digest('hex');
++for(const m of manifest){const p=path.resolve(target,m.path);assert(p.startsWith(target+path.sep));for(let q=p;q!==target;q=path.dirname(q))if(fs.existsSync(q))assert(!fs.lstatSync(q).isSymbolicLink(),'LINKED_TARGET');if(fs.existsSync(p))assert([m.modifiedSHA256,m.originalSHA256].includes(hash(fs.readFileSync(p))),'COPY_CHANGED '+m.path);else assert.equal(m.originalSHA256,null,'ORIGINAL_MISSING');if(m.originalSHA256)assert.equal(hash(fs.readFileSync(path.join(evidence,'original',m.path))),m.originalSHA256);}
++for(const m of manifest){const p=path.join(target,m.path);if(m.originalSHA256){fs.mkdirSync(path.dirname(p),{recursive:true});fs.copyFileSync(path.join(evidence,'original',m.path),p);}else if(fs.existsSync(p))fs.unlinkSync(p);}
++for(const m of manifest){const p=path.join(target,m.path);assert.equal(fs.existsSync(p)?hash(fs.readFileSync(p)):null,m.originalSHA256);}console.log('ROLLBACK_PASS files='+manifest.length+' original_hashes=restored added_files=removed source_unchanged=1');\n`);
++write(path.join(out,'ROLLBACK.sh'),'#!/usr/bin/env sh\nset -eu\nif [ "$#" -ne 1 ]; then echo "Usage: ROLLBACK.sh COPY_DIRECTORY" >&2; exit 64; fi\nHERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec node "$HERE/rollback.mjs" "$1"\n');
++const pwsh='D:/DEV/PowerShell/pwsh.exe',zip=path.join(out,'MODIFIED_FILE.zip'),reopened=path.join(root,'runtime/market-reopened-'+randomUUID());
++execFileSync(pwsh,['-NoProfile','-Command',`$ErrorActionPreference='Stop'; Compress-Archive -Path '${stage.replaceAll("'","''")}/*' -DestinationPath '${zip.replaceAll("'","''")}' -Force; Expand-Archive -LiteralPath '${zip.replaceAll("'","''")}' -DestinationPath '${reopened.replaceAll("'","''")}'`],{windowsHide:true});
++for(const m of manifest)assert.equal(hash(fs.readFileSync(path.join(reopened,m.path))),m.modifiedSHA256);
++const copy=path.join(root,'runtime/market-rollback-'+randomUUID()),archive=path.join(root,'runtime/market-baseline-'+randomUUID()+'.tar');fs.mkdirSync(copy);
++execFileSync('git',['archive','--format=tar','--output='+archive,base,'desktop','plugins','package.json','scripts','tests/naumi-enterprise.test.mjs'],{cwd:root});
++execFileSync('tar',['-xf',archive,'-C',copy]);
++for(const m of manifest)write(path.join(copy,m.path),fs.readFileSync(path.join(root,m.path)));
++write(path.join(copy,'.naumi-market-copy.json'),JSON.stringify({target:fs.realpathSync(copy)}));
++fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');
++const rollback=spawnSync('D:/DEV/Git/bin/bash.exe',[path.join(out,'ROLLBACK.sh'),copy.replaceAll('\\','/')],{cwd:root,encoding:'utf8',windowsHide:true});
++write(path.join(out,'ROLLBACK.log'),(rollback.stdout??'')+(rollback.stderr??''));assert.equal(rollback.status,0,rollback.stderr);
++const tests=['desktop/tests/identity.test.cjs','desktop/tests/enterprise.test.cjs','tests/naumi-enterprise.test.mjs'];
++const restored=spawnSync(process.execPath,['--test',...tests],{cwd:copy,encoding:'utf8',windowsHide:true,timeout:120000});
++write(path.join(out,'ROLLBACK_TESTS.log'),(restored.stdout??'')+(restored.stderr??''));assert.equal(restored.status,0,restored.stderr);
++for(const m of manifest)assert.equal(hash(fs.readFileSync(path.join(root,m.path))),m.modifiedSHA256);
++const result={status:'PASS',base,source:git('rev-parse','HEAD').toString().trim(),files:manifest.length,zipSHA256:hash(fs.readFileSync(zip)),archiveReopened:true,rollbackCopy:copy,rollbackCommand:`D:/DEV/Git/bin/bash.exe evidence/plugin-market/ROLLBACK.sh ${copy.replaceAll('\\','/')}`,rollbackExit:rollback.status,restoredCommand:'node --test '+tests.join(' '),restoredExit:restored.status,restoredSummary:restored.stdout.match(/ℹ tests \d+[\s\S]*?ℹ fail \d+/)?.[0],sourceUnchanged:true};
++write(path.join(out,'PACKAGE.json'),JSON.stringify(result,null,2)+'\n');
++for(const file of ['MODIFIED_FILE.zip','DIFF_FILE.patch','ROLLBACK.sh','HASHES.json','PACKAGE.json'])assert(fs.readFileSync(path.join(out,file)).length>0);
++console.log('ARTIFACTS_PASS files='+manifest.length+' zip_reopened=1 rollback_exit=0 restored_tests=PASS source_unchanged=1');
+diff --git a/scripts/verify-plugin-market.mjs b/scripts/verify-plugin-market.mjs
+new file mode 100644
+index 0000000..8a75a89
+--- /dev/null
++++ b/scripts/verify-plugin-market.mjs
+@@ -0,0 +1,24 @@
++// Two accounts, one shared market authority, a real Harness/native plugin manager,
++// production native-session bridge with only the Chromium network I/O adapted.
++import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import {spawn} from 'node:child_process';import {randomUUID} from 'node:crypto';import {createRequire} from 'node:module';import assert from 'node:assert/strict';import {stringify} from 'yaml';import {chromium} from '../desktop/node_modules/playwright/index.mjs';import {MarketStore} from '../market/store.mjs';import {marketServer,canvasAuthentication} from '../market/server.mjs';
++const require=createRequire(import.meta.url),{startBridge}=require('../desktop/app/tools.cjs'),{MarketSession}=require('../desktop/app/market.cjs');
++const root=process.cwd(),out=path.join(root,'evidence/plugin-market'),temp=path.join(root,'runtime/market-check-'+randomUUID()),home=path.join(temp,'home'),profile=path.join(home,'profiles/web');fs.mkdirSync(path.join(profile,'node_modules/@naumi'),{recursive:true});fs.mkdirSync(out,{recursive:true});
++for(const[name,folder]of [['dsh-enterprise','naumi-enterprise'],['dsh-ui-layout','naumi-ui-layout'],['dsh-sidebar-browser','naumi-sidebar-browser']])fs.symlinkSync(path.join(root,'plugins',folder),path.join(profile,'node_modules/@naumi',name),'junction');fs.symlinkSync(path.join(root,'node_modules/@deepseek-ai'),path.join(profile,'node_modules/@deepseek-ai'),'junction');
++fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'naumi-market-check',private:true,dependencies:{'@naumi/dsh-enterprise':'file:'+path.join(root,'plugins/naumi-enterprise'),'@naumi/dsh-ui-layout':'file:'+path.join(root,'plugins/naumi-ui-layout'),'@naumi/dsh-sidebar-browser':'file:'+path.join(root,'plugins/naumi-sidebar-browser')},dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}}));fs.writeFileSync(path.join(home,'cordis.patch.yml'),stringify([{id:'ui-theme',config:{preference:'light'}},{id:'session-log-deepseek',disabled:true}]));fs.writeFileSync(path.join(profile,'cordis.patch.yml'),stringify([{id:'ui-settings-general',config:{welcomeNoticeVersion:'2026-09-28.1'}}]));
++const store=new MarketStore(path.join(temp,'shared/market.sqlite'));let handle;const authority=http.createServer((req,res)=>{if(req.url==='/api/auth/session'){const name=req.headers.cookie?.includes('nv_user=alice-fixture')?'Alice':req.headers.cookie?.includes('nv_user=bob-fixture')?'Bob':null;res.setHeader('Content-Type','application/json');res.end(JSON.stringify({user:name?{name,email:name.toLowerCase()+'@employees.test'}:null}));return;}handle(req,res);});await new Promise(r=>authority.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+authority.address().port;const shared=marketServer({store,authenticate:canvasAuthentication({origin,tenant:'company'})});handle=shared.listeners('request')[0];
++async function remote(endpoint,body,who='alice'){const r=await fetch(origin+'/api/plugin-market/v1'+endpoint,{headers:{cookie:'nv_user='+who+'-fixture','x-naumi-market':'1',origin,'Content-Type':'application/json'},...body?{method:'POST',body:JSON.stringify(body)}:{}}),v=await r.json();assert(r.ok,JSON.stringify(v));return v;}
++const bundle=(version='1.0.0',slug='shared-organizer')=>({schemaVersion:1,slug,title:slug==='shared-organizer'?'资料整理助手':'我的排期工具',summary:'按项目整理资料，支持团队复用',kind:'plugin',version,description:'选择工作目录后整理资料。\n由创作者维护版本与更新记录。',changelog:'版本 '+version,capabilities:[],tags:['效率'],entry:'plugin.js',files:[{path:'plugin.js',content:"export function apply(ctx){ctx.on('webserver/index-inject',table=>table.push({kind:'global',name:'__NAUMI_MARKET_TEST__',value:"+JSON.stringify(version)+"}));}\n"}]});
++async function publish(value){const d=await remote('/drafts',{operationId:randomUUID(),expectedRevision:0,package:value});return remote('/publish',{operationId:randomUUID(),draftId:d.id,expectedRevision:d.revision});}
++const first=await publish(bundle()),identity={active:{origin},client:{session:{fetch:(url,options)=>fetch(url,{...options,headers:{...options.headers,cookie:'nv_user=bob-fixture'}})}}},market=new MarketSession({identity:()=>identity}),bridge=await startBridge({home,guests:{},window:{},market});
++const sock=http.createServer();await new Promise(r=>sock.listen(0,'127.0.0.1',r));const port=sock.address().port;await new Promise(r=>sock.close(r));const base='http://127.0.0.1:'+port,child=spawn(process.execPath,[path.join(root,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'web','--host','127.0.0.1','--port',String(port),'--no-open'],{cwd:root,windowsHide:true,env:{...process.env,DSH_HOME:home,DSH_TELEMETRY_MODE:'DISABLED'}});let output='',browser;child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);const checks=[],check=(name,value)=>{assert(value,name);checks.push(name);console.log('MARKET_PASS '+name);};
++try{let launch;for(let i=0;i<200;i++){launch=output.match(new RegExp(base.replaceAll('.','\\.')+'/?\\?token=[A-Za-z0-9_~.%-]+'))?.[0];if(launch)break;if(child.exitCode!==null)throw Error('HARNESS_BOOT_FAILED');await new Promise(r=>setTimeout(r,300));}assert(launch,'HARNESS_BOOT_TIMEOUT');
++ const owner=await fetch(launch,{redirect:'manual'}),cookie=owner.headers.getSetCookie().map(s=>s.split(';')[0]).join('; ');const local=async body=>{const r=await fetch(base+'/naumi/plugin-market',{headers:{cookie,'Content-Type':'application/json','x-naumi-market':'1'},...body?{method:'POST',body:JSON.stringify(body)}:{}}),v=await r.json();assert(r.ok,JSON.stringify(v));return v;};
++ browser=await chromium.launch({headless:true,channel:'chrome'});const context=await browser.newContext({viewport:{width:1360,height:900},colorScheme:'light'}),page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(launch);await page.getByRole('button',{name:'插件',exact:true}).click();await page.getByRole('tab',{name:'市场',exact:true}).click();await page.locator('.nmk-card').filter({hasText:'资料整理助手'}).waitFor();check('existing_plugin_entry_and_native_tabs',await page.getByRole('tab',{name:'已安装',exact:true}).isVisible()&&await page.getByRole('tab',{name:'我的作品',exact:true}).isVisible());check('verified_creator_and_zero_initial_stats',await page.locator('.nmk-card').filter({hasText:'资料整理助手'}).getByRole('button',{name:'Alice',exact:true}).isVisible()&&(await remote('/packages/'+first.id)).stats.downloads===0);
++ await page.locator('.nmk-card').filter({hasText:'资料整理助手'}).getByRole('button',{name:'查看',exact:true}).click();const detail=page.getByRole('dialog',{name:'资料整理助手',exact:true});await detail.waitFor();check('install_requires_explicit_confirmation',await detail.getByRole('button',{name:'安装',exact:true}).isDisabled());await detail.getByRole('checkbox').check();await detail.getByRole('button',{name:'安装',exact:true}).click();await page.waitForFunction(()=>!!document.querySelector('.nmk-notice')||[...document.querySelectorAll('[role=alert]')].some(e=>e.textContent.includes('安装未完成')),{},{timeout:180000});
++ const state=await local();if(!state.installed[first.id]){fs.writeFileSync(path.join(out,'INSTALL-FAILURE.json'),JSON.stringify({state,body:await page.locator('.nmk').innerText(),output:output.replace(/token=[A-Za-z0-9_~.%-]+/g,'token=REDACTED')},null,2));throw Error('NATIVE_INSTALL_NOT_CONFIRMED');}
++ check('real_native_plugin_installed',state.installed[first.id].current.version==='1.0.0');const stats=await remote('/packages/'+first.id);check('served_download_dedup_and_unique_installer',stats.stats.downloads===1&&stats.stats.installUsers===1);check('native_activation_observed',state.installed[first.id].application==='applied'||state.installed[first.id].application==='restart-required');
++ await detail.getByRole('button',{name:'关闭详情'}).click();await page.getByRole('tab',{name:'我的作品',exact:true}).click();await page.getByRole('button',{name:'发布作品',exact:true}).first().click();const publisher=page.getByRole('dialog',{name:'发布作品',exact:true}),file=path.join(temp,'bob.naumi-plugin.json');fs.writeFileSync(file,JSON.stringify(bundle('1.0.0','my-planner')));await publisher.locator('input[type=file]').setInputFiles(file);await publisher.getByRole('button',{name:'发布',exact:true}).click();await publisher.waitFor({state:'hidden'});const catalog=await remote('/packages'),bob=catalog.items.find(p=>p.slug==='my-planner');check('second_employee_publish_visible_to_first',bob.author.name==='Bob'&&catalog.items.some(p=>p.author.name==='Alice'));
++ await page.getByRole('tab',{name:'市场',exact:true}).click();await page.locator('.nmk-card').filter({hasText:'资料整理助手'}).waitFor();for(const width of [1360,580,360]){await page.setViewportSize({width,height:900});check('market_responsive_'+width,await page.locator('.nmk').evaluate(el=>el.scrollWidth<=el.clientWidth+2));}await page.setViewportSize({width:1360,height:900});await page.screenshot({path:path.join(out,'market.png')});check('no_page_errors',errors.length===0);
++ const second=await publish(bundle('2.0.0')),ticket=await remote('/download',{operationId:randomUUID(),id:first.id,version:'2.0.0'},'bob');await remote('/downloads/'+ticket.ticket,undefined,'bob');const upgraded=await local({action:'install',operationId:randomUUID(),id:first.id,ticket:ticket.ticket,expectedDigest:second.digest,capabilities:[]});check('native_upgrade_preserves_managed_identity',upgraded.version==='2.0.0');const rolled=await local({action:'rollback',operationId:randomUUID(),id:first.id,version:'1.0.0'});check('real_native_cached_rollback',rolled.version==='1.0.0');check('install_users_not_inflated_by_upgrade',(await remote('/packages/'+first.id)).stats.installUsers===1);
++ fs.writeFileSync(path.join(out,'INTEGRATION.json'),JSON.stringify({status:'PASS',checks,errors,sharedAuthority:true,accounts:2,realNativeInstall:true,realNativeUpgrade:true,realNativeRollback:true,inferenceCalls:0,productionAccountWrites:0},null,2)+'\n');console.log('MARKET_INTEGRATION checks='+checks.length+' page_errors=0 native_install=PASS upgrade=PASS rollback=PASS');
++}finally{await browser?.close();child.kill();await new Promise(r=>child.exitCode!==null?r():child.once('close',r));await bridge.close();authority.closeAllConnections();await new Promise(r=>authority.close(r));store.close();fs.writeFileSync(path.join(out,'HARNESS.log'),output.replace(/token=[A-Za-z0-9_~.%-]+/g,'token=REDACTED'));}
+diff --git a/tests/desktop-update-ui.test.mjs b/tests/desktop-update-ui.test.mjs
+index d0fa78c..0d1ac80 100644
+--- a/tests/desktop-update-ui.test.mjs
++++ b/tests/desktop-update-ui.test.mjs
+@@ -51,9 +51,10 @@ test('actual native gate atomically quiesces owned backend and fails closed on b
+  const main=fs.readFileSync('desktop/app/main.cjs','utf8');
+  const gate=main.slice(main.indexOf('async function canInstallUpdate()'),main.indexOf('async function showUpdateNotice'));
+  const maintenance=main.slice(main.indexOf('async function performMaintenance('),main.indexOf('function isAlive('));
+- const calls=[],ctx={closing:false,booting:false,connecting:false,bridge:{runtime:{queues:new Map()}},enterprise:{running:0},settings:{isolated:true},backend:{owned:true},maintenanceTicket:null,maintenanceUntil:0,maintenanceBlocked:()=>false,randomUUID:()=> 'fixture',maintenanceRequest:async(...args)=>{calls.push(args);}};
++ const calls=[],ctx={closing:false,booting:false,connecting:false,bridge:{runtime:{queues:new Map()}},enterprise:{running:0},market:{running:0},settings:{isolated:true},backend:{owned:true},maintenanceTicket:null,maintenanceUntil:0,maintenanceBlocked:()=>false,randomUUID:()=> 'fixture',maintenanceRequest:async(...args)=>{calls.push(args);}};
+  vm.createContext(ctx);vm.runInContext(gate+maintenance,ctx);
+  ctx.enterprise.running=1;assert.equal((await ctx.canInstallUpdate()).ok,false);assert.equal(calls.length,0);ctx.enterprise.running=0;
++ ctx.market.running=1;assert.equal((await ctx.canInstallUpdate()).ok,false);assert.equal(calls.length,0);ctx.market.running=0;
+  ctx.backend.owned=false;assert.equal((await ctx.canInstallUpdate()).ok,false);assert.equal(calls.length,0);ctx.backend.owned=true;
+  const accepted=await ctx.canInstallUpdate();assert.equal(accepted.ok,true);assert.equal(calls[0][1],'quiesce');await accepted.release();assert.equal(calls[1][1],'resume');assert.equal(ctx.maintenanceTicket,null);
+  ctx.maintenanceRequest=async()=>{throw Error('INSTALL_RUNNING_TASKS');};assert.equal((await ctx.canInstallUpdate()).ok,false);assert.equal(ctx.maintenanceTicket,null);
+diff --git a/tests/naumi-plugin-market.test.mjs b/tests/naumi-plugin-market.test.mjs
+new file mode 100644
+index 0000000..78b8ef7
+--- /dev/null
++++ b/tests/naumi-plugin-market.test.mjs
+@@ -0,0 +1,30 @@
++import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {randomUUID} from 'node:crypto';
++import {MarketStore} from '../market/store.mjs';import {marketServer,canvasAuthentication} from '../market/server.mjs';import {MarketInstaller} from '../plugins/naumi-enterprise/market-installer.js';import {validatePackage,compilePackage,digest} from '../plugins/naumi-enterprise/market-contract.js';
++const a={id:'alice',tenant:'company',name:'Alice'},b={id:'bob',tenant:'company',name:'Bob'},c={id:'eve',tenant:'other',name:'Eve'};
++export const sample=(v='1.0.0')=>({schemaVersion:1,slug:'employee-tool',title:'员工工具',summary:'整理本地资料',kind:'plugin',version:v,description:'真实作品说明',changelog:'第一版',capabilities:['files-read'],tags:['资料'],entry:'plugin.js',files:[{path:'plugin.js',content:'export function apply(ctx){}\n'}]});
++function fixture(t){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-market-')),store=new MarketStore(path.join(dir,'market.sqlite'));t.after(()=>{store.close();assert(dir.startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(dir,{recursive:true,force:true});});const publish=(actor=a,v='1.0.0')=>{const draft=store.saveDraft(actor,{operationId:randomUUID(),expectedRevision:0,package:sample(v)});return store.publish(actor,{operationId:randomUUID(),draftId:draft.id,expectedRevision:draft.revision});};return{dir,store,publish};}
++test('server owns creator identity, immutable releases and shared visibility between employees',t=>{const f=fixture(t),p=f.publish();assert.equal(f.store.list(b).items[0].author.name,'Alice');assert.equal(f.store.detail(b,p.id).version,'1.0.0');assert.throws(()=>f.publish(a),/MARKET_VERSION_IMMUTABLE/);assert.throws(()=>f.publish(b),/MARKET_AUTHOR_REQUIRED/);assert.equal(f.store.list(c).items.length,0);assert.throws(()=>f.store.detail(c,p.id),/MARKET_NOT_FOUND/);f.publish(a,'2.0.0');assert.equal(f.store.detail(b,p.id).versions.length,2);});
++test('drafts use author and revision CAS; retries are durable and cannot change payload',t=>{const f=fixture(t),input={operationId:randomUUID(),expectedRevision:0,package:sample()},d=f.store.saveDraft(a,input);assert.deepEqual(f.store.saveDraft(a,input),d);assert.throws(()=>f.store.saveDraft(a,{...input,package:sample('2.0.0')}),/MARKET_OPERATION_CONFLICT/);assert.throws(()=>f.store.saveDraft(b,{...input,operationId:randomUUID(),id:d.id,expectedRevision:d.revision}),/MARKET_AUTHOR_REQUIRED/);assert.throws(()=>f.store.saveDraft(a,{...input,operationId:randomUUID(),id:d.id}),/MARKET_DRAFT_CONFLICT/);assert.equal(f.store.list(b,{mine:true}).drafts.length,0);});
++test('download counts only delivered responses once; installation users deduplicate versions and retry',t=>{const f=fixture(t),p=f.publish(),input={operationId:randomUUID(),id:p.id,version:p.version},download=f.store.download(b,input);assert.equal(f.store.stats(p.id).downloads,0);assert.deepEqual(f.store.download(b,input),download);const body=f.store.downloadBody(b,download.ticket);assert.equal(digest(body.package),body.digest);assert.throws(()=>f.store.installed(b,{operationId:randomUUID(),ticket:download.ticket,digest:body.digest}),/RECEIPT_INVALID/);f.store.served(b,download.ticket);f.store.served(b,download.ticket);assert.equal(f.store.stats(p.id).downloads,1);for(let i=0;i<3;i++)f.store.installed(b,{operationId:randomUUID(),ticket:download.ticket,digest:body.digest});assert.equal(f.store.stats(p.id).installUsers,1);assert.throws(()=>f.store.downloadBody(a,download.ticket),/DOWNLOAD_NOT_FOUND/);});
++test('only installed employees review, author cannot self-score and withdraw preserves history',t=>{const f=fixture(t),p=f.publish();assert.throws(()=>f.store.feedback(b,{operationId:randomUUID(),id:p.id,rating:5}),/INSTALL_REQUIRED/);assert.throws(()=>f.store.feedback(a,{operationId:randomUUID(),id:p.id,rating:5}),/SELF_REVIEW/);const d=f.store.download(b,{operationId:randomUUID(),id:p.id,version:p.version});f.store.served(b,d.ticket);f.store.installed(b,{operationId:randomUUID(),ticket:d.ticket,digest:d.digest});f.store.feedback(b,{operationId:randomUUID(),id:p.id,rating:5,comment:'好用',favorite:true});assert.equal(f.store.detail(a,p.id).stats.rating.mean,5);assert.throws(()=>f.store.visibility(b,{operationId:randomUUID(),id:p.id,visibility:'withdrawn'}),/AUTHOR_REQUIRED/);f.store.visibility(a,{operationId:randomUUID(),id:p.id,visibility:'withdrawn'});assert.equal(f.store.list(b).items.length,0);assert.equal(f.store.detail(a,p.id).versions.length,1);});
++test('package rejects private files, traversal, case collisions, scripts and secret literals',()=>{for(const file of ['../x','C:/x','a\\b','.env','.git/config','node_modules/a.js','package.json','CON.txt'])assert.throws(()=>validatePackage({...sample(),files:[{path:file,content:'x'}]}));assert.throws(()=>validatePackage({...sample(),author:'forged'}));assert.throws(()=>validatePackage({...sample(),files:[{path:'plugin.js',content:'x'},{path:'PLUGIN.js',content:'y'}]}),/DUPLICATE_FILE/);assert.throws(()=>validatePackage({...sample(),files:[{path:'plugin.js',content:'-----BEGIN PRIVATE KEY-----'}]}),/SECRET/);const bundle=validatePackage(sample()),files=compilePackage(bundle,digest(bundle));assert(!JSON.parse(files['package.json']).scripts);assert(JSON.parse(files['cordis.patch.yml'])[0].insert[0].id.startsWith('naumi-market-'));});
++test('workflow/skill packages reuse native filesystem skill provider and templates remain typed data',()=>{const skill=validatePackage({...sample(),kind:'skill',files:[{path:'SKILL.md',content:'---\nname: employee-tool\ndescription: test\n---\nUse existing tools.'}]});const files=compilePackage(skill,digest(skill));assert(files['skills/employee-tool/SKILL.md']);assert(files['market-host.js'].toString().includes('@deepseek-ai/dsh-skill-filesystem'));const template=validatePackage({...sample(),kind:'bot-template',template:{name:'新员工',kind:'agent',purpose:'整理资料'}});assert.equal(template.template.name,'新员工');});
++test('real HTTP enforces account and same-origin; author is not accepted from request fields',async t=>{const f=fixture(t),server=marketServer({store:f.store,authenticate:async req=>{if(req.headers.cookie==='alice')return a;if(req.headers.cookie==='bob')return b;throw Object.assign(Error('MARKET_AUTH_REQUIRED'),{status:401});}});await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>{server.closeAllConnections();return new Promise(r=>server.close(r));});const url='http://127.0.0.1:'+server.address().port;assert.equal((await fetch(url+'/api/plugin-market/v1/me')).status,401);assert.equal((await fetch(url+'/api/plugin-market/v1/drafts',{method:'POST',headers:{cookie:'alice'},body:'{}'})).status,403);const p=f.publish();const r=await fetch(url+'/api/plugin-market/v1/packages',{headers:{cookie:'bob'}});assert.equal((await r.json()).items[0].id,p.id);assert.equal((await fetch(url+'/api/plugin-market/v1/drafts',{method:'POST',headers:{cookie:'alice','x-naumi-market':'1','Content-Type':'application/json',Origin:'http://foreign'},body:'{}'})).status,403);});
++test('Canvas identity is revalidated server-side and public identity never trusts client role',async()=>{let live=true;const verify=canvasAuthentication({origin:'https://accounts.test',tenant:'company',fetcher:async(url,options)=>{assert.equal(url,'https://accounts.test/api/auth/session');assert.equal(options.headers.cookie,'nv_user=real');return Response.json({user:live?{email:'Alice@Company.test',name:'Alice',role:'admin'}:null});}});const actor=await verify({headers:{cookie:'nv_user=real'}});assert.equal(actor.name,'Alice');assert.equal(actor.moderator,false);assert(!JSON.stringify(actor).includes('Alice@'));live=false;await assert.rejects(verify({headers:{cookie:'nv_user=real'}}),/AUTH_REQUIRED/);});
++function installerFixture(t){const f=fixture(t),p=f.publish(),native=new Map(),calls=[],transport={async request(endpoint,{body}={}){if(endpoint.includes('/downloads/'))return f.store.downloadBody(b,endpoint.split('/').at(-1));if(endpoint.includes('/packages/'))return f.store.detail(b,p.id);if(endpoint.endsWith('/installed'))return f.store.installed(b,body);throw Error('UNKNOWN');}},manager={failVersion:null,async listBundles(){return[...native.values()];},async removeBundle(name){calls.push('remove');native.delete(name);return{application:'applied'};},async installBundle(dir,options){const m=JSON.parse(fs.readFileSync(path.join(dir,'package.json')));calls.push(m.version);if(m.version===this.failVersion)return{application:'failed'};native.set(m.name,{name:m.name,version:m.version,installed:true,enabled:options.enabled,source:'file:'+dir});return{application:'applied'};}};const installer=new MarketInstaller({home:f.dir,manager,transport}),input=v=>{const d=f.store.download(b,{operationId:randomUUID(),id:p.id,version:v});f.store.served(b,d.ticket);return{action:'install',operationId:randomUUID(),ticket:d.ticket,id:p.id,expectedDigest:d.digest,capabilities:['files-read']};};return{...f,p,native,calls,manager,transport,installer,input};}
++test('installer uses native package manager and a confirmed digest; repeat never reinstalls or double counts',async t=>{const f=installerFixture(t),input=f.input('1.0.0');await f.installer.perform(input);await f.installer.perform(input);assert.deepEqual(f.calls,['1.0.0']);assert.equal(f.store.stats(f.p.id).installUsers,1);assert(f.installer.installed()[f.p.id]);});
++test('failed upgrade restores prior native package; cached rollback and uninstall preserve other packages',async t=>{const f=installerFixture(t);await f.installer.perform(f.input('1.0.0'));f.publish(a,'2.0.0');f.manager.failVersion='2.0.0';await assert.rejects(f.installer.perform(f.input('2.0.0')),/NATIVE_INSTALL_FAILED/);assert.equal(f.native.values().next().value.version,'1.0.0');f.manager.failVersion=null;await f.installer.perform(f.input('2.0.0'));await f.installer.perform({action:'rollback',operationId:randomUUID(),id:f.p.id,version:'1.0.0'});assert.equal(f.native.values().next().value.version,'1.0.0');await f.installer.perform({action:'uninstall',operationId:randomUUID(),id:f.p.id});assert.equal(f.native.size,0);});
++test('permission confirmation, tampered bytes and running tasks reject before native install',async t=>{const f=installerFixture(t),input=f.input('1.0.0');await assert.rejects(f.installer.perform({...input,capabilities:[]}),/CAPABILITY_CONFIRMATION/);assert.equal(f.calls.length,0);f.installer.idle=()=>false;await assert.rejects(f.installer.perform({...f.input('1.0.0')}),/RUNNING_TASKS/);assert.equal(f.calls.length,0);});
++
++test('native installed tab remains authoritative when managed package is removed outside market',async t=>{const f=installerFixture(t);await f.installer.perform(f.input('1.0.0'));assert((await f.installer.observed())[f.p.id]);await f.manager.removeBundle('@naumi-market/employee-tool');assert.equal((await f.installer.observed())[f.p.id],undefined);assert(f.installer.installed()[f.p.id],'cached rollback metadata remains');});
++test('installation serializes concurrent retries and durable receipt survives recreation',async t=>{const f=installerFixture(t),input=f.input('1.0.0');await Promise.all([f.installer.perform(input),f.installer.perform(input)]);assert.deepEqual(f.calls,['1.0.0']);const reopened=new MarketInstaller({home:f.dir,manager:f.manager,transport:f.transport});await reopened.perform(input);assert.deepEqual(f.calls,['1.0.0']);assert.equal(f.store.stats(f.p.id).installUsers,1);});
++test('receipt outage retains outbox and retry confirms exactly one installation',async t=>{const f=installerFixture(t),input=f.input('1.0.0'),request=f.transport.request;let failed=true;f.transport.request=async function(endpoint,options){if(failed&&endpoint.endsWith('/installed'))throw Error('offline');return request.call(this,endpoint,options);};await f.installer.perform(input);assert.equal(f.store.stats(f.p.id).installUsers,0);assert(f.installer.value.operations[input.operationId].report);failed=false;await f.installer.perform(input);assert.equal(f.store.stats(f.p.id).installUsers,1);assert.deepEqual(f.calls,['1.0.0']);assert.equal(f.installer.value.operations[input.operationId].report,undefined);});
++test('tampered server package rejects before native changes',async t=>{const f=installerFixture(t),input=f.input('1.0.0'),request=f.transport.request;f.transport.request=async function(endpoint,options){const value=await request.call(this,endpoint,options);return endpoint.includes('/downloads/')?{...value,package:{...value.package,title:'tampered'}}:value;};await assert.rejects(f.installer.perform(input),/PACKAGE_INTEGRITY/);assert.equal(f.calls.length,0);});
++test('file-versus-directory collisions are rejected at publish validation',()=>{assert.throws(()=>validatePackage({...sample(),files:[...sample().files,{path:'data',content:'file'},{path:'data/child.txt',content:'child'}]}),/FILE_DIRECTORY_COLLISION/);});
++test('identity adapter rejects unencrypted remote origin, malformed identity, large payload and upstream outage',async()=>{
++ assert.throws(()=>canvasAuthentication({origin:'http://accounts.test'}),/AUTH_ORIGIN_INVALID/);
++ for(const value of [{user:{email:'bad email@company'}},{user:{email:'a'.repeat(255)+'@company'}}])await assert.rejects(canvasAuthentication({origin:'https://accounts.test',fetcher:async()=>Response.json(value)})({headers:{cookie:'test'}}),/AUTH_REQUIRED/);
++ await assert.rejects(canvasAuthentication({origin:'https://accounts.test',fetcher:async()=>new Response('x'.repeat(65537),{headers:{'content-type':'application/json'}})})({headers:{cookie:'test'}}),/IDENTITY_INVALID/);
++ await assert.rejects(canvasAuthentication({origin:'https://accounts.test',fetcher:async()=>new Response('{}',{status:503})})({headers:{cookie:'test'}}),{status:503});
++});
++test('cache rejects linked ancestor directories without writing outside the account home',async t=>{const f=installerFixture(t),outside=path.join(f.dir,'outside');fs.mkdirSync(outside);fs.mkdirSync(f.installer.root,{recursive:true});fs.symlinkSync(outside,path.join(f.installer.root,'employee-tool'),'junction');await assert.rejects(f.installer.perform(f.input('1.0.0')),/CACHE_INTEGRITY/);assert.deepEqual(fs.readdirSync(outside),[]);assert.equal(f.calls.length,0);});
