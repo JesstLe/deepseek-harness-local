@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('naumiDesktop',{
   resumeWorkspace:()=>ipcRenderer.invoke('naumi:connection-resume'),
   updateState:()=>ipcRenderer.invoke('naumi:update-state'),
   checkUpdates:()=>ipcRenderer.invoke('naumi:update-check'),
+  installUpdate:()=>ipcRenderer.invoke('naumi:update-install'),
   onUpdateState:listener=>subscribe('naumi:update-state',listener),
   openIdentityRegistration:origin=>ipcRenderer.invoke('naumi:identity-register',origin),
   identityState:()=>ipcRenderer.invoke('naumi:identity-state'),

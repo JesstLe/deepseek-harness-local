@@ -47,6 +47,14 @@ function argValue(name) {
   return index >= 0 ? process.argv[index + 1] : undefined;
 }
 
+export function releaseCommands({existing,tag,notesFile,installer,manifest,prerelease=false}) {
+  const repo=['--repo',REPO];
+  return existing ? [
+    ['release','edit',tag,...repo,'--notes-file',notesFile],
+    ['release','upload',tag,...repo,installer,manifest,'--clobber'],
+  ] : [['release','create',tag,...repo,'--title','Naumi Desktop '+tag,'--notes-file',notesFile,...(prerelease?['--prerelease']:[]),installer,manifest]];
+}
+
 function run(command, args, {cwd = root, env} = {}) {
   const shell = process.platform === 'win32' && /\.cmd$/i.test(command);
   const result = spawnSync(command, args, {cwd, env, stdio: 'inherit', shell});
@@ -81,10 +89,7 @@ function main() {
   const tag = 'v' + version;
   const ghArgs = ['--repo', REPO];
   const existing = capture('gh', ['release', 'view', tag, ...ghArgs]);
-  const common = existing.ok
-    ? ['release', 'edit', tag, ...ghArgs, '--notes-file', notesFile, String(installer), String(manifest), '--clobber']
-    : ['release', 'create', tag, ...ghArgs, '--title', 'Naumi Desktop ' + tag, '--notes-file', notesFile, ...(args.includes('--prerelease') ? ['--prerelease'] : []), String(installer), String(manifest)];
-  run('gh', common);
+  for(const command of releaseCommands({existing:existing.ok,tag,notesFile,installer,manifest,prerelease:args.includes('--prerelease')}))run('gh',command);
   const size = (fs.statSync(installer).size / 1024 / 1024).toFixed(1);
   console.log(`RELEASE ${tag} artifacts=Naumi-Setup-${version}-x64.exe(${size}MB)+latest.yml(with releaseNotes) feed=github:${REPO}`);
 }

@@ -1,0 +1,64 @@
+NAUMI DESKTOP UPDATE ENTRY — VERIFIED
+Changed branch: codex/desktop-update-entry -> main
+Baseline: 7f823fe361d082635684c135ce5fdfe3b2e3db18
+Changed fields: sidebar.footer.action / naumi-updates, settings-left + update-right same row; naumiDesktop.installUpdate / naumi:update-install; update.lastChecked; autoInstallOnAppQuit=false; async signed quiesce before install.
+Files: 17 task paths. Original and modified SHA256 values: manifest.json. Originals retained in original/ and MODIFIED_FILE.zip. Current source retains modified behavior.
+
+ARTIFACTS
+E:/Workspace/naumi-desktop/evidence/desktop-updates/MODIFIED_FILE.zip
+E:/Workspace/naumi-desktop/evidence/desktop-updates/DIFF_FILE.patch
+E:/Workspace/naumi-desktop/evidence/desktop-updates/VERIFICATION.txt
+E:/Workspace/naumi-desktop/evidence/desktop-updates/ROLLBACK.sh
+
+BASELINE
+Command: node --test desktop/tests/updates.test.cjs
+CWD: E:/Workspace/naumi-desktop-updates (unmodified baseline)
+Input: baseline updater and controlled fixtures, no real installation.
+Literal result:
+ℹ tests 10
+ℹ pass 10
+ℹ fail 0
+Exit status: 0
+Full output: BASELINE.txt
+
+MODIFIED
+Command: node --test --test-concurrency=1 tests/*.test.mjs desktop/tests/*.test.cjs
+CWD: E:/Workspace/naumi-desktop-updates
+Input: modified 17 paths, controlled test fixtures, model_calls=0.
+Literal result:
+ℹ tests 540
+ℹ pass 540
+ℹ fail 0
+Exit status: 0
+Full output: MODIFIED_FINAL.txt
+
+UI
+Command: ego-browser nodejs -e "await import('file:///E:/Workspace/naumi-desktop-updates/scripts/check-desktop-updates-ui.mjs')"
+Input: shipped React update component, pinned native footer CSS, fixture native API; screenshot version 0.3.4 is synthetic.
+Literal result: UI checks=15 pass=15 fail=0 model_calls=0 installs=fixture_only
+Exit status: 0
+Full output: UI.txt. ready.png/download.png inspected; preview.png is an inspected crop of ready.png. Temporary browser space 4 finished and closed.
+
+ROLLBACK
+Command: D:/DEV/Git/bin/bash.exe evidence/desktop-updates/ROLLBACK.sh
+CWD: E:/Workspace/naumi-desktop-updates
+Input: separate git-archive baseline copy, overlay all 17 modified paths, verify hashes, restore original paths/delete new paths, then execute node --test --test-concurrency=1 tests/*.test.mjs desktop/tests/*.test.cjs in the copy.
+Literal output:
+ROLLBACK tests=527 pass=527 fail=0 exit=0
+RESTORED update_entry=absent native_updater=baseline settings=retained hashes=PASS
+CURRENT update_entry=settings_right source=modified service3080=untouched
+Exit status: 0
+Full output: ROLLBACK.txt and ROLLBACK_COMMAND.txt; copy location: ROLLBACK_RESULT.json.
+Restored behavior/status: prior native updater retained; new visible update entry and install IPC absent; original settings intact; baseline autoInstallOnAppQuit=true restored only in copy. Working source remains new UI with signed quiesce and autoInstallOnAppQuit=false.
+
+REGRESSION HISTORY
+Initial parallel full suite: 538/539, exit 1, pre-existing standalone launcher SIGKILL fixture reported FIXTURE_EXIT. Its baseline and modified isolated rechecks both passed 31/31, exit 0; no backend code changed. Serial full suite passed 539/539, exit 0. One additional emitted-install-error edge test then produced final 540/540 above. Failed first run retained in MODIFIED.txt; rechecks in BACKEND_BASELINE.txt/BACKEND_RECHECK.txt, prior serial in MODIFIED_SERIAL.txt.
+
+PUBLIC FEED (read-only)
+Published Release v0.3.2; latest.yml + Naumi-Setup-0.3.2-x64.exe.
+PUBLIC_FEED HTTP=200 manifest=true version=0.3.2
+Exit status: 0
+No installer download, no GitHub Release write, no version bump, no 3080 restart or user-data modification.
+
+DELIVERY STATUS
+Source/isolated UI and rollback verified. Existing 0.3.3 installer was not rebuilt or replaced. Next fixed-main version must be built and published with its matching latest.yml + installer before employees receive this new visible entry. Live downloaded-install/restart acceptance remains part of that release, not this fixture test.

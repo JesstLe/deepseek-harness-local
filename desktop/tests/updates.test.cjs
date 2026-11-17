@@ -31,7 +31,7 @@ test('feed override accepts https and loopback only, never credentials',()=>{
 test('update lifecycle reaches ready, notifies once and installs silently',async()=>{
  const {updates,updater,notified}=harness();
  assert.deepEqual(updates.start(),{ok:true});
- assert.equal(updater.autoDownload,false);assert.equal(updater.autoInstallOnAppQuit,true);
+ assert.equal(updater.autoDownload,false);assert.equal(updater.autoInstallOnAppQuit,false);
  updater.emit('update-available',{version:'0.3.0',releaseNotes:'<b>自动更新</b>'});
  let state=updates.snapshot();
  assert.equal(state.status,'downloading');assert.equal(state.version,'0.3.0');assert.equal(state.notes,'自动更新');assert.equal(updater.downloads,1);
@@ -96,4 +96,53 @@ test('publish script extracts exactly the requested changelog section',async()=>
   assert.equal((replaced.match(/^releaseNotes:/gm)||[]).length,1);assert.doesNotMatch(replaced,/old/);
   assert.throws(()=>injectReleaseNotes(manifest,'  '),/RELEASE_NOTES_INVALID/);
   assert.throws(()=>injectReleaseNotes('not yaml','x'),/RELEASE_MANIFEST_INVALID/);
+});
+
+test('manual checks lock before manifest probing and expose offline state',async()=>{
+ let resolve,requests=0;const {updates,updater}=harness({fetcher:()=>{requests++;return new Promise(r=>resolve=r);}});
+ updates.start();const first=updates.check();assert.equal(updates.snapshot().status,'checking');
+ assert.deepEqual(await updates.check(),{ok:true,status:'checking'});assert.equal(requests,1);
+ resolve({ok:true,text:async()=>manifest});await first;assert.equal(updater.checks,1);updates.stop();
+ const dead=harness({fetcher:feedFetcher([new Error('offline')])});dead.updates.start();await dead.updates.check();
+ assert.equal(dead.updates.snapshot().status,'idle');assert.equal(dead.updates.snapshot().error,'UPDATE_FEED_UNREACHABLE');dead.updates.stop();
+});
+
+test('ready update reopens without download and async install gate is fail closed and retryable',async()=>{
+ const {updates,updater}=harness({choice:1,gate:Promise.resolve({ok:false})});
+ updates.start();updater.emit('update-downloaded');await new Promise(r=>setImmediate(r));
+ assert.deepEqual(await updates.check(),{ok:true,status:'ready'});assert.equal(updater.checks,0);assert.equal(updater.downloads,0);
+ assert.deepEqual(await updates.install(),{ok:false,error:'UPDATE_INSTALL_BUSY'});assert.equal(updater.installs,0);assert.equal(updates.snapshot().status,'ready');
+ updates.stop();
+});
+
+test('async installation serializes clicks, resumes on failure, and retries without download',async()=>{
+ const updater=new FakeUpdater();let release=0,allow=false,finish;
+ const updates=createDesktopUpdates({app:{getVersion:()=> '0.3.3'},updater,notify:async()=>1,canInstall:async()=>{if(!allow)return {ok:false};await new Promise(r=>finish=r);return {ok:true,release:async()=>{release++;}};},startupDelayMs:100000});
+ updates.start();assert.deepEqual(await updates.install(),{ok:false,error:'UPDATE_NOT_READY'});updater.emit('update-downloaded');
+ assert.equal((await updates.install()).error,'UPDATE_INSTALL_BUSY');allow=true;
+ updater.quitAndInstall=()=>{throw Error('fixture failure');};const failed=updates.install();await new Promise(r=>setImmediate(r));
+ assert.equal((await updates.install()).error,'UPDATE_INSTALL_BUSY');finish();assert.equal((await failed).error,'UPDATE_INSTALL_FAILED');assert.equal(release,1);assert.equal(updates.snapshot().status,'ready');
+ updater.quitAndInstall=()=>{updater.installs++;};const success=updates.install();await new Promise(r=>setImmediate(r));finish();assert.equal((await success).ok,true);assert.equal(updater.installs,1);assert.equal(release,1);
+ assert.equal((await updates.install()).error,'UPDATE_INSTALL_BUSY');assert.equal(updater.downloads,0);updates.stop();
+});
+
+test('download errors are retryable and lastChecked only follows confirmed no-update',async()=>{
+ const {updates,updater}=harness();updates.start();assert.equal(updates.snapshot().lastChecked,null);
+ updater.emit('update-available',{version:'0.3.4'});updater.emit('error',Error('download'));assert.equal(updates.snapshot().status,'idle');assert.equal(updates.snapshot().error,'UPDATE_DOWNLOAD_FAILED');
+ updater.emit('update-not-available');assert.ok(updates.snapshot().lastChecked>0);updates.stop();
+});
+
+test('electron-updater emitted installation errors release the maintenance gate, not only thrown errors',async()=>{
+ let released=0;const updater=new FakeUpdater(),updates=createDesktopUpdates({app:{getVersion:()=> '0.3.3'},updater,notify:async()=>1,canInstall:async()=>({ok:true,release:async()=>released++}),startupDelayMs:100000});
+ updates.start();updater.emit('update-downloaded');updater.quitAndInstall=()=>updater.emit('error',Error('installer failure'));
+ assert.equal((await updates.install()).error,'UPDATE_INSTALL_FAILED');assert.equal(released,1);assert.equal(updates.snapshot().status,'ready');
+ updater.quitAndInstall=()=>{updater.installs++;};assert.equal((await updates.install()).ok,true);assert.equal(updater.installs,1);
+ updater.emit('error',Error('spawn failure'));await new Promise(r=>setImmediate(r));assert.equal(released,2);assert.equal(updates.snapshot().error,'UPDATE_INSTALL_FAILED');updates.stop();
+});
+
+test('republishing uploads assets separately from release edit',async()=>{
+ const {releaseCommands}=await import(pathToFileURL(path.resolve(__dirname,'../../scripts/publish-desktop-update.mjs')).href);
+ const params={tag:'v0.3.4',notesFile:'notes.md',installer:'setup.exe',manifest:'latest.yml'};
+ const commands=releaseCommands({...params,existing:true});assert.deepEqual(commands.map(c=>c.slice(0,2)),[['release','edit'],['release','upload']]);assert.ok(!commands[0].includes('--clobber'));assert.ok(commands[1].includes('--clobber'));
+ assert.ok(releaseCommands({...params,existing:false,prerelease:true})[0].includes('--prerelease'));
 });

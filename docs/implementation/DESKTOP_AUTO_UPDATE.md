@@ -35,7 +35,7 @@ ghfast.top 0.77、ghproxy.net 0.34。镜像列表固化在 `updates.cjs` 的
 - 启动 15 秒后首次检查，之后每 24 小时复查一次；`naumiDesktop.checkUpdates()` 支持手动触发
 - 发现新版本 → 后台静默下载（进度经 `naumiDesktop.onUpdateState` 推送）
 - 下载完成 → 弹窗展示更新日志 + 当前版本 → 新版本，按钮：立即重启更新 / 稍后
-- **安装门禁**：仅在空闲（无连接中/启动中/关闭中、无维护锁、无运行中的浏览器队列或企业任务）时才执行 `quitAndInstall`；忙碌时保持已就绪状态，下次手动触发或退出时自动安装（autoInstallOnAppQuit）
+- **安装门禁**：仅在空闲（无连接中/启动中/关闭中、无维护锁、无运行中的浏览器队列或企业任务）时，复用 signed maintenance quiesce 原子检查 owned/isolated 后端的运行任务并封新任务准入，再执行 `quitAndInstall`；忙碌或活动未知时保持已就绪状态，可稍后通过「重启并更新」重试。`autoInstallOnAppQuit=false`，普通退出不绕过门禁安装。
 - 与 0.2.2 安装器维护协议协同：更新重启走正常退出流程，NSIS 端 preflight 负责 quiesce 残留后端
 
 ## 安全边界
@@ -65,3 +65,12 @@ npm run release -- --prerelease
 - `desktop/app/preload.cjs` `naumiDesktop.updateState/checkUpdates/onUpdateState`
 - `scripts/publish-desktop-update.mjs` 发布脚本（CHANGELOG 小节提取 + latest.yml releaseNotes 注入）
 - `desktop/tests/updates.test.cjs` 单元测试
+
+## 可见检查入口（2026-11-17）
+
+- 位置：左侧底部「设置」右侧，同一行，不新增导航。
+- 使用 `sidebar.footer.action` 原生扩展点，最小 grid 适配保留原设置组件。普通网页无 Native API 时不展示。
+- 点击即检查；面板显示当前/目标版本、检查/下载状态、百分比、纯文本更新说明、错误重试和「重启并更新」。ready 再次打开不重复下载。
+- IPC：新增 `naumiDesktop.installUpdate()`；状态新增 `lastChecked`，只在确认无更新时展示「已是最新版本」。
+- 开发壳未启用更新器时显示「安装版支持更新」，不伪报最新。
+- 实现与证据边界见 [本次记录](../changes/2026-11-17-desktop-update-entry.md)。
