@@ -30,12 +30,13 @@ export function createBotGroupTools(ctx,service){
  ];
 }
 
-export function installBotGroups(ctx, directory, getTasks) {
+export function installBotGroups(ctx, directory, getTasks, {onReady}={}) {
   return ctx.inject(['agents','webServer','connection','systemPrompt'], scope => {
     let store;
     try { store = new BotGroupStore(join(dirname(directory.file), 'bot-groups.sqlite')); }
     catch { scope.logger.warn('BOT_GROUP_STORAGE_UNAVAILABLE'); return; }
     const service = new BotGroupService({directory,store,getTasks,onError:() => scope.logger.warn('BOT_GROUP_BACKGROUND_ERROR')});
+    onReady?.(service);
     const alignPrimary=()=>service.alignPrimary();
     alignPrimary();
     scope.effect(()=>directory.subscribe?.(alignPrimary)??(()=>{}));
