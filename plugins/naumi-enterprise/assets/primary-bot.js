@@ -2,14 +2,40 @@ import {botCatalog} from './bot-sidebar-model.js';
 import {createBotAvatar} from './bot-avatar.js';
 import {BOT_FORMS,BOT_PALETTES} from './bot-appearance-model.js';
 export const PRIMARY_PANEL='naumi-primary-bot';
+export const CREATE_BOT_EVENT='naumi:create-bot';
 export function primaryBot(catalog){return catalog.bots.find(b=>b.id===catalog.primaryBotId&&b.status==='active')??null;}
 export function enterBotMode(ctx,catalog){
  if(catalog.status!=='ready')throw Error('BOT_DIRECTORY_UNAVAILABLE');
  const bot=primaryBot(catalog),navigation=ctx.layout.beginNavigation?.();
  if(bot)return Promise.resolve((ctx.get?.('sessions')??ctx.sessions)?.refresh?.()).then(()=>{if(!navigation?.aborted)ctx.uiWorkspace.openSession(bot.homeSessionId);});ctx.layout.selectPanel(PRIMARY_PANEL);return Promise.resolve();
 }
-export function installPrimaryBotUI(ctx,React){return ctx.slots.inject('main',()=>ctx.slots.register({name:'main',key:PRIMARY_PANEL},createPrimaryBotPage(ctx,React)));}
-export const primaryError=e=>({BOT_CONFLICT:'目录已更新，请确认后重试。',BOT_PRIMARY_PENDING:'主 Bot 正在准备，请刷新后继续。',BOT_PRIMARY_REQUEST_CONFLICT:'这次创建已有记录，请继续原来的设置。',BOT_NAME_EXISTS:'这个名称已在使用。',BOT_WORKSPACE_REQUIRED:'请先在线程模式中选择一个工作区。',BOT_PRIMARY_HOME_ARCHIVED:'请先恢复这个 Bot 的接待会话。',BOT_PRIMARY_REQUIRED:'主 Bot 需要保持启用。',BOT_ARCHIVED:'请选择启用中的 Bot。'}[e.message]??'创建尚未确认，请重试。');
+export function installPrimaryBotUI(ctx,React){
+ const h=React.createElement,Dialog=createEmployeeDialog(ctx,React);
+ function CreationOverlay(){const [open,setOpen]=React.useState(false);React.useEffect(()=>{const show=()=>setOpen(true);window.addEventListener(CREATE_BOT_EVENT,show);return()=>window.removeEventListener(CREATE_BOT_EVENT,show);},[]);return open?h(Dialog,{onClose:()=>setOpen(false)}):null;}
+ const main=ctx.slots.inject('main',()=>ctx.slots.register({name:'main',key:PRIMARY_PANEL},createPrimaryBotPage(ctx,React)));
+ const overlay=ctx.slots.inject('shell.overlay',()=>ctx.slots.register({name:'shell.overlay',id:'naumi-create-bot',order:95},CreationOverlay));
+ return()=>{main();overlay();};
+}
+export function createEmployeeDialog(ctx,React){
+ const h=React.createElement,source=botCatalog();return function EmployeeDialog({onClose}){
+  const catalog=React.useSyncExternalStore(source.subscribe,source.getSnapshot,source.getSnapshot),[name,setName]=React.useState(''),[purpose,setPurpose]=React.useState(''),[kind,setKind]=React.useState('agent'),[busy,setBusy]=React.useState(false),[error,setError]=React.useState(''),form=React.useRef(null),request=React.useRef(null),flight=React.useRef(false),alive=React.useRef(true),prior=React.useRef(document.activeElement);
+  React.useEffect(()=>{alive.current=true;form.current?.querySelector('input')?.focus();return()=>{alive.current=false;prior.current?.isConnected&&prior.current.focus();};},[]);
+  const pending=catalog.creations?.find(c=>c.actor==='owner'&&c.state==='pending'),locked=busy||!!pending;
+  React.useEffect(()=>{if(pending){request.current=pending.requestId;setName(pending.name);setPurpose(pending.purpose);setKind(pending.kind);}},[pending?.requestId]);
+  const change=fn=>{request.current=null;setError('');fn();};
+  const submit=async e=>{e.preventDefault();if(flight.current)return;flight.current=true;setBusy(true);setError('');request.current??=crypto.randomUUID();try{
+    const bot=await source.primary({action:'create',requestId:request.current,expectedRevision:catalog.revision,fields:{name:name.trim(),purpose:purpose.trim(),kind}});
+    if(alive.current){await (ctx.get?.('sessions')??ctx.sessions)?.refresh?.();ctx.layout.beginNavigation?.();ctx.uiWorkspace.openSession(bot.homeSessionId);onClose();}
+   }catch(e){if(alive.current)setError(primaryError(e));}finally{flight.current=false;if(alive.current)setBusy(false);}};
+  const keys=e=>{if(e.key==='Escape'&&!busy){e.preventDefault();onClose();}if(e.key==='Tab'){const list=[...form.current.querySelectorAll('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled)')],first=list[0],last=list.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}};
+  return h('div',{className:'nbc-modal-backdrop',onMouseDown:e=>{if(e.target===e.currentTarget&&!busy)onClose();}},h('form',{ref:form,className:'nbc-create npb-staff',role:'dialog','aria-modal':true,'aria-label':'创建 Bot',onSubmit:submit,onKeyDown:keys},h('header',null,h('h2',null,'创建 Bot'),h('button',{type:'button',className:'nbc-icon','aria-label':'关闭创建',disabled:busy,onClick:onClose},'×')),
+   h('label',{className:'nbc-field'},'名称',h('input',{value:name,maxLength:80,required:true,disabled:locked,onChange:e=>change(()=>setName(e.target.value))})),
+   h('label',{className:'nbc-field'},'类型',h('select',{value:kind,disabled:locked,onChange:e=>change(()=>setKind(e.target.value))},h('option',{value:'agent'},'智能体'),h('option',{value:'team'},'团队'))),
+   h('label',{className:'nbc-field'},'职责',h('textarea',{value:purpose,maxLength:2000,rows:4,required:true,disabled:locked,onChange:e=>change(()=>setPurpose(e.target.value))})),error&&h('p',{className:'nbc-error',role:'alert'},error),
+   h('footer',null,h('button',{type:'button',disabled:busy,onClick:onClose},'取消'),h('button',{type:'submit',className:'nbc-primary',disabled:busy||catalog.status!=='ready'||!name.trim()||!purpose.trim()},busy?'创建中…':pending?'继续创建':'创建'))));
+ };
+}
+export const primaryError=e=>({BOT_CONFLICT:'目录已更新，请确认后重试。',BOT_PRIMARY_PENDING:'主 Bot 正在准备，请刷新后继续。',BOT_PRIMARY_REQUEST_CONFLICT:'这次创建已有记录，请继续原来的设置。',BOT_NAME_EXISTS:'这个名称已在使用。',BOT_WORKSPACE_REQUIRED:'请先在线程模式中选择一个工作区。',BOT_PRIMARY_HOME_ARCHIVED:'请先恢复这个 Bot 的接待会话。',BOT_PRIMARY_REQUIRED:'请先设置主 Bot。',BOT_CREATION_REQUEST_CONFLICT:'这次创建已被受理，请按原信息重试。',BOT_BUSY:'这个 Bot 仍有进行中的任务。',BOT_PRIMARY_MANAGER_REQUIRED:'请由主 Bot 管理其他 Bot。',BOT_ARCHIVED:'请选择启用中的 Bot。'}[e.message]??'创建尚未确认，请重试。');
 
 export function createPrimaryBotPage(ctx,React){
  const h=React.createElement,{useState,useEffect,useRef,useSyncExternalStore}=React,source=botCatalog(),Avatar=createBotAvatar(React);
