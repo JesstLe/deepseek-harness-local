@@ -60,3 +60,8 @@ BotDirectory / 原生 Session、BotTaskStore、原生标题事件和工作区服
 - D2最终计数沿用主线程补正：13检查、10原生会话回合、2次宿主启动；22为本地隔离连接入口计数，不是精确上游收费调用数，原生持久事件18条已提交模型响应。本文不重跑真实模型。
 - D2加载后本线程只读复核104sessions/0running/4bots/catalog revision47，4个独立cwd和3个新home保持。D2通知中revision46为旧口径，已按实时47说明。
 - 最终依赖stage核验完成：source dbaaee9，package invocation5ffd5f7，两者plugins/desktop无差异；D2四份文件刷新、其余45614文件哈希通过，45618总文件，closure PASS。后续主线程证据提交不改变本次打包产品代码。
+
+## 文件归属交接（2026-11-18）
+- bot-task-service.js / bot-task-store.js / bot-tasks.js 本轮修改已收口，主线程接续目标—派单—交付的可选已确认Goal引用；本线程不再追加这些文件。
+- 交接保留fileReference.snapshot、deliveryHistory，以及continue/retry/direct continuation中的archiveDelivery调用；继续复用现有任务/交付和原生会话。
+- 本轮0.3.6是当前候选，不代表完整自然Goal愿景完成；任务目标关联、Codex/Claude导入及整体目标验收仍由后续切片处理。钉钉真实私聊延期不变。
