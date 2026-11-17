@@ -1,0 +1,1358 @@
+diff --git a/original/.gitattributes b/modified/.gitattributes
+index d0b630a..6239182 100644
+--- a/original/.gitattributes
++++ b/modified/.gitattributes
+@@ -304,6 +304,10 @@ plugins/naumi-enterprise/third-party/ds-bot-im/** -text
+ /evidence/natural-work-goals/** -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab,cr-at-eol
+ /evidence/natural-work-goals/ROLLBACK.sh text eol=lf
+ 
++/evidence/cloud47/** -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab,cr-at-eol
++/evidence/cloud47/ROLLBACK.sh text eol=lf
++/scripts/package-cloud47.mjs text eol=lf
++
+ # Employee continuity effective-memory projection evidence.
+ /evidence/employee-continuity/** -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab,cr-at-eol
+ /evidence/employee-continuity/ROLLBACK.sh text eol=lf
+diff --git a/modified/desktop/app/cloud.cjs b/modified/desktop/app/cloud.cjs
+new file mode 100644
+index 0000000..9e1dfef
+--- /dev/null
++++ b/modified/desktop/app/cloud.cjs
+@@ -0,0 +1,20 @@
++'use strict';
++const fs=require('node:fs'),path=require('node:path'),{randomUUID,createHash}=require('node:crypto');
++const {MarketSession}=require('./market.cjs'),{atomic}=require('./profile.cjs');
++const ROOT='/api/desktop-cloud/v1',digest=b=>createHash('sha256').update(b).digest('hex');
++function validateCloud(input){
++ if(!input||typeof input!=='object'||Object.keys(input).some(k=>!['endpoint','method','body'].includes(k))||typeof input.endpoint!=='string'||input.endpoint.length>2048)throw Error('CLOUD_REQUEST_FORBIDDEN');
++ const u=new URL(input.endpoint,'http://cloud.invalid'),method=input.method??'GET';if(u.origin!=='http://cloud.invalid'||u.hash||u.username||!u.pathname.startsWith(ROOT+'/'))throw Error('CLOUD_REQUEST_FORBIDDEN');const route=u.pathname.slice(ROOT.length);
++ if(!(method==='GET'&&(/^\/(?:me|documents)$/.test(route)||/^\/documents\/(?:workspace|bot|profile|memory|conversation|settings|file-manifest)\/[-a-zA-Z0-9_.]{1,128}$/.test(route)||/^\/chunks\/[a-f0-9]{64}$/.test(route))||method==='POST'&&/^\/(?:documents|chunks)$/.test(route)))throw Error('CLOUD_REQUEST_FORBIDDEN');
++ if(method==='GET'&&input.body!==undefined||method==='POST'&&(typeof input.body!=='string'||Buffer.byteLength(input.body)>2*1024*1024))throw Error('CLOUD_REQUEST_TOO_LARGE');return{endpoint:u.pathname+u.search,method,body:input.body};
++}
++class CloudSession extends MarketSession{constructor({identity}){super({identity,validateRequest:validateCloud});}async request(endpoint,body){const r=await this.perform({endpoint:ROOT+endpoint,...body?{method:'POST',body:JSON.stringify(body)}:{}});let value;try{value=JSON.parse(r.body);}catch{throw Error('CLOUD_RESPONSE_INVALID');}if(r.status<200||r.status>=300)throw Object.assign(Error(value.error??'CLOUD_UNAVAILABLE'),{status:r.status});return value;}}
++class CloudBackup{
++ constructor({root,cloud,readLocal,identity,clock=()=>new Date().toISOString()}){Object.assign(this,{root,cloud,readLocal,identity,clock});fs.mkdirSync(root,{recursive:true});this.file=path.join(root,'cloud-backup-state.json');if(fs.existsSync(this.file)&&fs.lstatSync(this.file).isSymbolicLink())throw Error('CLOUD_LOCAL_STATE_INVALID');this.state=fs.existsSync(this.file)?JSON.parse(fs.readFileSync(this.file)):{version:1,deviceId:randomUUID(),revision:0,pending:null};if(this.state.version!==1)throw Error('CLOUD_LOCAL_STATE_INVALID');this.save();}
++ save(){atomic(this.file,this.state);}
++ async collect(){const catalog=await this.readLocal('/naumi/bots');if(!Array.isArray(catalog.bots)||catalog.bots.length>500)throw Error('CLOUD_LOCAL_RESPONSE_INVALID');const bots=[],employees=[];for(const b of catalog.bots){bots.push(Object.fromEntries(['id','name','kind','purpose','status'].filter(k=>b[k]!==undefined).map(k=>[k,b[k]])));if(b.status==='archived')continue;const e=await this.readLocal('/naumi/employees?'+new URLSearchParams({botId:b.id,view:'export'}));employees.push({botId:b.id,profile:e.profile,memories:(e.memories??[]).filter(m=>m.status==='active')});}return{schemaVersion:1,scope:['bot-directory','employee-profiles','confirmed-memories'],snapshotAt:this.clock(),bots,employees};}
++ async backup(){const active=this.identity();if(!active)throw Error('CLOUD_LOGIN_REQUIRED');if(!this.state.pending){const payload=await this.collect();if(this.identity()!==active)throw Error('CLOUD_ACCOUNT_CHANGED');this.state.pending={operationId:randomUUID(),kind:'workspace',id:this.state.deviceId,expectedRevision:this.state.revision,payload};this.save();}const result=await this.cloud.request('/documents',this.state.pending);if(this.identity()!==active)throw Error('CLOUD_ACCOUNT_CHANGED');this.state.revision=result.revision;this.state.pending=null;this.state.lastBackupAt=result.updatedAt;this.save();return result;}
++ async list(){return this.cloud.request('/documents?kind=workspace');}
++ async download(id){if(!/^[-a-zA-Z0-9_.]{1,128}$/.test(id))throw Error('CLOUD_INVALID_DOCUMENT');const value=await this.cloud.request('/documents/workspace/'+id);if(digest(JSON.stringify(value.payload))!==value.digest||value.deleted)throw Error('CLOUD_RESPONSE_INTEGRITY');return value;}
++}
++module.exports={CloudSession,CloudBackup,validateCloud};
+diff --git a/original/desktop/app/identity-runtime.cjs b/modified/desktop/app/identity-runtime.cjs
+index 36a4a26..d274e0c 100644
+--- a/original/desktop/app/identity-runtime.cjs
++++ b/modified/desktop/app/identity-runtime.cjs
+@@ -1,21 +1,26 @@
+ 'use strict';
+-const {identityOrigin,readIdentityConfig,bindAccount,sessionPartition,IdentitySession}=require('./identity.cjs');
++const fs=require('node:fs'),path=require('node:path');
++const {atomic}=require('./profile.cjs');
++const {identityOrigin,readIdentityConfig,bindAccount,sessionPartition,IdentitySession,publicUser}=require('./identity.cjs');
+ class IdentityRuntime{
+- constructor({userData,sessionFor,managedOrigin=''}){this.userData=userData;this.sessionFor=sessionFor;this.managedOrigin=managedOrigin?identityOrigin(managedOrigin):'';this.active=null;this.client=null;this.error=null;}
++ constructor({userData,sessionFor,managedOrigin='',legacyHome}){this.userData=userData;this.sessionFor=sessionFor;this.managedOrigin=managedOrigin?identityOrigin(managedOrigin):'';this.legacyHome=legacyHome;this.active=null;this.client=null;this.error=null;}
+  origin(){return this.managedOrigin||readIdentityConfig(this.userData)?.origin||'';}
+- status(){return {available:true,origin:this.origin(),managed:!!this.managedOrigin,user:this.active?.user??null,error:this.error};}
++ legacyOwner(){if(!this.legacyHome)return null;const file=path.join(this.legacyHome,'naumi-legacy-owner.json');if(!fs.existsSync(file))return null;if(fs.lstatSync(file).isSymbolicLink())throw Error('IDENTITY_LOCAL_OWNER_INVALID');const owner=JSON.parse(fs.readFileSync(file));if(owner.version!==1||!owner.origin||!owner.subject)throw Error('IDENTITY_LOCAL_OWNER_INVALID');return owner;}
++ legacyAccess(origin,user,confirmed=false){if(!this.legacyHome)return;const file=path.join(this.legacyHome,'naumi-legacy-owner.json'),owner={version:1,origin,subject:publicUser(user).subject},prior=this.legacyOwner();if(prior&&JSON.stringify(prior)!==JSON.stringify(owner))throw Error('IDENTITY_LOCAL_ACCOUNT_MISMATCH');if(!prior){if(!confirmed)throw Error('IDENTITY_LOCAL_CLAIM_REQUIRED');fs.mkdirSync(this.legacyHome,{recursive:true});atomic(file,owner);}}
++ status(){return {available:true,origin:this.origin(),managed:!!this.managedOrigin,user:this.active?.user??null,error:this.error,legacyClaimRequired:!!this.legacyHome&&!this.legacyOwner()};}
+  use(origin){origin=identityOrigin(origin);if(!this.client||this.client.origin!==origin)this.client=new IdentitySession({origin,session:this.sessionFor(sessionPartition(origin))});return this.client;}
+  async restore(){
+   // An already opened local account continues in this process during an outage.
+   // Cold start always verifies the server; no unsigned offline grant is invented.
+   if(this.active)return this.active;const origin=this.origin();if(!origin)return null;
+-  try{const user=await this.use(origin).inspect();this.error=user||!readIdentityConfig(this.userData)?null:'IDENTITY_LOGIN_REQUIRED';return user?(this.active=bindAccount(this.userData,origin,user)):null;}catch(error){this.error=/^IDENTITY_[A-Z_]+$/.test(error.message)?error.message:'IDENTITY_UNAVAILABLE';return null;}
++  try{const user=await this.use(origin).inspect();this.error=user||!readIdentityConfig(this.userData)?null:'IDENTITY_LOGIN_REQUIRED';if(user)this.legacyAccess(origin,user);return user?(this.active=bindAccount(this.userData,origin,user)):null;}catch(error){this.error=/^IDENTITY_[A-Z_]+$/.test(error.message)?error.message:'IDENTITY_UNAVAILABLE';return null;}
+  }
+  async login(input){
+   if(this.active)throw Error('IDENTITY_ALREADY_SIGNED_IN');
+-  if(!input||typeof input!=='object'||Object.keys(input).some(k=>!['origin','account','password'].includes(k)))throw Error('IDENTITY_INPUT_INVALID');
++  if(!input||typeof input!=='object'||Object.keys(input).some(k=>!['origin','account','password','claimLocal'].includes(k))||input.claimLocal!==undefined&&typeof input.claimLocal!=='boolean')throw Error('IDENTITY_INPUT_INVALID');
+   const origin=identityOrigin(input.origin||this.origin());if(this.managedOrigin&&origin!==this.managedOrigin)throw Error('IDENTITY_MANAGED_ORIGIN');
+   const user=await this.use(origin).login({account:input.account,password:input.password});
++  this.legacyAccess(origin,user,input.claimLocal===true);
+   this.active=bindAccount(this.userData,origin,user);this.error=null;return this.active;
+  }
+  async logout(){const result=this.client?await this.client.logout():{remoteConfirmed:false};this.active=null;this.error=null;return result;}
+diff --git a/original/desktop/app/identity.css b/modified/desktop/app/identity.css
+index 1159a02..893d3a3 100644
+--- a/original/desktop/app/identity.css
++++ b/modified/desktop/app/identity.css
+@@ -2,3 +2,5 @@
+ @import url("identity-style/auth-smoke.css");
+ @import url("identity-style/auth-liquid.css");
+ :root{font:14px Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;color-scheme:light}*{box-sizing:border-box}html,body{margin:0;min-height:100%;padding:0}body{line-height:1.5;-webkit-font-smoothing:antialiased}button,input{font:inherit}button,a,input{-webkit-tap-highlight-color:transparent}a{color:inherit;text-decoration:none}h1,h2,p{margin:0}svg{flex-shrink:0}button{cursor:pointer}button:disabled{cursor:wait;opacity:.55}[hidden]{display:none!important}.mg-brand-lockup{width:148px;height:50px;display:inline-flex;align-items:center;justify-content:center;gap:8px;flex-shrink:0}.mg-brand-symbol{width:40px;height:40px;display:block;border-radius:10px;object-fit:contain;flex-shrink:0}.mg-brand-words{width:100px;display:flex;align-items:center}.mg-brand-wordmark,.mg-brand-wordmark>img{display:block;width:100px;height:27px;object-fit:contain}.auth-error:empty{display:none}.auth-error:not(:empty){margin-top:18px}.auth-smoke .auth-password-control input{padding-left:14px}.auth-form-box .secondary{background:#f3f4ef;color:#415343;border-color:#d9ded2}#signed-in strong,#signed-in>span{display:block;overflow-wrap:anywhere}#signed-in strong{font-size:22px}#signed-in>span{color:#6f716b;margin-top:8px}#signed-in>button{display:flex;width:100%;margin-top:22px}.auth-smoke .smoke-form-box:has(#signed-in:not([hidden])) .auth-liquid-options{display:none}#origin:read-only{background:#f2f3ee}.auth-smoke .auth-password-toggle:focus-visible{outline-offset:0}
++
++.legacy-claim{display:flex;align-items:center;gap:9px;font-size:13px}.legacy-claim input{width:16px!important;height:16px!important;margin:0!important;flex-shrink:0}#cloud-panel{margin-top:24px;border-top:1px solid #e3e6df;padding-top:18px}#cloud-panel h3{font-size:15px;margin:0 0 12px}#cloud-panel button{width:100%;margin:8px 0 0;font-size:13px}#cloud-list{max-height:170px;overflow:auto}#cloud-status{font-size:12px;margin-top:12px;color:#69776b}
+diff --git a/original/desktop/app/identity.html b/modified/desktop/app/identity.html
+index 18d711c..0df0d53 100644
+--- a/original/desktop/app/identity.html
++++ b/modified/desktop/app/identity.html
+@@ -1 +1 @@
+-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'"><title>Naumi</title><link rel="stylesheet" href="identity.css"><main class="auth-page auth-smoke" data-theme="light"><div class="smoke-backdrop" aria-hidden="true"><canvas class="auth-smoke-canvas" data-smoke="fallback"></canvas><div class="smoke-grain"></div></div><div class="auth-brand smoke-brand"><span class="mg-brand-lockup" role="img" aria-label="Naumi"><img class="mg-brand-symbol" src="assets/symbol.svg" alt=""><span class="mg-brand-words"><span class="mg-brand-wordmark"><img src="identity-style/wordmark-italic.svg" alt=""></span></span></span></div><section class="auth-form-panel smoke-form-panel"><div class="auth-form-box smoke-form-box"><nav class="auth-liquid-options" aria-label="账号入口" data-active="0"><span class="auth-liquid-layer" data-gl="off" aria-hidden="true"><span class="auth-liquid-drop"></span><canvas class="auth-liquid-water"></canvas></span><a class="auth-option" id="login-tab" href="#login" aria-current="page"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg><span>登录</span></a><a class="auth-option" id="register" href="#register"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3a4 4 0 0 1 0 8M20 8v6M17 11h6"/><circle cx="9" cy="7" r="4"/></svg><span>注册</span></a></nav><h2 id="title">登录工作空间</h2><form id="login"><label id="server-row" for="origin">Naumi 地址<input id="origin" type="url" placeholder="https://" autocomplete="url" required></label><label for="account">账号<input id="account" placeholder="用户名或邮箱" autocomplete="username" maxlength="254" required autofocus></label><label for="password">密码<span class="auth-control auth-password-control"><input id="password" type="password" placeholder="输入密码" autocomplete="current-password" maxlength="1024" required><button id="show-password" type="button" class="auth-password-toggle" aria-label="显示密码" aria-pressed="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></span></label><button id="submit" class="auth-liquid-submit" type="submit"><span class="auth-liquid-layer" data-gl="off" aria-hidden="true"><span class="auth-liquid-drop"></span><canvas class="auth-liquid-water"></canvas></span><span class="auth-liquid-label">登录<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12h14M12 5l7 7-7 7"/></svg></span></button></form><div id="signed-in" hidden><strong id="name"></strong><span id="email"></span><button id="resume" type="button">返回工作台</button><button id="logout" type="button" class="secondary">退出登录</button></div><p id="error" class="auth-error" role="alert" aria-live="polite"></p></div></section></main><script src="identity.js"></script><script src="identity-visual.js"></script></html>
++<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'"><title>Naumi</title><link rel="stylesheet" href="identity.css"><main class="auth-page auth-smoke" data-theme="light"><div class="smoke-backdrop" aria-hidden="true"><canvas class="auth-smoke-canvas" data-smoke="fallback"></canvas><div class="smoke-grain"></div></div><div class="auth-brand smoke-brand"><span class="mg-brand-lockup" role="img" aria-label="Naumi"><img class="mg-brand-symbol" src="assets/symbol.svg" alt=""><span class="mg-brand-words"><span class="mg-brand-wordmark"><img src="identity-style/wordmark-italic.svg" alt=""></span></span></span></div><section class="auth-form-panel smoke-form-panel"><div class="auth-form-box smoke-form-box"><nav class="auth-liquid-options" aria-label="账号入口" data-active="0"><span class="auth-liquid-layer" data-gl="off" aria-hidden="true"><span class="auth-liquid-drop"></span><canvas class="auth-liquid-water"></canvas></span><a class="auth-option" id="login-tab" href="#login" aria-current="page"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg><span>登录</span></a><a class="auth-option" id="register" href="#register"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3a4 4 0 0 1 0 8M20 8v6M17 11h6"/><circle cx="9" cy="7" r="4"/></svg><span>注册</span></a></nav><h2 id="title">登录工作空间</h2><form id="login"><label id="server-row" for="origin">Naumi 地址<input id="origin" type="url" placeholder="https://" autocomplete="url" required></label><label for="account">账号<input id="account" placeholder="用户名或邮箱" autocomplete="username" maxlength="254" required autofocus></label><label for="password">密码<span class="auth-control auth-password-control"><input id="password" type="password" placeholder="输入密码" autocomplete="current-password" maxlength="1024" required><button id="show-password" type="button" class="auth-password-toggle" aria-label="显示密码" aria-pressed="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></span></label><label id="legacy-claim-row" hidden><span class="legacy-claim"><input id="legacy-claim" type="checkbox">将当前本地工作台关联到此账号</span></label><button id="submit" class="auth-liquid-submit" type="submit"><span class="auth-liquid-layer" data-gl="off" aria-hidden="true"><span class="auth-liquid-drop"></span><canvas class="auth-liquid-water"></canvas></span><span class="auth-liquid-label">登录<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12h14M12 5l7 7-7 7"/></svg></span></button></form><div id="signed-in" hidden><strong id="name"></strong><span id="email"></span><button id="resume" type="button">返回工作台</button><button id="logout" type="button" class="secondary">退出登录</button></div><section id="cloud-panel" hidden><h3>云端备份</h3><button id="cloud-backup" type="button">备份 Bot 档案与记忆</button><button id="cloud-refresh" type="button">刷新云端副本</button><div id="cloud-list"></div><p id="cloud-status" role="status"></p></section><p id="error" class="auth-error" role="alert" aria-live="polite"></p></div></section></main><script src="identity.js"></script><script src="identity-visual.js"></script></html>
+diff --git a/original/desktop/app/identity.js b/modified/desktop/app/identity.js
+index 2bd0bfa..884807e 100644
+--- a/original/desktop/app/identity.js
++++ b/modified/desktop/app/identity.js
+@@ -1,10 +1,10 @@
+ 'use strict';
+ const $=id=>document.getElementById(id),api=window.naumiDesktop;
+-const messages={IDENTITY_ORIGIN_INVALID:'请输入有效的 Naumi HTTPS 地址。',IDENTITY_INPUT_INVALID:'请填写账号和密码。',IDENTITY_CREDENTIALS_INVALID:'账号或密码不正确，请重新输入。',IDENTITY_ACCOUNT_UNAVAILABLE:'账号暂不可用，请联系管理员。',IDENTITY_RATE_LIMITED:'登录尝试过于频繁，请稍后再试。',IDENTITY_LOGIN_REQUIRED:'登录状态已失效，请重新登录。',IDENTITY_UNAVAILABLE:'Naumi 账号服务暂未连接，请检查网络后重试。',IDENTITY_RESPONSE_INVALID:'此地址未提供兼容的 Naumi 账号服务。',IDENTITY_RESPONSE_TOO_LARGE:'账号服务响应异常，请稍后重试。',IDENTITY_ALREADY_SIGNED_IN:'请先退出当前账号。',WORKSPACE_RUNNING_TASKS:'请先结束当前运行任务，再切换账号。',WORKSPACE_OPERATIONS_IN_FLIGHT:'当前操作尚未完成，请稍后再试。',IDENTITY_MANAGED_ORIGIN:'此设备的账号服务由管理员配置。'};
++const messages={IDENTITY_LOCAL_CLAIM_REQUIRED:'请确认当前本地工作台的账号归属。',IDENTITY_LOCAL_ACCOUNT_MISMATCH:'此本地工作台已关联其他账号，请使用该账号登录。',IDENTITY_LOCAL_OWNER_INVALID:'本地账号归属记录需要核对。',IDENTITY_ORIGIN_INVALID:'请输入有效的 Naumi HTTPS 地址。',IDENTITY_INPUT_INVALID:'请填写账号和密码。',IDENTITY_CREDENTIALS_INVALID:'账号或密码不正确，请重新输入。',IDENTITY_ACCOUNT_UNAVAILABLE:'账号暂不可用，请联系管理员。',IDENTITY_RATE_LIMITED:'登录尝试过于频繁，请稍后再试。',IDENTITY_LOGIN_REQUIRED:'登录状态已失效，请重新登录。',IDENTITY_UNAVAILABLE:'Naumi 账号服务暂未连接，请检查网络后重试。',IDENTITY_RESPONSE_INVALID:'此地址未提供兼容的 Naumi 账号服务。',IDENTITY_RESPONSE_TOO_LARGE:'账号服务响应异常，请稍后重试。',IDENTITY_ALREADY_SIGNED_IN:'请先退出当前账号。',WORKSPACE_RUNNING_TASKS:'请先结束当前运行任务，再切换账号。',WORKSPACE_OPERATIONS_IN_FLIGHT:'当前操作尚未完成，请稍后再试。',IDENTITY_MANAGED_ORIGIN:'此设备的账号服务由管理员配置。'};
+ function error(code){$('error').textContent=messages[code]||'操作尚未完成，请稍后重试。';}
+ function busy(value){for(const b of document.querySelectorAll('button'))b.disabled=value;for(const a of document.querySelectorAll('.auth-option'))a.setAttribute('aria-disabled',String(value));document.querySelector('.auth-liquid-options').setAttribute('aria-busy',String(value));}
+-async function refresh(){const state=await api.identityState();$('origin').value=state.origin||'';$('origin').readOnly=state.managed||!!state.user;$('server-row').hidden=!!state.origin;$('login').hidden=!!state.user;$('signed-in').hidden=!state.user;$('title').textContent=state.user?'Naumi 账号':'登录工作空间';if(state.user){$('name').textContent=state.user.name;$('email').textContent=state.user.email;}else (state.origin?$('account'):$('origin')).focus();if(state.error)error(state.error);}
+-$('login').addEventListener('submit',async event=>{event.preventDefault();busy(true);$('error').textContent='';const password=$('password').value;try{const result=await api.loginIdentity({origin:$('origin').value,account:$('account').value,password});if(!result.ok)error(result.error);}catch{error('IDENTITY_UNAVAILABLE');}finally{$('password').value='';$('password').type='password';$('show-password').setAttribute('aria-pressed','false');$('show-password').setAttribute('aria-label','显示密码');busy(false);}});
++async function refresh(){const state=await api.identityState();$('origin').value=state.origin||'';$('legacy-claim-row').hidden=!state.legacyClaimRequired;$('legacy-claim').required=!!state.legacyClaimRequired;$('cloud-panel').hidden=!state.user;if(state.user)void loadCloud();$('origin').readOnly=state.managed||!!state.user;$('server-row').hidden=!!state.origin;$('login').hidden=!!state.user;$('signed-in').hidden=!state.user;$('title').textContent=state.user?'Naumi 账号':'登录工作空间';if(state.user){$('name').textContent=state.user.name;$('email').textContent=state.user.email;}else (state.origin?$('account'):$('origin')).focus();if(state.error)error(state.error);}
++$('login').addEventListener('submit',async event=>{event.preventDefault();busy(true);$('error').textContent='';const password=$('password').value;try{const result=await api.loginIdentity({origin:$('origin').value,account:$('account').value,password,claimLocal:$('legacy-claim').checked});if(!result.ok)error(result.error);}catch{error('IDENTITY_UNAVAILABLE');}finally{$('password').value='';$('password').type='password';$('show-password').setAttribute('aria-pressed','false');$('show-password').setAttribute('aria-label','显示密码');busy(false);}});
+ $('resume').addEventListener('click',()=>api.resumeIdentity());
+ $('logout').addEventListener('click',async()=>{busy(true);try{const result=await api.logoutIdentity();if(!result.ok)error(result.error);else await refresh();}catch{error('IDENTITY_UNAVAILABLE');}finally{busy(false);}});
+ refresh().catch(()=>error('IDENTITY_UNAVAILABLE'));
+@@ -14,3 +14,8 @@ $('show-password').addEventListener('click',()=>{const visible=$('password').typ
+ $('register').addEventListener('click',async event=>{event.preventDefault();if($('register').getAttribute('aria-disabled')==='true')return;try{const result=await api.openIdentityRegistration($('origin').value);if(!result.ok)error(result.error);}catch{error('IDENTITY_UNAVAILABLE');}});
+ 
+ document.querySelector('.auth-liquid-options').addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;const links=[...document.querySelectorAll('.auth-option')],current=links.indexOf(document.activeElement),next=event.key==='Home'?0:event.key==='End'?1:((current<0?0:current)+(event.key==='ArrowRight'?1:-1)+2)%2;event.preventDefault();links[next].focus();});
++
++const cloudErrors={CLOUD_WORKSPACE_REQUIRED:'先进入工作台，再打开账号管理备份。',CLOUD_REVISION_CONFLICT:'云端版本已更新，本机待提交副本已保留。',CLOUD_QUOTA_EXCEEDED:'云端存储空间已满。',CLOUD_PRIVATE_FIELD:'数据中包含凭据字段，请先核对。',CLOUD_PRIVATE_CONTENT:'数据中包含密钥内容，请先核对。'};
++async function loadCloud(){if(!api.cloud)return;busy(true);try{const response=await api.cloud({action:'list'});if(!response.ok){$('cloud-status').textContent=cloudErrors[response.error]||'云端暂未连接';return;}const list=$('cloud-list');list.replaceChildren();for(const row of response.result.items.filter(r=>!r.deleted)){const b=document.createElement('button');b.type='button';b.textContent=new Date(row.updated_at).toLocaleString()+' · v'+row.revision;b.addEventListener('click',async()=>{const r=await api.cloud({action:'download',id:row.id});$('cloud-status').textContent=r.saved?'已保存云端数据副本':r.canceled?'':cloudErrors[r.error]||'下载未完成';});list.append(b);}$('cloud-status').textContent=response.result.items.length?'':'暂无云端副本';}catch{$('cloud-status').textContent='云端暂未连接';}finally{busy(false);}}
++$('cloud-refresh').addEventListener('click',()=>loadCloud().catch(()=>{$('cloud-status').textContent='云端暂未连接';}));
++$('cloud-backup').addEventListener('click',async()=>{busy(true);try{const r=await api.cloud({action:'backup'});if(!r.ok){$('cloud-status').textContent=cloudErrors[r.error]||'备份尚未完成，请重试';return;}await loadCloud();$('cloud-status').textContent='已备份到云端 · v'+r.result.revision;}finally{busy(false);}});
+diff --git a/original/desktop/app/main.cjs b/modified/desktop/app/main.cjs
+index b0b9828..7150254 100644
+--- a/original/desktop/app/main.cjs
++++ b/modified/desktop/app/main.cjs
+@@ -11,6 +11,7 @@ const installerState=require('./installer-state.cjs');
+ const {createDesktopUpdates}=require('./updates.cjs');
+ const {IdentityRuntime}=require('./identity-runtime.cjs');
+ const {MarketSession}=require('./market.cjs');
++const {CloudSession,CloudBackup}=require('./cloud.cjs');
+ const {identityOrigin}=require('./identity.cjs');
+ const {randomUUID}=require('node:crypto');
+ app.setName('Naumi');app.setAppUserModelId('com.naumi.desktop');
+@@ -19,6 +20,9 @@ if(process.env.NAUMI_TEST_HIDDEN==='1'){app.commandLine.appendSwitch('disable-ba
+ const locked=app.requestSingleInstanceLock();
+ let identityRuntime=null,identityUserData=null;
+ const market=new MarketSession({identity:()=>identityRuntime});
++const cloud=new CloudSession({identity:()=>identityRuntime});
++const DEFAULT_IDENTITY_ORIGIN='https://47.105.59.142';
++let cloudBusy=0;
+ let window,primarySession,guests,bridge,backend,settings,enterprise,login,loginAfterBoot=false,booting=false,closing=false,connecting=false,editingConnection=false,connectionFlight,maintenanceTicket=null,maintenanceUntil=0,updates=null;
+ if(!locked){app.quit();}else{
+ app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.show();window.focus();}});
+@@ -77,7 +81,7 @@ app.whenReady().then(async()=>{
+    const checked=await verifyConnection(origin,(url,options)=>primarySession.fetch(url,options),{signal:connectionFlight.signal});
+    const state=workspaceSummary(identityUserData??app.getPath('userData')),changed=state.configured&&state.origin!==checked.origin;
+    if(changed){
+-    if((enterprise?.running??0)>0||market.running>0||(bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');
++    if((enterprise?.running??0)>0||market.running>0||cloud.running>0||cloudBusy>0||(bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');
+     if(backend?.owned){const r=require('./profile.cjs').runtimeReceipt(settings.home,settings.identity.id);if(!r||r.pid===null||isAlive(r.pid))await assertWorkspaceIdle(settings,(url,options)=>primarySession.fetch(url,options));connectionFlight.signal.throwIfAborted();await stopBackend(backend);backend=null;}
+     else {const r=require('./profile.cjs').runtimeReceipt(settings.home,settings.identity.id);if(r&&(r.pid===null||isAlive(r.pid)))throw Error('WORKSPACE_BACKEND_STOP_REQUIRED');}
+     await bridge?.close();bridge=null;
+@@ -89,6 +93,18 @@ app.whenReady().then(async()=>{
+   finally{connecting=false;connectionFlight=null;}
+  });
+  ipcMain.handle('naumi:identity-state',e=>{if(!accountPage(e))trusted(e);return identityRuntime?.status()??{available:false};});
++ ipcMain.handle('naumi:cloud',async(e,input)=>{
++  if(!accountPage(e))throw Error('INVALID_DESKTOP_SENDER');
++  if(!identityRuntime?.active)return{ok:false,error:'CLOUD_LOGIN_REQUIRED'};
++  if(!input||Object.keys(input).some(k=>!['action','id'].includes(k))||!['list','backup','download'].includes(input.action)||cloudBusy)return{ok:false,error:'CLOUD_BUSY'};
++  const active=identityRuntime.active;cloudBusy++;
++  try{
++   const backup=new CloudBackup({root:active.root,cloud,identity:()=>identityRuntime?.active,readLocal:async endpoint=>{if(!settings)throw Error('CLOUD_WORKSPACE_REQUIRED');const response=await primarySession.fetch(settings.url+endpoint,{credentials:'include',cache:'no-store',redirect:'error',signal:AbortSignal.timeout(10000)});if(!response.ok)throw Error('CLOUD_LOCAL_RESPONSE_INVALID');const raw=await response.text();if(Buffer.byteLength(raw)>2*1024*1024)throw Error('CLOUD_LOCAL_RESPONSE_TOO_LARGE');return JSON.parse(raw);}});
++   if(input.action==='list')return{ok:true,result:await backup.list()};
++   if(input.action==='backup'){if(!settings)throw Error('CLOUD_WORKSPACE_REQUIRED');await assertWorkspaceIdle(settings,(url,options)=>primarySession.fetch(url,options));return{ok:true,result:await backup.backup()};}
++   const value=await backup.download(input.id);const chosen=await dialog.showSaveDialog(window,{defaultPath:'Naumi-backup-'+input.id+'.json',filters:[{name:'Naumi 数据副本',extensions:['json']}]});if(chosen.canceled)return{ok:true,canceled:true};if(identityRuntime.active!==active)throw Error('CLOUD_ACCOUNT_CHANGED');fs.writeFileSync(chosen.filePath,JSON.stringify(value,null,2)+'\n',{flag:'wx',mode:0o600});return{ok:true,saved:true};
++  }catch(error){return{ok:false,error:/^(CLOUD|MARKET|WORKSPACE)_[A-Z_]+$/.test(error.message)?error.message:'CLOUD_UNAVAILABLE'};}finally{cloudBusy--;}
++ });
+  ipcMain.handle('naumi:identity-register',async(e,value)=>{
+   if(!accountPage(e)||!identityRuntime)throw Error('INVALID_DESKTOP_SENDER');
+   try{const origin=identityOrigin(value||identityRuntime.origin());if(identityRuntime.managedOrigin&&origin!==identityRuntime.managedOrigin)throw Error('IDENTITY_MANAGED_ORIGIN');await shell.openExternal(origin+'/');return {ok:true};}
+@@ -138,11 +154,12 @@ async function boot(){
+  try{
+   if(!settings){
+    const candidate=localSettings(app);
+-   if(candidate.isolated){
+-    identityRuntime??=new IdentityRuntime({userData:app.getPath('userData'),sessionFor:name=>session.fromPartition(name),managedOrigin:process.env.NAUMI_IDENTITY_ORIGIN??''});
++   if(candidate.isolated||app.isPackaged||process.env.NAUMI_IDENTITY_ORIGIN){
++    identityRuntime??=new IdentityRuntime({userData:app.getPath('userData'),sessionFor:name=>session.fromPartition(name),managedOrigin:process.env.NAUMI_IDENTITY_ORIGIN??(app.isPackaged?DEFAULT_IDENTITY_ORIGIN:''),legacyHome:candidate.isolated?undefined:candidate.home});
+     const active=await identityRuntime.restore();
+     if(!active){await window.loadFile(path.join(__dirname,'identity.html'));return;}
+-    identityUserData=active.root;settings=localSettings(accountApp());
++    identityUserData=active.root;
++    if(candidate.isolated)settings=localSettings(accountApp());else settings=candidate;
+    }else settings=candidate;
+   }
+   if(settings.isolated){
+@@ -166,15 +183,15 @@ async function boot(){
+ }
+ function accountApp(){return {isPackaged:app.isPackaged,getPath:name=>name==='userData'&&identityUserData?identityUserData:app.getPath(name)};}
+ async function assertAccountIdle(){
+- if((enterprise?.running??0)>0||market.running>0||(bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');
+- if(backend&&!backend.owned)throw Error('WORKSPACE_BACKEND_STOP_REQUIRED');
+- if(backend?.owned)await assertWorkspaceIdle(settings,(url,options)=>primarySession.fetch(url,options));
++ if((enterprise?.running??0)>0||market.running>0||cloud.running>0||cloudBusy>0||(bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');
++ if(backend&&!backend.owned&&settings?.isolated)throw Error('WORKSPACE_BACKEND_STOP_REQUIRED');
++ if(backend)await assertWorkspaceIdle(settings,(url,options)=>primarySession.fetch(url,options));
+ }
+ function maintenanceBlocked(){if(maintenanceTicket&&Date.now()>=maintenanceUntil){maintenanceTicket=null;}return !!maintenanceTicket;}
+ async function canInstallUpdate(){
+  if(closing||booting||connecting)return {ok:false,reason:'WORKSPACE_BUSY'};
+  if(maintenanceBlocked())return {ok:false,reason:'INSTALL_MAINTENANCE_ACTIVE'};
+- if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0||market.running>0)return {ok:false,reason:'WORKSPACE_OPERATIONS_IN_FLIGHT'};
++ if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0||market.running>0||cloud.running>0||cloudBusy>0)return {ok:false,reason:'WORKSPACE_OPERATIONS_IN_FLIGHT'};
+  const ticket=randomUUID().replaceAll('-','')+randomUUID().replaceAll('-','');
+  try{await performMaintenance('quiesce',ticket);return {ok:true,release:()=>performMaintenance('resume',ticket)};}
+  catch{return {ok:false,reason:'INSTALL_ACTIVITY_UNKNOWN'};}
+@@ -190,7 +207,7 @@ async function performMaintenance(action,ticket,{accountTransition=false}={}){
+  if(action==='resume'){if(backend&&settings)await maintenanceRequest(settings,'resume',ticket);maintenanceTicket=null;return;}
+  if(booting||(connecting&&!accountTransition)||closing||!settings?.isolated||!backend?.owned)throw Error('INSTALL_ACTIVITY_UNKNOWN');
+  maintenanceTicket=ticket;maintenanceUntil=Date.now()+30000;
+- try{if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0||market.running>0)throw Error('INSTALL_OPERATIONS_IN_FLIGHT');await maintenanceRequest(settings,'quiesce',ticket);}
++ try{if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0||market.running>0||cloud.running>0||cloudBusy>0)throw Error('INSTALL_OPERATIONS_IN_FLIGHT');await maintenanceRequest(settings,'quiesce',ticket);}
+  catch(error){maintenanceTicket=null;throw error;}
+ }
+ function isAlive(pid){try{process.kill(pid,0);return true;}catch(error){return error.code!=='ESRCH';}}
+diff --git a/original/desktop/app/market.cjs b/modified/desktop/app/market.cjs
+index 8d5d71b..aa461e1 100644
+--- a/original/desktop/app/market.cjs
++++ b/modified/desktop/app/market.cjs
+@@ -4,9 +4,9 @@ const MAX=3*1024*1024,ROOT='/api/plugin-market/v1';
+ function validate(input){if(!input||typeof input!=='object'||Object.keys(input).some(k=>!['endpoint','method','body'].includes(k)))throw Error('MARKET_REQUEST_FORBIDDEN');const method=input.method??'GET';if(typeof input.endpoint!=='string'||input.endpoint.length>2048)throw Error('MARKET_REQUEST_FORBIDDEN');const u=new URL(input.endpoint,'http://market.invalid');if(u.origin!=='http://market.invalid'||u.hash||u.username||!u.pathname.startsWith(ROOT+'/'))throw Error('MARKET_REQUEST_FORBIDDEN');
+  const route=u.pathname.slice(ROOT.length);if(!(method==='GET'&&(/^\/(?:me|packages)$/.test(route)||/^\/(?:packages|downloads)\/[a-f0-9-]{36}$/.test(route))||method==='POST'&&/^\/(?:drafts|publish|visibility|download|installed|feedback)$/.test(route)))throw Error('MARKET_REQUEST_FORBIDDEN');if(method==='GET'&&input.body!==undefined||method==='POST'&&(typeof input.body!=='string'||Buffer.byteLength(input.body)>MAX))throw Error('MARKET_BODY_INVALID');return{endpoint:u.pathname+u.search,method,body:input.body};}
+ class MarketSession{
+- constructor({identity}){this.identity=identity;this.running=0;}
++ constructor({identity,validateRequest=validate}){this.identity=identity;this.validateRequest=validateRequest;this.running=0;}
+  descriptor(){const i=this.identity();return i?.active?{protocolVersion:1,origin:i.active.origin}:null;}
+- async perform(input,{signal}={}){const request=validate(input),identity=this.identity();if(!identity?.active||!identity.client)throw Error('MARKET_LOGIN_REQUIRED');const active=identity.active,client=identity.client,issuer=active.origin;this.running++;
++ async perform(input,{signal}={}){const request=this.validateRequest(input),identity=this.identity();if(!identity?.active||!identity.client)throw Error('MARKET_LOGIN_REQUIRED');const active=identity.active,client=identity.client,issuer=active.origin;this.running++;
+   try{const response=await client.session.fetch(issuer+request.endpoint,{method:request.method,credentials:'include',redirect:'error',cache:'no-store',headers:{Accept:'application/json',...(request.method==='POST'?{'Content-Type':'application/json','x-naumi-market':'1',Origin:issuer}:{})},...(request.body===undefined?{}:{body:request.body}),signal:AbortSignal.any([AbortSignal.timeout(20000),...(signal?[signal]:[])])});if(!response.headers.get('content-type')?.includes('application/json'))throw Error('MARKET_RESPONSE_INVALID');const chunks=[];let size=0;for await(const chunk of response.body){size+=chunk.length;if(size>MAX+65536)throw Error('MARKET_RESPONSE_TOO_LARGE');chunks.push(Buffer.from(chunk));}if(this.identity()!==identity||identity.active!==active||identity.client!==client)throw Error('MARKET_ACCOUNT_CHANGED');return{status:response.status,body:Buffer.concat(chunks).toString('utf8')};
+   }catch(error){throw Error(/^MARKET_/.test(error.message)?error.message:'MARKET_UNAVAILABLE_NO_REPLAY');}finally{this.running--;}
+  }
+diff --git a/original/desktop/app/preload.cjs b/modified/desktop/app/preload.cjs
+index a8cc1bc..3ebda80 100644
+--- a/original/desktop/app/preload.cjs
++++ b/modified/desktop/app/preload.cjs
+@@ -28,5 +28,6 @@ contextBridge.exposeInMainWorld('naumiDesktop',{
+   openIdentity:()=>ipcRenderer.invoke('naumi:identity-open'),
+   logoutIdentity:()=>ipcRenderer.invoke('naumi:identity-logout'),
+   resumeIdentity:()=>ipcRenderer.invoke('naumi:identity-resume'),
++  cloud:value=>ipcRenderer.invoke('naumi:cloud',value),
+   product:'Naumi'
+ });
+diff --git a/modified/desktop/scripts/verify-cloud47-live.mjs b/modified/desktop/scripts/verify-cloud47-live.mjs
+new file mode 100644
+index 0000000..4b2ec9a
+--- /dev/null
++++ b/modified/desktop/scripts/verify-cloud47-live.mjs
+@@ -0,0 +1,33 @@
++// Real Electron identity UI -> real 47 account API -> real cloud/market.
++// Only local workbench/installer I/O use isolated fixtures. Zero model calls.
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createRequire} from 'node:module';import http from 'node:http';import {randomUUID,createHash} from 'node:crypto';import {fileURLToPath} from 'node:url';
++const root=fileURLToPath(new URL('../..',import.meta.url)),require=createRequire(import.meta.url),{_electron}=require('playwright'),credentials=JSON.parse(fs.readFileSync(path.join(root,'runtime/private-cloud47/accounts.json'))),origin=credentials.origin;
++const folder=path.join(root,'runtime/cloud47-live-'+randomUUID()),appDir=path.join(folder,'application'),out=path.join(root,'evidence/cloud47');fs.mkdirSync(appDir,{recursive:true});fs.cpSync(path.join(root,'desktop/app'),path.join(appDir,'app'),{recursive:true});fs.writeFileSync(path.join(appDir,'package.json'),JSON.stringify({name:'naumi-cloud47-live',main:'app/main.cjs'}));
++let running=false;
++const local=http.createServer((req,res)=>{res.setHeader('Content-Type','application/json');const send=v=>res.end(JSON.stringify(v));if(req.url==='/api/session/list')return send({result:{ok:true,value:{items:running?[{running:true}]:[]}}});if(req.url==='/naumi/bots')return send({version:1,bots:[{id:'fixture-employee',name:'验收员工',kind:'agent',status:'active',purpose:'隔离验收'}]});if(req.url.startsWith('/naumi/employees?'))return send({profile:{persona:'验收档案',revision:1},memories:[{id:'memory-one',kind:'preference',text:'只用于云端备份验收',status:'active'}]});res.setHeader('Content-Type','text/html');res.end('<!doctype html><h1>Isolated Workbench</h1>');});await new Promise(r=>local.listen(0,'127.0.0.1',r));const localOrigin='http://127.0.0.1:'+local.address().port;
++fs.writeFileSync(path.join(appDir,'app/backend.cjs'),`const fs=require('fs'),path=require('path');module.exports={localSettings(app){const legacy=process.env.NAUMI_CLOUD_TEST_LEGACY==='1',root=app.getPath('userData'),home=path.join(root,'harness');fs.mkdirSync(home,{recursive:true});return{root,home,workspaceId:'default',url:${JSON.stringify(localOrigin)},isolated:!legacy,identity:{id:'fixture'}};},async ensureBackend(settings){return{owned:settings.isolated,child:{exitCode:null,signalCode:null},launchURL:settings.url};},async stopBackend(){},createQuitGate({onReady}){return{beforeQuit(e){if(!this.done){e.preventDefault();this.done=true;onReady();}}};},async maintenanceRequest(){}};`);
++fs.writeFileSync(path.join(appDir,'app/installer-state.cjs'),'exports.registerProfile=()=>{};\n');
++const checks=[];const check=(label,value=true)=>{assert(value,label);checks.push(label);console.log('LIVE47_PASS '+label);};let application,page;const AUTH_ONLY_COMPLETE=Symbol('AUTH_ONLY_COMPLETE');
++async function launch(name,legacy){const env={...process.env,NAUMI_TEST:'1',NAUMI_TEST_HIDDEN:'1',NAUMI_USER_DATA:path.join(folder,name),NAUMI_IDENTITY_ORIGIN:origin,NAUMI_CLOUD_TEST_LEGACY:legacy?'1':'0'};delete env.ELECTRON_RUN_AS_NODE;delete env.NAUMI_ROOT;application=await _electron.launch({executablePath:require('electron'),args:[appDir],env,timeout:30000});page=await application.firstWindow();await page.waitForURL('**/identity.html');}
++async function login(account,claim=false){await page.locator('#account').fill(account.email);await page.locator('#password').fill(account.password);if(claim)await page.locator('#legacy-claim').check();await page.locator('#submit').click();}
++async function loginHTTP(account){const r=await fetch(origin+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json',Origin:origin},body:JSON.stringify({email:account.email,password:account.password})});assert.equal(r.status,200,'HTTP_LOGIN_FAILED');const cookie=r.headers.getSetCookie().map(x=>x.split(';')[0]).join('; ');assert(cookie);return cookie;}
++async function remote(cookie,endpoint,body){const r=await fetch(origin+endpoint,{headers:{cookie,Origin:origin,'Content-Type':'application/json','x-naumi-market':'1'},...body?{method:'POST',body:JSON.stringify(body)}:{}});return{status:r.status,value:await r.json()};}
++try{
++ await launch('legacy-device',true);await page.waitForFunction(()=>document.querySelector('#origin').value.startsWith('https://47.105.59.142'));check('real47_origin_preconfigured',await page.locator('#origin').inputValue()===origin);check('legacy_data_claim_is_explicit',await page.locator('#legacy-claim-row').isVisible());await page.screenshot({path:path.join(out,'login47.png'),animations:'disabled'});
++ await login(credentials.accounts[0],true);await page.waitForURL(localOrigin+'/**');check('real47_password_and_server_cookie_login');await page.evaluate(()=>{void window.naumiDesktop.openIdentity();});await page.waitForURL('**/identity.html');await page.locator('#cloud-panel').waitFor({state:'visible'});
++ if(process.env.NAUMI_CLOUD47_AUTH_ONLY==='1'){
++  await page.waitForFunction(()=>!document.querySelector('#logout').disabled);const state=await page.evaluate(()=>window.naumiDesktop.identityState());check('real47_authenticated_subject_confirmed',state.user.email===credentials.accounts[0].email);await page.locator('#logout').click();await page.locator('#login').waitFor({state:'visible'});await login(credentials.accounts[1]);await page.locator('#error').filter({hasText:'已关联其他账号'}).waitFor();check('other_real47_account_cannot_claim_existing_local_workspace');fs.writeFileSync(path.join(out,'LIVE47_AUTH.json'),JSON.stringify({status:'PASS',checks,real47AccountAPI:true,realElectron:true,localWorkbench:'isolated fixture',cloudDeployed:false,modelCalls:0,realEmployeeDataUploaded:false},null,2)+'\n');console.log('LIVE47_AUTH_COMPLETE checks='+checks.length+' real_login=PASS cookie=PASS legacy_ownership=PASS model_calls=0');throw AUTH_ONLY_COMPLETE;
++ }
++ await page.locator('#cloud-backup').click();await page.locator('#cloud-status').filter({hasText:'已备份到云端'}).waitFor({timeout:30000});check('native_backup_reaches_real47_sqlite');
++ const first=await page.evaluate(()=>window.naumiDesktop.cloud({action:'list'}));assert(first.ok);const doc=first.result.items[0];assert(doc?.id);check('real47_cloud_receipt_has_revision_and_digest',doc.revision===1&&/^[a-f0-9]{64}$/.test(doc.digest));
++ const file=path.join(folder,'restored.json');await application.evaluate(({dialog},file)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath:file});},file);const saved=await page.evaluate(id=>window.naumiDesktop.cloud({action:'download',id}),doc.id);check('native_download_restores_independent_file',saved.saved&&JSON.parse(fs.readFileSync(file)).payload.employees[0].profile.persona==='验收档案');
++ const cookieA=await loginHTTP(credentials.accounts[0]);const cold=await remote(cookieA,'/api/desktop-cloud/v1/documents/workspace/'+doc.id);check('fresh_https_session_reads_persisted_backup',cold.status===200&&cold.value.digest===doc.digest);
++ running=true;await page.locator('#logout').click();await page.locator('#error').filter({hasText:'请先结束当前运行任务'}).waitFor();check('running_task_blocks_logout');running=false;await page.locator('#logout').click();await page.locator('#login').waitFor({state:'visible'});await login(credentials.accounts[1]);await page.locator('#error').filter({hasText:'已关联其他账号'}).waitFor();check('other_account_cannot_claim_existing_local_workspace');await application.close();application=null;
++ await launch('clean-device',false);await login(credentials.accounts[1]);await page.waitForURL(localOrigin+'/**');await page.evaluate(()=>{void window.naumiDesktop.openIdentity();});await page.waitForURL('**/identity.html');const second=await page.evaluate(()=>window.naumiDesktop.cloud({action:'list'}));check('second_employee_has_no_first_employee_cloud_data',second.ok&&second.result.items.length===0);
++ const cookieB=await loginHTTP(credentials.accounts[1]);check('cross_account_backup_id_is_404',(await remote(cookieB,'/api/desktop-cloud/v1/documents/workspace/'+doc.id)).status===404);
++ const bytes=Buffer.from('Naumi workspace attachment acceptance'),digest=createHash('sha256').update(bytes).digest('hex'),chunk=await remote(cookieB,'/api/desktop-cloud/v1/chunks',{operationId:randomUUID(),digest,content:bytes.toString('base64')});assert.equal(chunk.status,200);const manifest=await remote(cookieB,'/api/desktop-cloud/v1/documents',{operationId:randomUUID(),kind:'file-manifest',id:'acceptance-files',expectedRevision:0,payload:{files:[{path:'documents/report.txt',chunks:[digest]}]}});check('real47_file_chunk_and_manifest_persist',manifest.status===200);const downloaded=await remote(cookieB,'/api/desktop-cloud/v1/chunks/'+digest);check('real47_downloaded_chunk_hash_matches',createHash('sha256').update(Buffer.from(downloaded.value.content,'base64')).digest('hex')===digest);check('other_employee_cannot_fetch_file_chunk',(await remote(cookieA,'/api/desktop-cloud/v1/chunks/'+digest)).status===404);
++ const stale=await remote(cookieA,'/api/desktop-cloud/v1/documents',{operationId:randomUUID(),kind:'workspace',id:doc.id,expectedRevision:0,payload:{schemaVersion:1}});check('real47_stale_revision_preserves_existing_backup',stale.status===409);
++ const marketMe=await remote(cookieB,'/api/plugin-market/v1/me');check('market_reuses_same_real47_login',marketMe.status===200&&marketMe.value.user.name.includes('acceptance'));
++ const bundle={schemaVersion:1,slug:'cloud47-check-'+credentials.suffix,title:'云端联调验收',summary:'短期测试作品，验收后清理',kind:'plugin',version:'1.0.0',description:'仅用于真实同域账号联调',changelog:'首次验收',capabilities:[],tags:[],entry:'plugin.js',files:[{path:'plugin.js',content:'export function apply(){}\n'}]};const draft=await remote(cookieB,'/api/plugin-market/v1/drafts',{operationId:randomUUID(),expectedRevision:0,package:bundle});assert.equal(draft.status,200);const published=await remote(cookieB,'/api/plugin-market/v1/publish',{operationId:randomUUID(),draftId:draft.value.id,expectedRevision:draft.value.revision});assert.equal(published.status,200);const shared=await remote(cookieA,'/api/plugin-market/v1/packages/'+published.value.id);check('real47_market_shared_with_verified_creator',shared.status===200&&shared.value.author.id===marketMe.value.user.id);const ticket=await remote(cookieA,'/api/plugin-market/v1/download',{operationId:randomUUID(),id:published.value.id,version:'1.0.0'});await remote(cookieA,'/api/plugin-market/v1/downloads/'+ticket.value.ticket);const stats=await remote(cookieB,'/api/plugin-market/v1/packages/'+published.value.id);check('real47_market_completed_download_count',stats.value.stats.downloads===1);
++ const result={status:'PASS',checks,real47AccountAPI:true,realElectron:true,realRemoteSQLite:true,realMarket:true,localWorkbench:'isolated fixture, not 3080',accounts:2,modelCalls:0,existingEmployeeDataUploaded:false,sourceSHA:process.env.NAUMI_VERIFIED_MAIN??null};fs.writeFileSync(path.join(out,'LIVE47.json'),JSON.stringify(result,null,2)+'\n');console.log('LIVE47_COMPLETE checks='+checks.length+' native_login=PASS cloud_write_read=PASS files=PASS isolation=PASS market=PASS model_calls=0');
++}catch(error){if(error!==AUTH_ONLY_COMPLETE)throw error;}finally{await application?.close();local.closeAllConnections();await new Promise(r=>local.close(r));}
+diff --git a/modified/desktop/tests/cloud47.test.cjs b/modified/desktop/tests/cloud47.test.cjs
+new file mode 100644
+index 0000000..2d4a433
+--- /dev/null
++++ b/modified/desktop/tests/cloud47.test.cjs
+@@ -0,0 +1,8 @@
++'use strict';
++const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
++const {IdentityRuntime}=require('../app/identity-runtime.cjs');
++function fixture(){const root=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-cloud47-identity-')),state={email:'alice@fixture.test'},session={async fetch(url){return Response.json(url.endsWith('/session')?{user:{email:state.email,name:'Employee'}}:{ok:true});}};return{root,state,runtime:new IdentityRuntime({userData:path.join(root,'user'),legacyHome:path.join(root,'legacy'),managedOrigin:'https://47.105.59.142',sessionFor:()=>session}),close(){fs.rmSync(root,{recursive:true,force:true});}};}
++test('legacy local data requires explicit account claim after real server validation',async()=>{const f=fixture();try{assert.equal(f.runtime.status().legacyClaimRequired,true);await assert.rejects(f.runtime.login({account:'alice',password:'fixture'}),/CLAIM_REQUIRED/);assert.equal(f.runtime.active,null);assert(!fs.existsSync(path.join(f.root,'legacy','naumi-legacy-owner.json')));const active=await f.runtime.login({account:'alice',password:'fixture',claimLocal:true});assert.equal(active.user.email,f.state.email);assert.equal(f.runtime.status().legacyClaimRequired,false);assert(fs.existsSync(path.join(f.root,'legacy','naumi-legacy-owner.json')));}finally{f.close();}});
++test('legacy claim cannot be reassigned by another authenticated account or confirmation checkbox',async()=>{const f=fixture();try{await f.runtime.login({account:'alice',password:'fixture',claimLocal:true});const file=path.join(f.root,'legacy','naumi-legacy-owner.json'),before=fs.readFileSync(file,'utf8');f.runtime.active=null;f.state.email='bob@fixture.test';await assert.rejects(f.runtime.login({account:'bob',password:'fixture',claimLocal:true}),/LOCAL_ACCOUNT_MISMATCH/);assert.equal(fs.readFileSync(file,'utf8'),before);assert.equal(f.runtime.active,null);}finally{f.close();}});
++test('cold restored server session does not silently adopt unclaimed legacy data',async()=>{const f=fixture();try{assert.equal(await f.runtime.restore(),null);assert.equal(f.runtime.status().error,'IDENTITY_LOCAL_CLAIM_REQUIRED');assert(!fs.existsSync(path.join(f.root,'legacy','naumi-legacy-owner.json')));}finally{f.close();}});
++test('packaged client binds to real 47 authority even when a legacy backend-link exists',()=>{const main=fs.readFileSync(path.join(__dirname,'../app/main.cjs'),'utf8');assert(main.includes("DEFAULT_IDENTITY_ORIGIN='https://47.105.59.142'"));assert(main.includes('candidate.isolated||app.isPackaged||process.env.NAUMI_IDENTITY_ORIGIN'));assert(main.includes('legacyHome:candidate.isolated?undefined:candidate.home'));const html=fs.readFileSync(path.join(__dirname,'../app/identity.html'),'utf8');assert(html.includes('将当前本地工作台关联到此账号'));assert(html.includes('备份 Bot 档案与记忆'));});
+diff --git a/modified/docs/implementation/CLOUD47.md b/modified/docs/implementation/CLOUD47.md
+new file mode 100644
+index 0000000..35a958a
+--- /dev/null
++++ b/modified/docs/implementation/CLOUD47.md
+@@ -0,0 +1,43 @@
++# 47 账号接入与个人云数据基础
++
++## 模块与职责
++
++负责人：本线程 cloud47；独立分支 `codex/naumi-cloud47-foundation-20261117`，工作树 `E:/Workspace/naumi-cloud47-foundation-20261117`。创建时基线 `7c7108fec67602ae4caf4bbb137c75092be82892`。共享 main 的推理控制、主动执行、安装器证据和未提交内容保留。
++
++用户明确要求：继续完成真实登录，目标为 47 服务器，后续用户数据在服务器同步持久化。不得把模拟认证、源码合并或本地临时 HTTP 当成真实接通。
++
++本任务独占：新增 cloud 服务/个人同步契约与客户端适配、部署配置与脚本；桌面统一身份默认服务器与最小接线；市场服务部署所需增量。host/client/package 仅追加自身注册；不改 Bot 执行账本、模型路由和既有企业审批同步。
++
++## 公共接口、依赖方向、数据与事务归属
++
++账号权威继续是现有 Canvas `/api/auth/login`、`/api/auth/session`、`/api/auth/logout`。2026-11-17 实际 HTTPS 只读检查 `https://47.105.59.142/api/auth/session` 返回 HTTP200 `{"user":null}`。使用 naumi 项目已登记的连接信息和受保护部署密钥已成功完成 root 只读 SSH；原始下载密钥因 ACL 过宽被 OpenSSH 忽略，未修改原密钥。
++
++市场继续采用既有独立服务；个人云数据使用账号级归属，不继承协作系统企业角色。企业 EmployeeSync M3 的设备签名、组织成员、共享审批、私密档案/记忆同步保持原接口，不伪装成全量账号数据同步。
++
++本地原始工作区、SQLite、会话和密钥不会因为设置服务器地址而自动认领或搬动。同步必须明确记录范围、版本、回执、失败、重试和冲突；API Key、Cookie、设备私钥和浏览器档案不作为普通用户文件上传。
++
++## 本次实现与迁移状态
++
++47 已从固定 main `572fe8403ddb06db9f0f34902139547bc382faac` 部署独立容器 `naumi-desktop-cloud-572fe8403ddb`，云数据与市场健康HTTP200，匿名业务接口401。原6个容器启动时间保持；只追加新路由，未重建或重启原Canvas/Worker/Hub。NAS不是本服务默认依赖；数据使用47持久磁盘，后续可沿用已有通用对象存储适配。
++
++首次部署被NAS媒体迁移锁正确阻止；迁移自然释放后接续，没有终止他人进程。首轮nginx reload后立即读到旧路由，脚本已自动回退原网关、停止自己的候选容器，随后补齐有界就绪等待再发布成功。原/改网关SHA、固定Node image digest、6原容器不变证据见DEPLOYMENT.json。
++
++本机从固定main `5201ec43bb2f3e3dff91f3d378d903b691a9fd36` 增量加载：9个ASAR源文件、10个插件运行文件。Program Files目录只读，未改权限或覆盖原安装；保留原ASAR，用户目录构造同版本原生客户端，129个无关插件文件及287个无关ASAR条目校验不变。桌面Naumi快捷方式保留原图标、备份后指向新客户端；工作台数据不搬动。首次受限写入失败后原ASAR哈希不变且服务已恢复；最终加载成功并再次核验101sessions/0running/4bots/revision46。当前Windows锁屏，实际桌面视觉验收保留；原生真实47验收使用独立测试用户目录，未替用户登录或认领旧数据。
++
++运行服务长期占用：47独立容器loopback3190与每日备份timer属于产品服务，保留运行；本机3080为既有服务。本任务隔离Electron/HTTP测试宿主均已关闭。真实员工账号登录及“将当前本地工作台关联到此账号”仍由用户操作，不因测试账号通过就认领生产目录。
++
++## 验证命令、结果及证据层级
++
++只读 SSH 和 HTTPS 已核对；基线64/64，模块46/46，集中回归串行682/682；真实Electron受控账号协议检查通过，0模型调用。前两次并发全仓各有一个已有时限敏感测试失败，backend31项定向复测通过；未修改Bot/worker行为或放宽断言，保留失败日志。最终全仓使用 test-concurrency=1，后续UI加载状态的局部调整继续由真实47联调复验。
++
++真实部署使用新独立容器和持久目录；实际双账号验收使用零额度、role=user、1小时到期的临时账号，完成后只清理精确匹配的自身测试记录。原员工账号、密码、模型密钥和现有数据不读写。个人账号目前仍采用现有email主体契约，组织成员与不可变subject迁移另行实施。
++
++客户端增量加载器同时备份原ASAR、验证其无关条目不变；市场Host/client仅追加自身delta，保留原生图标、IM及推理控制注册。加载前真实running=0，核验Bot档案导出与凭据/模型配置哈希；失败恢复自己的原文件，不回滚用户数据库。
++
++## 未完成项与下一步
++
++已完成同域市场与账号级云数据服务、默认47原生登录、旧工作台显式归属绑定、档案/确认记忆备份与独立JSON下载、文件块/清单API。18项真实47双账号链通过：登录、服务器Cookie、SQLite持久化、新HTTPS会话回读、下载哈希、跨账号404、CAS冲突、市场署名和下载计数。临时账号均零额度/普通用户，最终两个测试账号、两个云文档、一个市场测试作品已精确清理；保留云数据库在线快照，并在独立副本验证完整性及测试记录可恢复，不回灌线上。
++
++下一步：用户使用自己的47账号登录并确认旧本地归属；全量聊天事件/附件与工作区文件的持续双向同步、冲突合并和一键恢复工作台仍未实现，不以当前备份按钮或底层文档/文件块API替代它。当前未上传真实员工历史数据，未自动同步API Key/Cookie。备份是服务器本机每日一致快照；异地备份与容量/高可用验收另计。
++
++协作整合：已保留D4 `employee-local-proactive.js` package条目，整合D3自然目标与确认接口；不修改employee-work*/employee-center*，备份只读取export的profile与已确认memories，忽略goalProposals。旧记录/真实任务账本不作为云端上传测试材料。
+diff --git a/original/native-client/app.asar b/modified/native-client/app.asar
+index 0fd5ef1096d96bd19bcf652914c722e207a29d9b..d7495ebed5c8b7ed89fea245422b1fe9a7289184 100644
+GIT binary patch
+delta 18474
+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
+O4JFY6d1~*mU;RIKt4)sp
+
+delta 6712
+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
+J8Cd+w{{V<@_0a$T
+
+diff --git a/modified/runtime-plugin/assets/plugin-market.css b/modified/runtime-plugin/assets/plugin-market.css
+new file mode 100644
+index 0000000..d0c3243
+--- /dev/null
++++ b/modified/runtime-plugin/assets/plugin-market.css
+@@ -0,0 +1 @@
++.nmk{--mk-line:#ece9f1;--mk-ink:#352f40;--mk-muted:#8b8295;--mk-accent:#79628e;width:100%;max-width:1240px;margin:0 auto;padding:24px 28px 56px;color:var(--mk-ink);font:13px/1.6 Inter,"Segoe UI","Microsoft YaHei",sans-serif}.nmk *{box-sizing:border-box}.nmk button,.nmk input,.nmk select,.nmk textarea{font:inherit}.nmk button{cursor:pointer;border:1px solid var(--mk-line);border-radius:9px;padding:8px 13px;background:#fff;color:var(--mk-ink)}.nmk button:disabled{opacity:.45;cursor:default}.nmk :focus-visible{outline:2px solid #a68db9;outline-offset:3px}.nmk input,.nmk textarea,.nmk select{border:1px solid var(--mk-line);border-radius:9px;padding:9px 11px;background:#fff;color:var(--mk-ink);min-width:0}.nmk .nmk-primary{background:var(--mk-accent);border-color:var(--mk-accent);color:#fff}.nmk-toolbar{display:flex;gap:10px;align-items:center;margin-bottom:27px}.nmk-search{display:flex;align-items:center;gap:8px;flex:1;background:#f7f5f9;border-radius:11px;padding:0 13px}.nmk-search span{font-size:24px;color:#a397b0}.nmk-search input{width:100%;border:0;background:transparent;outline:none;padding:11px 0}.nmk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:18px}.nmk-card{border:1px solid var(--mk-line);border-radius:17px;background:#fff;padding:21px;transition:box-shadow .18s,border-color .18s}.nmk-card:hover{box-shadow:0 8px 28px #35204609;border-color:#d6c9e0}.nmk .nmk-card-main{display:flex;text-align:left;width:100%;gap:14px;border:0;padding:0;background:transparent}.nmk-icon{width:48px;height:48px;flex-shrink:0;display:grid;place-items:center;border-radius:14px;font-size:22px;font-weight:600;color:#85639e;background:#f0e9f7}.nmk-icon[data-kind=workflow]{color:#538c86;background:#eaf6f2}.nmk-icon[data-kind=skill]{color:#a68b4a;background:#fcf5e4}.nmk-icon[data-kind=bot-template]{color:#6385ad;background:#edf3fb}.nmk h3{font-size:15px;font-weight:600;margin:0}.nmk h2{font-size:23px;font-weight:600;margin:0}.nmk-category{font-size:10px;color:#b0a6b9}.nmk-card-main p{font-size:12px;color:var(--mk-muted);margin:10px 0 0;min-height:39px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.nmk .nmk-author{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--mk-muted);padding:0;border:0;background:transparent;margin:18px 0}.nmk-avatar{display:grid;place-items:center;width:22px;height:22px;background:#f0edf3;border-radius:50%;font-size:10px;color:#8c7e99}.nmk-card footer{display:flex;gap:15px;border-top:1px solid #f3f0f5;padding-top:13px;align-items:center;font-size:11px;color:#a198aa}.nmk-card footer button{font-size:11px;padding:0;border:0;background:none;color:#a198aa}.nmk-card footer .nmk-open{margin-left:auto;color:var(--mk-accent);font-weight:600}.nmk-empty{min-height:230px;display:flex;justify-content:center;align-items:center;gap:18px;color:#aaa0b5}.nmk-error{font-size:12px;color:#b55a68;background:#fdf4f5;border-radius:10px;padding:12px;margin-bottom:16px}.nmk-error button{margin-left:10px;font-size:11px;padding:3px 8px}.nmk-notice{padding:10px 13px;border-radius:9px;background:#f2f8f3;color:#668a70;margin-bottom:14px}.nmk-filter{margin-bottom:16px}.nmk-backdrop{position:fixed;inset:0;z-index:400;display:grid;place-items:center;background:#2c243c28;backdrop-filter:blur(5px);padding:22px}.nmk-editor,.nmk-detail{width:min(700px,100%);max-height:calc(100dvh - 44px);overflow:auto;background:#fff;border-radius:22px;box-shadow:0 20px 100px #2c1e3e1a;padding:30px;display:grid;gap:20px}.nmk-editor header,.nmk-detail header{display:flex;justify-content:space-between;align-items:start}.nmk-editor header button,.nmk-detail header>button{border:0;font-size:22px;padding:0 4px;color:#b0a6b9}.nmk-editor label{display:grid;gap:7px;font-size:12px;color:var(--mk-muted)}.nmk-editor label textarea{resize:vertical;min-height:70px;width:100%}.nmk-upload{border:1px dashed #d6cbdf;border-radius:12px;padding:15px;background:#fcfafe;cursor:pointer}.nmk-upload input{width:100%;font-size:11px}.nmk-editor-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.nmk-editor footer{display:flex;gap:9px;justify-content:flex-end}.nmk-facts,.nmk-capabilities{display:flex;gap:9px;flex-wrap:wrap;color:var(--mk-muted);font-size:11px}.nmk-facts span,.nmk-capabilities span{border-radius:6px;padding:4px 8px;background:#f6f3f8}.nmk-description{white-space:pre-wrap;color:#756a80;margin:0}.nmk-detail .nmk-author{margin:8px 0 0}.nmk-version{display:flex;align-items:center;gap:12px;font-size:12px;color:var(--mk-muted)}.nmk-changelog{margin:0;font-size:12px;white-space:pre-wrap;color:var(--mk-muted)}.nmk-consent{display:flex;gap:9px;align-items:center;font-size:12px}.nmk-consent input{accent-color:var(--mk-accent)}.nmk-actions{display:flex;gap:9px;flex-wrap:wrap}.nmk-reviews{border-top:1px solid var(--mk-line);padding-top:20px}.nmk-reviews article{padding:15px 0;border-bottom:1px solid var(--mk-line)}.nmk-reviews article span{margin-left:15px;color:#b99e5e}.nmk-reviews p{margin:6px 0;color:var(--mk-muted);white-space:pre-wrap}.nmk-reviews form{display:grid;grid-template-columns:90px 1fr;gap:10px;padding-top:20px}.nmk-reviews textarea{resize:vertical;min-height:60px}.nmk-reviews form button{grid-column:2;justify-self:end}.nmk-drafts{margin-top:30px}.nmk-drafts>button{display:flex;gap:15px;width:100%;text-align:left;margin-top:10px;padding:13px}.nmk-drafts button span{margin-left:auto;color:var(--mk-muted)}.nmk-history{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.nmk-history h3{font-size:12px;color:var(--mk-muted);font-weight:400}@media(max-width:650px){.nmk{padding:15px}.nmk-toolbar{flex-wrap:wrap}.nmk-search{flex-basis:100%}.nmk-toolbar select{flex:1}.nmk-grid{grid-template-columns:1fr}.nmk-detail,.nmk-editor{padding:22px}.nmk-editor-grid{grid-template-columns:1fr}.nmk-reviews form{grid-template-columns:1fr}.nmk-reviews form button{grid-column:1}.nmk-backdrop{padding:12px}.nmk-editor,.nmk-detail{max-height:calc(100dvh - 24px)}}
+diff --git a/modified/runtime-plugin/assets/plugin-market.js b/modified/runtime-plugin/assets/plugin-market.js
+new file mode 100644
+index 0000000..d7e1573
+--- /dev/null
++++ b/modified/runtime-plugin/assets/plugin-market.js
+@@ -0,0 +1,37 @@
++import {CREATE_BOT_EVENT} from './primary-bot.js';
++const API='/api/plugin-market/v1';
++const kinds={plugin:'工具插件',skill:'技能包',workflow:'工作流','bot-template':'Bot 模板'},caps={'files-read':'读取文件','files-write':'写入文件',network:'访问网络',browser:'操作浏览器',commands:'执行命令'};
++const errors={MARKET_LOGIN_REQUIRED:'请先登录 Naumi 账号',MARKET_AUTH_REQUIRED:'请重新登录 Naumi 账号',MARKET_UNAVAILABLE_NO_REPLAY:'市场连接尚未确认，请重试',MARKET_IDENTITY_UNAVAILABLE:'账号服务暂未连接',MARKET_VERSION_IMMUTABLE:'这个版本已发布，请使用新版本号',MARKET_DRAFT_CONFLICT:'草稿已更新，请重新载入',MARKET_AUTHOR_REQUIRED:'仅创作者可以修改作品',MARKET_SELF_REVIEW:'可以收藏自己的作品，评分由使用者提供',MARKET_INSTALL_REQUIRED:'安装后可以评价',MARKET_RUNNING_TASKS:'请先结束运行中的任务',MARKET_CAPABILITY_CONFIRMATION_REQUIRED:'请确认插件声明的能力',MARKET_PRIVATE_OR_RESERVED_FILE:'包中包含私密文件或保留文件',MARKET_SECRET_IN_PACKAGE:'包中包含密钥，请移除后重新打包',MARKET_NATIVE_INSTALL_FAILED:'安装未完成，原版本已保留或恢复',MARKET_RESTORE_REQUIRED:'安装状态需要检查，请打开已安装列表',MARKET_PACKAGE_INTEGRITY:'文件校验未通过，请重新下载',MARKET_CACHE_INTEGRITY:'本地版本校验未通过',MARKET_EXISTING_PACKAGE_UNMANAGED:'已存在同名插件，请先在已安装中核对'};
++async function local(body,signal){const response=await fetch('/naumi/plugin-market',{credentials:'same-origin',cache:'no-store',signal,...body?{method:'POST',headers:{'Content-Type':'application/json','x-naumi-market':'1'},body:JSON.stringify(body)}:{}}),value=await response.json();if(!response.ok)throw Object.assign(Error(errors[value.error]??'操作尚未完成，请重试'),{code:value.error});return value;}
++async function remote(endpoint,body,signal){if(body)return local({action:'remote',endpoint:API+endpoint,body},signal);const response=await fetch('/naumi/plugin-market?endpoint='+encodeURIComponent(API+endpoint),{credentials:'same-origin',cache:'no-store',signal}),value=await response.json();if(!response.ok)throw Object.assign(Error(errors[value.error]??'市场暂未连接，请重试'),{code:value.error});return value;}
++const id=()=>crypto.randomUUID();
++export function installPluginMarketUI(ctx,React){const h=React.createElement,{useState,useEffect,useRef}=React;
++ function Publisher({initial,onClose,onSaved}){const [bundle,setBundle]=useState(initial?.package??null),[draft,setDraft]=useState(initial?{id:initial.id,revision:initial.revision}:null),[error,setError]=useState(''),[busy,setBusy]=useState(false);const operation=useRef({}),flight=useRef(false);
++  const change=(field,value)=>{setBundle(b=>({...b,[field]:value}));operation.current={};setError('');};
++  const load=async event=>{try{const file=event.target.files?.[0];if(!file)return;if(file.size>2*1024*1024)throw Error('文件超过 2 MB');const b=JSON.parse(await file.text());if(b.schemaVersion!==1||!b.slug||!Array.isArray(b.files))throw Error('请选择 Naumi 插件包');setBundle(b);setDraft(null);operation.current={};setError('');}catch(e){setError(e.message);}};
++  const save=async publish=>{if(flight.current||!bundle)return;flight.current=true;setBusy(true);setError('');try{operation.current.save??=id();operation.current.savePayload??={operationId:operation.current.save,...(draft?{id:draft.id}:{}),expectedRevision:draft?.revision??0,package:bundle};const d=operation.current.saved??await remote('/drafts',operation.current.savePayload);operation.current.saved=d;setDraft(d);if(publish){operation.current.publish??=id();await remote('/publish',{operationId:operation.current.publish,draftId:d.id,expectedRevision:d.revision});onSaved();onClose();}else{operation.current={};onSaved();}}catch(e){setError(e.message);}finally{flight.current=false;setBusy(false);}};
++  return h('div',{className:'nmk-backdrop',onMouseDown:e=>{if(e.target===e.currentTarget&&!busy)onClose();}},h('section',{className:'nmk-editor',role:'dialog','aria-modal':true,'aria-label':'发布作品'},h('header',null,h('h2',null,'发布作品'),h('button',{type:'button',onClick:onClose,disabled:busy,'aria-label':'关闭发布'},'×')),h('label',{className:'nmk-upload'},h('input',{type:'file',accept:'.json,.naumi-plugin',disabled:busy,onChange:load}),'导入插件包'),bundle&&h(React.Fragment,null,h('div',{className:'nmk-editor-grid'},[['title','名称',80],['slug','标识',64],['version','版本',30],['summary','简介',180]].map(([key,label,max])=>h('label',{key},label,h('input',{value:bundle[key]??'',maxLength:max,disabled:busy,onChange:e=>change(key,e.target.value)})))),h('label',null,'更新记录',h('textarea',{value:bundle.changelog??'',maxLength:4000,disabled:busy,onChange:e=>change('changelog',e.target.value)})),h('label',null,'详情',h('textarea',{value:bundle.description??'',maxLength:20000,rows:5,disabled:busy,onChange:e=>change('description',e.target.value)})),h('div',{className:'nmk-facts'},h('span',null,kinds[bundle.kind]??bundle.kind),h('span',null,bundle.files.length+' 个文件'),(bundle.capabilities??[]).map(c=>h('span',{key:c},caps[c]??c)))),error&&h('p',{role:'alert',className:'nmk-error'},error),h('footer',null,h('button',{disabled:busy,onClick:onClose},'取消'),h('button',{disabled:busy||!bundle,onClick:()=>save(false)},'保存草稿'),h('button',{className:'nmk-primary',disabled:busy||!bundle,onClick:()=>save(true)},busy?'提交中…':'发布'))));
++ }
++ function Market({mine=false}){const [data,setData]=useState(null),[me,setMe]=useState(null),[installed,setInstalled]=useState({}),[search,setSearch]=useState(''),[kind,setKind]=useState(''),[sort,setSort]=useState('popular'),[author,setAuthor]=useState(''),[detail,setDetail]=useState(null),[version,setVersion]=useState(''),[consent,setConsent]=useState(false),[publisher,setPublisher]=useState(null),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[epoch,setEpoch]=useState(0),[rating,setRating]=useState(5),[comment,setComment]=useState('');const flight=useRef(false),operation=useRef(null),generation=useRef(0);
++  const refresh=()=>setEpoch(v=>v+1);
++  useEffect(()=>{const controller=new AbortController(),g=++generation.current;setError('');const timer=setTimeout(()=>{void(async()=>{try{const [who,list,state]=await Promise.all([remote('/me',undefined,controller.signal),remote('/packages?'+new URLSearchParams({view:mine?'mine':'market',q:search,kind,sort,author}),undefined,controller.signal),local(undefined,controller.signal)]);if(g!==generation.current)return;setMe(who.user);setData(list);setInstalled(state.installed);}catch(e){if(!controller.signal.aborted){setError(e.message);if(['MARKET_LOGIN_REQUIRED','MARKET_AUTH_REQUIRED'].includes(e.code)){setData(null);setMe(null);setDetail(null);}}}})();},search?220:0);return()=>{clearTimeout(timer);controller.abort();};},[mine,search,kind,sort,author,epoch]);
++  const open=async item=>{setError('');setNotice('');setConsent(false);operation.current=null;try{const d=await remote('/packages/'+item.id);setDetail(d);setVersion(d.version);setComment(d.feedback?.comment??'');setRating(d.feedback?.rating??5);}catch(e){setError(e.message);}};
++  const run=async fn=>{if(flight.current)return;flight.current=true;setBusy(true);setError('');try{await fn();refresh();}catch(e){setError(e.message);}finally{flight.current=false;setBusy(false);}};
++  const install=()=>run(async()=>{if(!consent)return;operation.current??={download:id()};operation.current.install??=id();const request=operation.current,ticket=await remote('/download',{operationId:request.download,id:detail.id,version}),response=await remote('/downloads/'+ticket.ticket);const result=await local({action:'install',operationId:request.install,id:detail.id,ticket:ticket.ticket,expectedDigest:detail.versions.find(v=>v.version===version).digest,capabilities:response.package.capabilities});operation.current=null;setNotice(result.application==='restart-required'?'已安装，重启后生效':'已安装');});
++  const download=()=>run(async()=>{operation.current??={download:id()};const ticket=await remote('/download',{operationId:operation.current.download,id:detail.id,version}),body=await remote('/downloads/'+ticket.ticket);const url=URL.createObjectURL(new Blob([JSON.stringify(body.package,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download=detail.slug+'-'+version+'.naumi-plugin.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);operation.current=null;setNotice('已下载');});
++  const rollback=v=>run(async()=>{const result=await local({action:'rollback',operationId:id(),id:detail.id,version:v});setNotice(result.application==='restart-required'?'已回滚，重启后生效':'已回滚');});
++  const useTemplate=()=>{setDetail(null);window.dispatchEvent(new CustomEvent(CREATE_BOT_EVENT,{detail:{fields:installed[detail.id].current.template}}));};
++  const favorite=item=>run(async()=>{await remote('/feedback',{operationId:id(),id:item.id,favorite:!item.feedback?.favorite});if(detail?.id===item.id)setDetail(await remote('/packages/'+item.id));});
++  return h('section',{className:'nmk','aria-label':mine?'我的作品':'员工插件市场'},h('div',{className:'nmk-toolbar'},h('label',{className:'nmk-search'},h('span',{'aria-hidden':true},'⌕'),h('input',{'aria-label':'搜索插件',placeholder:'搜索插件或创作者',value:search,onChange:e=>setSearch(e.target.value)})),h('select',{'aria-label':'作品类型',value:kind,onChange:e=>setKind(e.target.value)},h('option',{value:''},'全部类型'),Object.entries(kinds).map(([id,label])=>h('option',{key:id,value:id},label))),h('select',{'aria-label':'排序',value:sort,onChange:e=>setSort(e.target.value)},h('option',{value:'popular'},'热门'),h('option',{value:'new'},'最新')),h('button',{className:'nmk-primary',disabled:!me||busy,onClick:()=>setPublisher({})},'发布作品')),author&&h('button',{className:'nmk-filter',onClick:()=>setAuthor('')},'全部创作者 ×'),
++   error&&h('div',{className:'nmk-error',role:'alert'},error,h('button',{onClick:refresh},'重试'),!me&&globalThis.naumiDesktop?.openIdentity&&h('button',{onClick:()=>globalThis.naumiDesktop.openIdentity()},'登录 Naumi')),notice&&h('div',{className:'nmk-notice',role:'status'},notice),
++   !data&&!error&&h('div',{className:'nmk-empty',role:'status'},'载入中…'),data&&data.items.length===0&&h('div',{className:'nmk-empty'},mine?'暂无已发布作品':'暂无插件',me&&h('button',{onClick:()=>setPublisher({})},'发布作品')),
++   h('div',{className:'nmk-grid'},(data?.items??[]).map(item=>h('article',{key:item.id,className:'nmk-card'},h('button',{className:'nmk-card-main',onClick:()=>open(item)},h('span',{className:'nmk-icon','data-kind':item.kind},item.title.slice(0,1)),h('div',null,h('h3',null,item.title),h('span',{className:'nmk-category'},kinds[item.kind]),h('p',null,item.summary))),h('button',{className:'nmk-author',onClick:()=>setAuthor(item.author.id)},h('span',{className:'nmk-avatar','aria-hidden':true},item.author.name.slice(0,1)),item.author.name),h('footer',null,h('span',{'aria-label':'下载量'},'↓ '+item.stats.downloads),h('span',{'aria-label':'安装用户'},'安装 '+item.stats.installUsers),h('button',{'aria-label':'收藏 '+item.title,onClick:()=>favorite(item),disabled:busy},item.feedback?.favorite?'♥':'♡',item.stats.favorites),h('button',{className:'nmk-open',onClick:()=>open(item)},installed[item.id]?'已安装':'查看'))))),
++   mine&&data?.drafts.length>0&&h('section',{className:'nmk-drafts'},h('h3',null,'草稿'),data.drafts.map(d=>h('button',{key:d.id,onClick:()=>setPublisher(d)},h('strong',null,d.package.title),h('span',null,d.package.version),'继续编辑'))),
++   detail&&h('div',{className:'nmk-backdrop',onMouseDown:e=>{if(e.target===e.currentTarget&&!busy)setDetail(null);}},h('section',{className:'nmk-detail',role:'dialog','aria-modal':true,'aria-label':detail.title},h('header',null,h('div',null,h('h2',null,detail.title),h('button',{className:'nmk-author',onClick:()=>{setAuthor(detail.author.id);setDetail(null);}},detail.author.name)),h('button',{'aria-label':'关闭详情',disabled:busy,onClick:()=>setDetail(null)},'×')),h('p',{className:'nmk-description'},detail.description||detail.summary),h('div',{className:'nmk-facts'},h('span',null,'下载 '+detail.stats.downloads),h('span',null,'安装用户 '+detail.stats.installUsers),h('span',null,'评分 '+(detail.stats.rating.mean?.toFixed(1)??'—')),h('span',null,kinds[detail.kind])),h('label',{className:'nmk-version'},'版本',h('select',{value:version,disabled:busy,onChange:e=>{setVersion(e.target.value);setConsent(false);operation.current=null;}},detail.versions.map(v=>h('option',{key:v.version,value:v.version},v.version)))),h('p',{className:'nmk-changelog'},detail.versions.find(v=>v.version===version)?.changelog),h('div',{className:'nmk-capabilities'},(detail.versions.find(v=>v.version===version)?.capabilities??[]).length?(detail.versions.find(v=>v.version===version)?.capabilities??[]).map(c=>h('span',{key:c},caps[c])):h('span',null,'未声明额外能力')),h('label',{className:'nmk-consent'},h('input',{type:'checkbox',checked:consent,disabled:busy,onChange:e=>setConsent(e.target.checked)}),'确认安装此版本及其声明的能力'),
++    h('div',{className:'nmk-actions'},h('button',{className:'nmk-primary',disabled:busy||!consent,onClick:install},busy?'处理中…':installed[detail.id]?.current.version===version?'重新安装':installed[detail.id]?'更新到此版本':'安装'),h('button',{disabled:busy,onClick:download},'下载包'),installed[detail.id]&&h('button',{disabled:busy,onClick:()=>run(async()=>{await local({action:'uninstall',operationId:id(),id:detail.id});setNotice('已卸载');})},'卸载'),detail.kind==='bot-template'&&installed[detail.id]&&h('button',{disabled:busy,onClick:useTemplate},'用模板创建 Bot'),detail.mine&&h('button',{disabled:busy,onClick:()=>run(async()=>{await remote('/visibility',{operationId:id(),id:detail.id,visibility:detail.visibility==='published'?'withdrawn':'published'});setDetail(null);})},detail.visibility==='published'?'下架':'重新上架')),
++    installed[detail.id]?.history.length>0&&h('div',{className:'nmk-history'},h('h3',null,'本地历史版本'),installed[detail.id].history.map(v=>h('button',{key:v.digest,disabled:busy,onClick:()=>rollback(v.version)},'回滚到 '+v.version))),
++    h('section',{className:'nmk-reviews'},h('h3',null,'使用评价'),detail.reviews.map((r,i)=>h('article',{key:i},h('strong',null,r.authorName),h('span',null,'★ '+r.rating),h('p',null,r.comment))),!detail.mine&&installed[detail.id]&&h('form',{onSubmit:e=>{e.preventDefault();void run(async()=>{await remote('/feedback',{operationId:id(),id:detail.id,rating:Number(rating),comment});setDetail(await remote('/packages/'+detail.id));});}},h('select',{'aria-label':'评分',value:rating,onChange:e=>setRating(e.target.value)},[5,4,3,2,1].map(n=>h('option',{key:n,value:n},n+' 星'))),h('textarea',{'aria-label':'评价',value:comment,maxLength:2000,onChange:e=>setComment(e.target.value)}),h('button',{disabled:busy},'提交评价'))),error&&h('p',{className:'nmk-error',role:'alert'},error),notice&&h('p',{role:'status'},notice))),
++   publisher&&h(Publisher,{initial:publisher.id?publisher:null,onClose:()=>setPublisher(null),onSaved:refresh}));
++ }
++ return ctx.slots.inject('plugins.tab',function*(){yield ctx.slots.register({name:'plugins.tab',id:'naumi-market',order:-20,label:()=> '市场'},()=>h(Market));yield ctx.slots.register({name:'plugins.tab',id:'naumi-my-works',order:-10,label:()=> '我的作品'},()=>h(Market,{mine:true}));});
++}
+diff --git a/original/runtime-plugin/assets/primary-bot.js b/modified/runtime-plugin/assets/primary-bot.js
+index c88e460..3fda960 100644
+--- a/original/runtime-plugin/assets/primary-bot.js
++++ b/modified/runtime-plugin/assets/primary-bot.js
+@@ -11,14 +11,14 @@ export function enterBotMode(ctx,catalog){
+ }
+ export function installPrimaryBotUI(ctx,React){
+  const h=React.createElement,Dialog=createEmployeeDialog(ctx,React);
+- function CreationOverlay(){const [open,setOpen]=React.useState(false);React.useEffect(()=>{const show=()=>setOpen(true);window.addEventListener(CREATE_BOT_EVENT,show);return()=>window.removeEventListener(CREATE_BOT_EVENT,show);},[]);return open?h(Dialog,{onClose:()=>setOpen(false)}):null;}
++ function CreationOverlay(){const [open,setOpen]=React.useState(false);React.useEffect(()=>{const show=e=>setOpen({fields:e.detail?.fields});window.addEventListener(CREATE_BOT_EVENT,show);return()=>window.removeEventListener(CREATE_BOT_EVENT,show);},[]);return open?h(Dialog,{initialFields:open.fields,onClose:()=>setOpen(false)}):null;}
+  const main=ctx.slots.inject('main',()=>ctx.slots.register({name:'main',key:PRIMARY_PANEL},createPrimaryBotPage(ctx,React)));
+  const overlay=ctx.slots.inject('shell.overlay',()=>ctx.slots.register({name:'shell.overlay',id:'naumi-create-bot',order:95},CreationOverlay));
+  return()=>{main();overlay();};
+ }
+ export function createEmployeeDialog(ctx,React){
+- const h=React.createElement,source=botCatalog();return function EmployeeDialog({onClose}){
+-  const catalog=React.useSyncExternalStore(source.subscribe,source.getSnapshot,source.getSnapshot),[name,setName]=React.useState(''),[purpose,setPurpose]=React.useState(''),[kind,setKind]=React.useState('agent'),[busy,setBusy]=React.useState(false),[error,setError]=React.useState(''),form=React.useRef(null),request=React.useRef(null),flight=React.useRef(false),alive=React.useRef(true),prior=React.useRef(document.activeElement);
++ const h=React.createElement,source=botCatalog();return function EmployeeDialog({onClose,initialFields}){
++  const catalog=React.useSyncExternalStore(source.subscribe,source.getSnapshot,source.getSnapshot),[name,setName]=React.useState(initialFields?.name??''),[purpose,setPurpose]=React.useState(initialFields?.purpose??''),[kind,setKind]=React.useState(initialFields?.kind??'agent'),[busy,setBusy]=React.useState(false),[error,setError]=React.useState(''),form=React.useRef(null),request=React.useRef(null),flight=React.useRef(false),alive=React.useRef(true),prior=React.useRef(document.activeElement);
+   React.useEffect(()=>{alive.current=true;form.current?.querySelector('input')?.focus();return()=>{alive.current=false;prior.current?.isConnected&&prior.current.focus();};},[]);
+   const pending=catalog.creations?.find(c=>c.actor==='owner'&&c.state==='pending'),locked=busy||!!pending;
+   React.useEffect(()=>{if(pending){request.current=pending.requestId;setName(pending.name);setPurpose(pending.purpose);setKind(pending.kind);}},[pending?.requestId]);
+diff --git a/original/runtime-plugin/client.js b/modified/runtime-plugin/client.js
+index 4ae1cd7..4cc4016 100644
+--- a/original/runtime-plugin/client.js
++++ b/modified/runtime-plugin/client.js
+@@ -1,5 +1,6 @@
+ /** Async presentation-only module; the original enterprise app below stays intact. */
+ function installNaumiContextUI(ctx,React,createPortal,Icon){
++  ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/plugin-market.js').then(module=>{if(!closed)dispose=module.installPluginMarketUI(ctx,React);}).catch(error=>console.error('Naumi plugin market:',error));return()=>{closed=true;dispose?.();};});
+   ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/blender-settings.js').then(m=>{if(!closed)dispose=m.installBlenderUI(ctx,React);}).catch(e=>console.error('Naumi Blender:',e));return()=>{closed=true;dispose?.();};});
+   ctx.effect(()=>{
+     let dispose,closed=false;
+diff --git a/original/runtime-plugin/host.js b/modified/runtime-plugin/host.js
+index 2d325ec..994d724 100644
+--- a/original/runtime-plugin/host.js
++++ b/modified/runtime-plugin/host.js
+@@ -1,3 +1,4 @@
++import {installPluginMarket} from './plugin-market.js';
+ import {installBlender} from './blender.js';
+ import {PRODUCT_VERSION} from './product-version.js';
+ import {installModelConnections} from './model-connections.js';
+@@ -12,6 +13,7 @@ export const inject=['webServer','connection'];
+ /** Supported plugin routes, index branding and an authenticated read-only business adapter. */
+ export function apply(ctx,config) {
+   installModelConnections(ctx);
++  installPluginMarket(ctx);
+   installAgentDesktop(ctx);
+   installBlender(ctx);
+   installEgoBrowser(ctx);
+@@ -40,6 +42,8 @@ export function apply(ctx,config) {
+   assets.set('bot-chat-markdown.js','text/javascript; charset=utf-8');
+   assets.set('bot-groups.js','text/javascript; charset=utf-8');
+   assets.set('bot-groups.css','text/css; charset=utf-8');
++  assets.set('plugin-market.js','text/javascript; charset=utf-8');
++  assets.set('plugin-market.css','text/css; charset=utf-8');
+   assets.set('primary-bot.js','text/javascript; charset=utf-8');
+   assets.set('primary-bot.css','text/css; charset=utf-8');
+   assets.set('employee-experience-model.js','text/javascript; charset=utf-8');
+@@ -73,7 +77,7 @@ export function apply(ctx,config) {
+   }}));
+   ctx.on('webserver/index-inject',table=>{
+     table.push({kind:'global',name:'__NAUMI__',value:{collaborationOrigin,designOrigin,version:'0.3.0',product:'Naumi',productVersion:PRODUCT_VERSION}});
+-    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/bot-groups.css"><link rel="stylesheet" href="/naumi/assets/primary-bot.css">'});
++    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/bot-groups.css"><link rel="stylesheet" href="/naumi/assets/primary-bot.css"><link rel="stylesheet" href="/naumi/assets/plugin-market.css">'});
+     table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/blender-settings.css"><link rel="stylesheet" href="/naumi/assets/product-identity.css"><link rel="stylesheet" href="/naumi/assets/model-connections.css"><link rel="stylesheet" href="/naumi/assets/im-settings.css"><link rel="stylesheet" href="/naumi/assets/employee-center.css"><link rel="stylesheet" href="/naumi/assets/employee-experience.css"><link rel="stylesheet" href="/naumi/assets/browser.css"><link rel="stylesheet" href="/naumi/assets/browser-native.css"><link rel="stylesheet" href="/naumi/assets/team-panel.css"><link rel="stylesheet" href="/naumi/assets/bot-sidebar.css"><link rel="stylesheet" href="/naumi/assets/bot-task.css"><link rel="stylesheet" href="/naumi/assets/bot-avatar.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
+   });
+   ctx.effect(()=>ctx.webServer.tapIndex(html=>html.replace(/<title>[^<]*<\/title>/i,'<title>Naumi</title>').replace(/<link[^>]+rel="(?:shortcut )?icon"[^>]*href="(?!\/naumi\/)[^"]*"[^>]*>/g,'')));
+diff --git a/modified/runtime-plugin/market-contract.js b/modified/runtime-plugin/market-contract.js
+new file mode 100644
+index 0000000..7567af4
+--- /dev/null
++++ b/modified/runtime-plugin/market-contract.js
+@@ -0,0 +1,35 @@
++import {createHash} from 'node:crypto';
++export const MARKET_PROTOCOL=1,MAX_PACKAGE_BYTES=2*1024*1024;
++export const fail=(code,status=400)=>{throw Object.assign(Error(code),{status});};
++export const digest=value=>createHash('sha256').update(typeof value==='string'||Buffer.isBuffer(value)?value:JSON.stringify(value)).digest('hex');
++export const text=(value,max=200,{empty=false}={})=>{if(typeof value!=='string'||value.length>max||(!empty&&!value.trim())||/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/u.test(value))fail('MARKET_INVALID_TEXT');return value.trim();};
++export function exact(value,keys){if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!keys.includes(k)))fail('MARKET_INVALID_REQUEST');return value;}
++export function slug(value){if(typeof value!=='string'||!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(value)||value.length>64)fail('MARKET_INVALID_SLUG');return value;}
++export function version(value){if(typeof value!=='string'||!/^(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})$/.test(value))fail('MARKET_INVALID_VERSION');return value;}
++export function uuid(value){if(typeof value!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value))fail('MARKET_OPERATION_ID_REQUIRED');return value;}
++export function filePath(value){if(typeof value!=='string'||value.length>240||!value||value.includes('\\')||value.startsWith('/')||value.split('/').some(p=>!p||p==='.'||p==='..'||/[<>:"|?*\x00-\x1f]/.test(p)||/[ .]$/.test(p)||/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(p)))fail('MARKET_INVALID_PATH');
++ if(/(?:^|\/)(?:\.env(?:\.|$)|\.git|\.dsh|node_modules|\.credentials|credentials(?:\.|$)|cookies|id_rsa|id_ed25519)|\.(?:pem|pfx|key)$/i.test(value)||['package.json','cordis.patch.yml','market-host.js','.naumi-market.json'].includes(value))fail('MARKET_PRIVATE_OR_RESERVED_FILE');return value;}
++export function fileBytes(file){return file.encoding==='base64'?Buffer.from(file.content,'base64'):Buffer.from(file.content,'utf8');}
++export function validatePackage(input){
++ exact(input,['schemaVersion','slug','title','summary','kind','version','description','changelog','capabilities','tags','entry','template','files']);if(input.schemaVersion!==1)fail('MARKET_PACKAGE_VERSION');
++ const value={schemaVersion:1,slug:slug(input.slug),title:text(input.title,80),summary:text(input.summary,180),kind:input.kind,version:version(input.version),description:text(input.description??'',20000,{empty:true}),changelog:text(input.changelog??'',4000,{empty:true})};
++ if(!['plugin','skill','workflow','bot-template'].includes(value.kind))fail('MARKET_INVALID_KIND');
++ if(!Array.isArray(input.capabilities)||input.capabilities.length>8||input.capabilities.some(c=>!['files-read','files-write','network','browser','commands'].includes(c)))fail('MARKET_CAPABILITIES_REQUIRED');value.capabilities=[...new Set(input.capabilities)].sort();
++ if(!Array.isArray(input.tags??[])||(input.tags??[]).length>5)fail('MARKET_INVALID_TAGS');value.tags=[...new Set((input.tags??[]).map(t=>text(t,20)))];
++ if(!Array.isArray(input.files)||input.files.length>100)fail('MARKET_INVALID_FILES');const names=new Set();value.files=input.files.map(f=>{exact(f,['path','content','encoding']);const p=filePath(f.path);if(names.has(p.toLowerCase()))fail('MARKET_DUPLICATE_FILE');names.add(p.toLowerCase());if(typeof f.content!=='string'||f.content.length>MAX_PACKAGE_BYTES||!['utf8','base64'].includes(f.encoding??'utf8'))fail('MARKET_INVALID_FILE');
++  const next={path:p,encoding:f.encoding??'utf8',content:f.content};if(next.encoding==='base64'&&(!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(next.content)))fail('MARKET_INVALID_ENCODING');
++  if((/-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{24,}|AKIA[A-Z0-9]{16})\b/.test(fileBytes(next).toString('utf8'))))fail('MARKET_SECRET_IN_PACKAGE');return next;}).sort((a,b)=>a.path.localeCompare(b.path,'en'));
++ for(const name of names){const parts=name.split('/');while(parts.length>1){parts.pop();if(names.has(parts.join('/')))fail('MARKET_FILE_DIRECTORY_COLLISION');}}
++ if(value.kind==='plugin'){value.entry=filePath(input.entry??'plugin.js');if(!/\.(?:mjs|js)$/.test(value.entry)||!value.files.some(f=>f.path===value.entry&&f.encoding==='utf8'))fail('MARKET_ENTRY_MISSING');}
++ if(['skill','workflow'].includes(value.kind)){const skill=value.files.find(f=>f.path==='SKILL.md'&&f.encoding==='utf8');if(!skill||!/^---\r?\n[\s\S]*?\bname:\s*\S+[\s\S]*?\bdescription:\s*\S+[\s\S]*?\r?\n---/m.test(skill.content))fail('MARKET_SKILL_MANIFEST_REQUIRED');}
++ if(value.kind==='bot-template'){exact(input.template,['name','kind','purpose']);if(!['agent','team'].includes(input.template.kind))fail('MARKET_INVALID_TEMPLATE');value.template={name:text(input.template.name,80),kind:input.template.kind,purpose:text(input.template.purpose,2000)};}
++ if(Buffer.byteLength(JSON.stringify(value))>MAX_PACKAGE_BYTES)fail('MARKET_PACKAGE_TOO_LARGE',413);return value;
++}
++export function packageMetadata(bundle){const {files,...metadata}=bundle;return metadata;}
++export function compilePackage(bundle,sha){
++ const name='@naumi-market/'+bundle.slug,generated={'package.json':JSON.stringify({name,version:bundle.version,type:'module',description:bundle.summary,main:bundle.kind==='plugin'?bundle.entry:'market-host.js',exports:{'.':bundle.kind==='plugin'?'./'+bundle.entry:'./market-host.js'},dsh:{bundle:{patch:'./cordis.patch.yml'},meta:{name:bundle.title,description:bundle.summary}},naumiMarket:{digest:sha,slug:bundle.slug,kind:bundle.kind},peerDependencies:{'@deepseek-ai/cordis':'~4.1.0',...(bundle.kind==='plugin'?{'@deepseek-ai/dsh-tools':'0.2.2-rc.1'}:{}),...(['skill','workflow'].includes(bundle.kind)?{'@deepseek-ai/dsh-skill-filesystem':'0.2.2-rc.1'}:{})}},null,2)+'\n',
++  'cordis.patch.yml':JSON.stringify([{insert:[{id:'naumi-market-'+bundle.slug,name}]}],null,2)+'\n'};
++ if(bundle.kind==='bot-template')generated['market-host.js']='export function apply(){}\n';
++ if(['skill','workflow'].includes(bundle.kind))generated['market-host.js']="import {apply as installSkills} from '@deepseek-ai/dsh-skill-filesystem';import {fileURLToPath} from 'node:url';export const inject=['skills'];export function apply(ctx){installSkills(ctx,{providerName:"+JSON.stringify('naumi-market-'+bundle.slug)+",includeDefaultRoots:false,bundledSkillDir:fileURLToPath(new URL('./skills/',import.meta.url)),watch:false});}\n";
++ return{...Object.fromEntries(bundle.files.map(f=>[(['skill','workflow'].includes(bundle.kind)?'skills/'+bundle.slug+'/':'')+f.path,fileBytes(f)])),...Object.fromEntries(Object.entries(generated).map(([p,c])=>[p,Buffer.from(c)]))};
++}
+diff --git a/modified/runtime-plugin/market-installer.js b/modified/runtime-plugin/market-installer.js
+new file mode 100644
+index 0000000..eb100f5
+--- /dev/null
++++ b/modified/runtime-plugin/market-installer.js
+@@ -0,0 +1,34 @@
++import fs from 'node:fs';import path from 'node:path';import {randomUUID} from 'node:crypto';import {validatePackage,compilePackage,digest,uuid,exact,fail} from './market-contract.js';
++function noLinks(home,target){const base=path.resolve(home),end=path.resolve(target);if(end!==base&&!end.startsWith(base+path.sep))fail('MARKET_CACHE_INTEGRITY');for(let p=end;;p=path.dirname(p)){try{if(fs.lstatSync(p).isSymbolicLink())fail('MARKET_CACHE_INTEGRITY');}catch(e){if(e.code!=='ENOENT')throw e;}if(p===base)break;}}
++const atomic=(file,value)=>{fs.mkdirSync(path.dirname(file),{recursive:true});const temp=file+'.'+randomUUID()+'.tmp';fs.writeFileSync(temp,JSON.stringify(value,null,2)+'\n',{mode:0o600});fs.renameSync(temp,file);};
++export class MarketInstaller{
++ constructor({home,manager,transport,idle=()=>true}){Object.assign(this,{home,manager,transport,idle});this.root=path.resolve(home,'naumi/market-cache');this.file=path.resolve(home,'naumi/market-installs.json');this.tail=Promise.resolve();try{this.value=JSON.parse(fs.readFileSync(this.file));if(this.value.version!==1||!this.value.installed||!this.value.operations)fail('MARKET_INSTALL_STATE_INVALID');}catch(e){if(e.code!=='ENOENT')throw e;this.value={version:1,installed:{},operations:{}};}}
++ save(value){noLinks(this.home,this.file);atomic(this.file,value);this.value=value;}
++ installed(){return structuredClone(this.value.installed);}
++ async observed(){const bundles=await this.manager.listBundles(),result=this.installed();for(const [id,record] of Object.entries(result)){const native=bundles.find(b=>b.name==='@naumi-market/'+record.current.slug&&b.installed);if(!native||native.version!==record.current.version)delete result[id];}return result;}
++ verifyCache(dir,sha){noLinks(this.home,dir);const file=path.join(dir,'.naumi-market.json');if(!fs.existsSync(file)||fs.lstatSync(dir).isSymbolicLink())fail('MARKET_CACHE_INTEGRITY');noLinks(this.home,file);const marker=JSON.parse(fs.readFileSync(file));if(marker.digest!==sha||!marker.files)fail('MARKET_CACHE_INTEGRITY');for(const [p,h]of Object.entries(marker.files)){const target=path.resolve(dir,p);noLinks(this.home,target);if(!target.startsWith(path.resolve(dir)+path.sep)||fs.lstatSync(target).isSymbolicLink()||digest(fs.readFileSync(target))!==h)fail('MARKET_CACHE_INTEGRITY');}return dir;}
++ cache(bundle,sha){if(digest(bundle)!==sha)fail('MARKET_PACKAGE_INTEGRITY');const dir=path.join(this.root,bundle.slug,bundle.version,sha),files=compilePackage(bundle,sha),marker=path.join(dir,'.naumi-market.json');noLinks(this.home,dir);if(fs.existsSync(dir)){this.verifyCache(dir,sha);
++  if(fs.lstatSync(dir).isSymbolicLink()||!fs.existsSync(marker)||JSON.parse(fs.readFileSync(marker)).digest!==sha)fail('MARKET_CACHE_CONFLICT');for(const [p,bytes]of Object.entries(files))if(digest(fs.readFileSync(path.join(dir,p)))!==digest(bytes))fail('MARKET_CACHE_INTEGRITY');return dir;
++ }fs.mkdirSync(this.root,{recursive:true});for(let p=this.root;p.startsWith(this.root);p=path.dirname(p))if(fs.existsSync(p)&&fs.lstatSync(p).isSymbolicLink())fail('MARKET_CACHE_CONFLICT');const temp=path.join(this.root,'stage-'+randomUUID());fs.mkdirSync(temp);try{for(const [p,bytes]of Object.entries(files)){const target=path.join(temp,p);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,bytes,{flag:'wx'});}fs.writeFileSync(path.join(temp,'.naumi-market.json'),JSON.stringify({digest:sha,files:Object.fromEntries(Object.entries(files).map(([p,b])=>[p,digest(b)]))}));fs.mkdirSync(path.dirname(dir),{recursive:true});fs.renameSync(temp,dir);}finally{if(fs.existsSync(temp))fs.rmSync(temp,{recursive:true});}return dir;}
++ perform(input){const run=this.tail.then(()=>this.apply(input));this.tail=run.catch(()=>{});return run;}
++ async apply(input){exact(input,['action','operationId','ticket','expectedDigest','capabilities','id','version']);uuid(input.operationId);if(!['install','rollback','uninstall'].includes(input.action))fail('MARKET_INSTALL_ACTION');const fingerprint=digest(input),old=this.value.operations[input.operationId];if(old&&old.fingerprint!==fingerprint)fail('MARKET_OPERATION_CONFLICT',409);if(old?.result){await this.report(input.operationId);return old.result;}if(!this.idle())fail('MARKET_RUNNING_TASKS',409);
++  const state=structuredClone(this.value);if(Object.keys(state.operations).length>=2000)fail('MARKET_INSTALL_HISTORY_FULL');state.operations[input.operationId]??={fingerprint,input,status:'pending'};this.save(state);
++  let release,dir,body;
++  if(input.action==='install'){
++   body=await this.transport.request('/api/plugin-market/v1/downloads/'+input.ticket);const bundle=validatePackage(body.package);if(body.digest!==input.expectedDigest||digest(bundle)!==body.digest)fail('MARKET_PACKAGE_INTEGRITY');if(JSON.stringify([...new Set(input.capabilities??[])].sort())!==JSON.stringify(bundle.capabilities))fail('MARKET_CAPABILITY_CONFIRMATION_REQUIRED');
++   const ticket=await this.transport.request('/api/plugin-market/v1/packages/'+input.id);if(ticket.slug!==bundle.slug||!ticket.versions.some(v=>v.version===bundle.version&&v.digest===body.digest))fail('MARKET_PACKAGE_INTEGRITY');
++   release={id:input.id,slug:bundle.slug,version:bundle.version,digest:body.digest,title:bundle.title,capabilities:bundle.capabilities,...(bundle.template?{template:bundle.template}:{})};dir=this.cache(bundle,body.digest);
++  }else{
++   const record=this.value.installed[input.id];if(!record)fail('MARKET_NOT_INSTALLED',404);release=input.action==='rollback'?record.history.find(v=>v.version===input.version):record.current;if(!release)fail('MARKET_ROLLBACK_NOT_CACHED');dir=path.join(this.root,release.slug,release.version,release.digest);this.verifyCache(dir,release.digest);
++  }
++  const name='@naumi-market/'+release.slug,bundles=await this.manager.listBundles(),native=bundles.find(b=>b.name===name&&b.installed),prior=this.value.installed[release.id],staged=structuredClone(this.value);staged.operations[input.operationId].previous??=native&&prior?{release:prior.current,enabled:native.enabled}:null;this.save(staged);
++  if(native&&!prior&&native.version===release.version&&typeof native.source==='string'&&path.resolve(native.source.replace(/^file:/,'')).toLowerCase()===path.resolve(dir).toLowerCase()){await this.commit(input,release,{application:'restart-required',changed:false},body);return this.value.operations[input.operationId].result;}if(native&&!prior)fail('MARKET_EXISTING_PACKAGE_UNMANAGED',409);if(native&&input.action!=='uninstall'&&native.version===release.version&&prior?.current.digest===release.digest){await this.commit(input,release,{application:prior.application??'applied',changed:false},body);return this.value.operations[input.operationId].result;}
++  if(!this.idle())fail('MARKET_RUNNING_TASKS',409);
++  if(native){const removed=await this.manager.removeBundle(name);if(removed.error||['failed','cancelled'].includes(removed.application))fail('MARKET_NATIVE_REMOVE_FAILED',409);}
++  if(input.action==='uninstall'){const next=structuredClone(this.value);delete next.installed[input.id];next.operations[input.operationId].result={id:input.id,application:'removed'};next.operations[input.operationId].status='complete';this.save(next);return next.operations[input.operationId].result;}
++  let result;try{result=await this.manager.installBundle(dir,{enabled:this.value.operations[input.operationId].previous?.enabled??true,saveExact:true,requestId:input.operationId});if(result.error||!['applied','restart-required'].includes(result.application))throw Error('MARKET_NATIVE_INSTALL_FAILED');}catch(error){const remaining=(await this.manager.listBundles()).find(b=>b.name===name&&b.installed);if(remaining){const removal=await this.manager.removeBundle(name);if(removal.error||['failed','cancelled'].includes(removal.application))fail('MARKET_RESTORE_REQUIRED',503);}const previous=this.value.operations[input.operationId].previous;if(previous){const p=previous.release;this.verifyCache(path.join(this.root,p.slug,p.version,p.digest),p.digest);const restore=await this.manager.installBundle(path.join(this.root,p.slug,p.version,p.digest),{enabled:previous.enabled,saveExact:true,requestId:input.operationId+'-restore'});if(restore.error||!['applied','restart-required'].includes(restore.application))fail('MARKET_RESTORE_REQUIRED',503);}fail('MARKET_NATIVE_INSTALL_FAILED',409);}
++  await this.commit(input,release,result,body);return this.value.operations[input.operationId].result;
++ }
++ async commit(input,release,result,body){const next=structuredClone(this.value),prior=next.installed[release.id],history=[...(prior?.history??[]),...(prior?.current?[prior.current]:[])].filter((v,i,a)=>v.digest!==release.digest&&a.findIndex(x=>x.digest===v.digest)===i).slice(-10);next.installed[release.id]={current:release,history,application:result.application};Object.assign(next.operations[input.operationId],{status:'complete',result:{id:release.id,version:release.version,application:result.application},...(body?{report:{ticket:body.ticket,digest:body.digest,operationId:input.operationId}}:{})});this.save(next);await this.report(input.operationId);}
++ async report(id){const report=this.value.operations[id]?.report;if(!report)return;try{await this.transport.request('/api/plugin-market/v1/installed',{method:'POST',body:report});const next=structuredClone(this.value);delete next.operations[id].report;this.save(next);}catch{}}
++}
+diff --git a/modified/runtime-plugin/market-native.js b/modified/runtime-plugin/market-native.js
+new file mode 100644
+index 0000000..30a8f25
+--- /dev/null
++++ b/modified/runtime-plugin/market-native.js
+@@ -0,0 +1,6 @@
++import fs from 'node:fs';import path from 'node:path';import {fail} from './market-contract.js';
++export class DesktopMarketTransport{
++ constructor({home=process.env.DSH_HOME,fetcher=fetch}={}){this.home=home;this.fetcher=fetcher;}
++ descriptor(){try{if(!this.home)return null;const file=path.join(this.home,'naumi-desktop-bridge.json');if(fs.lstatSync(file).isSymbolicLink())fail('MARKET_BRIDGE_INVALID');const value=JSON.parse(fs.readFileSync(file));if(!value.market)return null;if(value.version!==1||!Number.isInteger(value.port)||value.port<1||value.port>65535||!/^[a-f0-9]{64}$/.test(value.token)||value.market.protocolVersion!==1)fail('MARKET_BRIDGE_INVALID');return value;}catch(e){if(e.code==='ENOENT')return null;throw e;}}
++ async request(endpoint,{method='GET',body}={}){const d=this.descriptor();if(!d)fail('MARKET_LOGIN_REQUIRED',401);let response;try{response=await this.fetcher('http://127.0.0.1:'+d.port+'/market/request',{method:'POST',headers:{Authorization:'Bearer '+d.token,'Content-Type':'application/json'},body:JSON.stringify({endpoint,method,...(body===undefined?{}:{body:JSON.stringify(body)})}),redirect:'error',signal:AbortSignal.timeout(25000)});}catch{fail('MARKET_UNAVAILABLE_NO_REPLAY',503);}const raw=await response.text();if(raw.length>3*1024*1024+65536)fail('MARKET_RESPONSE_TOO_LARGE',503);let envelope;try{envelope=JSON.parse(raw);}catch{fail('MARKET_RESPONSE_INVALID',503);}if(!response.ok||!envelope.ok)fail(/^MARKET_/.test(envelope.error)?envelope.error:'MARKET_UNAVAILABLE_NO_REPLAY',503);let value;try{value=JSON.parse(envelope.data.body);}catch{fail('MARKET_RESPONSE_INVALID',503);}if(envelope.data.status<200||envelope.data.status>=300)fail(/^MARKET_/.test(value.error)?value.error:'MARKET_UNAVAILABLE',envelope.data.status);return value;}
++}
+diff --git a/original/runtime-plugin/package.json b/modified/runtime-plugin/package.json
+index 3c748ee..20b49bf 100644
+--- a/original/runtime-plugin/package.json
++++ b/modified/runtime-plugin/package.json
+@@ -64,7 +64,11 @@
+     "blender-runtime.js",
+     "blender-bridge",
+     "blender-skills",
+-    "employee-local-proactive.js"
++    "employee-local-proactive.js",
++    "plugin-market.js",
++    "market-contract.js",
++    "market-installer.js",
++    "market-native.js"
+   ],
+   "dsh": {
+     "bundle": {
+diff --git a/modified/runtime-plugin/plugin-market.js b/modified/runtime-plugin/plugin-market.js
+new file mode 100644
+index 0000000..a0d3629
+--- /dev/null
++++ b/modified/runtime-plugin/plugin-market.js
+@@ -0,0 +1,11 @@
++import os from 'node:os';import path from 'node:path';import {DesktopMarketTransport} from './market-native.js';import {MarketInstaller} from './market-installer.js';import {MAX_PACKAGE_BYTES,fail} from './market-contract.js';
++export function installPluginMarket(ctx,{transport,home=process.env.DSH_HOME??path.join(os.homedir(),'.dsh')}={}){
++ const remote=transport??new DesktopMarketTransport({home});return ctx.inject(['pluginManager','agents'],scope=>{const installer=new MarketInstaller({home,manager:scope.pluginManager,transport:remote,idle:()=>!scope.agents.list().some(a=>a.status==='running')});
++ scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/plugin-market',handler:async(req,res)=>{res.setHeader('Content-Type','application/json');res.setHeader('Cache-Control','no-store');const send=(s,v)=>res.writeHead(s).end(JSON.stringify(v));try{const a=scope.connection.admit(req);if('rejection'in a){send(a.rejection,{error:'MARKET_OWNER_REQUIRED'});return;}if(a.peer.principal.kind!=='owner')fail('MARKET_OWNER_REQUIRED',403);
++  if(req.method==='GET'){const url=new URL(req.url,'http://localhost'),endpoint=url.searchParams.get('endpoint');if(!endpoint){send(200,{installed:await installer.observed(),available:!!remote.descriptor?.()});return;}if(!/^\/api\/plugin-market\/v1\/(?:me|packages(?:\/[a-f0-9-]{36})?|downloads\/[a-f0-9-]{36})(?:\?[^#]*)?$/.test(endpoint))fail('MARKET_REQUEST_FORBIDDEN',403);send(200,await remote.request(endpoint));return;}
++  if(req.method!=='POST')fail('MARKET_METHOD',405);if(req.headers['x-naumi-market']!=='1'||req.headers.origin&&![`http://${req.headers.host}`,`https://${req.headers.host}`].includes(req.headers.origin))fail('MARKET_SAME_ORIGIN_REQUIRED',403);
++  const chunks=[];let size=0;for await(const b of req){size+=b.length;if(size>MAX_PACKAGE_BYTES+8192)fail('MARKET_PACKAGE_TOO_LARGE',413);chunks.push(b);}let input;try{input=JSON.parse(Buffer.concat(chunks));}catch{fail('MARKET_INVALID_REQUEST');}
++  if(input.action==='remote'){if(Object.keys(input).some(k=>!['action','endpoint','body'].includes(k))||!/^\/api\/plugin-market\/v1\/(?:drafts|publish|visibility|download|installed|feedback)$/.test(input.endpoint))fail('MARKET_REQUEST_FORBIDDEN',403);send(200,await remote.request(input.endpoint,{method:'POST',body:input.body}));return;}
++  send(200,await installer.perform(input));
++ }catch(e){if(!res.headersSent)send(e.status??500,{error:/^MARKET_/.test(e.message)?e.message:'MARKET_UNAVAILABLE'});}}}));scope.effect(()=>async()=>{await installer.tail;});});
++}
+diff --git a/modified/scripts/backup-cloud47.py b/modified/scripts/backup-cloud47.py
+new file mode 100644
+index 0000000..208bd33
+--- /dev/null
++++ b/modified/scripts/backup-cloud47.py
+@@ -0,0 +1,21 @@
++"""Consistent online SQLite backups; never copy a live database without its WAL."""
++import datetime,fcntl,hashlib,json,os,pathlib,sqlite3,secrets
++BASE=pathlib.Path('/opt/naumi-desktop-cloud')
++def main():
++ backups=BASE/'backups';backups.mkdir(mode=0o700,exist_ok=True)
++ with open(BASE/'backup.lock','a') as lock:
++  fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
++  target=backups/(datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+secrets.token_hex(3));target.mkdir(mode=0o700)
++  files=[]
++  for name in ['market.sqlite','cloud.sqlite']:
++   source=BASE/'data'/name;assert source.is_file() and not source.is_symlink()
++   dest=target/name
++   with sqlite3.connect('file:'+str(source)+'?mode=ro',uri=True,timeout=15) as src,sqlite3.connect(dest) as out:src.backup(out)
++   dest.chmod(0o600)
++   with sqlite3.connect(dest) as db:assert db.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
++   with open(dest,'rb') as f:os.fsync(f.fileno())
++   files.append({'name':name,'bytes':dest.stat().st_size,'sha256':hashlib.sha256(dest.read_bytes()).hexdigest(),'integrity':'ok'})
++  receipt={'status':'PASS','createdAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'directory':str(target),'files':files,'activeDatabaseReplaced':False,'retentionDeletion':False}
++  (target/'receipt.json').write_text(json.dumps(receipt,indent=2)+'\n');(target/'receipt.json').chmod(0o600)
++  print(json.dumps(receipt,indent=2))
++if __name__=='__main__':main()
+diff --git a/modified/scripts/deploy-cloud47-client.mjs b/modified/scripts/deploy-cloud47-client.mjs
+new file mode 100644
+index 0000000..20d4709
+--- /dev/null
++++ b/modified/scripts/deploy-cloud47-client.mjs
+@@ -0,0 +1,53 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {createRequire} from 'node:module';import {execFileSync,spawnSync} from 'node:child_process';
++const root=process.cwd(),e=path.join(root,'evidence/cloud47/client'),require=createRequire(path.join(root,'desktop/package.json')),asar=require('@electron/asar'),sha=b=>createHash('sha256').update(b).digest('hex'),read=p=>fs.readFileSync(p),text=p=>read(p).toString().replaceAll('\r\n','\n'),git=(...args)=>execFileSync('git',args,{encoding:'utf8'}).trim(),pwsh='D:/DEV/PowerShell/pwsh.exe',archive='C:/Program Files/Naumi/resources/app.asar',plugin=path.join(root,'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise'),mode=process.argv[2];
++assert.equal(git('branch','--show-current'),'main','MAIN_ONLY');
++const appFiles=['main.cjs','preload.cjs','identity-runtime.cjs','identity.js','identity.html','identity.css','market.cjs','cloud.cjs','tools.cjs'];
++function inventory(dir){const result={};const walk=d=>{for(const entry of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,entry.name);assert(!entry.isSymbolicLink(),'UNEXPECTED_PLUGIN_LINK');if(entry.isDirectory())walk(p);else result[path.relative(dir,p).replaceAll('\\','/')]=sha(read(p));}};walk(dir);return result;}
++function write(p,b){fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,b);}
++function nativeTarget(main){
++ try{const fd=fs.openSync(archive,'r+');fs.closeSync(fd);return{targetArchive:archive,executable:path.join(path.dirname(path.dirname(archive)),'Naumi.exe'),userDirectory:false};}
++ catch(error){if(!['EACCES','EPERM'].includes(error.code))throw error;}
++ const source=path.dirname(path.dirname(archive)),base=path.resolve(process.env.LOCALAPPDATA,'Naumi/client-builds'),target=path.join(base,main);assert(target.startsWith(base+path.sep));
++ if(fs.existsSync(target)){const marker=JSON.parse(read(path.join(target,'naumi-client-build.json')));assert.equal(marker.main,main);assert.equal(marker.originalASAR,sha(read(archive)));}
++ else{fs.mkdirSync(target,{recursive:true});for(const entry of fs.readdirSync(source,{withFileTypes:true})){if(entry.name==='resources'||/^Uninstall /i.test(entry.name))continue;fs.cpSync(path.join(source,entry.name),path.join(target,entry.name),{recursive:true,errorOnExist:true});}fs.mkdirSync(path.join(target,'resources'));for(const entry of fs.readdirSync(path.join(source,'resources'),{withFileTypes:true})){const from=path.join(source,'resources',entry.name),to=path.join(target,'resources',entry.name);if(entry.name==='backend'){fs.symlinkSync(from,to,'junction');continue;}fs.cpSync(from,to,{recursive:true,errorOnExist:true});}write(path.join(target,'naumi-client-build.json'),JSON.stringify({main,originalASAR:sha(read(archive)),originalInstallationRetained:true})+'\n');}
++ return{targetArchive:path.join(target,'resources/app.asar'),executable:path.join(target,'Naumi.exe'),userDirectory:true};
++}
++function shell(script){const r=spawnSync(pwsh,['-NoProfile','-ExecutionPolicy','Bypass','-File',path.join(root,script)],{encoding:'utf8',windowsHide:true,timeout:150000});assert.equal(r.status,0,r.stderr);return r.stdout;}
++function desktopShortcut(executable,stage){
++ const backup=path.join(stage,'original-Naumi.lnk'),q=s=>s.replaceAll("'","''"),script=`$ErrorActionPreference='Stop';$p=Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'Naumi.lnk';$w=New-Object -ComObject WScript.Shell;$s=$w.CreateShortcut($p);$oldIcon=$s.IconLocation;if(Test-Path -LiteralPath $p){if(-not($s.Arguments.Contains('Start-NaumiDesktop.ps1') -or $s.TargetPath -eq [IO.Path]::GetFullPath('C:/Program Files/Naumi/Naumi.exe'))){throw 'UNRECOGNIZED_SHORTCUT'};Copy-Item -LiteralPath $p -Destination '${q(backup)}'};$s.TargetPath='${q(executable)}';$s.Arguments='';$s.WorkingDirectory='${q(path.dirname(executable))}';$s.Save();$check=$w.CreateShortcut($p);if($check.TargetPath -ne '${q(executable)}' -or $check.IconLocation -ne $oldIcon){throw 'SHORTCUT_VERIFY_FAILED'};[pscustomobject]@{path=$p;backup='${q(backup)}';iconPreserved=$true;target=$check.TargetPath}|ConvertTo-Json -Compress`;
++ const result=spawnSync(pwsh,['-NoProfile','-Command',script],{encoding:'utf8',windowsHide:true});assert.equal(result.status,0,result.stderr);return JSON.parse(result.stdout);
++}
++async function businessSnapshot(){
++ const logs=['server.out.log','server.err.log'].map(f=>text(path.join(root,'logs',f))).join('\n'),launch=[...logs.matchAll(/http:\/\/127\.0\.0\.1:3080\/?\?token=[A-Za-z0-9_~.%-]+/g)].at(-1)?.[0];assert(launch,'OWNER_LAUNCH_MISSING');const response=await fetch(launch,{redirect:'manual'}),cookie=response.headers.getSetCookie().map(x=>x.split(';')[0]).join('; ');assert(cookie);const get=async route=>{const r=await fetch('http://127.0.0.1:3080'+route,{headers:{cookie},signal:AbortSignal.timeout(10000)});assert(r.ok,'BUSINESS_READ_FAILED');return r.json();},catalog=await get('/naumi/bots'),bots=catalog.bots.map(b=>Object.fromEntries(['id','name','kind','purpose','workspace','model','status','createdAt','homeSessionId'].filter(k=>b[k]!==undefined).map(k=>[k,b[k]]))),profiles=[];
++ for(const bot of bots){if(bot.status==='archived')continue;const data=await get('/naumi/employees?'+new URLSearchParams({botId:bot.id,view:'export'}));delete data.exportedAt;profiles.push(data);}
++ const protectedFiles={};for(const f of ['.dsh/.credentials.yaml','.dsh/cordis.patch.yml','.dsh/profiles/web/package.json','.dsh/profiles/web/cordis.patch.yml'])if(fs.existsSync(path.join(root,f)))protectedFiles[f]=sha(read(path.join(root,f)));
++ return{bots:bots.length,directoryHash:sha(Buffer.from(JSON.stringify(bots))),employeeHash:sha(Buffer.from(JSON.stringify(profiles))),protectedFiles};
++}
++if(mode==='prepare'){
++ fs.mkdirSync(e,{recursive:true});assert(fs.realpathSync(plugin).startsWith(fs.realpathSync(root)+path.sep));const stage=path.join(root,'runtime/cloud47-client-'+randomUUID());fs.mkdirSync(stage);const app=path.join(stage,'app');asar.extractAll(archive,app);const appBefore={};for(const entry of asar.listPackage(archive)){const p=entry.replaceAll('\\','/').replace(/^\//,'');if(asar.statFile(archive,path.normalize(p)).size!==undefined)appBefore[p]=sha(asar.extractFile(archive,path.normalize(p)));}
++ const original=path.join(e,'ORIGINAL_APP.asar');fs.copyFileSync(archive,original);for(const file of appFiles)fs.copyFileSync(path.join(root,'desktop/app',file),path.join(app,'app',file));const modified=path.join(e,'MODIFIED_APP.asar');await asar.createPackage(app,modified);const changed=appFiles.map(f=>'app/'+f);
++ for(const [p,h]of Object.entries(appBefore))if(!changed.includes(p))assert.equal(sha(asar.extractFile(modified,path.normalize(p))),h,'UNRELATED_APP_CHANGED '+p);
++ for(const f of appFiles)assert.equal(sha(asar.extractFile(modified,path.join('app',f))),sha(read(path.join(root,'desktop/app',f))));
++ const before=inventory(plugin),files=new Map();const source=path.join(root,'plugins/naumi-enterprise');
++ const once=(s,a,b)=>{assert.equal(s.split(a).length,2,'RUNTIME_ANCHOR '+a);return s.replace(a,b);};
++ let host=text(path.join(plugin,'host.js'));assert(!host.includes('installPluginMarket'),'MARKET_ALREADY_LOADED');host="import {installPluginMarket} from './plugin-market.js';\n"+host;host=once(host,'  installModelConnections(ctx);','  installModelConnections(ctx);\n  installPluginMarket(ctx);');host=once(host,"  assets.set('primary-bot.js'","  assets.set('plugin-market.js','text/javascript; charset=utf-8');\n  assets.set('plugin-market.css','text/css; charset=utf-8');\n  assets.set('primary-bot.js'");host=once(host,'<link rel="stylesheet" href="/naumi/assets/primary-bot.css">','<link rel="stylesheet" href="/naumi/assets/primary-bot.css"><link rel="stylesheet" href="/naumi/assets/plugin-market.css">');files.set('host.js',Buffer.from(host));
++ let client=text(path.join(plugin,'client.js'));client=once(client,'function installNaumiContextUI(ctx,React,createPortal,Icon){','function installNaumiContextUI(ctx,React,createPortal,Icon){\n  ctx.effect(()=>{let dispose,closed=false;void import(\'/naumi/assets/plugin-market.js\').then(module=>{if(!closed)dispose=module.installPluginMarketUI(ctx,React);}).catch(error=>console.error(\'Naumi plugin market:\',error));return()=>{closed=true;dispose?.();};});');files.set('client.js',Buffer.from(client));
++ const oldPrimary=text(path.join(root,'evidence/plugin-market/original/plugins/naumi-enterprise/assets/primary-bot.js')),actualPrimary=text(path.join(plugin,'assets/primary-bot.js'));assert.equal(actualPrimary,oldPrimary,'PRIMARY_BOT_DRIFT');files.set('assets/primary-bot.js',read(path.join(source,'assets/primary-bot.js')));
++ const meta=JSON.parse(read(path.join(plugin,'package.json')));for(const f of ['plugin-market.js','market-contract.js','market-installer.js','market-native.js'])if(!meta.files.includes(f))meta.files.push(f);files.set('package.json',Buffer.from(JSON.stringify(meta,null,2)+'\n'));
++ for(const f of ['plugin-market.js','market-contract.js','market-installer.js','market-native.js','assets/plugin-market.js','assets/plugin-market.css']){assert(!before[f],'MARKET_FILE_ALREADY_PRESENT');files.set(f,read(path.join(source,f)));}
++ const receipts=[];for(const [file,bytes]of files){const target=path.join(plugin,file);if(fs.existsSync(target))write(path.join(e,'original-runtime',file),read(target));write(path.join(stage,'runtime',file),bytes);receipts.push({file,before:before[file]??null,after:sha(bytes)});}
++ const main=git('rev-parse','HEAD'),record={main,stage,archive,originalSHA:sha(read(archive)),modifiedSHA:sha(read(modified)),appFiles,unrelatedAppFilesVerified:Object.keys(appBefore).filter(p=>!changed.includes(p)).length,runtimeBefore:before,runtime:receipts,...nativeTarget(main)};write(path.join(e,'PREPARED.json'),JSON.stringify(record,null,2)+'\n');console.log('CLIENT_PREPARED app_files='+appFiles.length+' runtime_files='+receipts.length+' unrelated_app_files_preserved='+record.unrelatedAppFilesVerified+' user_directory='+Number(record.userDirectory));
++}else if(mode==='apply'){
++ const r=JSON.parse(read(path.join(e,'PREPARED.json')));assert.equal(git('rev-parse','HEAD'),r.main,'SOURCE_ADVANCED_REPREPARE');assert.equal(sha(read(archive)),r.originalSHA,'INSTALLED_APP_CHANGED');assert.deepEqual(inventory(plugin),r.runtimeBefore,'RUNTIME_CHANGED');
++ execFileSync(process.execPath,[path.join(root,'scripts/check-bot-runtime.mjs'),root],{stdio:'inherit'});
++ const originalBusiness=await businessSnapshot();
++ const close=spawnSync(pwsh,['-NoProfile','-Command',"$ErrorActionPreference='Stop';$apps=@(Get-Process -Name Naumi -ErrorAction SilentlyContinue|Where-Object {$_.Path -eq [IO.Path]::GetFullPath('C:/Program Files/Naumi/Naumi.exe') -and $_.MainWindowHandle -ne 0});foreach($p in $apps){$null=$p.CloseMainWindow()};$until=(Get-Date).AddSeconds(25);while((Get-Process -Name Naumi -ErrorAction SilentlyContinue|Where-Object {$_.Path -eq [IO.Path]::GetFullPath('C:/Program Files/Naumi/Naumi.exe')}) -and (Get-Date)-lt $until){Start-Sleep -Milliseconds 200};if(Get-Process -Name Naumi -ErrorAction SilentlyContinue|Where-Object {$_.Path -eq [IO.Path]::GetFullPath('C:/Program Files/Naumi/Naumi.exe')}){throw 'DESKTOP_DID_NOT_EXIT'}"],{encoding:'utf8',windowsHide:true,timeout:30000});assert.equal(close.status,0,close.stderr);
++ let changed=false,shortcut;
++ try{
++  shell('Stop-Naumi.ps1');changed=true;fs.copyFileSync(path.join(e,'MODIFIED_APP.asar'),r.targetArchive);for(const f of r.runtime)fs.copyFileSync(path.join(r.stage,'runtime',f.file),path.join(plugin,f.file));shell('Start-Naumi.ps1');
++  assert.equal(sha(read(r.targetArchive)),r.modifiedSHA);if(r.userDirectory)assert.equal(sha(read(archive)),r.originalSHA,'ORIGINAL_INSTALLATION_CHANGED');const after=inventory(plugin);for(const f of r.runtime)assert.equal(after[f.file],f.after);for(const [file,h]of Object.entries(r.runtimeBefore))if(!r.runtime.some(f=>f.file===file))assert.equal(after[file],h,'UNRELATED_RUNTIME_CHANGED '+file);
++  execFileSync(process.execPath,[path.join(root,'scripts/check-bot-runtime.mjs'),root],{stdio:'inherit'});
++  const afterBusiness=await businessSnapshot();assert.deepEqual(afterBusiness,originalBusiness,'EXISTING_BUSINESS_DATA_CHANGED');write(path.join(e,'BUSINESS_PRESERVED.json'),JSON.stringify({status:'PASS',before:originalBusiness,after:afterBusiness},null,2)+'\n');
++  shortcut=desktopShortcut(r.executable,r.stage);const exe=r.executable.replaceAll("'","''"),launched=spawnSync(pwsh,['-NoProfile','-Command',`$env:ELECTRON_RUN_AS_NODE=$null;Start-Process -FilePath '${exe}' -WindowStyle Hidden`],{encoding:'utf8',windowsHide:true});assert.equal(launched.status,0);write(path.join(e,'LOADED.json'),JSON.stringify({status:'PASS',main:r.main,activeExecutable:r.executable,userDirectory:r.userDirectory,originalInstallationRetained:r.userDirectory,installedASAR:r.modifiedSHA,sourceFiles:r.appFiles,runtimeFiles:r.runtime.length,unrelatedRuntimeFilesUnchanged:Object.keys(r.runtimeBefore).filter(f=>!r.runtime.some(r=>r.file===f)).length,unrelatedAppFilesUnchanged:r.unrelatedAppFilesVerified,loginOrigin:'https://47.105.59.142',legacyDataClaimed:false,realEmployeeDataUploaded:false,shortcut},null,2)+'\n');console.log('CLIENT_LOADED native_identity=47 runtime_market=1 old_data_claimed=0 employee_upload=0 user_directory='+Number(r.userDirectory));
++ }catch(error){if(changed){try{shell('Stop-Naumi.ps1');}catch{}if(shortcut&&fs.existsSync(shortcut.backup))fs.copyFileSync(shortcut.backup,shortcut.path);if(sha(read(r.targetArchive))!==r.originalSHA)fs.copyFileSync(path.join(e,'ORIGINAL_APP.asar'),r.targetArchive);for(const f of r.runtime){const target=path.join(plugin,f.file);if(f.before)fs.copyFileSync(path.join(e,'original-runtime',f.file),target);else if(fs.existsSync(target))fs.unlinkSync(target);}shell('Start-Naumi.ps1');}throw error;}
++}else throw Error('USE_prepare_OR_apply');
+diff --git a/modified/scripts/deploy-cloud47-remote.mjs b/modified/scripts/deploy-cloud47-remote.mjs
+new file mode 100644
+index 0000000..168ad81
+--- /dev/null
++++ b/modified/scripts/deploy-cloud47-remote.mjs
+@@ -0,0 +1,9 @@
++// Operator entry point; key is read by OpenSSH, never loaded or logged by this script.
++import fs from 'node:fs';import path from 'node:path';import {execFileSync,spawnSync} from 'node:child_process';import assert from 'node:assert/strict';
++const root=process.cwd(),connection=process.argv[2],key=process.argv[3];if(!connection||!key)throw Error('USE_CONNECTION_JSON_AND_KEY_PATH');const conn=JSON.parse(fs.readFileSync(connection));assert.equal(conn.host,'47.105.59.142');assert.equal(conn.port,22);assert(typeof conn.username==='string'&&/^[a-z_][a-z0-9_-]*$/.test(conn.username));
++const git=(...args)=>execFileSync('git',args,{cwd:root,encoding:'utf8'}).trim();assert.equal(git('branch','--show-current'),'main','MAIN_ONLY');const head=git('rev-parse','HEAD'),known=path.join(path.dirname(connection),'known_hosts'),args=['-T','-i',path.resolve(key),'-o','BatchMode=yes','-o','IdentitiesOnly=yes','-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+known,conn.username+'@'+conn.host],out=path.join(root,'evidence/cloud47');fs.mkdirSync(out,{recursive:true});
++const baseline=execFileSync('ssh',[...args,"python3 -c \"import pathlib,hashlib;print(hashlib.sha256(pathlib.Path('/etc/nginx/sites-available/reference-workbench').read_bytes()).hexdigest())\""],{encoding:'utf8'}).trim();assert(/^[a-f0-9]{64}$/.test(baseline));
++const archive=path.join(root,'runtime/cloud47-'+head+'.tar'),target='/opt/naumi-desktop-cloud/incoming/'+head+'.tar';fs.mkdirSync(path.dirname(archive),{recursive:true});execFileSync('git',['archive','--format=tar','--output='+archive,head,'market','services/desktop-cloud','plugins/naumi-enterprise/market-contract.js','scripts/deploy-cloud47.py','scripts/backup-cloud47.py'],{cwd:root});
++execFileSync('ssh',[...args,'mkdir -p /opt/naumi-desktop-cloud/incoming']);execFileSync('scp',['-i',path.resolve(key),'-o','BatchMode=yes','-o','IdentitiesOnly=yes','-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+known,archive,conn.username+'@'+conn.host+':'+target]);
++const result=spawnSync('ssh',[...args,'python3 -B - --sha '+head+' --archive '+target+' --gateway-sha '+baseline],{input:execFileSync('git',['show',head+':scripts/deploy-cloud47.py'],{cwd:root}),timeout:240000,windowsHide:true});fs.writeFileSync(path.join(out,'DEPLOYMENT_LAST.log'),Buffer.concat([result.stdout??Buffer.alloc(0),result.stderr??Buffer.alloc(0)]));
++if(result.status===0||result.status===75){const value=JSON.parse(result.stdout);fs.writeFileSync(path.join(out,'DEPLOYMENT_STATUS.json'),JSON.stringify({main:head,...value},null,2)+'\n');console.log(JSON.stringify(value));process.exit(result.status);}throw Error('DEPLOYMENT_FAILED_SEE_OWN_LOG');
+diff --git a/modified/scripts/deploy-cloud47.py b/modified/scripts/deploy-cloud47.py
+new file mode 100644
+index 0000000..b362f2d
+--- /dev/null
++++ b/modified/scripts/deploy-cloud47.py
+@@ -0,0 +1,112 @@
++"""Deploy only Naumi Desktop cloud+market alongside the existing 47 account app.
++Run on the target with --sha <fixed main> --archive <uploaded tar> --gateway-sha <observed SHA>.
++No account app/worker rebuild, database overwrite, model call, or existing task replay.
++"""
++import argparse,contextlib,fcntl,hashlib,json,os,pathlib,socket,subprocess,tarfile,time,urllib.request,urllib.error,sys
++
++BASE=pathlib.Path('/opt/naumi-desktop-cloud')
++GATE=pathlib.Path('/etc/nginx/sites-available/reference-workbench')
++ORIGIN='https://47.105.59.142'
++sha=lambda b:hashlib.sha256(b).hexdigest()
++def run(args,timeout=180,cwd=None):return subprocess.check_output(args,stderr=subprocess.PIPE,timeout=timeout,cwd=cwd)
++def request(url):
++ try:
++  with urllib.request.urlopen(url,timeout=15) as r:
++   raw=r.read()
++   try:value=json.loads(raw)
++   except ValueError:value={'invalidJSON':True}
++   return r.status,value
++ except urllib.error.HTTPError as e:
++  try:value=json.loads(e.read())
++  except ValueError:value={'invalidJSON':True}
++  return e.code,value
++def wait_health(url,product):
++ deadline=time.monotonic()+20
++ while True:
++  try:
++   code,value=request(url)
++   if code==200 and value.get('product')==product:return
++  except Exception:pass
++  if time.monotonic()>=deadline:raise RuntimeError('HEALTH_NOT_READY '+url)
++  time.sleep(.3)
++def atomic(file,data):
++ temp=file.with_name(file.name+'.cloud47-tmp');temp.write_bytes(data);temp.chmod(0o644);os.replace(temp,file)
++def main():
++ p=argparse.ArgumentParser();p.add_argument('--sha',required=True);p.add_argument('--archive',required=True);p.add_argument('--gateway-sha',required=True);a=p.parse_args()
++ assert len(a.sha)==40 and all(c in 'abcdef0123456789' for c in a.sha)
++ BASE.mkdir(exist_ok=True)
++ with contextlib.ExitStack() as stack:
++  for file in ['/opt/naumi-staging/releases/deploy.lock','/opt/reference-workbench/deploy.lock',str(BASE/'deploy.lock')]:
++   lock=stack.enter_context(open(file,'a'));fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
++  before=GATE.read_bytes();assert sha(before)==a.gateway_sha,'GATEWAY_BASELINE_CHANGED'
++  assert request(ORIGIN+'/api/auth/session')==(200,{'user':None}),'ACCOUNT_BASELINE_CHANGED'
++  original_containers={r['Name']:r['State']['StartedAt'] for r in json.loads(run(['docker','inspect',*run(['docker','ps','-q']).decode().split()]))}
++  assert all(not pathlib.Path('/etc/systemd/system/naumi-desktop-cloud-backup.'+s).exists() for s in ['service','timer']),'BACKUP_UNITS_ALREADY_MANAGED'
++  release=BASE/'releases'/a.sha;assert not release.exists(),'RELEASE_EXISTS'
++  release.mkdir(parents=True);e=BASE/'evidence'/a.sha;e.mkdir(parents=True);(e/'gateway.before').write_bytes(before)
++  archive=pathlib.Path(a.archive);assert archive.is_file();
++  with tarfile.open(archive) as tar:
++   assert all(not m.name.startswith('/') and '..' not in pathlib.PurePosixPath(m.name).parts and not m.issym() and not m.islnk() for m in tar.getmembers())
++   tar.extractall(release,filter='data')
++  assert (release/'services/desktop-cloud/server.mjs').is_file()
++  data=BASE/'data';created=not data.exists();data.mkdir(mode=0o700,exist_ok=True)
++  if created:os.chown(data,1000,1000)
++  import sqlite3
++  for name in ['market.sqlite','cloud.sqlite']:
++   db=data/name
++   if db.exists():
++    with sqlite3.connect(db) as src,sqlite3.connect(e/(name+'.backup')) as dest:src.backup(dest)
++  with socket.socket() as sock:sock.bind(('127.0.0.1',3190))
++  image_info=json.loads(run(['docker','image','inspect','node:24-alpine']))[0]
++  base_image=next((d for d in image_info.get('RepoDigests',[]) if 'node@sha256:' in d),None);assert base_image,'PINNED_NODE_IMAGE_REQUIRED'
++  image='naumi-desktop-cloud:'+a.sha;container='naumi-desktop-cloud-'+a.sha[:12]
++  run(['docker','build','--pull=false','--network=none','--build-arg','BASE_IMAGE='+base_image,'-f','services/desktop-cloud/Dockerfile','-t',image,'.'],timeout=180,cwd=release)
++  old_current=os.readlink(BASE/'current') if (BASE/'current').is_symlink() else None
++  switched=False;started=False;backup_units=False
++  try:
++   run(['docker','run','-d','--name',container,'--network','host','--restart','unless-stopped','--read-only','--tmpfs','/tmp:rw,noexec,nosuid,size=32m','--cap-drop','ALL','--security-opt','no-new-privileges','--memory','256m','--cpus','1','--log-opt','max-size=5m','--log-opt','max-file=3','-v',str(data)+':/data','-e','HOST=127.0.0.1','-e','PORT=3190','-e','NAUMI_MARKET_AUTH_ORIGIN='+ORIGIN,'-e','NAUMI_MARKET_PUBLIC_ORIGIN='+ORIGIN,'-e','NAUMI_MARKET_TENANT=naumi',image]);started=True
++   for attempt in range(30):
++    try:
++     if request('http://127.0.0.1:3190/api/desktop-cloud/health')[0]==200:break
++    except Exception:pass
++    time.sleep(.5)
++   assert request('http://127.0.0.1:3190/api/desktop-cloud/health')[1]['product']=='Naumi Desktop Cloud'
++   current=BASE/'current';temp=BASE/'current.next';temp.symlink_to(release);os.replace(temp,current)
++   marker=' include /opt/naumi-desktop-cloud/current/services/desktop-cloud/nginx-location.conf;'
++   text=before.decode();anchor=' listen 443 ssl; server_name 47.105.59.142;'
++   assert marker not in text and text.count(anchor)==1,'UNEXPECTED_NGINX_ANCHOR'
++   after=text.replace(anchor,anchor+'\n'+marker).encode();atomic(GATE,after);switched=True
++   run(['nginx','-t']);run(['systemctl','reload','nginx'])
++   wait_health(ORIGIN+'/api/desktop-cloud/health','Naumi Desktop Cloud')
++   wait_health(ORIGIN+'/api/plugin-market/health','Naumi Market')
++   assert request(ORIGIN+'/api/desktop-cloud/v1/me')[0]==401
++   assert request(ORIGIN+'/api/plugin-market/v1/me')[0]==401
++   assert request(ORIGIN+'/api/auth/session')==(200,{'user':None})
++   now={r['Name']:r['State']['StartedAt'] for r in json.loads(run(['docker','inspect',*run(['docker','ps','-q']).decode().split()]))}
++   assert all(now.get(name)==value for name,value in original_containers.items()),'EXISTING_CONTAINER_RESTARTED'
++   (BASE/'backups').mkdir(mode=0o700,exist_ok=True)
++   backup=json.loads(run(['python3',str(release/'scripts/backup-cloud47.py')]))
++   assert backup['status']=='PASS'
++   for suffix in ['service','timer']:atomic(pathlib.Path('/etc/systemd/system/naumi-desktop-cloud-backup.'+suffix),(release/('services/desktop-cloud/backup.'+suffix)).read_bytes())
++   backup_units=True
++   run(['systemctl','daemon-reload']);run(['systemctl','enable','--now','naumi-desktop-cloud-backup.timer'])
++   record={'status':'PASS','mainSHA':a.sha,'container':container,'image':image,'nodeBase':base_image,'gatewayBefore':sha(before),'gatewayAfter':sha(after),'origin':ORIGIN,'cloudHealth':200,'marketHealth':200,'anonymousCloud':401,'anonymousMarket':401,'accountUnauthenticatedSession':200,'existingContainersUnchanged':len(original_containers),'databaseRestore':False,'modelCalls':0,'persistentData':str(data),'initialBackupVerified':True,'dailyBackupTimer':True}
++   (e/'deployment.json').write_text(json.dumps(record,indent=2)+'\n');print(json.dumps(record,indent=2))
++  except Exception:
++   if backup_units:
++    subprocess.run(['systemctl','disable','--now','naumi-desktop-cloud-backup.timer'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
++    for suffix in ['service','timer']:
++     unit=pathlib.Path('/etc/systemd/system/naumi-desktop-cloud-backup.'+suffix)
++     assert unit.read_bytes()==(release/('services/desktop-cloud/backup.'+suffix)).read_bytes(),'NEWER_BACKUP_UNIT_DO_NOT_OVERWRITE'
++     unit.unlink()
++    run(['systemctl','daemon-reload'])
++   if switched:
++    assert sha(GATE.read_bytes())==sha(after),'NEWER_GATEWAY_DO_NOT_OVERWRITE';atomic(GATE,before);run(['nginx','-t']);run(['systemctl','reload','nginx'])
++   if started:run(['docker','stop',container]);run(['docker','rm',container])
++   if (BASE/'current').is_symlink() and os.readlink(BASE/'current')==str(release):(BASE/'current').unlink()
++   if old_current:(BASE/'current').symlink_to(old_current)
++   raise
++if __name__=='__main__':
++ try:main()
++ except BlockingIOError:
++  print(json.dumps({'status':'WAITING_DEPLOYMENT_LOCK','publicRoutesChanged':False,'existingServicesRestarted':False}));sys.exit(75)
+diff --git a/modified/scripts/package-cloud47.mjs b/modified/scripts/package-cloud47.mjs
+new file mode 100644
+index 0000000..a4428f4
+--- /dev/null
++++ b/modified/scripts/package-cloud47.mjs
+@@ -0,0 +1,16 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';
++const base='7c7108fec67602ae4caf4bbb137c75092be82892',root=process.cwd(),e=path.join(root,'evidence/cloud47'),hash=b=>createHash('sha256').update(b).digest('hex'),git=(...args)=>execFileSync('git',args,{cwd:root,stdio:['ignore','pipe','pipe']}),write=(p,b)=>{fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,b);};
++const files=['desktop/app/cloud.cjs','desktop/app/identity-runtime.cjs','desktop/app/identity.css','desktop/app/identity.html','desktop/app/identity.js','desktop/app/main.cjs','desktop/app/market.cjs','desktop/app/preload.cjs','desktop/tests/cloud47.test.cjs','desktop/scripts/verify-cloud47-live.mjs','services/desktop-cloud/store.mjs','services/desktop-cloud/server.mjs','services/desktop-cloud/Dockerfile','services/desktop-cloud/nginx-location.conf','services/desktop-cloud/README.md','services/desktop-cloud/backup.service','services/desktop-cloud/backup.timer','scripts/deploy-cloud47.py','scripts/backup-cloud47.py','scripts/deploy-cloud47-client.mjs','scripts/deploy-cloud47-remote.mjs','tests/desktop-cloud.test.mjs','tests/desktop-update-ui.test.mjs','docs/implementation/CLOUD47.md','scripts/package-cloud47.mjs'];
++const attributeBase=process.argv[2];if(!/^[a-f0-9]{40}$/.test(attributeBase??''))throw Error('PRE_ATTRIBUTE_COMMIT_REQUIRED');
++const temp=path.join(root,'runtime/cloud47-artifact-'+randomUUID()),stage=path.join(temp,'modified'),originalStage=path.join(temp,'original');fs.mkdirSync(stage,{recursive:true});fs.mkdirSync(originalStage,{recursive:true});fs.mkdirSync(e,{recursive:true});
++const entries=files.map(file=>{let original=null;try{original=git('show',base+':'+file);}catch{}return{file,original,source:path.join(root,file),kind:'source'};});entries.push({file:'.gitattributes',original:git('show',attributeBase+':.gitattributes'),source:path.join(root,'.gitattributes'),kind:'evidence-config'});
++const client=JSON.parse(fs.readFileSync(path.join(e,'client/PREPARED.json')));for(const r of client.runtime)entries.push({file:'runtime-plugin/'+r.file,original:r.before?fs.readFileSync(path.join(e,'client/original-runtime',r.file)):null,source:path.join(client.stage,'runtime',r.file),kind:'runtime-delta'});entries.push({file:'native-client/app.asar',original:fs.readFileSync(path.join(e,'client/ORIGINAL_APP.asar')),source:path.join(e,'client/MODIFIED_APP.asar'),kind:'native-archive'});
++const manifest=entries.map(entry=>{const {file,original,source,kind}=entry,bytes=fs.readFileSync(source);if(original){write(path.join(e,'original',file),original);write(path.join(originalStage,file),original);}write(path.join(stage,file),bytes);return{file,kind,originalSHA256:original?hash(original):null,modifiedSHA256:hash(bytes)};});
++write(path.join(e,'HASHES.json'),JSON.stringify({base,attributeBase,source:git('rev-parse','HEAD').toString().trim(),files:manifest},null,2)+'\n');const diff=spawnSync('git',['diff','--binary','--no-index','--','original','modified'],{cwd:temp,maxBuffer:20*1024*1024});assert([0,1].includes(diff.status));write(path.join(e,'DIFF_FILE.patch'),diff.stdout);
++write(path.join(e,'rollback.mjs'),`import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {fileURLToPath} from 'node:url';import {createHash} from 'node:crypto';const e=path.dirname(fileURLToPath(import.meta.url)),target=fs.realpathSync(process.argv[2]),marker=path.join(target,'.cloud47-copy.json'),hash=b=>createHash('sha256').update(b).digest('hex');assert(fs.existsSync(marker),'COPY_REQUIRED');assert.equal(JSON.parse(fs.readFileSync(marker)).target,target);const manifest=JSON.parse(fs.readFileSync(path.join(e,'HASHES.json'))).files;for(const m of manifest){const p=path.resolve(target,m.file);assert(p.startsWith(target+path.sep));for(let q=p;q!==target;q=path.dirname(q))if(fs.existsSync(q))assert(!fs.lstatSync(q).isSymbolicLink(),'LINKED_TARGET');if(fs.existsSync(p))assert([m.originalSHA256,m.modifiedSHA256].includes(hash(fs.readFileSync(p))),'COPY_CHANGED '+m.file);else assert.equal(m.originalSHA256,null);if(m.originalSHA256)assert.equal(hash(fs.readFileSync(path.join(e,'original',m.file))),m.originalSHA256);}for(const m of manifest){const p=path.join(target,m.file);if(m.originalSHA256){fs.mkdirSync(path.dirname(p),{recursive:true});fs.copyFileSync(path.join(e,'original',m.file),p);}else if(fs.existsSync(p))fs.unlinkSync(p);}for(const m of manifest)assert.equal(fs.existsSync(path.join(target,m.file))?hash(fs.readFileSync(path.join(target,m.file))):null,m.originalSHA256);console.log('ROLLBACK_PASS files='+manifest.length+' original_hashes=restored added_files=removed source_unchanged=1');\n`);
++write(path.join(e,'ROLLBACK.sh'),'#!/usr/bin/env sh\nset -eu\nif [ "$#" -ne 1 ]; then echo "Usage: ROLLBACK.sh COPY_DIRECTORY" >&2; exit 64; fi\nHERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec node "$HERE/rollback.mjs" "$1"\n');
++const zip=path.join(e,'MODIFIED_FILE.zip'),expanded=path.join(temp,'reopened');execFileSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-Command',`$ErrorActionPreference='Stop';Compress-Archive -Path '${stage.replaceAll("'","''")}/*' -DestinationPath '${zip.replaceAll("'","''")}' -Force;Expand-Archive -LiteralPath '${zip.replaceAll("'","''")}' -DestinationPath '${expanded.replaceAll("'","''")}'`],{windowsHide:true});for(const m of manifest)assert.equal(hash(fs.readFileSync(path.join(expanded,m.file))),m.modifiedSHA256);
++const copy=path.join(temp,'rollback-copy'),archive=path.join(temp,'baseline.tar');fs.mkdirSync(copy);execFileSync('git',['archive','--format=tar','--output='+archive,base,'desktop','plugins','market','package.json','scripts','tests/naumi-enterprise.test.mjs','tests/desktop-update-ui.test.mjs','tests/naumi-plugin-market.test.mjs'],{cwd:root});execFileSync('tar',['-xf',archive,'-C',copy]);for(const entry of entries)write(path.join(copy,entry.file),fs.readFileSync(entry.source));write(path.join(copy,'.cloud47-copy.json'),JSON.stringify({target:fs.realpathSync(copy)}));fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');
++const rollback=spawnSync('D:/DEV/Git/bin/bash.exe',[path.join(e,'ROLLBACK.sh'),copy.replaceAll('\\','/')],{encoding:'utf8',windowsHide:true});write(path.join(e,'ROLLBACK.log'),(rollback.stdout??'')+(rollback.stderr??''));assert.equal(rollback.status,0,rollback.stderr);
++const tests=['desktop/tests/identity.test.cjs','desktop/tests/market.test.cjs','tests/desktop-update-ui.test.mjs','tests/naumi-plugin-market.test.mjs','tests/naumi-enterprise.test.mjs'],restored=spawnSync(process.execPath,['--test',...tests],{cwd:copy,encoding:'utf8',windowsHide:true,timeout:120000});write(path.join(e,'ROLLBACK_TESTS.log'),(restored.stdout??'')+(restored.stderr??''));assert.equal(restored.status,0,restored.stderr);for(let i=0;i<manifest.length;i++)assert.equal(hash(fs.readFileSync(entries[i].source)),manifest[i].modifiedSHA256);
++const receipt={status:'PASS',base,attributeBase,source:git('rev-parse','HEAD').toString().trim(),files:manifest.length,sourceFiles:files.length,runtimeFiles:client.runtime.length,nativeArchives:1,archiveSHA256:hash(fs.readFileSync(zip)),archiveReopened:true,rollbackCommand:`D:/DEV/Git/bin/bash.exe evidence/cloud47/ROLLBACK.sh ${copy.replaceAll('\\','/')}`,rollbackCopy:copy,rollbackExit:rollback.status,restoredCommand:'node --test '+tests.join(' '),restoredExit:restored.status,sourceUnchanged:true};write(path.join(e,'PACKAGE.json'),JSON.stringify(receipt,null,2)+'\n');console.log('ARTIFACTS_PASS files='+manifest.length+' zip_reopened=1 rollback_exit=0 restored_tests=PASS source_unchanged=1');
+diff --git a/modified/services/desktop-cloud/Dockerfile b/modified/services/desktop-cloud/Dockerfile
+new file mode 100644
+index 0000000..8dd5b95
+--- /dev/null
++++ b/modified/services/desktop-cloud/Dockerfile
+@@ -0,0 +1,11 @@
++ARG BASE_IMAGE=node:24-alpine
++FROM ${BASE_IMAGE}
++WORKDIR /app
++COPY market/package.json ./package.json
++COPY market ./market
++COPY services/desktop-cloud ./services/desktop-cloud
++COPY plugins/naumi-enterprise/market-contract.js ./plugins/naumi-enterprise/market-contract.js
++RUN mkdir /data && chown node:node /data
++USER node
++ENV HOST=0.0.0.0 PORT=3190 NAUMI_CLOUD_DATA=/data
++CMD ["node","services/desktop-cloud/server.mjs"]
+diff --git a/modified/services/desktop-cloud/README.md b/modified/services/desktop-cloud/README.md
+new file mode 100644
+index 0000000..b19e625
+--- /dev/null
++++ b/modified/services/desktop-cloud/README.md
+@@ -0,0 +1,40 @@
++# Naumi Desktop 47 个人云数据
++
++账号权威为 `https://47.105.59.142` 现有 `/api/auth/*`，本服务不存密码、不另建账号库。市场和云数据共用一个轻量 Node24 进程，数据分别在 `market.sqlite`、`cloud.sqlite`；外部只追加 `/api/plugin-market/`、`/api/desktop-cloud/`，容器监听宿主机 loopback3190。
++
++## 已实现的数据协议
++
++- `GET /api/desktop-cloud/v1/me`：当前服务端确认的用户与配额。
++- `GET /documents?kind=workspace&offset=0`：仅该账号的文档元数据，100条分页。
++- `GET /documents/<kind>/<id>?revision=N`：当前或保留的历史版本；正文摘要可核验。
++- `POST /documents`：`operationId,kind,id,expectedRevision,payload,deleted?`。事务 CAS、幂等回执、10版历史；删除为带 revision 的墓碑，旧副本不会无意覆盖它。
++- `POST /chunks`：`operationId,digest,content`；每块最多1MiB，摘要校验和账号级去重。
++- `GET /chunks/<sha256>`：仅上传账号可取。`file-manifest` 的文件路径和块引用均由服务器校验，不接受跨账号块。
++
++一期账号配额128MiB，涵盖历史文档和文件块，不是容量或高并发达标结论。浏览器、Cookie、设备私钥、API Key、普通配置中的凭据字段及环境文件不进入同步。账号主体沿用当前原生账号 email 契约的服务端命名空间；账号改名仍需显式迁移，不能把 email 当不可变用户 UUID。
++
++## 客户端入口与实际范围
++
++安装版默认账号服务为47；管理员环境变量仍可显式覆盖到经验证的新地址。旧 `backend-link.json` 不再让安装版跳过登录：首次登录明确确认旧本地工作台归属，随后固定到该账号，其他账号不能通过勾选框重新认领。旧数据不搬动、不覆盖。新安装的独立账号目录继续按现有 `identity-profiles` 隔离。
++
++系统连接 → Naumi账号 → 云端备份：**备份 Bot 档案与记忆**，复用 `/naumi/bots` 及既有员工 export API，只选择 Bot 公开信息、档案及已确认记忆；不读取活跃 SQLite 文件，不自动上传聊天全文或工作区所有文件。请求发送前先持久化冻结 outbox，丢回执后的重试复用同一 operationId 和正文。版本冲突保留本机待提交副本，不静默覆盖云端。
++
++云端副本可在任一已登录设备列出、下载为独立 JSON 文件，并核对正文摘要；不把下载副本自动导入正在工作的数据库。全量会话/附件的分批适配、持续双向合并、历史本地账号归属确认及一键重建工作台仍须在后续迁移切片完成，当前不是全量迁移完成声明。文件块与版本协议已为这些数据类别预留，不能以协议存在替代实际迁移验收。
++
++## 部署、备份与回退
++
++只从 main 固定 SHA 打包 `market/`、本目录、`market-contract.js` 和部署/备份脚本。`scripts/deploy-cloud47.py` 在47同时持既有Naumi/工作台部署锁及自身锁；核对 nginx 哈希与现有容器启动时间，构建固定镜像、启动独立容器、检查健康后，仅追加自己的 nginx include。失败只回退自己的网关增量并停止自己的新容器，保留数据目录，不重启 Canvas/Worker/其他服务。
++
++持久数据在 `/opt/naumi-desktop-cloud/data`；使用专用UID和700目录权限。`backup.service/timer` 每日通过 SQLite backup API 生成可读的一致快照并执行 integrity_check；不用只复制活跃主库替代在线备份。当前不自动删除历史备份；容量巡检及异地副本单独实施。
++
++回退新增入口时先确认当前 gateway SHA 等于该次部署回执，移除该 include 或恢复备份并 `nginx -t` 后 reload；停止命名为 `naumi-desktop-cloud-<sha>` 的自身容器，保留云数据与备份。不可拿旧数据库覆盖已接受的新用户写入。具体已部署/验收结果见 `docs/implementation/CLOUD47.md` 与 `evidence/cloud47/VERIFICATION.txt`。
++
++## 复用提示
++
++```text
++接续Naumi个人云同步：复用47现有原生账号与桌面CloudSession，不另写密码库或通用HTTP代理。
++先读CLOUD47.md，区分实际已备份的Bot档案/确认记忆与尚未迁移的完整会话/文件。
++新适配器按账号、revision、digest和持久outbox接入documents/chunks，先预览归属和恢复目录。
++不要直接复制运行中的SQLite/WAL，不同步密钥/Cookie，不覆盖本地现有数据。
++保留企业EmployeeSync的组织授权/审批职责，不能用个人账号登录冒充企业权限。
++```
+diff --git a/modified/services/desktop-cloud/backup.service b/modified/services/desktop-cloud/backup.service
+new file mode 100644
+index 0000000..696446a
+--- /dev/null
++++ b/modified/services/desktop-cloud/backup.service
+@@ -0,0 +1,11 @@
++[Unit]
++Description=Naumi Desktop Cloud consistent SQLite backup
++
++[Service]
++Type=oneshot
++UMask=0077
++ExecStart=/usr/bin/python3 /opt/naumi-desktop-cloud/current/scripts/backup-cloud47.py
++NoNewPrivileges=true
++ProtectHome=true
++ProtectSystem=strict
++ReadWritePaths=/opt/naumi-desktop-cloud/data /opt/naumi-desktop-cloud/backups /opt/naumi-desktop-cloud
+diff --git a/modified/services/desktop-cloud/backup.timer b/modified/services/desktop-cloud/backup.timer
+new file mode 100644
+index 0000000..8fc7834
+--- /dev/null
++++ b/modified/services/desktop-cloud/backup.timer
+@@ -0,0 +1,11 @@
++[Unit]
++Description=Daily Naumi Desktop Cloud backup
++
++[Timer]
++OnCalendar=*-*-* 03:20:00
++RandomizedDelaySec=15m
++Persistent=true
++Unit=naumi-desktop-cloud-backup.service
++
++[Install]
++WantedBy=timers.target
+diff --git a/modified/services/desktop-cloud/nginx-location.conf b/modified/services/desktop-cloud/nginx-location.conf
+new file mode 100644
+index 0000000..a66b38d
+--- /dev/null
++++ b/modified/services/desktop-cloud/nginx-location.conf
+@@ -0,0 +1,19 @@
++# Append only inside the existing Naumi HTTPS server.
++location ^~ /api/plugin-market/ {
++    client_max_body_size 3m;
++    proxy_pass http://127.0.0.1:3190;
++    proxy_set_header Host $host;
++    proxy_set_header X-Forwarded-Proto $scheme;
++    proxy_set_header Cookie $http_cookie;
++    proxy_read_timeout 35s;
++    proxy_buffering off;
++}
++location ^~ /api/desktop-cloud/ {
++    client_max_body_size 3m;
++    proxy_pass http://127.0.0.1:3190;
++    proxy_set_header Host $host;
++    proxy_set_header X-Forwarded-Proto $scheme;
++    proxy_set_header Cookie $http_cookie;
++    proxy_read_timeout 35s;
++    proxy_buffering off;
++}
+diff --git a/modified/services/desktop-cloud/server.mjs b/modified/services/desktop-cloud/server.mjs
+new file mode 100644
+index 0000000..fcffe25
+--- /dev/null
++++ b/modified/services/desktop-cloud/server.mjs
+@@ -0,0 +1,19 @@
++import http from 'node:http';
++import path from 'node:path';
++import {pathToFileURL} from 'node:url';
++import {CloudStore,MAX_BODY} from './store.mjs';
++import {MarketStore} from '../../market/store.mjs';
++import {marketServer,canvasAuthentication} from '../../market/server.mjs';
++
++const PREFIX='/api/desktop-cloud/v1';
++export function cloudServer({store,authenticate,publicOrigin}){return http.createServer(async(req,res)=>{
++ const send=(status,value)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(value));};
++ try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/api/desktop-cloud/health')return send(200,{product:'Naumi Desktop Cloud',protocol:1});if(!u.pathname.startsWith(PREFIX+'/'))return send(404,{error:'NOT_FOUND'});if(!['GET','POST'].includes(req.method))return send(405,{error:'CLOUD_METHOD'});if(req.method==='POST'&&(req.headers['x-naumi-market']!=='1'||req.headers.origin&&req.headers.origin!==(publicOrigin??'http://'+req.headers.host)))return send(403,{error:'CLOUD_SAME_ORIGIN_REQUIRED'});
++  const actor=await authenticate(req),endpoint=u.pathname.slice(PREFIX.length);
++  if(req.method==='GET'){if(endpoint==='/me')return send(200,{user:{id:actor.id,name:actor.name},usage:store.usage(actor),protocol:1});if(endpoint==='/documents')return send(200,store.list(actor,{kind:u.searchParams.get('kind')??'',offset:Number(u.searchParams.get('offset')??0)}));const doc=endpoint.match(/^\/documents\/([-a-z]+)\/([-a-zA-Z0-9_.]{1,128})$/);if(doc)return send(200,store.get(actor,doc[1],doc[2],u.searchParams.has('revision')?Number(u.searchParams.get('revision')):undefined));const chunk=endpoint.match(/^\/chunks\/([a-f0-9]{64})$/);if(chunk)return send(200,store.chunk(actor,chunk[1]));return send(404,{error:'NOT_FOUND'});}
++  const chunks=[];let size=0;for await(const c of req){size+=c.length;if(size>MAX_BODY)return send(413,{error:'CLOUD_REQUEST_TOO_LARGE'});chunks.push(c);}let input;try{input=JSON.parse(Buffer.concat(chunks));}catch{return send(400,{error:'CLOUD_INVALID_JSON'});}if(endpoint==='/documents')return send(200,store.put(actor,input));if(endpoint==='/chunks')return send(200,store.putChunk(actor,input));return send(404,{error:'NOT_FOUND'});
++ }catch(e){if(!res.headersSent)send(e.status??500,{error:/^(?:CLOUD|MARKET)_[A-Z_]+$/.test(e.message)?e.message:'CLOUD_UNAVAILABLE'});}
++ });}
++if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
++ const origin=process.env.NAUMI_MARKET_AUTH_ORIGIN;if(!origin)throw Error('AUTH_ORIGIN_REQUIRED');const publicOrigin=process.env.NAUMI_MARKET_PUBLIC_ORIGIN,authenticate=canvasAuthentication({origin,tenant:process.env.NAUMI_MARKET_TENANT??'naumi',moderators:(process.env.NAUMI_MARKET_MODERATORS??'').split(',').filter(Boolean)}),home=path.resolve(process.env.NAUMI_CLOUD_DATA??'/data'),store=new CloudStore(path.join(home,'cloud.sqlite')),market=new MarketStore(path.join(home,'market.sqlite')),cloud=cloudServer({store,authenticate,publicOrigin}),marketHTTP=marketServer({store:market,authenticate,publicOrigin}),server=http.createServer((req,res)=>(req.url.startsWith('/api/plugin-market/')?marketHTTP:cloud).emit('request',req,res));server.requestTimeout=30000;server.headersTimeout=10000;server.listen(Number(process.env.PORT??3190),process.env.HOST??'127.0.0.1',()=>console.log('NAUMI_CLOUD_READY protocol=1'));const stop=()=>{server.closeAllConnections();server.close(()=>{store.close();market.close();process.exit(0);});};process.on('SIGTERM',stop);process.on('SIGINT',stop);
++}
+diff --git a/modified/services/desktop-cloud/store.mjs b/modified/services/desktop-cloud/store.mjs
+new file mode 100644
+index 0000000..7d994e3
+--- /dev/null
++++ b/modified/services/desktop-cloud/store.mjs
+@@ -0,0 +1,35 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import {DatabaseSync} from 'node:sqlite';
++import {createHash} from 'node:crypto';
++import {exact,uuid,fail} from '../../plugins/naumi-enterprise/market-contract.js';
++
++export const hash=value=>createHash('sha256').update(typeof value==='string'||Buffer.isBuffer(value)?value:JSON.stringify(value)).digest('hex');
++export const MAX_BODY=2*1024*1024;
++const kinds=new Set(['workspace','bot','profile','memory','conversation','settings','file-manifest']);
++export function identity(kind,id){if(!kinds.has(kind)||typeof id!=='string'||!/^[-a-zA-Z0-9_.]{1,128}$/.test(id)||id==='.'||id==='..')fail('CLOUD_INVALID_DOCUMENT');}
++export function publicPayload(value){
++ let count=0;
++ function walk(v,depth){if(++count>20000||depth>24)fail('CLOUD_PAYLOAD_TOO_COMPLEX');if(v&&typeof v==='object'){for(const [k,x]of Object.entries(v)){if(/^(?:__proto__|prototype|constructor|api.?key|access.?token|refresh.?token|password|cookie|authorization|private.?key|credentials)$/i.test(k))fail('CLOUD_PRIVATE_FIELD');walk(x,depth+1);}}else if(typeof v==='string'&&/-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----|\bsk-[A-Za-z0-9_-]{24,}\b/.test(v))fail('CLOUD_PRIVATE_CONTENT');}
++ if(!value||typeof value!=='object'||Array.isArray(value))fail('CLOUD_INVALID_PAYLOAD');walk(value,0);const raw=JSON.stringify(value);if(Buffer.byteLength(raw)>1024*1024)fail('CLOUD_PAYLOAD_TOO_LARGE',413);return raw;
++}
++export class CloudStore{
++ constructor(file,{quota=128*1024*1024}={}){fs.mkdirSync(path.dirname(file),{recursive:true});this.quota=quota;this.db=new DatabaseSync(file);const v=this.db.prepare('PRAGMA user_version').get().user_version;if(![0,1].includes(v))throw Error('CLOUD_SCHEMA_UNSUPPORTED');this.db.exec(`PRAGMA journal_mode=WAL;PRAGMA busy_timeout=5000;
++ CREATE TABLE IF NOT EXISTS documents(owner TEXT,kind TEXT,id TEXT,revision INTEGER NOT NULL,digest TEXT NOT NULL,body TEXT NOT NULL,deleted INTEGER NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(owner,kind,id));
++ CREATE TABLE IF NOT EXISTS versions(owner TEXT,kind TEXT,id TEXT,revision INTEGER,digest TEXT NOT NULL,body TEXT NOT NULL,deleted INTEGER NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(owner,kind,id,revision));
++ CREATE TABLE IF NOT EXISTS operations(owner TEXT,operation TEXT,fingerprint TEXT NOT NULL,result TEXT NOT NULL,PRIMARY KEY(owner,operation));
++ CREATE TABLE IF NOT EXISTS chunks(owner TEXT,digest TEXT,bytes BLOB NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(owner,digest));
++ PRAGMA user_version=1;`);}
++ owner(actor){if(!actor?.id||typeof actor.id!=='string')fail('CLOUD_AUTH_REQUIRED',401);return actor.id;}
++ transaction(fn){this.db.exec('BEGIN IMMEDIATE');try{const result=fn();this.db.exec('COMMIT');return result;}catch(e){this.db.exec('ROLLBACK');throw e;}}
++ usage(actor){const owner=this.owner(actor);return{used:this.db.prepare('SELECT coalesce(sum(length(CAST(body AS BLOB))),0) n FROM versions WHERE owner=?').get(owner).n+this.db.prepare('SELECT coalesce(sum(length(bytes)),0) n FROM chunks WHERE owner=?').get(owner).n,limit:this.quota};}
++ mutate(actor,input,fn){const owner=this.owner(actor);uuid(input.operationId);return this.transaction(()=>{const fingerprint=hash(input),prior=this.db.prepare('SELECT * FROM operations WHERE owner=? AND operation=?').get(owner,input.operationId);if(prior){if(prior.fingerprint!==fingerprint)fail('CLOUD_OPERATION_CONFLICT',409);return JSON.parse(prior.result);}const result=fn(owner);if(this.usage(actor).used>this.quota)fail('CLOUD_QUOTA_EXCEEDED',413);this.db.prepare('INSERT INTO operations VALUES(?,?,?,?)').run(owner,input.operationId,fingerprint,JSON.stringify(result));return result;});}
++ list(actor,{kind='',offset=0}={}){if(kind&&!kinds.has(kind)||!Number.isInteger(offset)||offset<0)fail('CLOUD_INVALID_QUERY');const owner=this.owner(actor),rows=this.db.prepare('SELECT kind,id,revision,digest,deleted,updated_at FROM documents WHERE owner=? AND (?=\'\' OR kind=?) ORDER BY kind,id LIMIT 101 OFFSET ?').all(owner,kind,kind,offset);return{items:rows.slice(0,100),next:rows.length>100?offset+100:null,usage:this.usage(actor)};}
++ get(actor,kind,id,revision){identity(kind,id);const owner=this.owner(actor);if(revision!==undefined&&(!Number.isInteger(revision)||revision<1))fail('CLOUD_INVALID_REVISION');const r=revision===undefined?this.db.prepare('SELECT * FROM documents WHERE owner=? AND kind=? AND id=?').get(owner,kind,id):this.db.prepare('SELECT * FROM versions WHERE owner=? AND kind=? AND id=? AND revision=?').get(owner,kind,id,revision);if(!r)fail('CLOUD_NOT_FOUND',404);const {owner:_,body,...meta}=r;return{...meta,payload:JSON.parse(body)};}
++ put(actor,input){exact(input,['operationId','kind','id','expectedRevision','payload','deleted']);identity(input.kind,input.id);if(!Number.isInteger(input.expectedRevision)||input.expectedRevision<0||input.deleted!==undefined&&typeof input.deleted!=='boolean')fail('CLOUD_INVALID_REVISION');const body=publicPayload(input.payload);return this.mutate(actor,input,owner=>{const old=this.db.prepare('SELECT revision FROM documents WHERE owner=? AND kind=? AND id=?').get(owner,input.kind,input.id);if((old?.revision??0)!==input.expectedRevision)fail('CLOUD_REVISION_CONFLICT',409);
++  if(input.kind==='file-manifest'&&!input.deleted){if(!Array.isArray(input.payload.files)||input.payload.files.length>100)fail('CLOUD_INVALID_MANIFEST');const names=new Set();for(const f of input.payload.files){exact(f,['path','chunks']);if(typeof f.path!=='string'||!f.path||f.path.length>240||f.path.includes('\\')||f.path.startsWith('/')||f.path.split('/').some(p=>!p||p==='.'||p==='..'||/[<>:"|?*\x00-\x1f]/.test(p)||/[ .]$/.test(p))||/(?:^|\/)(?:\.env(?:\.|$)|\.git|\.dsh|node_modules|cookies|login data|local state)|\.(?:pem|pfx|key)$/i.test(f.path))fail('CLOUD_PRIVATE_PATH');if(names.has(f.path.toLowerCase()))fail('CLOUD_DUPLICATE_PATH');names.add(f.path.toLowerCase());if(!Array.isArray(f.chunks)||f.chunks.length>10000)fail('CLOUD_INVALID_MANIFEST');for(const digest of f.chunks)if(!/^[a-f0-9]{64}$/.test(digest)||!this.db.prepare('SELECT 1 FROM chunks WHERE owner=? AND digest=?').get(owner,digest))fail('CLOUD_CHUNK_NOT_FOUND',409);}}
++  const revision=(old?.revision??0)+1,digest=hash(body),updatedAt=new Date().toISOString(),deleted=Number(!!input.deleted);this.db.prepare('INSERT INTO documents VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(owner,kind,id) DO UPDATE SET revision=excluded.revision,digest=excluded.digest,body=excluded.body,deleted=excluded.deleted,updated_at=excluded.updated_at').run(owner,input.kind,input.id,revision,digest,body,deleted,updatedAt);this.db.prepare('INSERT INTO versions VALUES(?,?,?,?,?,?,?,?)').run(owner,input.kind,input.id,revision,digest,body,deleted,updatedAt);this.db.prepare('DELETE FROM versions WHERE owner=? AND kind=? AND id=? AND revision<=?').run(owner,input.kind,input.id,revision-10);return{kind:input.kind,id:input.id,revision,digest,deleted,updatedAt};});}
++ putChunk(actor,input){exact(input,['operationId','digest','content']);if(typeof input.content!=='string'||input.content.length>1400000||!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(input.content))fail('CLOUD_INVALID_CHUNK');const bytes=Buffer.from(input.content,'base64');if(!bytes.length||bytes.length>1024*1024||hash(bytes)!==input.digest)fail('CLOUD_CHUNK_INTEGRITY');if(/-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----|\bsk-[A-Za-z0-9_-]{24,}\b/.test(bytes.toString('utf8')))fail('CLOUD_PRIVATE_CONTENT');return this.mutate(actor,input,owner=>{this.db.prepare('INSERT INTO chunks VALUES(?,?,?,?) ON CONFLICT(owner,digest) DO NOTHING').run(owner,input.digest,bytes,new Date().toISOString());return{digest:input.digest,bytes:bytes.length};});}
++ chunk(actor,digest){if(!/^[a-f0-9]{64}$/.test(digest))fail('CLOUD_INVALID_CHUNK');const r=this.db.prepare('SELECT bytes FROM chunks WHERE owner=? AND digest=?').get(this.owner(actor),digest);if(!r)fail('CLOUD_NOT_FOUND',404);return{digest,content:Buffer.from(r.bytes).toString('base64')};}
++ close(){this.db.close();}
++}
+diff --git a/modified/tests/desktop-cloud.test.mjs b/modified/tests/desktop-cloud.test.mjs
+new file mode 100644
+index 0000000..a82a0ea
+--- /dev/null
++++ b/modified/tests/desktop-cloud.test.mjs
+@@ -0,0 +1,16 @@
++import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {randomUUID} from 'node:crypto';import {createRequire} from 'node:module';
++import {CloudStore,hash} from '../services/desktop-cloud/store.mjs';import {cloudServer} from '../services/desktop-cloud/server.mjs';
++const require=createRequire(import.meta.url),{CloudSession,CloudBackup,validateCloud}=require('../desktop/app/cloud.cjs');
++const alice={id:'alice',name:'Alice'},bob={id:'bob',name:'Bob'};
++function fixture(t,options){const root=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-cloud-')),store=new CloudStore(path.join(root,'cloud.sqlite'),options);t.after(()=>{store.close();fs.rmSync(root,{recursive:true,force:true});});return{root,store};}
++const put=(payload={name:'Employee'})=>({operationId:randomUUID(),kind:'bot',id:'one',expectedRevision:0,payload});
++test('cloud documents persist by authenticated account, not caller owner fields',t=>{const {store}=fixture(t),first=put();const r=store.put(alice,first);assert.equal(r.revision,1);assert.deepEqual(store.get(alice,'bot','one').payload,first.payload);assert.equal(store.list(bob).items.length,0);assert.throws(()=>store.get(bob,'bot','one'),{status:404});assert.throws(()=>store.put(bob,{...put(),owner:'alice'}));});
++test('cloud CAS and durable idempotent receipt reject stale or different retry payload',t=>{const {store,root}=fixture(t),input=put(),one=store.put(alice,input);assert.deepEqual(store.put(alice,input),one);assert.throws(()=>store.put(alice,{...input,payload:{name:'Changed'}}),{status:409});assert.throws(()=>store.put(alice,{...put(),expectedRevision:0}),/REVISION_CONFLICT/);const second=new CloudStore(path.join(root,'cloud.sqlite'));try{assert.deepEqual(second.put(alice,input),one);}finally{second.close();}});
++test('cloud history preserves ten versions and deletion is an explicit revisioned tombstone',t=>{const {store}=fixture(t);for(let n=0;n<12;n++)store.put(alice,{...put({n}),expectedRevision:n});assert.throws(()=>store.get(alice,'bot','one',1),{status:404});assert.equal(store.get(alice,'bot','one',3).payload.n,2);store.put(alice,{...put({}),expectedRevision:12,deleted:true});assert.equal(store.get(alice,'bot','one').deleted,1);assert.equal(store.get(alice,'bot','one',12).payload.n,11);assert.throws(()=>store.put(alice,put()),/REVISION_CONFLICT/);});
++test('cloud chunk transfer is content verified and account isolated; manifest cannot reference another owner',t=>{const {store}=fixture(t),bytes=Buffer.from('employee workspace document'),digest=hash(bytes),input={operationId:randomUUID(),digest,content:bytes.toString('base64')};store.putChunk(alice,input);assert.equal(Buffer.from(store.chunk(alice,digest).content,'base64').toString(),bytes.toString());assert.throws(()=>store.chunk(bob,digest),{status:404});const doc={...put({files:[{path:'docs/report.md',chunks:[digest]}]}),kind:'file-manifest'};assert.throws(()=>store.put(bob,doc),/CHUNK_NOT_FOUND/);store.put(alice,doc);assert.throws(()=>store.putChunk(alice,{...input,operationId:randomUUID(),digest:'0'.repeat(64)}),/INTEGRITY/);});
++test('cloud quotas roll back rejected writes including operations, and bytes count UTF8 not characters',t=>{const {store}=fixture(t,{quota:50});assert.throws(()=>store.put(alice,put({text:'中'.repeat(20)})),{status:413});assert.equal(store.list(alice).items.length,0);assert.equal(store.db.prepare('SELECT count(*) n FROM operations').get().n,0);assert.equal(store.usage(alice).used,0);});
++test('cloud rejects secrets, private paths and malformed document metadata',t=>{const {store}=fixture(t);for(const payload of [{apiKey:'x'},{nested:{password:'x'}},{text:'-----BEGIN PRIVATE KEY-----'}])assert.throws(()=>store.put(alice,put(payload)));for(const name of ['../a','.env','a\\b','/absolute','credentials.key'])assert.throws(()=>store.put(alice,{...put({files:[{path:name,chunks:[]}]}),kind:'file-manifest'}));assert.throws(()=>store.put(alice,{...put(),id:'../x'}));});
++test('cloud HTTP keeps unauthorized, CSRF and stale-revision errors distinct',async t=>{const {store}=fixture(t),server=cloudServer({store,authenticate:async req=>{if(req.headers.cookie==='alice')return alice;throw Object.assign(Error('MARKET_AUTH_REQUIRED'),{status:401});}});await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>{server.closeAllConnections();return new Promise(r=>server.close(r));});const base='http://127.0.0.1:'+server.address().port;assert.equal((await fetch(base+'/api/desktop-cloud/health')).status,200);assert.equal((await fetch(base+'/api/desktop-cloud/v1/me')).status,401);const post=input=>fetch(base+'/api/desktop-cloud/v1/documents',{method:'POST',headers:{cookie:'alice','x-naumi-market':'1','content-type':'application/json'},body:JSON.stringify(input)});assert.equal((await post(put())).status,200);assert.equal((await post(put())).status,409);assert.equal((await fetch(base+'/api/desktop-cloud/v1/documents',{method:'POST',headers:{cookie:'alice'},body:'{}'})).status,403);});
++test('native cloud adapter reuses account partition but never expands to a generic URL proxy',async()=>{for(const endpoint of ['/api/auth/session','https://evil.test/api/desktop-cloud/v1/me','/api/desktop-cloud/v1/../../auth/session','/api/plugin-market/v1/me'])assert.throws(()=>validateCloud({endpoint}));const identity={active:{origin:'https://47.105.59.142'},client:{session:{fetch:async url=>{assert.equal(url,'https://47.105.59.142/api/desktop-cloud/v1/me');return Response.json({user:{id:'alice'}});}}}};const cloud=new CloudSession({identity:()=>identity});assert.equal((await cloud.request('/me')).user.id,'alice');assert.equal(cloud.running,0);});
++test('backup freezes and persists the outbox before network call; lost ACK retries the same payload and operation',async t=>{const {root}=fixture(t),active={},calls=[],identity=()=>active,readLocal=async endpoint=>endpoint==='/naumi/bots'?{bots:[{id:'one',name:'A',kind:'agent',status:'active',model:'do not export'}]}:{profile:{persona:'Employee'},memories:[{id:'confirmed',status:'active'},{id:'candidate',status:'candidate'}]},cloud={async request(endpoint,input){calls.push(input);if(calls.length===1)throw Error('lost ack');return{revision:1,updatedAt:'now'};}};const backup=new CloudBackup({root:path.join(root,'identity'),cloud,readLocal,identity});await assert.rejects(backup.backup(),/lost ack/);assert(backup.state.pending);const reopened=new CloudBackup({root:path.join(root,'identity'),cloud,readLocal,identity});await reopened.backup();assert.deepEqual(calls[0],calls[1]);assert.equal(calls[0].payload.employees[0].memories.length,1);assert(!JSON.stringify(calls[0]).includes('do not export'));assert.equal(reopened.state.pending,null);});
++test('backup downloads verify payload digest and preserve local databases',async t=>{const {root}=fixture(t),active={},backup=new CloudBackup({root,identity:()=>active,readLocal:async()=>{},cloud:{async request(){return{payload:{bots:[]},digest:'0'.repeat(64)}}}});await assert.rejects(backup.download('one'),/INTEGRITY/);assert(!fs.existsSync(path.join(root,'employees.sqlite')));});
+diff --git a/original/tests/desktop-update-ui.test.mjs b/modified/tests/desktop-update-ui.test.mjs
+index 0d1ac80..bb9c928 100644
+--- a/original/tests/desktop-update-ui.test.mjs
++++ b/modified/tests/desktop-update-ui.test.mjs
+@@ -51,10 +51,11 @@ test('actual native gate atomically quiesces owned backend and fails closed on b
+  const main=fs.readFileSync('desktop/app/main.cjs','utf8');
+  const gate=main.slice(main.indexOf('async function canInstallUpdate()'),main.indexOf('async function showUpdateNotice'));
+  const maintenance=main.slice(main.indexOf('async function performMaintenance('),main.indexOf('function isAlive('));
+- const calls=[],ctx={closing:false,booting:false,connecting:false,bridge:{runtime:{queues:new Map()}},enterprise:{running:0},market:{running:0},settings:{isolated:true},backend:{owned:true},maintenanceTicket:null,maintenanceUntil:0,maintenanceBlocked:()=>false,randomUUID:()=> 'fixture',maintenanceRequest:async(...args)=>{calls.push(args);}};
++ const calls=[],ctx={closing:false,booting:false,connecting:false,cloud:{running:0},cloudBusy:0,bridge:{runtime:{queues:new Map()}},enterprise:{running:0},market:{running:0},settings:{isolated:true},backend:{owned:true},maintenanceTicket:null,maintenanceUntil:0,maintenanceBlocked:()=>false,randomUUID:()=> 'fixture',maintenanceRequest:async(...args)=>{calls.push(args);}};
+  vm.createContext(ctx);vm.runInContext(gate+maintenance,ctx);
+  ctx.enterprise.running=1;assert.equal((await ctx.canInstallUpdate()).ok,false);assert.equal(calls.length,0);ctx.enterprise.running=0;
+  ctx.market.running=1;assert.equal((await ctx.canInstallUpdate()).ok,false);assert.equal(calls.length,0);ctx.market.running=0;
++ ctx.cloudBusy=1;assert.equal((await ctx.canInstallUpdate()).ok,false);assert.equal(calls.length,0);ctx.cloudBusy=0;
+  ctx.backend.owned=false;assert.equal((await ctx.canInstallUpdate()).ok,false);assert.equal(calls.length,0);ctx.backend.owned=true;
+  const accepted=await ctx.canInstallUpdate();assert.equal(accepted.ok,true);assert.equal(calls[0][1],'quiesce');await accepted.release();assert.equal(calls[1][1],'resume');assert.equal(ctx.maintenanceTicket,null);
+  ctx.maintenanceRequest=async()=>{throw Error('INSTALL_RUNNING_TASKS');};assert.equal((await ctx.canInstallUpdate()).ok,false);assert.equal(ctx.maintenanceTicket,null);

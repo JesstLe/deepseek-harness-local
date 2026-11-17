@@ -5,10 +5,10 @@ const root=path.resolve(__dirname,'../..'),read=p=>fs.readFileSync(path.join(roo
 const source=read('desktop/installer/presentation.nsh'),pages=read('desktop/installer/pages.nsh');
 const pkg=JSON.parse(read('desktop/package.json'));
 const sha=s=>crypto.createHash('sha256').update(s).digest('hex');
-test('pinned installer engine changes only the assisted presentation include',()=>{
+test('pinned installer engine retains stock transactions with declared presentation and shortcut policy hooks',()=>{
  const upstream=read('desktop/node_modules/app-builder-lib/templates/nsis/installer.nsi').replaceAll('\r\n','\n');
  const engine=read('desktop/installer/engine.nsi');
- assert.equal(engine,upstream.replace('!include "assistedInstaller.nsh"','!include "${NAUMI_WIZARD_DIR}\\pages.nsh"'));
+ assert.equal(engine,upstream.replace('!include "assistedInstaller.nsh"','!include "${NAUMI_WIZARD_DIR}\\pages.nsh"').replace('!include "installUtil.nsh"','!include "installUtil.nsh"\n  !include "${NAUMI_WIZARD_DIR}\\upgrade-shortcuts.nsh"'));
  const meta=JSON.parse(read('desktop/installer/UPSTREAM.json'));
  assert.equal(meta.originalEngineSHA256,sha(upstream));assert.equal(meta.modifiedEngineSHA256,sha(engine));
 });
