@@ -14,7 +14,7 @@ test('real Cordis and HTTP dispatch through public registry preserves target pro
     assert.equal(f.creations.length,1);assert.equal(f.creations[0].parentAgent,undefined);assert.equal(worker.session.header.origin,undefined);
     assert.match(worker.prompts.get('naumi:bot-task').text(),new RegExp(task.id));
     await f.complete(task);assert.equal(f.service.current(task.id).status,'completed');
-    const message=f.sender.inbox.nextStep[0];assert.equal(message.source.kind,'agent-message');assert.equal(message.source.senderSessionId,task.targetSessionId);assert.match(message.content[0].text,/真实会话格式交付/);
+    const message=f.sender.inbox.nextTurn[0];assert.equal(message.source.kind,'agent-message');assert.equal(message.source.senderSessionId,task.targetSessionId);assert.match(message.content[0].text,/真实会话格式交付/);
     const fetched=await (await f.request(null,{url:'/naumi/bot-tasks?taskId='+task.id})).json();assert.equal(fetched.result,'真实会话格式交付');assert.equal(fetched.messages[0].delivered,true);assert(!('profile'in fetched));
   }finally{await f.cleanup();}
 });
@@ -34,8 +34,8 @@ test('HTTP owner/origin/body boundaries reject unauthenticated and undeclared co
 test('source result delivery is deduplicated even when acknowledgement is lost after inbox persistence',async()=>{
   const f=await botTaskHost();try{
     const task=await f.service.dispatch(f.sender,{targetBotId:f.targetBot.id,task:'验证',idempotencyKey:'once'});await f.service.settled();await f.complete(task);
-    const message=f.sender.inbox.nextStep[0];await f.store.change(doc=>{doc.outbox[0].delivered=false;return {value:null};});await f.service.settled();
-    assert.equal(f.sender.inbox.nextStep.length,1);assert.equal(f.sender.inbox.nextStep[0].id,message.id);
+    const message=f.sender.inbox.nextTurn[0];await f.store.change(doc=>{doc.outbox[0].delivered=false;return {value:null};});await f.service.settled();
+    assert.equal(f.sender.inbox.nextTurn.length,1);assert.equal(f.sender.inbox.nextTurn[0].id,message.id);
   }finally{await f.cleanup();}
 });
 test('cold target profile is read without waking its home Session',async()=>{

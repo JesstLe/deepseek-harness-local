@@ -30,6 +30,7 @@ export async function botTaskHost(){
         select:selection=>session.append('model/selection',selection)},
       inbox:{nextStep,nextTurn,remove(id){for(const [target,items] of [['next-step',nextStep],['next-turn',nextTurn]]){const index=items.findIndex(m=>m.id===id);if(index>=0){items.splice(index,1);session.append('agent/inbox/spliced',{target,start:index,removedCount:1,inserted:[],outcome:'canceled'});return true;}}return false;}},
       steer(message){session.append('agent/inbox/spliced',{target:'next-step',start:nextStep.length,removedCount:0,inserted:[message]});nextStep.push(message);agent.status='running';ctx.emit('agent/status',{agent,status:'running'});},
+      followup(message){session.append('agent/inbox/spliced',{target:'next-turn',start:nextTurn.length,removedCount:0,inserted:[message]});nextTurn.push(message);if(agent.status==='idle'){agent.status='running';ctx.emit('agent/status',{agent,status:'running'});}},
       cancel(){agent.status='idle';},whenIdle:async()=>{},
     };agents.set(agent.id,agent);return agent;
   }
