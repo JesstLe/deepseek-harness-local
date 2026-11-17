@@ -55,6 +55,8 @@ export class BotGroupService {
     });
   }
 
+  rename(input,actor='owner') { return this.store.rename(input,actor); }
+
   post(input) {
     this.alignPrimary();
     const post = this.store.post(input, () => {

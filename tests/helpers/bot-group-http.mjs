@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {Readable} from 'node:stream';
 import {installBotGroups} from '../../plugins/naumi-enterprise/bot-groups.js';
 
-export async function botGroupHttpFixture() {
+export async function botGroupHttpFixture({management=false}={}) {
   const home = await mkdtemp(join(tmpdir(),'naumi-group-http-'));
   const bots = ['编辑','审稿','归档助手'].map((name,index) => ({id:`bot-${index}`,name,cwd:home,status:index === 2 ? 'archived' : 'active'}));
   const slots = new Map(), agents = new Map(), receipts = new Map(), tasks = [], effects = [], warnings = [];
@@ -19,9 +19,9 @@ export async function botGroupHttpFixture() {
     snapshot:async sessionId => agents.get(sessionId),
     profile:async bot => ({model:{model:bot.id}}),
     async ensure(sessionId, options) {
-      const contexts = new Map();
-      const systemPrompt = {getContextOrder:() => 0,context(entry) { contexts.set(entry.name,entry); return () => contexts.delete(entry.name); }};
-      const agent = {id:sessionId,options,contexts,ctx:{systemPrompt}};
+      const contexts = new Map(), tools=new Map(), sections=new Map();
+      const systemPrompt = {getSectionOrder:()=>0,section(entry){sections.set(entry.name,entry);return()=>sections.delete(entry.name);},getContextOrder:() => 0,context(entry) { contexts.set(entry.name,entry); return () => contexts.delete(entry.name); }};
+      const agent = {id:sessionId,options,contexts,tools,sections,ctx:{systemPrompt,...management?{tools:{register(tool){tools.set(tool.name,tool);return()=>tools.delete(tool.name);}}}:{}}};
       agents.set(sessionId,agent);
       events.emit('agent/created',{agent});
     },
@@ -33,6 +33,7 @@ export async function botGroupHttpFixture() {
     },
   };
   const scope = {
+    ...management?{agentTeams:{tryMembership:agent=>({root:agent,role:'lead'}),membership:agent=>({root:agent,role:agent.role??'lead'})}}:{},
     agents:{list:() => [...agents.values()]},
     logger:{warn:code => warnings.push(code)},
     on:events.on.bind(events),
@@ -71,6 +72,6 @@ export async function botGroupHttpFixture() {
     events.emit('session/event',{id:receipt.input.sessionId},{type:'turn/end'});
   }
 
-  return {bots,agents,receipts,tasks,warnings,directory,runtime,call,finish,
+  return {events,bots,agents,receipts,tasks,warnings,directory,runtime,call,finish,
     async close() { for (const dispose of effects.reverse()) await dispose(); await rm(home,{recursive:true,force:true}); }};
 }

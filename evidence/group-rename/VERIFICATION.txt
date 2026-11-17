@@ -1,0 +1,69 @@
+GROUP RENAME VERIFICATION
+Changed branch: codex/group-rename-20261117
+Initial baseline SHA: 4c44363a579cd4172d867ec8994e09ab59d4adef
+Final integrated rollback baseline SHA: 6192368e41c5bc23a802ce3b04793aac0aa78b6d (preserves parallel primary Bot module)
+Changed field: rooms.name; additive table: room_name_operations
+Changed dispatch: POST action=rename; tools bot_group_list/bot_group_rename; title pencil + shared catalog.
+
+FOUR DELIVERABLE PATHS (main integration target)
+MODIFIED_FILE: E:/Workspace/naumi-desktop/evidence/group-rename/MODIFIED_FILE.zip
+DIFF_FILE: E:/Workspace/naumi-desktop/evidence/group-rename/DIFF_FILE.patch
+VERIFICATION: E:/Workspace/naumi-desktop/evidence/group-rename/VERIFICATION.txt
+ROLLBACK: E:/Workspace/naumi-desktop/evidence/group-rename/ROLLBACK.sh
+Original SHA256 and modified SHA256 for all 8 restored files: HASHES.json; preserved bytes: original/.
+
+BASELINE
+Command: node --test tests/naumi-bot-groups.test.mjs tests/naumi-bot-groups-http.test.mjs
+CWD: runtime/group-rename-evidence-6192368/baseline (created by node scripts/package-group-rename.mjs)
+Input: unmodified baseline source and isolated temporary SQLite fixtures, group create/post/read lifecycle.
+Literal output/result: ℹ tests 10 / ℹ pass 10 / ℹ fail 0
+Exit status: 0
+Behavior: prior group operations pass; no group rename API/tool.
+
+MODIFIED
+Command: node --test tests/*.test.mjs desktop/tests/*.test.cjs
+Input: task source plus all repository/desktop test fixtures, no live inference.
+Literal output/result (integrated main): ℹ tests 581 / ℹ pass 581 / ℹ fail 0
+Exit status: 0
+Targeted command: node --test tests/naumi-bot-groups.test.mjs tests/naumi-bot-groups-http.test.mjs tests/naumi-group-rename.test.mjs tests/naumi-group-collaboration.test.mjs tests/naumi-unified-chat.test.mjs tests/naumi-bot-runtime.test.mjs
+Targeted literal result: ℹ tests 45 / ℹ pass 45 / ℹ fail 0; exit 0
+UI command: node scripts/verify-group-rename-ui.mjs
+UI input: isolated real Harness HTTP + SQLite; aa -> 工作群; native composer draft; stale edit; lost receipt; IME; widths 1360/580/360.
+UI literal output/result: RENAME_UI_COMPLETE checks=11 errors=0 inference=0
+UI exit status: 0
+Initial full-suite run: 565/567; fixed two stale exact-tool-count assertions (4 -> 6), asserted new tool names/policy; task full run 567/567; integrated primary-Bot main full run 581/581.
+
+ROLLBACK
+Command: D:/DEV/Git/bin/bash.exe E:/Workspace/naumi-desktop/evidence/group-rename/ROLLBACK.sh E:/Workspace/naumi-desktop/runtime/group-rename-evidence-6192368/rollback-copy
+Input: separate modified-source copy marked .rename-rollback-copy, original bytes and SHA256 manifest; no live directory or database restore.
+Literal output/result: ROLLBACK_RESTORED files=8 hashes=PASS data=UNCHANGED
+Exit status: 0
+Command after restore: node --test tests/naumi-bot-groups.test.mjs tests/naumi-bot-groups-http.test.mjs
+CWD: runtime/group-rename-evidence-6192368/rollback-copy
+Literal output/result: ℹ tests 10 / ℹ pass 10 / ℹ fail 0
+Exit status: 0
+Packaging command: node scripts/package-group-rename.mjs
+Literal compatibility result: ROLLBACK_COMPATIBILITY renamed_room=工作群 rename_api=absent data=UNCHANGED
+Packaging literal result: ARTIFACTS_CREATED originals=8 modified_zip=PASS patch=PASS rollback=PASS
+Exit status: 0
+Restored behavior/status: original reader loads the renamed room and unchanged data, legacy group tests pass, rename method absent; MODIFIED_FILE and task source remain modified.
+
+GIT / RUNTIME
+Git main implementation merge: e66422415fba4c0fc0d9ce1f3aa4c45c99b66141
+Integrated/tested plugin source: b18bfdce375f08e5cb67b42ee029a8d0990b9754
+Runtime verification tooling merge: f077de9 (ordinary push to origin/main).
+Deploy commands (CWD E:/Workspace/naumi-desktop):
+node scripts/deploy-group-rename.mjs prepare
+Literal output: RENAME_DEPLOY_PREPARED files=6 running=0 backup=PASS; exit 0
+node scripts/deploy-group-rename.mjs apply
+Literal output: RENAME_DEPLOY_APPLIED files=6; exit 0
+Only two missing client assets were copied (bot-chat-model.js and bot-groups.css); four group backend/page files already matched the integrated main source after the parallel primary Bot load. No service restart in this task.
+node scripts/deploy-group-rename.mjs verify
+Input: unique real room dd7f92b1-af98-4101-8feb-154d1b6ffac2, expectedName=aa, name=工作群, durable UUID operationId stored in private runtime checkpoint.
+Literal output: RENAME_LIVE_PASS name=工作群 http=200 members=UNCHANGED messages=UNCHANGED tasks=UNCHANGED models=UNCHANGED running=0
+Exit status: 0
+Reopened API + SQLite literal result: RENAME_REOPEN_PASS api=工作群 sqlite=工作群 members=3; exit 0.
+101 protected files and 97 unrelated plugin files unchanged; 92 Sessions, running=0; zero model calls. Details: DEPLOYMENT.json.
+First deployment verification compared SQLite null-prototype objects to JSON plain objects; content unchanged, rename not yet attempted. Changed to serialized full-row hashes and verification passed.
+Source rollback tested on another copy only: previous primary Bot implementation retained, renamed data retained, original tests 10/10. Live room remains 工作群 and MODIFIED_FILE remains modified.
+Future natural-language model selection of the new tool was not exercised with a paid/live prompt; real registration, execution, identity checks and disposal were tested.

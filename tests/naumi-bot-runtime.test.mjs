@@ -9,7 +9,9 @@ const input={name:'运营助手',kind:'agent',purpose:'运营规划与复盘'};
 for(const lateAgent of [false,true])test(`real Cordis dependency injection creates Bot (lateAgent=${lateAgent})`,async()=>{
   const f=await botRuntime(module,{lateAgent});
   try{
-    assert.equal(f.tools.size,4);
+    assert.equal(f.tools.size,6);
+    assert(f.tools.has('bot_group_list'));assert(f.tools.has('bot_group_rename'));
+    assert.match(f.prompts.get('naumi:group-management').text,/use those tools directly/);
     const bot=await f.invoke('bot_create',input);
     assert.equal(bot.agentPreset,'standard');assert.equal(f.presetReads(),1);
     assert.equal(bot.homeSessionId,f.root.id);assert.equal(f.directory.list().bots.length,1);
