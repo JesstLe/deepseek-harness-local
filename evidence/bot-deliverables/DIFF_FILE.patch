@@ -1,9 +1,9 @@
 diff --git a/docs/changes/2026-11-17-bot-file-deliverables.md b/docs/changes/2026-11-17-bot-file-deliverables.md
 new file mode 100644
-index 0000000..27d9fe8
+index 0000000..0642e2b
 --- /dev/null
 +++ b/docs/changes/2026-11-17-bot-file-deliverables.md
-@@ -0,0 +1,25 @@
+@@ -0,0 +1,31 @@
 +# Bot 文件交付闭环
 +
 +## 模块与职责
@@ -28,13 +28,19 @@ index 0000000..27d9fe8
 +
 +实现已完成：统一交付提示、原生文件声明/自动兜底、结构化引用、文件任务检查及主管原生卡片登记。已验证全仓 365/365、补充跨工作区定向 22/22，执行证据为真实 Cordis/Session schema/HTTP/隔离文件，模型执行由确定性适配器驱动。
 +
-+下一步完成主线合并、本地增量加载及其独立证据；未重建 EXE、不回填历史会话，不用旧文章链接代替新流程实跑。功能模块迭代计数：1。当前未满三模块，不额外扩展其他业务模块。合并前仍刷新主线并记录 SHA；最终提交与运行层见 VERIFICATION。
++源码通过普通 merge 合入并推送 main `84b693a7393e8bba2da5f071449fc249acf1233f`，同步前 origin/main 为 `1d152ae065b055c38bec64d6ab40b9764a3826a8`。整合后全仓 365/365 再次通过。
++
++本地 running=0 后增量加载 5 个交付代码模块。运行 package 与源码存在历史元数据差异，预检停止后采用仅追加本模块 files 条目，原 peerDependencies 等字段保留，其余插件文件哈希不变。返回 HTTP 200 / X-Naumi-Bot-Delivery=1。
++
++实际模型联调：目标 Bot 用 write 写入独立测试 Markdown 文件，present 调用 0，系统登记员工卡片 1、主管 relay 卡片 1；任务 completed、delivery ready、文件来源坐标落盘。测试文件已删除、两条测试会话已归档，原 3 个 Bot 保留，结束时 running=0。重启窗口已通知员工 UI 线程释放；本任务不再占用服务。
++
++未重建 EXE、不回填历史会话；用户浏览器实际点击验收与安装包发布仍是独立阶段，不用会话卡片记录冒充截图验收。功能模块迭代计数：1；未满三模块，不扩展其他模块。最终提交身份和证据见 VERIFICATION。
 diff --git a/docs/implementation/BOT_FILE_DELIVERABLES.md b/docs/implementation/BOT_FILE_DELIVERABLES.md
 new file mode 100644
-index 0000000..3524178
+index 0000000..0317651
 --- /dev/null
 +++ b/docs/implementation/BOT_FILE_DELIVERABLES.md
-@@ -0,0 +1,66 @@
+@@ -0,0 +1,72 @@
 +# Bot 文件交付
 +
 +## 契约与职责
@@ -101,6 +107,12 @@ index 0000000..3524178
 +- 本轮不会修改旧文章、历史交付、模型选择、权限或企业登录；本地服务加载、安装包构建与模型/用户实用验收分别记录。
 +
 +具体命令和基线/修改/副本回滚见 `evidence/bot-deliverables/VERIFICATION.txt`。
++
++## 本地加载与实际模型验收（2026-11-17）
++
++main `84b693a` 的 5 个代码模块已在空闲后加载，运行 package 仅追加本模块 files 条目，其余运行文件未改。真实配置模型完成独立文件派单：未调用 present，员工与主管会话仍分别保存一条原生文件卡片事件，任务与 outbox 保留原始文件坐标。两条测试会话已归档、临时文件删除，结束时无运行任务。
++
++此项证明真实执行和卡片事件链路；不冒充用户浏览器点击或新 EXE 安装验收。历史文章及历史会话没有被补写。安装包清单包含新模块，已发布的 v0.3.2 EXE 未在本轮重建。
 diff --git a/docs/implementation/BOT_TO_BOT_COMMUNICATION.md b/docs/implementation/BOT_TO_BOT_COMMUNICATION.md
 index d079757..ee6470a 100644
 --- a/docs/implementation/BOT_TO_BOT_COMMUNICATION.md
