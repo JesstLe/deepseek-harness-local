@@ -1,5 +1,6 @@
 import {installModelSelection,modelSelectionProjectionDefinition} from '@deepseek-ai/dsh-agent';
 import {freezeMessage} from '@deepseek-ai/dsh-llm';
+import {references,announcedFiles,validateFiles,registerFiles} from './bot-deliverables.js';
 
 const permissionTypes=['permission/preset','sandbox/mode','approval/policy'];
 
@@ -52,8 +53,66 @@ export function createBotTaskRuntime(ctx){
     })();opening.set(sessionId,run);
     try{return await run;}finally{opening.delete(sessionId);}
   };
+  const deliveryLanes=new Map();
+  const serialDelivery=(id,fn)=>{
+    const run=(deliveryLanes.get(id)??Promise.resolve()).then(fn),tail=run.catch(()=>{});deliveryLanes.set(id,tail);
+    return run.finally(()=>{if(deliveryLanes.get(id)===tail)deliveryLanes.delete(id);});
+  };
+  const publish=async(sessionId,turn,{files,callId,signal=AbortSignal.timeout(10000)}={})=>serialDelivery(sessionId,async()=>{
+    signal.throwIfAborted();
+    const agent=ctx.agents.get(sessionId),stored=await snapshot(sessionId);
+    if(!stored)throw Error('BOT_SESSION_NOT_FOUND');
+    const ended=stored.events.find(e=>e.type==='turn/end'&&e.data.turn===turn);
+    const final=stored.events.findLast(e=>e.type==='assistant/message'&&e.data.turn===turn)?.data.message;
+    const text=final?.toolCalls?.length?'':(final?.content??[]).filter(p=>p.type==='text').map(p=>p.text).join('\n');
+    const old=references(stored.events,sessionId,turn);
+    const candidates=files??(old.length?null:ended?.data.reason.kind==='completed'?announcedFiles(stored.events,turn,text):null);
+    if(candidates?.length){
+      if(!agent)throw Error('BOT_DELIVERY_SESSION_NOT_ACTIVE');
+      const checked=await validateFiles(ctx,agent.session,candidates,signal);
+      signal.throwIfAborted();
+      registerFiles(agent.session,turn,checked,callId??`naumi-delivery:${sessionId}:${turn}`);
+      await ctx.sessions.flush(agent.session);
+    }
+    const current=await snapshot(sessionId),refs=references(current.events,sessionId,turn),verified=[];
+    for(const ref of refs){
+      const [stat]=await validateFiles(ctx,{id:sessionId,header:current.header},[{path:ref.path,description:ref.description}],AbortSignal.timeout(10000));
+      verified.push({...ref,version:stat.version,...(stat.bytes!==undefined?{bytes:stat.bytes}:{})});
+    }
+    return verified;
+  });
   return {
     snapshot,profile,ensure,
+    publishTurn:publish,
+    async declare(sessionId,files,callId,signal){
+      const stored=await snapshot(sessionId),turn=stored?.events.findLast(e=>e.type==='turn/start')?.data.turn;
+      if(!turn||stored.events.some(e=>e.type==='turn/end'&&e.data.turn===turn))throw Error('BOT_DELIVERY_OPEN_TURN_REQUIRED');
+      return publish(sessionId,turn,{files,callId,signal:signal?AbortSignal.any([signal,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000)});
+    },
+    async delivery(sessionId,messageId,requirement='text'){
+      const state=await this.inspect(sessionId,messageId);
+      if(!state?.turn)return {requirement,status:requirement==='files'?'missing':'not_required',files:[]};
+      try{const files=await publish(sessionId,state.turn);return {requirement,status:files.length?'ready':requirement==='files'?'missing':'not_required',files};}
+      catch{return {requirement,status:'unavailable',files:[]};}
+    },
+    async mirror(sessionId,messageId,files){
+      if(!files?.length)return;
+      return serialDelivery(sessionId,async()=>{
+        const stored=await snapshot(sessionId),agent=ctx.agents.get(sessionId);if(!stored||!agent)return;
+        const state=inspectBotMessage(stored.events,messageId);if(!state.consumed)return;
+        const callId=`naumi-relay:${messageId}`;
+        if(stored.events.some(e=>e.type==='deliverables/presented'&&e.data.callId===callId))return;
+        const checked=[];
+        for(const ref of files){
+          const source=await snapshot(ref.sessionId),event=source?.events.find(e=>e.seq===ref.seq&&e.type==='deliverables/presented'&&e.data.turn===ref.turn);
+          const original=event?.data.files[ref.index];
+          if(!original||original.path!==ref.path)throw Error('BOT_DELIVERY_REFERENCE_MISMATCH');
+          await validateFiles(ctx,{id:ref.sessionId,header:source.header},[original],AbortSignal.timeout(10000));
+          checked.push(...await validateFiles(ctx,agent.session,[original],AbortSignal.timeout(10000)));
+        }
+        registerFiles(agent.session,state.turn,checked,callId);await ctx.sessions.flush(agent.session);
+      });
+    },
     isRunning:sessionId=>ctx.agents.get(sessionId)?.status==='running',
     async inspect(sessionId,messageId){const stored=await snapshot(sessionId);return stored?inspectBotMessage(stored.events,messageId,stored.live?.status==='running'):null;},
     async deliver({sessionId,messageId,fromSessionId,text,create=false,cwd,profile:config}){
@@ -75,7 +134,7 @@ export function createBotTaskRuntime(ctx){
       if(!ctx.agents.get(sessionId)&&!await ctx.sessionPersistence.stat(sessionId))return;
       const agent=await ensure(sessionId);agent.cancel({kind:'user'});await agent.whenIdle();await ctx.sessions.flush(agent.session);
     },
-    async close(){closed=true;await Promise.allSettled([...opening.values()]);await Promise.allSettled([...handles.values()].map(handle=>handle.dispose()));handles.clear();},
+    async close(){closed=true;await Promise.allSettled([...deliveryLanes.values()]);await Promise.allSettled([...opening.values()]);await Promise.allSettled([...handles.values()].map(handle=>handle.dispose()));handles.clear();},
   };
 }
 

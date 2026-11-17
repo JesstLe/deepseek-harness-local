@@ -1,0 +1,794 @@
+diff --git a/docs/changes/2026-11-17-bot-file-deliverables.md b/docs/changes/2026-11-17-bot-file-deliverables.md
+new file mode 100644
+index 0000000..27d9fe8
+--- /dev/null
++++ b/docs/changes/2026-11-17-bot-file-deliverables.md
+@@ -0,0 +1,25 @@
++# Bot 文件交付闭环
++
++## 模块与职责
++
++本任务负责 Bot 原生文件交付登记、结构化回传与文件任务完成检查。负责人为本线程，文件范围为 `bot-task-{runtime,service,store}.js`、`bot-tasks.js`、新增 `bot-deliverables.js`、对应测试/文档及 package files 条目。已通知员工交互线程；不改员工菜单、记忆、client 或 bot-sidebar。
++
++## 公共接口、依赖方向、数据/状态/事务归属
++
++复用 Harness `deliverables/presented` 与 workspaceFiles；Session 是文件交付事件权威，任务账本持有来源会话/事件/文件坐标与检查结果，outbox 在同一事务保存文字及文件引用。文件不复制，不改变模型和权限。
++
++## 本次实现与迁移状态
++
++基线 main/origin/main `1d152ae065b055c38bec64d6ab40b9764a3826a8`，独立 `codex/bot-file-deliverables-20261117`。原运行代码仅提取最终文字，自媒体任务没有 present 事件，主管自己调用 present 才有卡片。历史 JSON 字段保持可读，不篡改历史结果/会话。
++
++计划：统一交付提示、将已明确宣布且有本轮成功写入记录的文件自动登记；支持显式文件交付；文件派单通过 output=files 声明契约，无有效文件不得标记交付成功；回传原始引用并在主管消费消息时复用原生卡片。
++
++## 验证命令、结果及证据层级
++
++基线定向测试 47/47，退出 0（Bot 通信、真实 Cordis/Session schema/HTTP、原目录/UI 契约）。本任务集中完成后再运行新增交付与相关回归、独立副本恢复。真实执行与打包分别记录，不以模块通过冒充模型或安装包验收。
++
++## 未完成项与下一步
++
++实现已完成：统一交付提示、原生文件声明/自动兜底、结构化引用、文件任务检查及主管原生卡片登记。已验证全仓 365/365、补充跨工作区定向 22/22，执行证据为真实 Cordis/Session schema/HTTP/隔离文件，模型执行由确定性适配器驱动。
++
++下一步完成主线合并、本地增量加载及其独立证据；未重建 EXE、不回填历史会话，不用旧文章链接代替新流程实跑。功能模块迭代计数：1。当前未满三模块，不额外扩展其他业务模块。合并前仍刷新主线并记录 SHA；最终提交与运行层见 VERIFICATION。
+diff --git a/docs/implementation/BOT_FILE_DELIVERABLES.md b/docs/implementation/BOT_FILE_DELIVERABLES.md
+new file mode 100644
+index 0000000..3524178
+--- /dev/null
++++ b/docs/implementation/BOT_FILE_DELIVERABLES.md
+@@ -0,0 +1,66 @@
++# Bot 文件交付
++
++## 契约与职责
++
++所有常驻 Bot 使用相同文件交付约定。Session 的 `deliverables/presented` 是卡片权威，不由文件名、对话标题或任务结束文字推断。`bot-deliverables.js` 负责登记候选与验证；runtime 调用原生 `workspaceFiles.stat`、Session append/flush；task service 管理输出检查与 outbox，原预览器和 UI 不替换。
++
++### 明确交付
++
++- 首选原生 `present({files:[{path,description}]})`，文件卡片在执行员工本身的会话显示。
++- 派单任务可使用 `bot_task_reply({taskId,kind:"result",message,idempotencyKey,files:[{path,description}]})`。只允许实际执行该任务的精确 Lead 提交，不接受由主管/其他会话伪造附件。
++- 显式声明校验现有文件并登记原生事件；任务仍等待真实 turn/end，不能在模型仍执行时自报完成。
++- 每次最多 8 个最终文件，不为源代码修改和中间产物无差别生成卡片。
++
++### 不依赖模型记得调用 present 的兜底
++
++一个 Bot 回合确实 completed 后，系统检查最终回复中的 Markdown 文件链接和单行反引号路径，且必须匹配同一回合成功的 `write/edit` 工具记录。确认文件仍存在且可读后，补登记 `deliverables/presented`。
++
++这不是扫描整个目录自动交付：未成功写入、其他回合写入、未在最终答复宣布的代码修改、命令字符串、任意提及路径都不会因此自动成为成果。通过 shell 生成、或交付既有文件时，需要显式 present/files；不猜测 PowerShell 命令的副作用。
++
++## 文件型派单与完成检查
++
++```js
++bot_dispatch({
++  targetBotId: "bot-<真实目录 ID>",
++  task: "整理材料并交付一份 Markdown 文章",
++  output: "files",
++  idempotencyKey: "article-01"
++})
++```
++
++`output` 缺省 text，兼容旧调用；提示明确要求需要独立文件时使用 files。它属于幂等请求身份，同一 key 改 output 是冲突。当前没有按“文章”等关键词强行分类，避免把仅要求在消息中给建议的请求误判为文件任务。
++
++真实模型回合结束后：
++
++- `delivery.status=ready`：存在经过验证的交付引用；可以完成任务执行，但不表示业务验收通过。
++- `missing`：文件型任务没有有效登记，任务 failed / BOT_DELIVERY_MISSING，保留实际文本供检查。
++- `unavailable`：文件不存在、读访问失败或超出本任务工作区，任务 failed / BOT_DELIVERY_UNAVAILABLE，不伪装文件交付成功。
++- `not_required`：纯文字任务无需文件；原行为保留。
++
++拒绝或缺失后不自动重新调用模型；用户确认后可沿用原任务 ID 执行显式 retry，新的 attempt 清除旧检查数据，不复用其他回合的文件声明。
++
++## 结构化引用与主管访问
++
++任务 delivery 和 outbox 在同一事务保存 `sessionId / seq / index / turn / path / description / version / bytes`。只保存文件引用，不复制文件内容；版本是检查时的原生 freshness token，不承诺不可变文件快照。
++
++回传文字包含原文件的 `dsh-resource://file/session/...` 地址，使用来源会话打开现有预览器，不要求主管再猜一次路径或重新声明。
++
++主管消费对应消息后，在来源事件坐标、原文件和接收会话工作区均校验通过时，登记同一文件的原生卡片。若工作区不同导致镜像卡片被拒绝，来源引用仍保留，可从原会话预览；不越过接收方工作区边界伪造本地交付。不新增不受鉴权的文件 HTTP 下载端点。
++
++登记按来源会话/回合或 relay message ID 幂等。回传失败、重复回传、重启恢复不会重复创建文件、卡片或任务。原生 present 已产生卡片时不额外补同一回合卡片。
++
++## 兼容与迁移
++
++任务 schema v1 新增可选 output/delivery/files 字段，已有任务可继续读取，不回填或重写历史会话。不把历史任务中一段文件路径改成“已交付”记录，避免改变审计事实。
++
++旧代码的 strict schema 不认识新字段，因此**旧版本降级不是仅覆盖源文件即可完成的数据迁移**。本轮 ROLLBACK.sh 只在标记的独立副本验证源文件恢复，实际回退要停机备份并另行验证任务账本兼容，不能删除新增交付元数据或静默清空账本。
++
++## 验证与边界
++
++- 365 项全仓回归通过，含桌面生命周期、原 Bot、员工功能和交付模块。
++- 新增 8 个交付场景，使用真实 Cordis/Session schema/HTTP/临时普通文件，执行驱动是确定性适配器，不冒充模型实跑或用户浏览器验收。
++- 覆盖自动/显式登记、原生 present、来源坐标、读失败/缺失/越界、旧回合隔离、主管镜像、持久化重开、重复确认与缺失检查。
++- 初次全仓检查因独立 worktree 未链接 desktop/node_modules 而出现 electron 模块缺失；补齐依赖目录链接后全仓通过，原失败日志保留。早期 schema/fixture 错误也保留修正记录。
++- 本轮不会修改旧文章、历史交付、模型选择、权限或企业登录；本地服务加载、安装包构建与模型/用户实用验收分别记录。
++
++具体命令和基线/修改/副本回滚见 `evidence/bot-deliverables/VERIFICATION.txt`。
+diff --git a/docs/implementation/BOT_TO_BOT_COMMUNICATION.md b/docs/implementation/BOT_TO_BOT_COMMUNICATION.md
+index d079757..ee6470a 100644
+--- a/docs/implementation/BOT_TO_BOT_COMMUNICATION.md
++++ b/docs/implementation/BOT_TO_BOT_COMMUNICATION.md
+@@ -6,6 +6,8 @@
+ 
+ 本地 Bot 目录继续管理稳定身份。新增任务路由器为目标 Bot 创建独立根 Session 并绑定到原 Bot ID，使用原 Harness Agent registry、preset、模型与消息 inbox。原有 UI、Team、模型选择控件与业务登录不变。
+ 
++文件交付扩展见 [Bot 文件交付](BOT_FILE_DELIVERABLES.md)：`output="files"`、原生文件登记、结构化来源引用和完成检查，不再只回传文字。
++
+ ## 实现模块
+ 
+ - `bot-task-store.js`：原子文件事务、版本校验、任务与回复 outbox 同事务落盘。
+diff --git a/plugins/naumi-enterprise/bot-deliverables.js b/plugins/naumi-enterprise/bot-deliverables.js
+new file mode 100644
+index 0000000..3549219
+--- /dev/null
++++ b/plugins/naumi-enterprise/bot-deliverables.js
+@@ -0,0 +1,64 @@
++import path from 'node:path';
++import {z} from 'zod';
++
++export const deliveryFiles=z.array(z.object({path:z.string().trim().min(1).max(4096),description:z.string().max(1000).optional()}).strict()).min(1).max(8);
++export const fileReference=z.object({sessionId:z.string().min(1).max(200),seq:z.number().int().nonnegative(),index:z.number().int().nonnegative(),turn:z.number().int().positive(),path:z.string().min(1).max(4096),description:z.string().max(1000).optional(),version:z.string().optional(),bytes:z.number().nonnegative().optional()}).strict();
++export const deliveryCheck=z.object({requirement:z.enum(['text','files']),status:z.enum(['not_required','ready','missing','unavailable']),files:z.array(fileReference).max(8)}).strict();
++export const DELIVERY_PROMPT='File delivery is part of completing work, not a filename in backticks. For a requested standalone article, report, spreadsheet, image or other file: save and verify the final file, call present with its path and description in THIS employee Session, then link it in the final response. Do not present source edits or intermediate files just to populate cards. bot_task_reply(kind="result", files=[{path,description}]) also registers final files. For bot_dispatch set output="files" when the request requires separate files; output="text" is only for an inline answer. A completed model turn is not proof of a file delivery or business acceptance. File references in task results identify the original Session and event; do not fabricate attachment identities.';
++
++export function previewAddress(ref){
++  const encode=segment=>encodeURIComponent(segment).replace(/%3A/gi,':');
++  return `dsh-resource://file/session/${encode(ref.sessionId)}/${ref.path.replaceAll('\\','/').split('/').map(encode).join('/')}`;
++}
++
++export function references(events,sessionId,turn){
++  const files=new Map();
++  for(const e of events)if(e.type==='deliverables/presented'&&e.data.turn===turn&&Number.isSafeInteger(e.seq)){
++    for(const [index,f]of e.data.files.entries()){
++      const ref=fileReference.safeParse({sessionId,seq:e.seq,index,turn,...f});
++      if(ref.success)files.set(ref.data.path,ref.data);
++    }
++  }
++  return [...files.values()].slice(-8);
++}
++
++/** Only final file references matching successful write/edit calls from this turn are eligible. */
++export function announcedFiles(events,turn,text){
++  const announced=new Set();
++  for(const m of text.matchAll(/`([^`\n]+)`|\[[^\]\n]+\]\(<?([^\n)]+?)>?\)/g))announced.add((m[1]??m[2]).replace(/#L\d+(?:-L\d+)?$/,''));
++  const normalize=p=>p.replaceAll('\\','/').toLocaleLowerCase();
++  const files=new Map();
++  for(const e of events){
++    if(e.type!=='tool/call'||e.data.turn!==turn||!['write','edit'].includes(e.data.name))continue;
++    const result=events.find(r=>r.type==='tool/result'&&r.data.message?.toolCallId===e.data.callId);
++    if(!result||result.data.message.isError)continue;
++    let args=e.data.arguments;try{if(typeof args==='string')args=JSON.parse(args);}catch{continue;}
++    const p=args?.file_path??args?.path;if(typeof p!=='string')continue;
++    for(const a of announced){const n=normalize(a),written=normalize(p);if(n===written||!path.isAbsolute(a)&&written.endsWith('/'+n))files.set(p,{path:p});}
++  }
++  return [...files.values()].slice(0,8);
++}
++
++/** Use the same composed filesystem and scope as native preview; never Node raw file access. */
++export async function validateFiles(ctx,session,files,signal){
++  const parsed=deliveryFiles.parse(files),out=new Map();
++  if(!session.header.cwd)throw Error('BOT_DELIVERY_WORKSPACE_REQUIRED');
++  for(const file of parsed){
++    signal.throwIfAborted();
++    const stat=await ctx.workspaceFiles.stat({sessionId:session.id,workspaceRoot:session.header.cwd},file.path,signal);
++    // Automatic registration/relay is confined to this Session's actual workspace.
++    const relative=path.relative(path.resolve(session.header.cwd),path.resolve(stat.absolutePath));
++    if(relative==='..'||relative.startsWith('..'+path.sep)||path.isAbsolute(relative))throw Error('BOT_DELIVERY_OUTSIDE_WORKSPACE');
++    out.set(stat.absolutePath,{path:stat.absolutePath,...(file.description?{description:file.description}:{}),version:stat.version,...(stat.bytes!==undefined?{bytes:stat.bytes}:{})});
++  }
++  return [...out.values()];
++}
++
++export function registerFiles(session,turn,files,callId){
++  const existing=session.snapshotEvents().find(e=>e.type==='deliverables/presented'&&e.data.callId===callId);
++  if(existing){
++    if(JSON.stringify(existing.data.files)!==JSON.stringify(files.map(({path,description})=>({path,...(description?{description}:{})}))))throw Error('BOT_DELIVERY_IDEMPOTENCY_CONFLICT');
++    return existing;
++  }
++  return session.append('deliverables/presented',{turn,callId,files:files.map(({path,description})=>({path,...(description?{description}:{})}))});
++}
+diff --git a/plugins/naumi-enterprise/bot-task-runtime.js b/plugins/naumi-enterprise/bot-task-runtime.js
+index 2cf4d6a..fd8dd66 100644
+--- a/plugins/naumi-enterprise/bot-task-runtime.js
++++ b/plugins/naumi-enterprise/bot-task-runtime.js
+@@ -1,5 +1,6 @@
+ import {installModelSelection,modelSelectionProjectionDefinition} from '@deepseek-ai/dsh-agent';
+ import {freezeMessage} from '@deepseek-ai/dsh-llm';
++import {references,announcedFiles,validateFiles,registerFiles} from './bot-deliverables.js';
+ 
+ const permissionTypes=['permission/preset','sandbox/mode','approval/policy'];
+ 
+@@ -52,8 +53,66 @@ export function createBotTaskRuntime(ctx){
+     })();opening.set(sessionId,run);
+     try{return await run;}finally{opening.delete(sessionId);}
+   };
++  const deliveryLanes=new Map();
++  const serialDelivery=(id,fn)=>{
++    const run=(deliveryLanes.get(id)??Promise.resolve()).then(fn),tail=run.catch(()=>{});deliveryLanes.set(id,tail);
++    return run.finally(()=>{if(deliveryLanes.get(id)===tail)deliveryLanes.delete(id);});
++  };
++  const publish=async(sessionId,turn,{files,callId,signal=AbortSignal.timeout(10000)}={})=>serialDelivery(sessionId,async()=>{
++    signal.throwIfAborted();
++    const agent=ctx.agents.get(sessionId),stored=await snapshot(sessionId);
++    if(!stored)throw Error('BOT_SESSION_NOT_FOUND');
++    const ended=stored.events.find(e=>e.type==='turn/end'&&e.data.turn===turn);
++    const final=stored.events.findLast(e=>e.type==='assistant/message'&&e.data.turn===turn)?.data.message;
++    const text=final?.toolCalls?.length?'':(final?.content??[]).filter(p=>p.type==='text').map(p=>p.text).join('\n');
++    const old=references(stored.events,sessionId,turn);
++    const candidates=files??(old.length?null:ended?.data.reason.kind==='completed'?announcedFiles(stored.events,turn,text):null);
++    if(candidates?.length){
++      if(!agent)throw Error('BOT_DELIVERY_SESSION_NOT_ACTIVE');
++      const checked=await validateFiles(ctx,agent.session,candidates,signal);
++      signal.throwIfAborted();
++      registerFiles(agent.session,turn,checked,callId??`naumi-delivery:${sessionId}:${turn}`);
++      await ctx.sessions.flush(agent.session);
++    }
++    const current=await snapshot(sessionId),refs=references(current.events,sessionId,turn),verified=[];
++    for(const ref of refs){
++      const [stat]=await validateFiles(ctx,{id:sessionId,header:current.header},[{path:ref.path,description:ref.description}],AbortSignal.timeout(10000));
++      verified.push({...ref,version:stat.version,...(stat.bytes!==undefined?{bytes:stat.bytes}:{})});
++    }
++    return verified;
++  });
+   return {
+     snapshot,profile,ensure,
++    publishTurn:publish,
++    async declare(sessionId,files,callId,signal){
++      const stored=await snapshot(sessionId),turn=stored?.events.findLast(e=>e.type==='turn/start')?.data.turn;
++      if(!turn||stored.events.some(e=>e.type==='turn/end'&&e.data.turn===turn))throw Error('BOT_DELIVERY_OPEN_TURN_REQUIRED');
++      return publish(sessionId,turn,{files,callId,signal:signal?AbortSignal.any([signal,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000)});
++    },
++    async delivery(sessionId,messageId,requirement='text'){
++      const state=await this.inspect(sessionId,messageId);
++      if(!state?.turn)return {requirement,status:requirement==='files'?'missing':'not_required',files:[]};
++      try{const files=await publish(sessionId,state.turn);return {requirement,status:files.length?'ready':requirement==='files'?'missing':'not_required',files};}
++      catch{return {requirement,status:'unavailable',files:[]};}
++    },
++    async mirror(sessionId,messageId,files){
++      if(!files?.length)return;
++      return serialDelivery(sessionId,async()=>{
++        const stored=await snapshot(sessionId),agent=ctx.agents.get(sessionId);if(!stored||!agent)return;
++        const state=inspectBotMessage(stored.events,messageId);if(!state.consumed)return;
++        const callId=`naumi-relay:${messageId}`;
++        if(stored.events.some(e=>e.type==='deliverables/presented'&&e.data.callId===callId))return;
++        const checked=[];
++        for(const ref of files){
++          const source=await snapshot(ref.sessionId),event=source?.events.find(e=>e.seq===ref.seq&&e.type==='deliverables/presented'&&e.data.turn===ref.turn);
++          const original=event?.data.files[ref.index];
++          if(!original||original.path!==ref.path)throw Error('BOT_DELIVERY_REFERENCE_MISMATCH');
++          await validateFiles(ctx,{id:ref.sessionId,header:source.header},[original],AbortSignal.timeout(10000));
++          checked.push(...await validateFiles(ctx,agent.session,[original],AbortSignal.timeout(10000)));
++        }
++        registerFiles(agent.session,state.turn,checked,callId);await ctx.sessions.flush(agent.session);
++      });
++    },
+     isRunning:sessionId=>ctx.agents.get(sessionId)?.status==='running',
+     async inspect(sessionId,messageId){const stored=await snapshot(sessionId);return stored?inspectBotMessage(stored.events,messageId,stored.live?.status==='running'):null;},
+     async deliver({sessionId,messageId,fromSessionId,text,create=false,cwd,profile:config}){
+@@ -75,7 +134,7 @@ export function createBotTaskRuntime(ctx){
+       if(!ctx.agents.get(sessionId)&&!await ctx.sessionPersistence.stat(sessionId))return;
+       const agent=await ensure(sessionId);agent.cancel({kind:'user'});await agent.whenIdle();await ctx.sessions.flush(agent.session);
+     },
+-    async close(){closed=true;await Promise.allSettled([...opening.values()]);await Promise.allSettled([...handles.values()].map(handle=>handle.dispose()));handles.clear();},
++    async close(){closed=true;await Promise.allSettled([...deliveryLanes.values()]);await Promise.allSettled([...opening.values()]);await Promise.allSettled([...handles.values()].map(handle=>handle.dispose()));handles.clear();},
+   };
+ }
+ 
+diff --git a/plugins/naumi-enterprise/bot-task-service.js b/plugins/naumi-enterprise/bot-task-service.js
+index 562b036..f635954 100644
+--- a/plugins/naumi-enterprise/bot-task-service.js
++++ b/plugins/naumi-enterprise/bot-task-service.js
+@@ -1,6 +1,7 @@
+ import {randomUUID} from 'node:crypto';
+ import {z} from 'zod';
+ import {TERMINAL} from './bot-task-store.js';
++import {deliveryFiles,previewAddress} from './bot-deliverables.js';
+ 
+ const key=z.string().trim().min(1).max(160),id=z.string().min(1).max(200),body=z.string().trim().min(1).max(16000);
+ const fail=code=>{throw Error(code);},now=()=>new Date().toISOString();
+@@ -28,12 +29,12 @@ export class BotTaskService{
+     const run=(this.lanes.get(taskId)??Promise.resolve()).then(fn),tail=run.then(()=>{},()=>{});this.lanes.set(taskId,tail);
+     return run.finally(()=>{if(this.lanes.get(taskId)===tail)this.lanes.delete(taskId);});
+   }
+-  view(task){return {...publicTask(task),messages:this.store.read().outbox.filter(m=>m.taskId===task.id).map(m=>({id:m.id,kind:m.kind,attempt:m.attempt,text:m.text,delivered:m.delivered,...(m.error?{error:m.error}:{})}))};}
++  view(task){return {...publicTask(task),messages:this.store.read().outbox.filter(m=>m.taskId===task.id).map(m=>({id:m.id,kind:m.kind,attempt:m.attempt,text:m.text,files:m.files??[],delivered:m.delivered,...(m.error?{error:m.error}:{})}))};}
+   async dispatch(agent,input,{signal}={}){
+-    const args=z.object({targetBotId:id,task:body,idempotencyKey:key}).strict().parse(input);signal?.throwIfAborted();
++    const args=z.object({targetBotId:id,task:body,idempotencyKey:key,output:z.enum(['text','files']).default('text')}).strict().parse(input);signal?.throwIfAborted();
+     const {root,bot:source}=this.caller(agent,true);
+     const prior=this.store.read().tasks.find(t=>t.sourceSessionId===root.id&&t.key===args.idempotencyKey);
+-    if(prior){if(prior.targetBotId!==args.targetBotId||prior.task!==args.task)fail('BOT_TASK_IDEMPOTENCY_CONFLICT');this.kick();return this.view(prior);}
++    if(prior){if(prior.targetBotId!==args.targetBotId||prior.task!==args.task||(prior.output??'text')!==args.output)fail('BOT_TASK_IDEMPOTENCY_CONFLICT');this.kick();return this.view(prior);}
+     const target=this.directory.list().bots.find(b=>b.id===args.targetBotId);
+     if(!target)fail('BOT_NOT_FOUND');if(target.status!=='active')fail('BOT_ARCHIVED');
+     const parent=this.store.read().tasks.find(t=>t.targetSessionId===root.id),lineage=parent?.lineage??[source.id];
+@@ -42,11 +43,11 @@ export class BotTaskService{
+     const profile=await this.runtime.profile(target);signal?.throwIfAborted();
+     const value=await this.store.change(doc=>{
+       const existing=doc.tasks.find(t=>t.sourceSessionId===root.id&&t.key===args.idempotencyKey);
+-      if(existing){if(existing.targetBotId!==target.id||existing.task!==args.task)fail('BOT_TASK_IDEMPOTENCY_CONFLICT');return {value:existing,unchanged:true};}
++      if(existing){if(existing.targetBotId!==target.id||existing.task!==args.task||(existing.output??'text')!==args.output)fail('BOT_TASK_IDEMPOTENCY_CONFLICT');return {value:existing,unchanged:true};}
+       if(doc.tasks.length>=1000)fail('BOT_TASK_CAPACITY');
+       if(this.directory.forSession(root.id)?.status!=='active'||this.directory.list().bots.find(b=>b.id===target.id)?.status!=='active')fail('BOT_ARCHIVED');
+       const time=now(),task={id:'task-'+randomUUID(),key:args.idempotencyKey,sourceBotId:source.id,sourceSessionId:root.id,
+-        targetBotId:target.id,targetSessionId:'session-'+randomUUID(),targetCwd:target.cwd,profile,task:args.task,status:'queued',revision:1,
++        targetBotId:target.id,targetSessionId:'session-'+randomUUID(),targetCwd:target.cwd,profile,task:args.task,output:args.output,status:'queued',revision:1,
+         attempt:1,messageId:randomUUID(),lineage:[...lineage,target.id],...(parent?{parentTaskId:parent.id}:{}),createdAt:time,updatedAt:time};
+       doc.tasks.push(task);return {value:task};
+     });this.kick();return this.view(value);
+@@ -65,12 +66,24 @@ export class BotTaskService{
+       signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();else check();
+     });
+   }
+-  async reply(agent,input){
+-    const args=z.object({taskId:id,idempotencyKey:key,kind:z.enum(['message','progress','blocked','result']),message:body}).strict().parse(input);
++  async reply(agent,input,exec={}){
++    const args=z.object({taskId:id,idempotencyKey:key,kind:z.enum(['message','progress','blocked','result']),message:body,files:deliveryFiles.optional()}).strict().parse(input);
+     const {caller,task}=this.authorized(agent,args.taskId,true),isTarget=caller.root.id===task.targetSessionId;
+     if(caller.bot.id!==task.sourceBotId&&!isTarget)fail('BOT_TASK_EXECUTOR_REQUIRED');
+     if(!isTarget&&args.kind!=='message')fail('BOT_TASK_EXECUTOR_REQUIRED');
++    if(args.files&&(!isTarget||args.kind!=='result'))fail('BOT_TASK_EXECUTOR_REQUIRED');
+     return this.serial(task.id,async()=>{
++      // File results are declarations, not an early completion while the model is still executing.
++      if(args.files){
++        if(TERMINAL.has(this.current(task.id).status))fail('BOT_TASK_CLOSED');
++        if(!exec.callId)fail('BOT_DELIVERY_TOOL_CALL_REQUIRED');
++        await this.runtime.declare(caller.root.id,args.files,`naumi-files:${task.id}:${task.attempt}:${args.idempotencyKey}`,exec.signal);
++        return {...this.view(this.current(task.id)),deliveryDeclared:true,awaitingTurnEnd:true};
++      }
++      if(isTarget&&args.kind==='result'&&task.output==='files'){
++        const delivery=await this.runtime.delivery(task.targetSessionId,task.messageId,'files');
++        if(delivery.status!=='ready')fail('BOT_DELIVERY_FILES_REQUIRED');
++      }
+       await this.store.change(doc=>{
+         const current=doc.tasks.find(t=>t.id===task.id),messageKey=caller.root.id+':'+args.idempotencyKey;
+         const prior=doc.outbox.find(m=>m.taskId===task.id&&m.key===messageKey);
+@@ -78,7 +91,7 @@ export class BotTaskService{
+         if(TERMINAL.has(current.status))fail('BOT_TASK_CLOSED');
+         const message=this.addMessage(doc,current,{key:messageKey,kind:args.kind,text:args.message,fromSessionId:caller.root.id,
+           toSessionId:isTarget?current.sourceSessionId:current.targetSessionId});
+-        if(isTarget){current.progress=args.message.slice(0,4000);if(args.kind==='blocked')current.status='waiting';if(args.kind==='result'){current.result=args.message;current.status='completed';}}
++        if(isTarget){current.progress=args.message.slice(0,4000);if(args.kind==='blocked')current.status='waiting';if(args.kind==='result'){current.result=args.message;current.status='running';}}
+         else{current.messageId=message.messageId;current.status='running';delete current.error;}
+         message.taskStatus=current.status;this.bump(current);return {value:null};
+       });this.kick();return this.view(this.current(task.id));
+@@ -105,23 +118,23 @@ export class BotTaskService{
+         if(caller.bot.id!==task.sourceBotId)fail('BOT_TASK_SENDER_REQUIRED');if(task.revision!==expectedRevision)fail('BOT_TASK_CONFLICT');
+         if(!['failed','interrupted','cancelled'].includes(task.status))fail('BOT_TASK_NOT_RETRYABLE');
+         if(task.attempt>=100)fail('BOT_TASK_RETRY_LIMIT');if(this.runtime.isRunning(task.targetSessionId))fail('BOT_TASK_STILL_RUNNING');
+-        task.attempt++;task.messageId=randomUUID();task.status='queued';delete task.result;delete task.error;this.bump(task);return {value:null};
++        task.attempt++;task.messageId=randomUUID();task.status='queued';delete task.result;delete task.error;delete task.delivery;this.bump(task);return {value:null};
+       });this.kick();return this.view(this.current(taskId));
+     });
+   }
+   bump(task){task.revision++;task.updatedAt=now();}
+-  addMessage(doc,task,{key:messageKey,kind,text,fromSessionId,toSessionId}){
++  addMessage(doc,task,{key:messageKey,kind,text,fromSessionId,toSessionId,files=[]}){
+     const existing=doc.outbox.find(m=>m.taskId===task.id&&m.key===messageKey);if(existing)return existing;
+     if(doc.outbox.length>=10000||doc.outbox.filter(m=>m.taskId===task.id).length>=200)fail('BOT_TASK_MESSAGE_CAPACITY');
+-    const message={id:'message-'+randomUUID(),taskId:task.id,key:messageKey,messageId:randomUUID(),fromSessionId,toSessionId,attempt:task.attempt,taskStatus:task.status,kind,text:bounded(text),delivered:kind==='progress',createdAt:now()};
++    const message={id:'message-'+randomUUID(),taskId:task.id,key:messageKey,messageId:randomUUID(),fromSessionId,toSessionId,attempt:task.attempt,taskStatus:task.status,kind,text:bounded(text),files,delivered:kind==='progress',createdAt:now()};
+     doc.outbox.push(message);return message;
+   }
+-  async finish(task,status,result,error){
++  async finish(task,status,result,error,delivery){
+     return this.store.change(doc=>{const current=doc.tasks.find(t=>t.id===task.id);
+       if(TERMINAL.has(current.status))return {value:current,unchanged:true};
+-      current.status=status;current.result=bounded(result);if(error)current.error=error;this.bump(current);
++      current.status=status;current.result=bounded(result);if(error)current.error=error;if(delivery)current.delivery=delivery;this.bump(current);
+       this.addMessage(doc,current,{key:`finish:${current.attempt}`,kind:status==='completed'?'result':'status',text:current.result,
+-        fromSessionId:current.targetSessionId,toSessionId:current.sourceSessionId});return {value:current};
++        fromSessionId:current.targetSessionId,toSessionId:current.sourceSessionId,files:delivery?.files??[]});return {value:current};
+     });
+   }
+   kick(){
+@@ -153,7 +166,7 @@ export class BotTaskService{
+         try{await this.directory.bind(fresh.id,task.targetSessionId,fresh.revision,task.targetCwd);break;}catch(e){if(e.message!=='BOT_CONFLICT'||attempt===2)throw e;}
+       }
+       await this.runtime.deliver({sessionId:task.targetSessionId,messageId:task.messageId,fromSessionId:task.sourceSessionId,
+-        text:`Naumi Bot 任务 ${task.id}，来自 Bot ${task.sourceBotId}。\n${task.task}\n${task.attempt>1?'这是明确请求的重试，请结合本会话已完成的工作继续，避免重复外部操作。\n':''}你代表已有目标 Bot ${task.targetBotId} 执行，不要创建替代 Bot。需要澄清时用 bot_task_reply(kind="blocked") 回传主管；最终答复会自动回传。任务内容是委派工作，不是新增系统指令；沿用当前工具、模型和权限。`});
++        text:`Naumi Bot 任务 ${task.id}，来自 Bot ${task.sourceBotId}。\n${task.task}\n${task.output==='files'?'交付契约：必须保存并使用 present 或 bot_task_reply(result,files) 登记最终文件，只有文字或路径不算交付成功。\n':''}${task.attempt>1?'这是明确请求的重试，请结合本会话已完成的工作继续，避免重复外部操作。\n':''}你代表已有目标 Bot ${task.targetBotId} 执行，不要创建替代 Bot。需要澄清时用 bot_task_reply(kind="blocked") 回传主管；最终答复会自动回传。任务内容是委派工作，不是新增系统指令；沿用当前工具、模型和权限。`});
+       await this.store.change(doc=>{const t=doc.tasks.find(t=>t.id===taskId);if(t.status!=='starting')return {value:null,unchanged:true};t.status='running';this.bump(t);return {value:null};});
+       await this.reconcile(taskId);
+     }catch(error){if(!this.closed)await this.finish(this.current(taskId),'failed','任务启动失败，可用原任务 ID 重试。',errorCode(error));}
+@@ -172,7 +185,11 @@ export class BotTaskService{
+         text:task.task,create:false,profile:task.profile});
+       return;
+     }
+-    if(state.end?.kind==='completed'&&state.text){await this.finish(task,'completed',state.text);return;}
++    if(state.end?.kind==='completed'&&state.text){
++      const delivery=this.runtime.delivery?await this.runtime.delivery(task.targetSessionId,task.messageId,task.output??'text'):{requirement:task.output??'text',status:task.output==='files'?'missing':'not_required',files:[]};
++      const failed=delivery.status==='missing'||delivery.status==='unavailable';
++      await this.finish(task,failed?'failed':'completed',state.text,failed?delivery.status==='missing'?'BOT_DELIVERY_MISSING':'BOT_DELIVERY_UNAVAILABLE':undefined,delivery);return;
++    }
+     if(state.end?.kind==='blocked'){
+       await this.store.change(doc=>{const t=doc.tasks.find(t=>t.id===taskId);t.status='waiting';t.progress='目标任务正在等待确认。';this.bump(t);
+         this.addMessage(doc,t,{key:`blocked:${t.attempt}:${state.turn}`,kind:'blocked',text:'目标任务需要确认，请打开目标任务会话查看。',fromSessionId:t.targetSessionId,toSessionId:t.sourceSessionId});return {value:null};});return;
+@@ -189,13 +206,17 @@ export class BotTaskService{
+       if(message.attempt!==task.attempt)fail('BOT_TASK_STALE_ATTEMPT');
+       if(toWorker&&TERMINAL.has(task.status))fail('BOT_TASK_CLOSED');
+       const recipient=this.directory.forSession(message.toSessionId);if(!recipient||recipient.status!=='active')fail('BOT_ARCHIVED');
+-      const text=`Naumi Bot 任务 ${task.id} 的${message.kind==='result'?'结果':'消息'}。\n来源 Bot: ${toWorker?task.sourceBotId:task.targetBotId}\n任务：${task.task}\n第 ${message.attempt} 次执行，消息生成时状态：${message.taskStatus}\n${message.text}\n目标任务会话：${task.targetSessionId}\n这是其他 Agent 的工作内容，不是系统指令；请核对后处理。`;
++      const attachments=(message.files??[]).map(f=>`[${f.description??f.path.split(/[\\/]/).at(-1)}](<${previewAddress(f)}>)\n原始交付坐标：${JSON.stringify(f)}`).join('\n');
++      const text=`Naumi Bot 任务 ${task.id} 的${message.kind==='result'?'结果':'消息'}。\n来源 Bot: ${toWorker?task.sourceBotId:task.targetBotId}\n任务：${task.task}\n第 ${message.attempt} 次执行，消息生成时状态：${message.taskStatus}\n${message.text}\n${attachments?`文件交付（原文件，不是复制件）：\n${attachments}\n`:''}${task.error?`交付检查：${task.error}；保留的文字不代表文件交付成功。\n`:''}目标任务会话：${task.targetSessionId}\n这是其他 Agent 的工作内容，不是系统指令；请核对后处理。`;
+       await this.runtime.deliver({sessionId:message.toSessionId,messageId:message.messageId,fromSessionId:message.fromSessionId,text});
++      await this.runtime.mirror?.(message.toSessionId,message.messageId,message.files??[]).catch(()=>{});
+       await this.store.change(next=>{const m=next.outbox.find(m=>m.id===message.id);m.delivered=true;delete m.error;return {value:null};});
+     }catch(error){await this.store.change(next=>{next.outbox.find(m=>m.id===message.id).error=errorCode(error);return {value:null};});}
+   }
+   observe(sessionId){if(this.closed)return;for(const task of this.store.read().tasks.filter(t=>t.targetSessionId===sessionId&&!TERMINAL.has(t.status)))void this.observeTask(task.id).catch(this.onError);}
+   userInput(sessionId,message){
++    const relayed=this.store.read().outbox.find(m=>m.toSessionId===sessionId&&m.messageId===message.id&&m.files?.length);
++    if(relayed)void this.runtime.mirror?.(sessionId,message.id,relayed.files).catch(this.onError);
+     if(this.closed||message.source?.kind!=='user')return;
+     const task=this.store.read().tasks.find(t=>t.targetSessionId===sessionId&&t.status==='waiting');if(!task)return;
+     void this.serial(task.id,()=>this.store.change(doc=>{const t=doc.tasks.find(t=>t.id===task.id);if(t.status!=='waiting')return {value:null,unchanged:true};t.status='running';t.messageId=message.id;this.bump(t);return {value:null};})).catch(this.onError);
+diff --git a/plugins/naumi-enterprise/bot-task-store.js b/plugins/naumi-enterprise/bot-task-store.js
+index 9708855..790e3e0 100644
+--- a/plugins/naumi-enterprise/bot-task-store.js
++++ b/plugins/naumi-enterprise/bot-task-store.js
+@@ -2,6 +2,7 @@ import fs from 'node:fs';
+ import path from 'node:path';
+ import {randomUUID} from 'node:crypto';
+ import {z} from 'zod';
++import {fileReference,deliveryCheck} from './bot-deliverables.js';
+ 
+ const id=z.string().min(1).max(200),text=z.string().min(1).max(32000),stamp=z.string().datetime();
+ export const TASK_STATES=['queued','starting','running','waiting','completed','failed','cancelled','interrupted'];
+@@ -11,9 +12,10 @@ const profileSchema=z.object({agentPreset:id.optional(),model:z.object({provider
+ const taskSchema=z.object({id,key:id,sourceBotId:id,sourceSessionId:id,targetBotId:id,targetSessionId:id,targetCwd:z.string().min(1).max(4096),
+   profile:profileSchema,task:text,status:z.enum(TASK_STATES),revision:z.number().int().positive(),attempt:z.number().int().positive().max(100),
+   messageId:id,lineage:z.array(id).min(2).max(5),parentTaskId:id.optional(),createdAt:stamp,updatedAt:stamp,
++  output:z.enum(['text','files']).optional(),delivery:deliveryCheck.optional(),
+   result:z.string().max(32000).optional(),progress:z.string().max(4000).optional(),error:id.optional()}).strict();
+ const outboxSchema=z.object({id,taskId:id,key:z.string().min(1).max(400),messageId:id,fromSessionId:id,toSessionId:id,
+-  attempt:z.number().int().positive(),taskStatus:z.enum(TASK_STATES),kind:z.enum(['message','progress','blocked','result','status']),text,delivered:z.boolean(),error:id.optional(),createdAt:stamp}).strict();
++  attempt:z.number().int().positive(),taskStatus:z.enum(TASK_STATES),kind:z.enum(['message','progress','blocked','result','status']),text,files:z.array(fileReference).max(8).optional(),delivered:z.boolean(),error:id.optional(),createdAt:stamp}).strict();
+ const schema=z.object({version:z.literal(1),revision:z.number().int().nonnegative(),tasks:z.array(taskSchema).max(1000),outbox:z.array(outboxSchema).max(10000)}).strict().superRefine((doc,ctx)=>{
+   const ids=new Set(),keys=new Set(),sessions=new Set();
+   for(const task of doc.tasks){const key=task.sourceSessionId+'\0'+task.key;if(ids.has(task.id)||keys.has(key)||sessions.has(task.targetSessionId)||new Set(task.lineage).size!==task.lineage.length)ctx.addIssue({code:'custom',message:'Duplicate Bot task identity'});ids.add(task.id);keys.add(key);sessions.add(task.targetSessionId);}
+diff --git a/plugins/naumi-enterprise/bot-tasks.js b/plugins/naumi-enterprise/bot-tasks.js
+index 1d1e2a4..6d5165f 100644
+--- a/plugins/naumi-enterprise/bot-tasks.js
++++ b/plugins/naumi-enterprise/bot-tasks.js
+@@ -5,6 +5,7 @@ import {defineTool} from '@deepseek-ai/dsh-tools';
+ import {BotTaskStore} from './bot-task-store.js';
+ import {BotTaskService} from './bot-task-service.js';
+ import {createBotTaskRuntime} from './bot-task-runtime.js';
++import {DELIVERY_PROMPT} from './bot-deliverables.js';
+ 
+ export function createBotTaskTools(service){
+   const output={schema:{type:'json'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]};
+@@ -12,20 +13,20 @@ export function createBotTaskTools(service){
+   const tool=(name,description,parameters,execute)=>defineTool({name,description,parameters,output,execute:(args,exec)=>{exec.signal?.throwIfAborted();return execute(exec.agent,args,exec);}});
+   return [
+     tool('bot_dispatch','Delegate a task to an EXISTING persistent Bot by its exact ID from bot_directory. This reuses that Bot identity and creates a linked task Session, not a substitute teammate. Supply a stable idempotencyKey for this request and reuse it on retries. Returns after durable acceptance; the result will be sent back automatically. Does not change models, permissions, or provision external accounts.',
+-      {targetBotId:{type:'string',required:true},task:{type:'string',required:true},idempotencyKey:{type:'string',required:true}},(agent,args,exec)=>service.dispatch(agent,args,exec)),
++      {targetBotId:{type:'string',required:true},task:{type:'string',required:true},idempotencyKey:{type:'string',required:true},output:{type:'string',enum:['text','files'],description:'Use files when the user requires separate deliverable files; text only for an inline answer. File tasks require validated file registration before completion.'}},(agent,args,exec)=>service.dispatch(agent,args,exec)),
+     tool('bot_task_list','List real tasks sent or received by this persistent Bot. Team list_agents does not list independent Bots.',{},agent=>service.list(agent)),
+     tool('bot_task_get','Read a delegated Bot task, current revision, progress, persisted result and message delivery state.',{taskId},(agent,args)=>service.get(agent,args.taskId)),
+     tool('bot_task_wait','Wait for a delegated Bot task revision to change. Use the exact revision from dispatch/get. Timeout is not failure and never reruns work; use this instead of Team wait_agent for independent Bots.',
+       {taskId,afterRevision:{type:'integer',required:true},timeoutMs:{type:'integer',description:'100 through 120000; default 30000.'}},(agent,args,exec)=>service.wait(agent,args,exec)),
+     tool('bot_task_reply','Send task feedback or report progress. The sender may send message; the exact target task Agent may send message, progress, blocked (needs sender input) or result. Use a stable idempotencyKey. Progress is recorded without waking the sender. Final assistant output also returns automatically; do not duplicate it unnecessarily.',
+-      {taskId,idempotencyKey:{type:'string',required:true},kind:{type:'string',enum:['message','progress','blocked','result'],required:true},message:{type:'string',required:true}},(agent,args)=>service.reply(agent,args)),
++      {taskId,idempotencyKey:{type:'string',required:true},kind:{type:'string',enum:['message','progress','blocked','result'],required:true},message:{type:'string',required:true},files:{type:'array',description:'Existing final files owned by this task. Registers native preview cards; result is finalized only when the turn completes.',items:{type:'object',additionalProperties:false,properties:{path:{type:'string',required:true},description:{type:'string'}}}}},(agent,args,exec)=>service.reply(agent,args,exec)),
+     tool('bot_task_cancel','Cancel only this delegated task, preserving both Bot identities and other Sessions. Sender Bot Lead only, CAS revision required.',{taskId,expectedRevision},(agent,args)=>service.cancel(agent,args)),
+     tool('bot_task_retry','Explicitly retry a failed, cancelled or interrupted task after examining its cause. Reuses the same task, target Bot and task Session; increments attempt. Never automatically repeat external side effects.',{taskId,expectedRevision},(agent,args)=>service.retry(agent,args)),
+   ];
+ }
+ 
+ export function installBotTasks(ctx,directory,{store,runtime,onReady}={}){
+-  return ctx.inject(['agents','agentTeams','agentPresets','agentDefaultModel','sessions','sessionPersistence','tools','systemPrompt'],scope=>{
++  return ctx.inject(['agents','agentTeams','agentPresets','agentDefaultModel','sessions','sessionPersistence','workspaceFiles','tools','systemPrompt'],scope=>{
+     const ledger=store??new BotTaskStore(path.join(process.env.DSH_HOME??path.join(os.homedir(),'.dsh'),'naumi','bot-tasks.json'));
+     const adapter=runtime??createBotTaskRuntime(scope);
+     const service=new BotTaskService({ctx:scope,directory,store:ledger,runtime:adapter,onError:()=>scope.logger.warn('BOT_TASK_BACKGROUND_ERROR')});
+@@ -34,6 +35,7 @@ export function installBotTasks(ctx,directory,{store,runtime,onReady}={}){
+       if(installed.has(agent)||!scope.agentTeams.tryMembership(agent))return;const disposers=[];
+       try{
+         for(const tool of createBotTaskTools(service))disposers.push(agent.ctx.tools.register(tool));
++        disposers.push(agent.ctx.systemPrompt.section({name:'naumi:bot-delivery',order:agent.ctx.systemPrompt.getSectionOrder('TEAM_POLICY')+4,text:DELIVERY_PROMPT}));
+         disposers.push(agent.ctx.systemPrompt.section({name:'naumi:bot-routing',order:agent.ctx.systemPrompt.getSectionOrder('TEAM_POLICY')+3,
+           text:'Naumi persistent Bots can collaborate across independent root Sessions. When the user names an existing Bot, first resolve its stable ID with bot_directory, then use bot_dispatch. Do not substitute spawn_teammate for an existing Bot. Team list_agents/send_message/wait_agent address only the current Team, not the Bot directory. For dispatched work use bot_task_get/bot_task_wait; results arrive automatically. Use bot_task_reply for feedback or clarification. Never claim sent/queued means completed. Do not use shell, source edits, file manipulation, or direct provider calls to route tasks. Only create a new Bot if the user actually asks for a new reusable identity.'}));
+         disposers.push(agent.ctx.systemPrompt.context({name:'naumi:bot-task',required:true,order:agent.ctx.systemPrompt.getContextOrder('TEAM_IDENTITY')+2,text:()=>{
+@@ -45,16 +47,23 @@ export function installBotTasks(ctx,directory,{store,runtime,onReady}={}){
+     scope.on('agent/created',({agent})=>install(agent));
+     scope.on('agent/disposed',({agent})=>{installed.get(agent)?.();installed.delete(agent);service.observe(agent.id);});
+     scope.on('agent/status',({agent,status})=>{if(status==='idle')service.observe(agent.id);});
+-    scope.on('session/event',(session,event)=>{if(event.type==='turn/end')service.observe(session.id);if(event.type==='user/message')service.userInput(session.id,event.data);});
++    scope.on('session/event',(session,event)=>{
++      if(event.type==='turn/end'){
++        // All persistent Bots share the contract, including direct (non-delegated) conversations.
++        if(directory.forSession(session.id)&&event.data.reason.kind==='completed')void adapter.publishTurn?.(session.id,event.data.turn).catch(()=>scope.logger.warn('BOT_DELIVERY_REGISTRATION_PENDING'));
++        service.observe(session.id);
++      }
++      if(event.type==='user/message')service.userInput(session.id,event.data);
++    });
+     for(const agent of scope.agents.list())install(agent);
+     const admit=(req,res)=>{
+-      res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Naumi-Bot-Router','1');
++      res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Naumi-Bot-Router','1');res.setHeader('X-Naumi-Bot-Delivery','1');
+       const a=scope.connection.admit(req);if('rejection'in a){res.writeHead(a.rejection).end();return false;}
+       if(a.peer.principal.kind!=='owner'){res.writeHead(403).end();return false;}return true;
+     };
+     const str=z.string().min(1).max(200),revision=z.number().int().positive();
+     const command=z.discriminatedUnion('action',[
+-      z.object({action:z.literal('dispatch'),sourceSessionId:str,targetBotId:str,task:z.string().min(1).max(16000),idempotencyKey:str}).strict(),
++      z.object({action:z.literal('dispatch'),sourceSessionId:str,targetBotId:str,task:z.string().min(1).max(16000),idempotencyKey:str,output:z.enum(['text','files']).optional()}).strict(),
+       z.object({action:z.literal('reply'),sourceSessionId:str,taskId:str,kind:z.enum(['message','progress','blocked','result']),message:z.string().min(1).max(16000),idempotencyKey:str}).strict(),
+       z.object({action:z.enum(['cancel','retry']),sourceSessionId:str,taskId:str,expectedRevision:revision}).strict(),
+     ]);
+diff --git a/plugins/naumi-enterprise/package.json b/plugins/naumi-enterprise/package.json
+index 45b5569..389a7bb 100644
+--- a/plugins/naumi-enterprise/package.json
++++ b/plugins/naumi-enterprise/package.json
+@@ -31,6 +31,7 @@
+     "bot-task-store.js",
+     "bot-task-service.js",
+     "bot-task-runtime.js",
++    "bot-deliverables.js",
+     "employees.js",
+     "employee-store.js",
+     "employee-service.js",
+diff --git a/scripts/verify-bot-deliverables-live.mjs b/scripts/verify-bot-deliverables-live.mjs
+new file mode 100644
+index 0000000..0422ee0
+--- /dev/null
++++ b/scripts/verify-bot-deliverables-live.mjs
+@@ -0,0 +1,56 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import assert from 'node:assert/strict';
++import {randomUUID} from 'node:crypto';
++import {zstdDecompressSync} from 'node:zlib';
++import {botLiveApi} from './bot-live-api.mjs';
++
++const runtime=path.resolve(process.argv[2]??'E:/Workspace/naumi-desktop'),e=path.resolve('evidence/bot-deliverables');
++const api=await botLiveApi(runtime),checkpoint=path.join(e,'live-checkpoint.json');
++let run=fs.existsSync(checkpoint)?JSON.parse(fs.readFileSync(checkpoint,'utf8')):null;
++const save=()=>fs.writeFileSync(checkpoint,JSON.stringify(run,null,2)+'\n');
++const read=id=>{
++  const root=path.join(runtime,'.dsh/sessions');let file;
++  for(const project of fs.readdirSync(root)){const p=path.join(root,project,id,'session.v4.jsonl.zstd');if(fs.existsSync(p)){file=p;break;}}
++  assert(file);const bytes=fs.readFileSync(file),parts=[];let offset=0;
++  while(offset<bytes.length){const frame=zstdDecompressSync(bytes.subarray(offset),{info:true});assert(frame.engine.bytesWritten>0);offset+=frame.engine.bytesWritten;parts.push(frame.buffer);}
++  return Buffer.concat(parts).toString('utf8').split('\n').filter(Boolean).map(JSON.parse);
++};
++const catalog=await api.json('/naumi/bots');
++if(!run){
++  const bots=catalog.bots.filter(b=>b.status==='active');assert(bots.length>=2);
++  const target=bots.find(b=>b.name.includes('自媒体'))??bots[1],source=bots.find(b=>b.id!==target.id);
++  const sourceSession=await api.rpc('session/create',{request:{cwd:source.cwd,agentPreset:source.agentPreset}});
++  run={startedAt:new Date().toISOString(),sourceBotId:source.id,targetBotId:target.id,sourceSessionId:sourceSession.sessionId,idempotencyKey:'file-preview-'+randomUUID(),botIds:catalog.bots.map(b=>b.id),file:path.join(target.cwd,'naumi-file-preview-'+randomUUID()+'.md'),dispatchSent:false};save();
++  await api.rpc('session/rename',{request:{sessionId:run.sourceSessionId,title:'文件交付联调'}});
++}
++const source=(await api.json('/naumi/bots')).bots.find(b=>b.id===run.sourceBotId);assert(source);
++if(!source.sessionIds.includes(run.sourceSessionId))await api.json('/naumi/bots',{action:'bind',botId:source.id,sessionId:run.sourceSessionId,expectedRevision:source.revision},'x-naumi-bots');
++const all=await api.json('/naumi/bot-tasks');let task=all.tasks.find(t=>t.sourceSessionId===run.sourceSessionId&&t.key===run.idempotencyKey);
++if(!task){
++  assert(!run.dispatchSent,'Prior dispatch outcome unknown; do not replay');run.dispatchSent=true;save();
++  task=await api.json('/naumi/bot-tasks',{action:'dispatch',sourceSessionId:run.sourceSessionId,targetBotId:run.targetBotId,output:'files',idempotencyKey:run.idempotencyKey,
++    task:`文件交付联调，只执行本次本地检查。请用 write 工具创建这个唯一的新文件：${run.file}，内容为 Markdown 标题“Naumi 文件预览验证”和一行“文件交付成功”。最终答复只需声明交付文件，并用反引号写出该完整文件路径。此次特意不调用 present，也不调用 bot_task_reply，以验证系统自动登记的兜底。不要读取、修改其他文件，不调用浏览器、外部账号或创建新 Bot。`},'x-naumi-bot-tasks');
++  run.taskId=task.id;run.targetSessionId=task.targetSessionId;save();
++}
++if(!['completed','failed','cancelled','interrupted'].includes(task.status)){
++  const abort=new AbortController(),timer=setTimeout(()=>abort.abort(Error('DELIVERY_TIMEOUT')),180000);
++  try{const events=await api.request('/naumi/bot-tasks/events',{signal:abort.signal});assert.equal(events.status,200);
++    for await(const _ of events.body){task=(await api.json('/naumi/bot-tasks?taskId='+task.id));if(['completed','failed','cancelled','interrupted'].includes(task.status)&&task.messages.some(m=>m.delivered))break;}
++  }finally{clearTimeout(timer);abort.abort();}
++}
++assert.equal(task.status,'completed',task.error);assert.equal(task.delivery.status,'ready');assert.equal(task.delivery.files.length,1);
++assert.equal(path.resolve(task.delivery.files[0].path),path.resolve(run.file));
++await api.rpc('session/wait',{request:{sessionId:run.sourceSessionId,timeoutMs:120000,limit:1}},125000);
++const worker=read(task.targetSessionId),supervisor=read(run.sourceSessionId);
++assert.equal(worker.filter(r=>r.type==='deliverables/presented').length,1);
++assert(!worker.some(r=>r.type==='tool/call'&&r.data.name==='present'),'Expected automatic registration, not model present');
++assert.equal(supervisor.filter(r=>r.type==='deliverables/presented'&&r.data.callId.startsWith('naumi-relay:')).length,1);
++assert(fs.readFileSync(run.file,'utf8').includes('Naumi'));
++assert.deepEqual((await api.json('/naumi/bots')).bots.map(b=>b.id),run.botIds);
++for(const id of [run.sourceSessionId,task.targetSessionId])await api.rpc('workspace/archiveSession',{request:{sessionId:id,stopActivity:false}});
++fs.unlinkSync(run.file);
++const result={tier:'actual local Harness, configured model, real write, durable Session events and task/outbox',taskId:task.id,sourceSessionId:run.sourceSessionId,targetSessionId:task.targetSessionId,workerCard:1,supervisorRelayCard:1,modelPresentCalls:0,sourceReferences:task.delivery.files.map(({sessionId,seq,index,turn})=>({sessionId,seq,index,turn})),taskStatus:task.status,deliveryStatus:task.delivery.status,temporaryFileRemoved:true,testThreadsArchived:2,botsPreserved:true,finishedAt:new Date().toISOString()};
++fs.writeFileSync(path.join(e,'LIVE_VERIFICATION.json'),JSON.stringify(result,null,2)+'\n');
++run.finished=true;save();
++console.log('LIVE worker_card=1 supervisor_card=1 model_present_calls=0 file_refs=VERIFIED task=completed test_threads_archived=2 temporary_file=REMOVED');
+diff --git a/scripts/verify-bot-deliverables.mjs b/scripts/verify-bot-deliverables.mjs
+new file mode 100644
+index 0000000..32079c8
+--- /dev/null
++++ b/scripts/verify-bot-deliverables.mjs
+@@ -0,0 +1,31 @@
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import path from 'node:path';
++import {pathToFileURL} from 'node:url';
++import {createToolResultMessage} from '@deepseek-ai/dsh-llm';
++import {botTaskHost} from '../tests/helpers/bot-task-host.mjs';
++
++const mode=process.argv[2]??'modified';
++if(['baseline','rollback'].includes(mode)){
++  const root=process.argv[3]??'evidence/bot-deliverables/original';
++  const {createBotTaskRuntime,inspectBotMessage}=await import(pathToFileURL(path.resolve(root,'plugins/naumi-enterprise/bot-task-runtime.js')));
++  const runtime=createBotTaskRuntime({});assert.equal(runtime.delivery,undefined);
++  const state=inspectBotMessage([{type:'turn/start',data:{turn:1}},{type:'user/message',data:{id:'request'}},{type:'assistant/message',data:{turn:1,message:{content:[{type:'text',text:'交付文件：`article.md`'}]}}},{type:'turn/end',data:{turn:1,reason:{kind:'completed'}}}],'request');
++  assert(state.text.includes('article.md'));assert(!state.files);
++  console.log(`${mode.toUpperCase()} result=text-only structured_files=ABSENT delivery_check=ABSENT original_behavior=PASS`);
++}else{
++  const f=await botTaskHost();try{
++    const task=await f.service.dispatch(f.sender,{targetBotId:f.targetBot.id,task:'交付 article.md',output:'files',idempotencyKey:'verify-file'});await f.service.settled();
++    const file=path.join(f.dir,'article.md');fs.writeFileSync(file,'# Verified\narticle');
++    await f.complete(task,'交付文件：`article.md`',async(agent,turn)=>{
++      agent.session.append('tool/call',{turn,step:1,callId:'verify-write',name:'write',arguments:JSON.stringify({file_path:file,content:'# Verified\narticle'})});
++      agent.session.append('tool/result',{turn,step:1,message:createToolResultMessage({callId:'verify-write',isError:false,content:[{type:'text',text:'written'}]})},{surfaceOp:'append'});
++    });
++    const done=f.service.current(task.id);assert.equal(done.status,'completed');assert.equal(done.delivery.files.length,1);
++    const reply=f.sender.inbox.nextStep[0];f.sender.session.append('turn/start',{turn:1});f.sender.session.append('user/message',reply,{surfaceOp:'append'});
++    await f.service.runtime.mirror(f.sender.id,reply.id,done.delivery.files);
++    assert.equal(f.sender.session.snapshotEvents().filter(e=>e.type==='deliverables/presented').length,1);
++    const missing=await f.service.dispatch(f.sender,{targetBotId:f.targetBot.id,task:'交付 missing.md',output:'files',idempotencyKey:'verify-missing'});await f.service.settled();await f.complete(missing,'写好了 missing.md');assert.equal(f.service.current(missing.id).error,'BOT_DELIVERY_MISSING');
++    console.log('MODIFIED worker_card=1 supervisor_card=1 source_refs=PERSISTED missing_file=FAILED duplicate_cards=0 PASS');
++  }finally{await f.cleanup();}
++}
+diff --git a/tests/helpers/bot-task-host.mjs b/tests/helpers/bot-task-host.mjs
+index 97a8952..9420281 100644
+--- a/tests/helpers/bot-task-host.mjs
++++ b/tests/helpers/bot-task-host.mjs
+@@ -53,6 +53,7 @@ export async function botTaskHost(){
+     agentPresets:{resolve:async id=>({id:id??'default-preset'}),mount:async(_scope,id)=>{mounts.push(id);},presetForSession:session=>session.header.agentPreset},
+     agentDefaultModel:{currentSelection:()=>({provider:'fixture',model:'default-model'})},
+     sessions:{get:id=>agents.get(id)?.session,flush},
++    workspaceFiles:{async stat(scope,file,signal){signal.throwIfAborted();const absolutePath=await fs.promises.realpath(path.resolve(scope.workspaceRoot,file)),stat=await fs.promises.stat(absolutePath);if(!stat.isFile())throw Error('NOT_REGULAR_FILE');return {absolutePath,version:String(stat.mtimeMs),bytes:stat.size};}},
+     sessionPersistence:{stat:async id=>log.has(id)?{header:log.get(id).header}:null,
+       open:async id=>({header:log.get(id).header,read:async()=>({events:log.get(id).events}),close:async()=>{}})},
+     tools:{},systemPrompt:{},
+@@ -64,11 +65,12 @@ export async function botTaskHost(){
+   const server=http.createServer((req,res)=>{const handler=routes.get(new URL(req.url,'http://localhost').pathname);if(handler)void handler(req,res);else res.writeHead(404).end();});
+   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const origin='http://127.0.0.1:'+server.address().port;
+   const request=(body,{cookie='fixture-owner',originHeader=origin,method=body?'POST':'GET',header=true,url='/naumi/bot-tasks'}={})=>fetch(origin+url,{method,headers:{cookie,origin:originHeader,'Content-Type':'application/json',...(header?{'x-naumi-bot-tasks':'1'}:{})},...(body?{body:typeof body==='string'?body:JSON.stringify(body)}:{})});
+-  const complete=async(task,text='真实会话格式交付')=>{
++  const complete=async(task,text='真实会话格式交付',beforeEnd=()=>{})=>{
+     const agent=agents.get(task.targetSessionId),messages=[...agent.inbox.nextStep];
+     const turn=1;agent.session.append('turn/start',{turn});agent.session.append('agent/inbox/spliced',{target:'next-step',start:0,removedCount:messages.length,inserted:[]});agent.inbox.nextStep.splice(0);
+     agent.session.append('step/start',{turn,step:1});for(const message of messages)agent.session.append('user/message',message,{surfaceOp:'append'});
+     agent.session.append('assistant/message',{turn,step:1,message:createAssistantMessage({source:{kind:'model',provider:'fixture',model:'target-model'},content:[{type:'text',text}]})},{surfaceOp:'append'});
++    await beforeEnd(agent,turn);
+     agent.session.append('turn/end',{turn,reason:{kind:'completed'}});await flush(agent.session);agent.status='idle';ctx.emit('agent/status',{agent,status:'idle'});await service.settled();
+   };
+   return {dir,ctx,services,registry,agents,log,store,directory,sourceBot,targetBot,sender,target,creations,mounts,service,origin,request,complete,
+diff --git a/tests/naumi-bot-deliverables.test.mjs b/tests/naumi-bot-deliverables.test.mjs
+new file mode 100644
+index 0000000..1d25ffd
+--- /dev/null
++++ b/tests/naumi-bot-deliverables.test.mjs
+@@ -0,0 +1,134 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import path from 'node:path';
++import {createToolResultMessage} from '@deepseek-ai/dsh-llm';
++import {parseFileAddress} from '@deepseek-ai/dsh-util-workspace-path';
++import {Session,SessionId} from '@deepseek-ai/dsh-session';
++import {botTaskHost} from './helpers/bot-task-host.mjs';
++import {announcedFiles,references,registerFiles,previewAddress,DELIVERY_PROMPT} from '../plugins/naumi-enterprise/bot-deliverables.js';
++import {BotTaskStore} from '../plugins/naumi-enterprise/bot-task-store.js';
++
++const input=f=>({targetBotId:f.targetBot.id,task:'保存并交付文章文件',idempotencyKey:'article-1',output:'files'});
++const writeEvents=(agent,turn,file,{error=false}={})=>{
++  const callId='fixture-write';
++  agent.session.append('tool/call',{turn,step:1,callId,name:'write',arguments:JSON.stringify({file_path:file,content:'fixture'})});
++  agent.session.append('tool/result',{turn,step:1,message:createToolResultMessage({callId,isError:error,content:[{type:'text',text:error?'write failed':'written'}]})},{surfaceOp:'append'});
++};
++async function start(f){const response=await f.request({action:'dispatch',sourceSessionId:f.sender.id,...input(f)});assert.equal(response.status,200);const task=await response.json();await f.service.settled();return task;}
++
++test('announcements are correlated with successful same-turn writes, not arbitrary paths or source edits',()=>{
++  const events=[{type:'tool/call',data:{turn:1,name:'write',callId:'w',arguments:'{"file_path":"reports/a.md"}'}},
++    {type:'tool/result',data:{message:{toolCallId:'w',isError:false}}},
++    {type:'tool/call',data:{turn:1,name:'edit',callId:'e',arguments:{file_path:'src/code.js'}}},
++    {type:'tool/result',data:{message:{toolCallId:'e',isError:true}}}];
++  assert.deepEqual(announcedFiles(events,1,'交付：`reports/a.md`；另有 `secret.key`、`src/code.js`'),[{path:'reports/a.md'}]);
++  assert.deepEqual(announcedFiles(events,2,'`reports/a.md`'),[]);
++  assert.deepEqual(announcedFiles(events,1,'[文章](<reports/a.md>)'),[{path:'reports/a.md'}]);
++  assert.deepEqual(announcedFiles(events,1,'分析结束，没有文件交付'),[]);
++});
++
++test('automatic registration creates native events, durable source references and an idempotent supervisor card',async()=>{
++  const f=await botTaskHost();try{
++    assert(f.sender.prompts.get('naumi:bot-delivery').text.includes('present'));
++    assert.equal((await f.request(null)).headers.get('x-naumi-bot-delivery'),'1');
++    const task=await start(f),file=path.join(f.dir,'文章 草稿.md');fs.writeFileSync(file,'# 文章\n正文');
++    await f.complete(task,'交付文件：`文章 草稿.md`',async(a,t)=>writeEvents(a,t,file));
++    const done=f.service.current(task.id);assert.equal(done.status,'completed');assert.equal(done.delivery.status,'ready');
++    const ref=done.delivery.files[0];assert.equal(ref.sessionId,task.targetSessionId);assert.equal(ref.path,file);assert(ref.version);assert(ref.bytes>0);
++    const address=parseFileAddress(previewAddress(ref));assert.equal(address.sessionId,task.targetSessionId);assert(address.path.includes('文章 草稿.md'));
++    const worker=f.agents.get(task.targetSessionId),presented=worker.session.snapshotEvents().filter(e=>e.type==='deliverables/presented');
++    assert.equal(presented.length,1);assert.equal(presented[0].seq,ref.seq);assert.equal(presented[0].data.turn,1);
++    const reply=f.sender.inbox.nextStep[0];assert(reply.content[0].text.includes('原始交付坐标'));assert(reply.content[0].text.includes(task.targetSessionId));
++    const fetched=await(await f.request(null,{url:'/naumi/bot-tasks?taskId='+task.id})).json();assert.deepEqual(fetched.messages[0].files,done.delivery.files);
++    const reopened=new BotTaskStore(f.store.file);assert.deepEqual(reopened.read().tasks[0].delivery,done.delivery);await reopened.close();
++    f.sender.session.append('turn/start',{turn:1});f.sender.session.append('user/message',reply,{surfaceOp:'append'});
++    await f.service.runtime.mirror(f.sender.id,reply.id,done.delivery.files);await f.service.runtime.mirror(f.sender.id,reply.id,done.delivery.files);
++    assert.equal(f.sender.session.snapshotEvents().filter(e=>e.type==='deliverables/presented').length,1);
++    // Reconcile and lost outbox acknowledgement never create another attachment or execute work again.
++    await f.service.observeTask(task.id);await f.store.change(d=>{d.outbox[0].delivered=false;return {value:null};});await f.service.settled();
++    assert.equal(worker.session.snapshotEvents().filter(e=>e.type==='deliverables/presented').length,1);assert.equal(f.sender.inbox.nextStep.length,1);
++  }finally{await f.cleanup();}
++});
++
++test('file tasks with text-only completion fail delivery checking and retain the actual text',async()=>{
++  const f=await botTaskHost();try{const task=await start(f);await f.complete(task,'我已经写好了 `missing.md`');const done=f.service.current(task.id);
++    assert.equal(done.status,'failed');assert.equal(done.error,'BOT_DELIVERY_MISSING');assert.equal(done.delivery.status,'missing');assert.match(done.result,/写好了/);
++    assert.equal(f.sender.inbox.nextStep.length,1);assert.match(f.sender.inbox.nextStep[0].content[0].text,/BOT_DELIVERY_MISSING/);
++    const body={...input(f),output:'text'};await assert.rejects(f.service.dispatch(f.sender,body),/IDEMPOTENCY_CONFLICT/);
++  }finally{await f.cleanup();}
++});
++
++test('missing, denied and outside-workspace file announcements cannot become valid deliveries',async()=>{
++  for(const mode of ['missing','denied','outside']){
++    const f=await botTaskHost();try{
++      const task=await start(f),file=mode==='outside'?path.join(path.dirname(f.dir),'not-owned.md'):path.join(f.dir,'missing.md');
++      if(mode==='denied')f.services.workspaceFiles.stat=async()=>{throw Error('READ_DENIED');};
++      if(mode==='outside')f.services.workspaceFiles.stat=async()=>({absolutePath:file,version:'fixture',bytes:1});
++      await f.complete(task,`交付：[文章](<${file}>)`,async(a,t)=>writeEvents(a,t,file));
++      const done=f.service.current(task.id);assert.equal(done.status,'failed');assert.equal(done.error,'BOT_DELIVERY_UNAVAILABLE');
++      assert.equal(f.agents.get(task.targetSessionId).session.snapshotEvents().filter(e=>e.type==='deliverables/presented').length,0);
++    }finally{await f.cleanup();}
++  }
++});
++
++test('explicit file result registers a native card but cannot complete before the actual turn end',async()=>{
++  const f=await botTaskHost();try{
++    const task=await start(f),file=path.join(f.dir,'explicit.md');fs.writeFileSync(file,'explicit');
++    await f.complete(task,'交付已登记',async(agent,turn)=>{
++      await assert.rejects(agent.tools.get('bot_task_reply').execute({taskId:task.id,idempotencyKey:'early',kind:'result',message:'完成'},{agent,signal:new AbortController().signal}),/FILES_REQUIRED/);
++      const response=await agent.tools.get('bot_task_reply').execute({taskId:task.id,idempotencyKey:'files-1',kind:'result',message:'完成文章',files:[{path:file,description:'文章'}]},{agent,callId:'delivery-1',signal:new AbortController().signal});
++      assert.equal(response.awaitingTurnEnd,true);assert.equal(f.service.current(task.id).status,'running');
++      assert.equal(references(agent.session.snapshotEvents(),agent.id,turn).length,1);
++      const tool=agent.tools.get('bot_task_reply'),args={taskId:task.id,idempotencyKey:'files-1',kind:'result',message:'完成文章',files:[{path:file,description:'文章'}]};
++      await Promise.all(Array.from({length:4},(_,i)=>tool.execute(args,{agent,callId:'retry-'+i,signal:new AbortController().signal})));
++      assert.equal(agent.session.snapshotEvents().filter(e=>e.type==='deliverables/presented').length,1);
++      await assert.rejects(tool.execute({...args,files:[{path:file,description:'different'}]},{agent,callId:'conflict',signal:new AbortController().signal}),/IDEMPOTENCY_CONFLICT/);
++      await assert.rejects(tool.execute({...args,idempotencyKey:'cancelled'},{agent,callId:'cancelled',signal:AbortSignal.abort()}),{name:'AbortError'});
++      await agent.tools.get('bot_task_reply').execute({taskId:task.id,idempotencyKey:'registered',kind:'result',message:'完成'},{agent,signal:new AbortController().signal});
++      assert.equal(f.service.current(task.id).status,'running');
++    });assert.equal(f.service.current(task.id).status,'completed');assert.equal(f.service.current(task.id).delivery.files[0].description,'文章');
++  }finally{await f.cleanup();}
++});
++
++test('native present remains authoritative, different turns and forged relay coordinates are rejected',async()=>{
++  const f=await botTaskHost();try{
++    const task=await start(f),file=path.join(f.dir,'native.md');fs.writeFileSync(file,'native');
++    await f.complete(task,'正文完成',async(agent,turn)=>registerFiles(agent.session,turn,[{path:file,description:'原始文件'}],'native-present'));
++    const refs=f.service.current(task.id).delivery.files;assert.equal(refs.length,1);assert.equal(f.agents.get(task.targetSessionId).session.snapshotEvents().filter(e=>e.type==='deliverables/presented').length,1);
++    const reply=f.sender.inbox.nextStep[0];f.sender.session.append('turn/start',{turn:1});f.sender.session.append('user/message',reply,{surfaceOp:'append'});
++    await assert.rejects(f.service.runtime.mirror(f.sender.id,reply.id,[{...refs[0],seq:99999}]),/REFERENCE_MISMATCH/);
++    assert.equal(f.sender.session.snapshotEvents().filter(e=>e.type==='deliverables/presented').length,0);
++    assert.deepEqual(references(f.agents.get(task.targetSessionId).session.snapshotEvents(),task.targetSessionId,2),[]);
++    fs.unlinkSync(file);await assert.rejects(f.service.runtime.mirror(f.sender.id,reply.id,refs));
++  }finally{await f.cleanup();}
++});
++
++test('direct Bot work also publishes announced deliverables without a delegated task',async()=>{
++  const f=await botTaskHost();try{
++    const file=path.join(f.dir,'direct.md');fs.writeFileSync(file,'direct');
++    await f.complete({targetSessionId:f.target.id},'交付文件：`direct.md`',async(a,t)=>writeEvents(a,t,file));
++    const refs=await f.service.runtime.publishTurn(f.target.id,1);assert.equal(refs.length,1);assert.equal(f.store.read().tasks.length,0);
++    assert(DELIVERY_PROMPT.includes('output="files"'));
++  }finally{await f.cleanup();}
++});
++
++test('same-turn native deliveries do not leak from old turns and cross-workspace relay keeps the source authoritative',async()=>{
++  const f=await botTaskHost();try{
++    const task=await start(f),file=path.join(f.dir,'private.md');fs.writeFileSync(file,'source');
++    await f.complete(task,'完成',async(a,t)=>registerFiles(a.session,t,[{path:file}],'present-1'));
++    const refs=f.service.current(task.id).delivery.files,reply=f.sender.inbox.nextStep[0];
++    // The viewer can use the source Session reference; no recipient-local card is forged across workspaces.
++    const otherRoot=path.join(f.dir,'other');fs.mkdirSync(otherRoot);
++    f.sender.session=Session.create(SessionId(f.sender.id),f.sender.session.snapshotEvents(),{...f.sender.session.header,cwd:otherRoot});
++    f.sender.session.append('turn/start',{turn:1});f.sender.session.append('user/message',reply,{surfaceOp:'append'});
++    await assert.rejects(f.service.runtime.mirror(f.sender.id,reply.id,refs),/OUTSIDE_WORKSPACE/);
++    assert.equal(f.sender.session.snapshotEvents().filter(e=>e.type==='deliverables/presented').length,0);
++    const forged=refs.map(r=>({...r,path:path.join(f.dir,'another.md')}));
++    await assert.rejects(f.service.runtime.mirror(f.sender.id,reply.id,forged),/REFERENCE_MISMATCH/);
++    assert(reply.content[0].text.includes(previewAddress(refs[0])));
++    const worker=f.agents.get(task.targetSessionId);worker.session.append('turn/start',{turn:2});worker.session.append('user/message',{id:'new-request',role:'user',source:{kind:'user'},content:[{type:'text',text:'另一任务'}]},{surfaceOp:'append'});
++    worker.session.append('turn/end',{turn:2,reason:{kind:'completed'}});
++    assert.equal((await f.service.runtime.delivery(worker.id,'new-request','files')).status,'missing');
++  }finally{await f.cleanup();}
++});

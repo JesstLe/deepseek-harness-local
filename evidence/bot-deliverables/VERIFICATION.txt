@@ -1,0 +1,60 @@
+Bot file delivery product slice — 2026-11-17
+Branch: codex/bot-file-deliverables-20261117
+Baseline main/origin/main: 1d152ae065b055c38bec64d6ab40b9764a3826a8
+Changed fields: bot_dispatch.output=text|files; task.delivery={requirement,status,files}; outbox.files; native deliverables/presented source/relay events.
+Native file card renderer and previewer are unchanged. Source Session/event coordinates remain authoritative.
+
+FINAL PATHS (retained on main)
+MODIFIED_FILE: E:/Workspace/naumi-desktop/evidence/bot-deliverables/MODIFIED_FILE.zip
+DIFF_FILE: E:/Workspace/naumi-desktop/evidence/bot-deliverables/DIFF_FILE.patch
+VERIFICATION: E:/Workspace/naumi-desktop/evidence/bot-deliverables/VERIFICATION.txt
+ROLLBACK: E:/Workspace/naumi-desktop/evidence/bot-deliverables/ROLLBACK.sh
+Original and modified SHA256 per source path: manifest.json; original bytes: original/.
+
+Working directory for recorded pre-merge commands: E:/Workspace/naumi-bot-file-deliverables
+
+BASELINE
+Command: node scripts/verify-bot-deliverables.mjs baseline
+Input: original runtime, final assistant text "交付文件：`article.md`", no structured delivery API.
+Literal output: BASELINE result=text-only structured_files=ABSENT delivery_check=ABSENT original_behavior=PASS
+Exit status: 0
+Additional baseline regression: node --test tests/naumi-bot-communication.test.mjs tests/naumi-bot-http-runtime.test.mjs tests/naumi-bots.test.mjs
+Result: tests=47 pass=47 fail=0; exit=0.
+
+MODIFIED
+Command: node scripts/verify-bot-deliverables.mjs modified
+Input: isolated real Cordis/Session/HTTP fixture; output=files; successful write and final explicit article.md reference; separate missing-file task.
+Literal output: MODIFIED worker_card=1 supervisor_card=1 source_refs=PERSISTED missing_file=FAILED duplicate_cards=0 PASS
+Exit status: 0
+Evidence tier: deterministic Agent driver, real Session schema/atomic stores/HTTP/files; not an actual model run or user browser acceptance.
+
+REGRESSION
+Command: node --test tests/*.test.mjs desktop/tests/*.test.cjs
+Result: tests=365 pass=365 fail=0; exit=0; full-tests-final.log.
+After final cancellation/idempotency refinements, focused command:
+node --test tests/naumi-bot-deliverables.test.mjs tests/naumi-bot-http-runtime.test.mjs tests/naumi-bot-communication.test.mjs
+Result: tests=36 pass=36 fail=0; exit=0; final-module-tests.log.
+Eight new file-delivery scenarios include missing/denied/outside workspace, same-turn origin, source-reference forgery, native/automatic/explicit cards, duplicate/concurrent declaration, cancellation, persistent ledger reopening and source-scoped preview grammar.
+Packaging command: npm pack ./plugins/naumi-enterprise --dry-run --json
+Result: bot-deliverables.js is included; exit=0.
+
+ROLLBACK
+Command: & 'D:/DEV/Git/bin/bash.exe' evidence/bot-deliverables/ROLLBACK.sh E:/Workspace/naumi-bot-file-deliverables/evidence/bot-deliverables/rollback-copy-final
+Input: explicitly marked independent source copy, guarded by exact modified hashes; never the live checkout or application data.
+Literal output: ROLLBACK_COPY restored=7 removed=6 hashes=PASS active_source=UNCHANGED
+Exit status: 0
+Command: node scripts/verify-bot-deliverables.mjs rollback E:/Workspace/naumi-bot-file-deliverables/evidence/bot-deliverables/rollback-copy-final
+Literal output: ROLLBACK result=text-only structured_files=ABSENT delivery_check=ABSENT original_behavior=PASS
+Exit status: 0
+Restored behavior/status: copy returns the original text-only Bot result API and lacks the new delivery checker. Active source and MODIFIED_FILE retain the changed implementation.
+Old strict-schema binaries do not recognize the new optional ledger fields: this copy-only source rollback is NOT an online task-data downgrade procedure. Preserve ledger metadata; a real downgrade requires a separately validated data plan.
+
+INITIAL FAILURES RETAINED
+module-initial-failure.log: nested file tool schema lacked explicit additionalProperties; corrected.
+fixture-initial-failure.log: new test used toolCallId instead of createToolResultMessage.callId; corrected without changing actual Session schema.
+full-tests.log: 363/364, isolated worktree lacked desktop/node_modules (electron); linked existing desktop dependencies, final full regression passed.
+
+GIT AND LOCAL LOAD
+Source merge, main SHA, local runtime hash/header checks, actual model acceptance and cleanup are recorded separately after integration. This pre-merge file does not claim them completed.
+No existing article or historical Session is rewritten; no model/provider/permission/login setting is changed.
+Installer v0.3.2 is not rebuilt or replaced by this source-module slice.

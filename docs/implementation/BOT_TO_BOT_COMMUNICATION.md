@@ -6,6 +6,8 @@
 
 本地 Bot 目录继续管理稳定身份。新增任务路由器为目标 Bot 创建独立根 Session 并绑定到原 Bot ID，使用原 Harness Agent registry、preset、模型与消息 inbox。原有 UI、Team、模型选择控件与业务登录不变。
 
+文件交付扩展见 [Bot 文件交付](BOT_FILE_DELIVERABLES.md)：`output="files"`、原生文件登记、结构化来源引用和完成检查，不再只回传文字。
+
 ## 实现模块
 
 - `bot-task-store.js`：原子文件事务、版本校验、任务与回复 outbox 同事务落盘。
