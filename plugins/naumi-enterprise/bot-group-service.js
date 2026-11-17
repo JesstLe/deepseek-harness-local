@@ -84,6 +84,8 @@ export class BotGroupService {
     return post;
   }
 
+  readPost(roomId,postId){if(!this.store.room(roomId))fail('BOT_GROUP_NOT_FOUND');return this.store.postById(roomId,postId);}
+
   read(roomId, before) {
     this.alignPrimary();
     const room = this.store.room(roomId);
