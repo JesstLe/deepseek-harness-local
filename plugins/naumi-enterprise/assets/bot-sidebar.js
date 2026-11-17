@@ -19,7 +19,7 @@ function installNavigation(ctx,React,Icon,createPortal){
     const target=receptionTarget(bot,jobs.tasks,sessions,workspaces),state=jobs.status==='ready'?employeeTaskState(bot,jobs.tasks,botActivity(bot,sessions,status)):botActivity(bot,sessions,status),rows=botSessions(bot,sessions,workspaces);
     const active=employeeTasks(bot,jobs.tasks).active.filter(t=>t.targetBotId===bot.id);
     const stateName={running:'工作中',starting:'准备中',waiting:'待你确认',queued:'排队中',idle:'待命',unknown:'待同步'}[state];
-    const open=id=>{setError(null);try{ctx.layout.beginNavigation();ctx.uiWorkspace.openSession(id);}catch{setError('任务暂未就绪');}};
+    const open=id=>{setError(null);try{ctx.layout.beginNavigation?.();ctx.uiWorkspace.openSession(id);}catch{setError('任务暂未就绪');}};
     const newTask=async()=>{
       if(flight.current)return;flight.current=true;setBusy(true);setError(null);let id=unbound;
       try{
