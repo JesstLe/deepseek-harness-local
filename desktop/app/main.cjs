@@ -8,11 +8,12 @@ const {Guests}=require('./guests.cjs');
 const {startBridge}=require('./tools.cjs');
 const {localSettings,ensureBackend,stopBackend,createQuitGate,maintenanceRequest}=require('./backend.cjs');
 const installerState=require('./installer-state.cjs');
+const {createDesktopUpdates}=require('./updates.cjs');
 app.setName('Naumi');app.setAppUserModelId('com.naumi.desktop');
 if(process.env.NAUMI_USER_DATA)app.setPath('userData',path.resolve(process.env.NAUMI_USER_DATA));
 if(process.env.NAUMI_TEST_HIDDEN==='1'){app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');app.commandLine.appendSwitch('disable-renderer-backgrounding');}
 const locked=app.requestSingleInstanceLock();
-let window,primarySession,guests,bridge,backend,settings,enterprise,login,loginAfterBoot=false,booting=false,closing=false,connecting=false,editingConnection=false,connectionFlight,maintenanceTicket=null,maintenanceUntil=0;
+let window,primarySession,guests,bridge,backend,settings,enterprise,login,loginAfterBoot=false,booting=false,closing=false,connecting=false,editingConnection=false,connectionFlight,maintenanceTicket=null,maintenanceUntil=0,updates=null;
 if(!locked){app.quit();}else{
 app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.show();window.focus();}});
 app.whenReady().then(async()=>{
@@ -21,6 +22,13 @@ app.whenReady().then(async()=>{
  const icon=path.join(__dirname,'assets/naumi.ico');
  window=new BrowserWindow({width:1460,height:930,minWidth:1000,minHeight:640,show:false,title:'Naumi',backgroundColor:'#f7f9fc',icon,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webviewTag:true,partition:'persist:naumi-workbench',spellcheck:false,backgroundThrottling:false}});
  primarySession=window.webContents.session;
+ if(app.isPackaged||process.env.NAUMI_UPDATE_DEV==='1'){
+  try{
+   const {autoUpdater}=require('electron-updater');
+   updates=createDesktopUpdates({app,updater:autoUpdater,notify:showUpdateNotice,canInstall:canInstallUpdate,broadcast:snapshot=>{if(window&&!window.isDestroyed())window.webContents.send('naumi:update-state',snapshot);}});
+   const started=updates.start();if(!started.ok)console.warn('[updates] disabled:',started.error);
+  }catch(error){console.warn('[updates] unavailable:',error.message);}
+ }
  window.on('close',()=>{closing=true;});
  window.on('page-title-updated',e=>{e.preventDefault();window.setTitle('Naumi');});
  window.webContents.on('will-navigate',(event,url)=>{if(settings&&new URL(url).origin!==settings.url)event.preventDefault();});
@@ -42,6 +50,8 @@ app.whenReady().then(async()=>{
  ipcMain.handle('naumi:browser-release',(e,lease)=>{trusted(e);return guests.release(e.sender,lease);});
  ipcMain.handle('naumi:browser-bind',(e,value)=>{trusted(e);return guests.bind(e.sender,value);});
  ipcMain.handle('naumi:retry',e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');void boot();});
+ ipcMain.handle('naumi:update-state',e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');return updates?updates.snapshot():{enabled:false,status:'disabled',currentVersion:app.getVersion(),version:null,notes:'',progress:null,error:null};});
+ ipcMain.handle('naumi:update-check',async e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');return updates?updates.check():{ok:false,error:'UPDATE_FEED_UNCONFIGURED'};});
  ipcMain.handle('naumi:connection-state',e=>{if(!localPage(e,['connect.html','startup.html']))trusted(e);if(!settings?.isolated)return {available:false};return {available:true,...workspaceSummary(app.getPath('userData'))};});
  ipcMain.handle('naumi:connection-settings',async e=>{
   if(!localPage(e,['startup.html']))trusted(e);if(!settings?.isolated||booting||connecting)return {ok:false,error:'WORKSPACE_SETTINGS_BUSY'};
@@ -106,6 +116,18 @@ async function boot(){
  finally{booting=false;if(process.env.NAUMI_TEST==='1')globalThis.__naumiTest={window,guests,bridge,settings,backend,enterprise,get login(){return login;}};}
 }
 function maintenanceBlocked(){if(maintenanceTicket&&Date.now()>=maintenanceUntil){maintenanceTicket=null;}return !!maintenanceTicket;}
+function canInstallUpdate(){
+ if(closing||booting||connecting)return {ok:false,reason:'WORKSPACE_BUSY'};
+ if(maintenanceBlocked())return {ok:false,reason:'INSTALL_MAINTENANCE_ACTIVE'};
+ if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0)return {ok:false,reason:'WORKSPACE_OPERATIONS_IN_FLIGHT'};
+ return {ok:true};
+}
+async function showUpdateNotice(snapshot){
+ if(!window||window.isDestroyed())return 1;
+ const detail=(snapshot.notes||'（本次更新未提供更新日志）')+'\n\n当前版本 '+snapshot.currentVersion+' → 新版本 '+snapshot.version;
+ const {response}=await dialog.showMessageBox(window,{type:'info',buttons:['立即重启更新','稍后'],defaultId:1,cancelId:1,noLink:true,title:'Naumi 更新',message:'新版本 '+snapshot.version+' 已下载完成',detail});
+ return response;
+}
 async function performMaintenance(action,ticket){
  if(maintenanceBlocked()&&maintenanceTicket!==ticket)throw Error('INSTALL_MAINTENANCE_BUSY');
  if(action==='resume'){if(backend&&settings)await maintenanceRequest(settings,'resume',ticket);maintenanceTicket=null;return;}

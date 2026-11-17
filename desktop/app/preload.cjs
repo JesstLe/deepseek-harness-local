@@ -18,5 +18,8 @@ contextBridge.exposeInMainWorld('naumiDesktop',{
   connectionSettings:()=>ipcRenderer.invoke('naumi:connection-settings'),
   cancelConnection:()=>ipcRenderer.invoke('naumi:connection-cancel'),
   resumeWorkspace:()=>ipcRenderer.invoke('naumi:connection-resume'),
+  updateState:()=>ipcRenderer.invoke('naumi:update-state'),
+  checkUpdates:()=>ipcRenderer.invoke('naumi:update-check'),
+  onUpdateState:listener=>subscribe('naumi:update-state',listener),
   product:'Naumi'
 });
