@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
+import {fileReference,deliveryCheck} from './bot-deliverables.js';
 
 const id=z.string().min(1).max(200),text=z.string().min(1).max(32000),stamp=z.string().datetime();
 export const TASK_STATES=['queued','starting','running','waiting','completed','failed','cancelled','interrupted'];
@@ -11,9 +12,10 @@ const profileSchema=z.object({agentPreset:id.optional(),model:z.object({provider
 const taskSchema=z.object({id,key:id,sourceBotId:id,sourceSessionId:id,targetBotId:id,targetSessionId:id,targetCwd:z.string().min(1).max(4096),
   profile:profileSchema,task:text,status:z.enum(TASK_STATES),revision:z.number().int().positive(),attempt:z.number().int().positive().max(100),
   messageId:id,lineage:z.array(id).min(2).max(5),parentTaskId:id.optional(),createdAt:stamp,updatedAt:stamp,
+  output:z.enum(['text','files']).optional(),delivery:deliveryCheck.optional(),
   result:z.string().max(32000).optional(),progress:z.string().max(4000).optional(),error:id.optional()}).strict();
 const outboxSchema=z.object({id,taskId:id,key:z.string().min(1).max(400),messageId:id,fromSessionId:id,toSessionId:id,
-  attempt:z.number().int().positive(),taskStatus:z.enum(TASK_STATES),kind:z.enum(['message','progress','blocked','result','status']),text,delivered:z.boolean(),error:id.optional(),createdAt:stamp}).strict();
+  attempt:z.number().int().positive(),taskStatus:z.enum(TASK_STATES),kind:z.enum(['message','progress','blocked','result','status']),text,files:z.array(fileReference).max(8).optional(),delivered:z.boolean(),error:id.optional(),createdAt:stamp}).strict();
 const schema=z.object({version:z.literal(1),revision:z.number().int().nonnegative(),tasks:z.array(taskSchema).max(1000),outbox:z.array(outboxSchema).max(10000)}).strict().superRefine((doc,ctx)=>{
   const ids=new Set(),keys=new Set(),sessions=new Set();
   for(const task of doc.tasks){const key=task.sourceSessionId+'\0'+task.key;if(ids.has(task.id)||keys.has(key)||sessions.has(task.targetSessionId)||new Set(task.lineage).size!==task.lineage.length)ctx.addIssue({code:'custom',message:'Duplicate Bot task identity'});ids.add(task.id);keys.add(key);sessions.add(task.targetSessionId);}

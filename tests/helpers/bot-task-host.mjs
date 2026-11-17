@@ -53,6 +53,7 @@ export async function botTaskHost(){
     agentPresets:{resolve:async id=>({id:id??'default-preset'}),mount:async(_scope,id)=>{mounts.push(id);},presetForSession:session=>session.header.agentPreset},
     agentDefaultModel:{currentSelection:()=>({provider:'fixture',model:'default-model'})},
     sessions:{get:id=>agents.get(id)?.session,flush},
+    workspaceFiles:{async stat(scope,file,signal){signal.throwIfAborted();const absolutePath=await fs.promises.realpath(path.resolve(scope.workspaceRoot,file)),stat=await fs.promises.stat(absolutePath);if(!stat.isFile())throw Error('NOT_REGULAR_FILE');return {absolutePath,version:String(stat.mtimeMs),bytes:stat.size};}},
     sessionPersistence:{stat:async id=>log.has(id)?{header:log.get(id).header}:null,
       open:async id=>({header:log.get(id).header,read:async()=>({events:log.get(id).events}),close:async()=>{}})},
     tools:{},systemPrompt:{},
@@ -64,11 +65,12 @@ export async function botTaskHost(){
   const server=http.createServer((req,res)=>{const handler=routes.get(new URL(req.url,'http://localhost').pathname);if(handler)void handler(req,res);else res.writeHead(404).end();});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const origin='http://127.0.0.1:'+server.address().port;
   const request=(body,{cookie='fixture-owner',originHeader=origin,method=body?'POST':'GET',header=true,url='/naumi/bot-tasks'}={})=>fetch(origin+url,{method,headers:{cookie,origin:originHeader,'Content-Type':'application/json',...(header?{'x-naumi-bot-tasks':'1'}:{})},...(body?{body:typeof body==='string'?body:JSON.stringify(body)}:{})});
-  const complete=async(task,text='真实会话格式交付')=>{
+  const complete=async(task,text='真实会话格式交付',beforeEnd=()=>{})=>{
     const agent=agents.get(task.targetSessionId),messages=[...agent.inbox.nextStep];
     const turn=1;agent.session.append('turn/start',{turn});agent.session.append('agent/inbox/spliced',{target:'next-step',start:0,removedCount:messages.length,inserted:[]});agent.inbox.nextStep.splice(0);
     agent.session.append('step/start',{turn,step:1});for(const message of messages)agent.session.append('user/message',message,{surfaceOp:'append'});
     agent.session.append('assistant/message',{turn,step:1,message:createAssistantMessage({source:{kind:'model',provider:'fixture',model:'target-model'},content:[{type:'text',text}]})},{surfaceOp:'append'});
+    await beforeEnd(agent,turn);
     agent.session.append('turn/end',{turn,reason:{kind:'completed'}});await flush(agent.session);agent.status='idle';ctx.emit('agent/status',{agent,status:'idle'});await service.settled();
   };
   return {dir,ctx,services,registry,agents,log,store,directory,sourceBot,targetBot,sender,target,creations,mounts,service,origin,request,complete,
