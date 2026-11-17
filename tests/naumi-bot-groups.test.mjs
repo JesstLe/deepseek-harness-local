@@ -116,3 +116,47 @@ test('group history stays isolated and only tasks dispatched by its own sessions
   assert.equal(f.service.read(room.id).tasks[0].files[0].path,'稿件.md');
   assert.equal(f.service.read(room.id).tasks.length,1);
 });
+
+test('a long group turn recalls older exact user statements and reply excerpts after restart',async t=>{
+  const f = fixture(t), room = f.create(), other = f.create({name:'另一个群'});
+  const record = (group,user,reply='收到') => {
+    const {seq} = f.store.post({id:randomUUID(),roomId:group.id,text:user,botIds:[]},() => [group.members[0]]);
+    const [{id}] = f.store.pending().filter(row => row.postSeq === seq);
+    f.store.transition(id,'queued','completed',{text:reply});
+    return seq;
+  };
+  const userText = '青鸟项目首年预算是 12 万元，审批人是李明。';
+  const replyText = '青鸟项目账期固定为 45 天。';
+  const older = record(room,userText,'历史补充。'.repeat(120)+replyText);
+  const referenced = record(room,'规格编号为 P2。');
+  const privateSeq = record(other,'青鸟项目预算其实是 999 万元。');
+  for (let i=0; i<10; i+=1) record(room,`第 ${i+1} 次日常简报。`);
+  await f.reopen();
+  const {seq:current} = f.post(room,`请回忆“青鸟项目”的预算和账期，以及 #${referenced}、#${privateSeq}。`);
+  record(room,'青鸟项目预算的未来更新。');
+  await f.service.kick();
+  const context = JSON.parse(f.service.context(room.members[0].sessionId).split('\n').at(-1));
+  assert.equal(context.previous.length,8);
+  assert(context.previous.every(item => item.seq < current));
+  assert.deepEqual(context.history.map(item => item.seq),[older,referenced]);
+  const restored = context.history[0];
+  assert.deepEqual(restored.user,{text:userText,truncated:false});
+  assert.match(restored.responses[0].text,/青鸟项目账期固定为 45 天。/);
+  assert.equal(restored.responses[0].truncated,true);
+  assert.equal(context.history[1].user.text,'规格编号为 P2。');
+  assert.doesNotMatch(JSON.stringify(context),/999 万元|未来更新/);
+});
+
+test('historical lookup has a four-message limit and matches only completed replies',async t=>{
+  const f = fixture(t), room = f.create();
+  const seqs = [];
+  for (let i=0; i<6; i+=1) {
+    const {seq} = f.store.post({id:randomUUID(),roomId:room.id,text:`预算条目 ${i}`,botIds:[]},() => [room.members[0]]);
+    const [{id}] = f.store.pending().filter(row => row.postSeq === seq);
+    f.store.transition(id,'queued','blocked',{text:'隐藏草稿'});
+    seqs.push(seq);
+  }
+  assert.deepEqual(f.store.history(room.id,{recentFrom:Number.MAX_SAFE_INTEGER,terms:['预算'],references:[seqs[0]]}).map(post=>post.seq),
+    [seqs[0],...seqs.slice(-3)]);
+  assert.deepEqual(f.store.history(room.id,{recentFrom:Number.MAX_SAFE_INTEGER,terms:['隐藏草稿'],references:[]}),[]);
+});

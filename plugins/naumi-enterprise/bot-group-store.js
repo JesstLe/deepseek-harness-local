@@ -103,12 +103,38 @@ export class BotGroupStore {
   }
 
   posts(roomId, {before = Number.MAX_SAFE_INTEGER, limit = 50} = {}) {
+    const posts = this.db.prepare(`SELECT id, seq, text, created_at AS createdAt FROM posts
+      WHERE room_id=? AND seq<? ORDER BY seq DESC LIMIT ?`).all(roomId, before, limit).reverse();
+    return this.withReplies(posts);
+  }
+
+  withReplies(posts) {
     const loadReplies = this.db.prepare(`SELECT r.id, m.bot_id AS botId, r.session_id AS sessionId,
       r.state, r.text, r.reason, r.updated_at AS updatedAt FROM replies r JOIN members m USING (session_id)
       WHERE post_seq=? ORDER BY m.position`);
-    return this.db.prepare(`SELECT id, seq, text, created_at AS createdAt FROM posts
-      WHERE room_id=? AND seq<? ORDER BY seq DESC LIMIT ?`).all(roomId, before, limit).reverse()
-      .map(post => ({...post, replies:loadReplies.all(post.seq)}));
+    return posts.map(post => ({...post, replies:loadReplies.all(post.seq)}));
+  }
+
+  history(roomId, {before = Number.MAX_SAFE_INTEGER, recentFrom, terms, references}) {
+    if (!terms.length && !references.length) return [];
+    const matches = this.db.prepare(`WITH needles AS (SELECT value AS term FROM json_each(?)),
+      refs AS (SELECT value AS seq FROM json_each(?)),
+      ranked AS (
+        SELECT p.id, p.seq, p.text, p.created_at AS createdAt,
+          p.seq IN (SELECT seq FROM refs) AS requested,
+          CASE WHEN p.seq < ? THEN (SELECT count(*) FROM needles n WHERE
+            instr(lower(p.text), n.term) > 0 OR EXISTS (
+              SELECT 1 FROM replies r WHERE r.post_seq=p.seq AND r.state='completed' AND instr(lower(r.text),n.term) > 0
+            )) ELSE 0 END AS score
+        FROM posts p WHERE p.room_id=? AND p.seq<?
+      )
+      SELECT id, seq, text, createdAt FROM ranked WHERE requested OR score>0 ORDER BY requested DESC, score DESC, seq DESC LIMIT 4`)
+      .all(JSON.stringify(terms), JSON.stringify(references), recentFrom, roomId, before);
+    return this.withReplies(matches.sort((a,b) => a.seq-b.seq));
+  }
+
+  postText(roomId, seq) {
+    return this.db.prepare('SELECT text FROM posts WHERE room_id=? AND seq=?').get(roomId, seq)?.text ?? '';
   }
 
   activeSeq(sessionId) {
