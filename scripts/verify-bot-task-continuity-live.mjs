@@ -33,7 +33,7 @@ const awaitTask=async predicate=>{
   finally{clearTimeout(timer);abort.abort();}
   throw Error('CONTINUITY_EVENT_STREAM_ENDED');
 };
-if(!run.firstSent){run.firstSent=true;save();await prompt(run.firstRequest,`这是同任务续办验收：请让已有的“${run.targetName}”Bot 在它自己的任务会话只回复 NAUMI_CONTINUITY_ORIGINAL。不要创建替代队友或新 Bot，不读写文件、不做外部操作。`);}
+if(!run.firstSent){run.firstSent=true;save();await prompt(run.firstRequest,`请创建一项全新的独立测试任务，不是续办、修改或重试任何历史任务。让已有的“${run.targetName}”Bot 在它自己的任务会话只回复 NAUMI_CONTINUITY_ORIGINAL。先用 bot_directory 找到它再 bot_dispatch；不要读取历史任务或创建替代队友/新 Bot，不读写文件、不做外部操作。`);}
 if(!run.firstCompleted){
   await idle();const rows=await awaitTask(rows=>rows.length>0&&rows.every(t=>['completed','failed','cancelled','interrupted'].includes(t.status)));
   assert.equal(rows.length,1);const t=rows[0];assert.equal(t.status,'completed',t.error);assert(t.result.includes('NAUMI_CONTINUITY_ORIGINAL'));
