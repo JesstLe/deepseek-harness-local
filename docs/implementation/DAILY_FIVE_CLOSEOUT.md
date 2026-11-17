@@ -60,3 +60,15 @@ BotDirectory / 原生 Session、BotTaskStore、原生标题事件和工作区服
 - D2最终计数沿用主线程补正：13检查、10原生会话回合、2次宿主启动；22为本地隔离连接入口计数，不是精确上游收费调用数，原生持久事件18条已提交模型响应。本文不重跑真实模型。
 - D2加载后本线程只读复核104sessions/0running/4bots/catalog revision47，4个独立cwd和3个新home保持。D2通知中revision46为旧口径，已按实时47说明。
 - 最终依赖stage核验完成：source dbaaee9，package invocation5ffd5f7，两者plugins/desktop无差异；D2四份文件刷新、其余45614文件哈希通过，45618总文件，closure PASS。后续主线程证据提交不改变本次打包产品代码。
+
+## 文件归属交接（2026-11-18）
+- bot-task-service.js / bot-task-store.js / bot-tasks.js 本轮修改已收口，主线程接续目标—派单—交付的可选已确认Goal引用；本线程不再追加这些文件。
+- 交接保留fileReference.snapshot、deliveryHistory，以及continue/retry/direct continuation中的archiveDelivery调用；继续复用现有任务/交付和原生会话。
+- 本轮0.3.6是当前候选，不代表完整自然Goal愿景完成；任务目标关联、Codex/Claude导入及整体目标验收仍由后续切片处理。钉钉真实私聊延期不变。
+
+## 安装升级验收发现与修复
+- 首轮真实/currentuser：0.3.5安装exit0，0.3.6手动覆盖安装exit0，但旧卸载器未收到--keep-shortcuts，删除原有桌面Naumi.lnk；保护检查失败，INSTALLATION_FIRST.log / INSTALL_PENDING_FIRST.json保留，未发布草稿。
+- 原入口已按Cloud47既有目标与原Icon恢复，SHORTCUT_RESTORED.json明确exact=false：功能与目标恢复，重建后的二进制hash不等同验收前；不记成“原字节保持”。Program Files原安装与HKLM保留。后续验收先保存恢复后快捷方式原字节。
+- 根因是stock setIsTryToKeepShortcuts在allowToChangeInstallationDirectory时将所有手动安装置false，哪怕原目录已有支持保留链接的Naumi.exe。新增upgrade-shortcuts.nsh只调整该能力选择：原目录手动升级采用已有支持--keep-shortcuts的路径；新安装/更换目录仍保留stock行为，原生自动更新不变。
+- 原engine仍保留stock提取、旧卸载器、签名、大小检查、维护锁与注册，只追加精确校验的shortcut policy include；原始/修改engine hash重新生成。NSIS真实宏5例通过：baseline manual=false，modified manual=true，fresh=false，auto=true，changed-directory=false；没有注册表/用户快捷方式写入。
+- 安装器模块11/11通过。最终复测从已安装旧策略0.3.6覆盖到修订版0.3.6，保留最初0.3.5安装及退出回执；不把这次补测写成第二次干净的0.3.5起点。当前候选仍未公开。
