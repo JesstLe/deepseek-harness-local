@@ -90,3 +90,7 @@
 ## M4 受控主动AI交付
 
 HBT-003已从确定性通知/待办延伸到明确批准的真实AI消费：固定Bot/现有受管根会话/任务/目标/模型、批准nonce、预算预检与最终网关、人工优先、部分产物保留、UNKNOWN不重放与负责人核对。251/233回归、11 UI、真实硬杀和53项副本回滚已通过，实际3080接入。实现/边界详见 EMPLOYEE_PROACTIVE_AI_M4.md；M5与真实供应商/员工业务验收继续。
+
+## 日常优先增量：local-owner 主动执行
+
+D1的4个静态资源已从固定main406277c加载，HTTP200，117个无关运行文件保持，94sessions/0running/4bots/revision40，无重启/模型调用。新日常Goal已实查active。D4新增local-owner准入与回执策略，共用原规则队列/AgentLoop/Native工具和工作/交付组件，不需企业登记，不改企业策略。当前最终源码/隔离验收/运行加载边界见 `../implementation/LOCAL_PROACTIVE_EXECUTION.md` 与 `evidence/local-proactive/VERIFICATION.txt`，D2/D3/D5仍继续，不以该切片关闭总目标。
