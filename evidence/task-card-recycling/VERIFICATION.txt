@@ -1,0 +1,47 @@
+TASK CARD RECYCLING — 2026-11-17
+Branch: codex/task-card-recycling-20261117
+Baseline main/origin/main: 65eac8479022234946bf2923246a02cdb69e215d
+Changed fields/branches: taskDockRows.current/history/nextExpiry; TASK_CARD_RETENTION_MS=8000; local presentation dismissal identity=[task.id,attempt,status]; bounded history and reading pin. No backend/task-ledger fields changed.
+
+FINAL ARTIFACT PATHS
+MODIFIED_FILE: E:/Workspace/naumi-desktop/evidence/task-card-recycling/MODIFIED_FILE.zip
+DIFF_FILE: E:/Workspace/naumi-desktop/evidence/task-card-recycling/DIFF_FILE.patch
+VERIFICATION: E:/Workspace/naumi-desktop/evidence/task-card-recycling/VERIFICATION.txt
+ROLLBACK: E:/Workspace/naumi-desktop/evidence/task-card-recycling/ROLLBACK.sh
+Original bytes and SHA256 are preserved in original/ and manifest.json. Archive has 9 explicit source/test/script/document paths.
+
+BASELINE
+Command: node scripts/verify-task-card-recycling.mjs baseline
+Input: original presentation module, one running and two settled old tasks in one conversation.
+Literal output: BASELINE visible_cards=3 completed_card=STICKY history=ABSENT original_behavior=PASS
+Exit status: 0
+Baseline regression: node --test tests/naumi-async-bot.test.mjs
+Result: tests=8 pass=8 fail=0, exit=0, baseline-tests.log.
+
+MODIFIED
+Command: node scripts/verify-task-card-recycling.mjs modified
+Input: same task catalog, then a new completion, eight-second expiry and explicit local dismissal.
+Literal output: MODIFIED active_cards=1 archived_cards=2 auto_recycle_ms=8000 manual_dismiss=PASS task_data=UNCHANGED
+Exit status: 0
+Concentrated regression: node --test tests/*.test.mjs desktop/tests/*.test.cjs
+Result: tests=391 pass=391 fail=0, exit=0, full-tests.log.
+
+UI
+Command: node scripts/verify-task-card-recycling-ui.mjs
+Input: real Harness shell with only the three candidate assets, read-only task catalog and controlled browser clock. No task/model writes.
+Literal output: RECYCLE_UI checks=20 errors=0 model_task_writes=0 contexts_closed=1
+Exit status: 0
+Verified old-card recycling, 8-second receipt, no-event timeout, active task preservation, expanded reading pin, manual dismissal/reload, new attempt, failure badge, bounded history, draft/model preservation, 360px fit, one subscription. Cropped synthetic-only screenshots were reopened and inspected.
+
+ROLLBACK
+Command: & 'D:/DEV/Git/bin/bash.exe' evidence/task-card-recycling/ROLLBACK.sh E:/Workspace/naumi-desktop/.dsh/task-card-recycling-rollback-copy-20261117
+Input: explicitly marked independent source copy; all original and modified hashes verified before restoration.
+Literal output: ROLLBACK_COPY restored=5 removed=4 hashes=PASS active_source=UNCHANGED
+Exit status: 0
+Command: node scripts/verify-task-card-recycling.mjs rollback E:/Workspace/naumi-desktop/.dsh/task-card-recycling-rollback-copy-20261117/plugins/naumi-enterprise/assets
+Literal output: ROLLBACK visible_cards=3 completed_card=STICKY history=ABSENT original_behavior=PASS
+Exit status: 0
+Restored behavior/status: original sticky completed-card presentation in the copy; active source and MODIFIED_FILE remain changed. This rollback changes source files only; no tasks, files or persisted results are deleted.
+
+LOCAL LOAD
+Pending pre-merge: load only the three static assets from fixed main, no process restart. At initial observation running=1; do not stop or modify that session. Actual loaded UI and runtime receipt recorded after merge.

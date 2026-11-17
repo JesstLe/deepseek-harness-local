@@ -1,0 +1,306 @@
+diff --git a/docs/changes/2026-11-17-task-card-recycling.md b/docs/changes/2026-11-17-task-card-recycling.md
+new file mode 100644
+index 0000000..5b67cf3
+--- /dev/null
++++ b/docs/changes/2026-11-17-task-card-recycling.md
+@@ -0,0 +1,24 @@
++# 输入区任务卡回收
++
++## 模块与职责
++
++本任务只负责 `assets/bot-task-model.js`、`bot-task-ui.js`、`bot-task.css` 的展示生命周期；更新对应测试、验收脚本与文档。负责人为本线程，无并行子任务。基线 main/origin/main：`65eac8479022234946bf2923246a02cdb69e215d`；独立分支 `codex/task-card-recycling-20261117`，worktree `E:/Workspace/naumi-task-card-recycling`。
++
++## 公共接口、依赖方向、数据/状态/事务归属
++
++任务账本及 Session 继续拥有业务状态、结果和文件。UI 只按会话、终态时间和本地收起偏好计算 current/history，不写任务 API，不改变派单/等待/回传/取消/重试。偏好只存 task ID、attempt、status 组成的标识，最多 500 条，不保存任务正文、结果或凭据。
++
++## 本次实现与迁移状态
++
++- queued/starting/running/waiting 和未知状态保留；终态 completed/failed/cancelled/interrupted 展示 8 秒后自动归入历史。首次打开时已过期的旧卡片立即回收。
++- 用户展开正在阅读的详情时暂停自动回收；关闭详情后已过期的卡片立即归档。终态卡片支持手动收起，刷新及多标签页同步；新 attempt 不受旧偏好影响。
++- 无当前任务时只留一行“任务记录”，异常数仍可发现；历史按需展开、每次渲染 10 条并可加载更多。成果、文件预览和任务会话入口保留。
++- 使用一个最近到期 timeout，无轮询及逐卡定时器；卸载/切换会话清理，不触发模型调用。
++
++## 验证命令、结果及证据层级
++
++基线异步模块 8/8 通过。定向生命周期、真实壳受控数据 UI、全仓回归与加载后真实只读页面分层记录于 `evidence/task-card-recycling/VERIFICATION.txt`。
++
++## 未完成项与下一步
++
++进行中：集中测试、副本回滚、普通合并/推送、从 main 只更新三份静态资源并做实际页面检查。当前观察到用户会话 running=1，不重启或中断服务。该资源路由逐次读取文件且 no-cache，可无重启加载，现有页面刷新后使用新模块。功能切片计数 1；不涉及安装包或完整头像设计。
+diff --git a/docs/implementation/ASYNC_BOT_CONVERSATION.md b/docs/implementation/ASYNC_BOT_CONVERSATION.md
+index d074b33..7b6dfbc 100644
+--- a/docs/implementation/ASYNC_BOT_CONVERSATION.md
++++ b/docs/implementation/ASYNC_BOT_CONVERSATION.md
+@@ -40,6 +40,12 @@ bot_dispatch({targetBotId:"bot-<实际目录 ID>",task:"生成活动文案",outp
+ - 头像仅在真实 working 状态显示轻量动效，排队和待确认分别展示；支持系统减少动态效果。离线/权限丢失不制造任务或虚构进度。
+ - 三张以上卡片可展开全部，任务区限定高度；长结果按需展开，保持聊天输入区域可用。
+ 
++### 任务卡回收
++
++输入区只保留当前任务与短时结束回执。排队、准备、运行、待确认及未知状态继续显示；完成、失败、取消、中断在 `updatedAt` 后 8 秒收进“任务记录”，打开页面时过期旧卡片不再展开。正在阅读的详情暂停自动回收，收起详情后恢复；终态卡片也可手动关闭。收起只影响展示，不删除任务、文件或结果，不取消执行。
++
++本地偏好以 ID/attempt/status 为键，最多 500 条并同步同源标签页；刷新仍保留手动收起状态，重试的新 attempt 自动重新出现。任务记录默认仅一行入口，异常数保留；展开后按 10 条逐步加载，可继续查看执行会话、原结果与文件预览。仅使用一个最近到期 timeout，不为每张卡建立轮询。见 [任务卡回收记录](../changes/2026-11-17-task-card-recycling.md)。
++
+ ## 验证
+ 
+ 原通信/交付基线 36/36。实现后全仓 385/385；新增定向覆盖后台受理、无等待器、必要依赖 wait、next-turn 对正在聊天的隔离、消息去重/重开、取消失败、接待入口和共享订阅权限。
+diff --git a/plugins/naumi-enterprise/assets/bot-task-model.js b/plugins/naumi-enterprise/assets/bot-task-model.js
+index 0f9ddce..42a7917 100644
+--- a/plugins/naumi-enterprise/assets/bot-task-model.js
++++ b/plugins/naumi-enterprise/assets/bot-task-model.js
+@@ -17,6 +17,32 @@ export function receptionTarget(bot,tasks,sessions,workspaces){
+ export function sessionTasks(tasks,sessionId){
+   return tasks.filter(t=>t.sourceSessionId===sessionId||t.targetSessionId===sessionId).sort((a,b)=>Number(ACTIVE_TASKS.has(b.status))-Number(ACTIVE_TASKS.has(a.status))||b.updatedAt.localeCompare(a.updatedAt));
+ }
++export const SETTLED_TASKS=new Set(['completed','failed','cancelled','interrupted']);
++export const TASK_CARD_RETENTION_MS=8000;
++export const TASK_CARD_DISMISSALS_KEY='naumi.taskCards.dismissed.v1';
++export const taskCardIdentity=task=>JSON.stringify([task.id,task.attempt??1,task.status]);
++export function readTaskCardDismissals(storage){
++  try{const value=JSON.parse((storage??globalThis.localStorage)?.getItem(TASK_CARD_DISMISSALS_KEY)??'[]');return Array.isArray(value)?value.filter(v=>typeof v==='string'&&v.length<500).slice(-500):[];}catch{return [];}
++}
++export function dismissTaskCard(task,current=[],storage){
++  if(!SETTLED_TASKS.has(task.status))return current;
++  const key=taskCardIdentity(task),value=[...new Set([...readTaskCardDismissals(storage),...current,key])].slice(-500);
++  try{(storage??globalThis.localStorage)?.setItem(TASK_CARD_DISMISSALS_KEY,JSON.stringify(value));}catch{/* A blocked/full preference store never blocks chat. */}
++  return value;
++}
++/** Presentation-only retention. Never mutates, deletes, stops or rewrites a task. */
++export function taskDockRows(tasks,sessionId,{now=Date.now(),dismissed=[],pinned=[]}={}){
++  const hidden=new Set(dismissed),reading=new Set(pinned),current=[],history=[];let nextExpiry=null;
++  for(const task of sessionTasks(tasks,sessionId)){
++    if(!SETTLED_TASKS.has(task.status)){current.push(task);continue;}
++    const expiry=Date.parse(task.updatedAt)+TASK_CARD_RETENTION_MS,remaining=expiry-now;
++    const recent=remaining>0&&remaining<=TASK_CARD_RETENTION_MS;
++    if(!hidden.has(taskCardIdentity(task))&&(reading.has(task.id)||recent)){
++      current.push(task);if(!reading.has(task.id)&&recent)nextExpiry=nextExpiry===null?expiry:Math.min(nextExpiry,expiry);
++    }else history.push(task);
++  }
++  return {current,history,nextExpiry,errors:history.filter(t=>t.status==='failed'||t.status==='interrupted').length};
++}
+ export function filePreviewAddress(file){const enc=s=>encodeURIComponent(s).replace(/%3A/gi,':');return `dsh-resource://file/session/${enc(file.sessionId)}/${file.path.replaceAll('\\','/').split('/').map(enc).join('/')}`;}
+ 
+ /** One owner-authenticated event subscription shared by task cards and employee activity. */
+diff --git a/plugins/naumi-enterprise/assets/bot-task-ui.js b/plugins/naumi-enterprise/assets/bot-task-ui.js
+index 6d5510e..58a718c 100644
+--- a/plugins/naumi-enterprise/assets/bot-task-ui.js
++++ b/plugins/naumi-enterprise/assets/bot-task-ui.js
+@@ -1,10 +1,10 @@
+-import {taskActivity,sessionTasks,taskLabel,ACTIVE_TASKS,filePreviewAddress} from './bot-task-model.js';
++import {taskActivity,taskDockRows,taskLabel,ACTIVE_TASKS,SETTLED_TASKS,filePreviewAddress,readTaskCardDismissals,dismissTaskCard,TASK_CARD_DISMISSALS_KEY} from './bot-task-model.js';
+ import {botCatalog} from './bot-sidebar-model.js';
+ 
+ export function installBotTaskUI(ctx,React){
+   return ctx.inject(['uiWorkspace','sidebarRight'],scope=>{
+     const h=React.createElement,{useState,useEffect,useSyncExternalStore}=React,activity=taskActivity(),directory=botCatalog();
+-    function TaskCard({task,bots}){
++    function TaskCard({task,bots,onDismiss,onExpanded}){
+       const [expanded,setExpanded]=useState(false),[detail,setDetail]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+       useEffect(()=>{
+         if(!expanded)return;const abort=new AbortController();setError('');
+@@ -18,19 +18,26 @@ export function installBotTaskUI(ctx,React){
+         catch{setError('操作未完成，请刷新任务后重试');}finally{setBusy(false);}
+       };
+       return h('article',{className:'naumi-background-task','data-task-id':task.id,'data-task-state':task.status},
+-        h('div',{className:'nbt-heading'},h('span',{className:'nbt-state','aria-live':'polite'},h('span',{'aria-hidden':true,className:'nbt-dot'}),target?.name??'员工',' · ',taskLabel(task)),h('div',{className:'nbt-actions'},h('button',{type:'button',onClick:open,'aria-label':'查看'+(target?.name??'员工')+'的任务会话'},'查看任务'),h('button',{type:'button',onClick:()=>setExpanded(v=>!v),'aria-expanded':expanded},expanded?'收起':'详情'))),
++        h('div',{className:'nbt-heading'},h('span',{className:'nbt-state','aria-live':'polite'},h('span',{'aria-hidden':true,className:'nbt-dot'}),target?.name??'员工',' · ',taskLabel(task)),h('div',{className:'nbt-actions'},h('button',{type:'button',onClick:open,'aria-label':'查看'+(target?.name??'员工')+'的任务会话'},'查看任务'),h('button',{type:'button',onClick:()=>{setExpanded(!expanded);onExpanded?.(task.id,!expanded);},'aria-expanded':expanded},expanded?'收起':'详情'),onDismiss&&SETTLED_TASKS.has(task.status)&&h('button',{type:'button',className:'nbt-dismiss',onClick:()=>onDismiss(task),'aria-label':'收起任务卡片',title:'收起任务卡片'},'×'))),
+         h('div',{className:'nbt-subject'},task.subject),
+         expanded&&h('div',{className:'nbt-detail'},task.progress&&h('p',null,task.progress),detail?.result&&h('pre',null,detail.result),detail?.delivery?.files?.map(f=>h('button',{type:'button',className:'nbt-file',key:f.sessionId+':'+f.seq+':'+f.index,onClick:()=>scope.sidebarRight.openResource(filePreviewAddress(f))},'↗ ',f.description??f.path.split(/[\\/]/).at(-1))),ACTIVE_TASKS.has(task.status)&&h('button',{type:'button',className:'nbt-cancel',onClick:cancel,disabled:busy},busy?'处理中…':'停止任务')),
+         error&&h('div',{className:'nbt-error',role:'alert'},error));
+     }
+     function TaskDock({sessionId,session}){
+       const activeId=sessionId??session?.id;
+-      const state=useSyncExternalStore(activity.subscribe,activity.getSnapshot,activity.getSnapshot),catalog=useSyncExternalStore(directory.subscribe,directory.getSnapshot,directory.getSnapshot),[all,setAll]=useState(false);
+-      useEffect(()=>setAll(false),[activeId]);
+-      const rows=sessionTasks(state.tasks,activeId);if(!rows.length)return null;
++      const state=useSyncExternalStore(activity.subscribe,activity.getSnapshot,activity.getSnapshot),catalog=useSyncExternalStore(directory.subscribe,directory.getSnapshot,directory.getSnapshot),[all,setAll]=useState(false),[showHistory,setShowHistory]=useState(false),[historyLimit,setHistoryLimit]=useState(10),[pinned,setPinned]=useState([]),[dismissed,setDismissed]=useState(()=>readTaskCardDismissals()),[,tick]=useState(0);
++      useEffect(()=>{setAll(false);setShowHistory(false);setHistoryLimit(10);setPinned([]);},[activeId]);
++      useEffect(()=>{const sync=e=>{if(e.key===TASK_CARD_DISMISSALS_KEY||e.key===null)setDismissed(readTaskCardDismissals());};window.addEventListener('storage',sync);return()=>window.removeEventListener('storage',sync);},[]);
++      const view=taskDockRows(state.tasks,activeId,{dismissed,pinned});
++      useEffect(()=>{if(view.nextExpiry===null)return;const timer=setTimeout(()=>tick(v=>v+1),Math.max(1,view.nextExpiry-Date.now()+10));return()=>clearTimeout(timer);},[view.nextExpiry,activeId]);
++      const reading=(id,value)=>setPinned(current=>value?[...new Set([...current,id])]:current.filter(v=>v!==id));
++      const dismiss=task=>{setDismissed(dismissTaskCard(task,dismissed));reading(task.id,false);};
++      if(!view.current.length&&!view.history.length)return null;
+       return h('section',{className:'naumi-task-dock','aria-label':'交办任务','data-task-sync':state.status},
+-        (all?rows:rows.slice(0,3)).map(t=>h(TaskCard,{key:t.id,task:t,bots:catalog.bots})),
+-        rows.length>3&&h('button',{type:'button',className:'nbt-more',onClick:()=>setAll(v=>!v)},all?'收起任务':'全部任务 · '+rows.length),
++        (all?view.current:view.current.slice(0,3)).map(t=>h(TaskCard,{key:t.id+':'+t.attempt,task:t,bots:catalog.bots,onDismiss:dismiss,onExpanded:reading})),
++        view.current.length>3&&h('button',{type:'button',className:'nbt-more',onClick:()=>setAll(v=>!v)},all?'收起任务':'全部任务 · '+view.current.length),
++        view.history.length>0&&h('button',{type:'button',className:'nbt-history-toggle','aria-expanded':showHistory,'aria-controls':'naumi-task-history-'+activeId,onClick:()=>{setShowHistory(v=>!v);setHistoryLimit(10);}},h('span',null,showHistory?'收起记录':'任务记录',' · ',view.history.length),view.errors>0&&h('span',{className:'nbt-history-errors'},'异常 ',view.errors),h('span',{'aria-hidden':true},showHistory?'⌃':'⌄')),
++        showHistory&&view.history.length>0&&h('div',{className:'nbt-history',id:'naumi-task-history-'+activeId},view.history.slice(0,historyLimit).map(t=>h(TaskCard,{key:t.id+':'+t.attempt,task:t,bots:catalog.bots})),view.history.length>historyLimit&&h('button',{type:'button',className:'nbt-more',onClick:()=>setHistoryLimit(v=>v+10)},'更多记录')),
+         state.status==='error'&&h('button',{type:'button',className:'nbt-more',onClick:()=>activity.refresh()},'重新连接任务状态'));
+     }
+     return scope.slots.inject('conversation.input.dock',()=>scope.slots.register({name:'conversation.input.dock',id:'naumi-background-tasks',order:10},TaskDock));
+diff --git a/plugins/naumi-enterprise/assets/bot-task.css b/plugins/naumi-enterprise/assets/bot-task.css
+index b2e3945..8a27d08 100644
+--- a/plugins/naumi-enterprise/assets/bot-task.css
++++ b/plugins/naumi-enterprise/assets/bot-task.css
+@@ -8,6 +8,8 @@
+ [data-task-state=failed] .nbt-dot,[data-task-state=interrupted] .nbt-dot{background:#be6a77}
+ [data-task-state=completed] .nbt-dot{background:#708c77}
+ .nbt-actions{display:flex;flex-shrink:0;gap:9px}
++.nbt-actions .nbt-dismiss{font-size:17px;line-height:1;width:20px;color:#93889d;border-radius:5px}.nbt-actions .nbt-dismiss:hover{background:#f1edf6;color:#5e476f}
++.nbt-history-toggle{display:flex;align-items:center;gap:8px;align-self:flex-start;max-width:100%;min-height:28px;padding:3px 8px;border:0;border-radius:7px;background:transparent;color:#897a96;font:inherit;font-size:11px;cursor:pointer}.nbt-history-toggle:hover{background:#f6f3f9;color:#6d5384}.nbt-history-errors{color:#ab5d6b}.nbt-history{display:flex;flex-direction:column;gap:7px}
+ .nbt-actions button,.nbt-more{font:inherit;font-size:11px;border:0;background:transparent;color:#7b6096;padding:4px 0;cursor:pointer}
+ .nbt-subject{margin-top:5px;font-size:12px;line-height:1.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#71647f}
+ .nbt-detail{margin-top:10px;padding-top:10px;border-top:1px solid #f0edf4;font-size:12px;line-height:1.6}
+diff --git a/scripts/verify-async-bot-loaded-ui.mjs b/scripts/verify-async-bot-loaded-ui.mjs
+index 3e5f0b9..02f635d 100644
+--- a/scripts/verify-async-bot-loaded-ui.mjs
++++ b/scripts/verify-async-bot-loaded-ui.mjs
+@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
+ import {chromium} from '../desktop/node_modules/playwright/index.mjs';
+ import {botLiveApi} from './bot-live-api.mjs';
+ 
+-const root=path.resolve(process.argv[2]??'E:/Workspace/naumi-desktop'),api=await botLiveApi(root),e=path.resolve('evidence/async-bot');
++const root=path.resolve(process.argv[2]??'E:/Workspace/naumi-desktop'),api=await botLiveApi(root),e=path.resolve(process.env.NAUMI_UI_EVIDENCE_DIR??'evidence/async-bot');
+ const bots=(await api.json('/naumi/bots')).bots,tasks=(await api.json('/naumi/bot-tasks?view=activity')).tasks;
+ const source=bots.find(b=>tasks.some(t=>t.sourceSessionId===b.homeSessionId));assert(source,'A real reception task is required');
+ const browser=await chromium.launch({headless:true,channel:'chrome'}),context=await browser.newContext({viewport:{width:1440,height:980},colorScheme:'light'}),page=await context.newPage();
+@@ -18,6 +18,7 @@ try{
+   await page.goto(launch,{waitUntil:'domcontentloaded'});
+   const row=page.locator('[data-bot-id="'+source.id+'"]');await row.locator('.naumi-bot-open').click();
+   const dock=page.locator('.naumi-task-dock');await dock.waitFor();
++  if(await dock.locator('[data-task-id]').count()===0){check('historical_cards_recycled',await dock.locator('.nbt-history-toggle').isVisible());await dock.locator('.nbt-history-toggle').click();}
+   check('actual_runtime_assets_without_routes', ['bot-task-ui.js','bot-task-model.js','bot-task.css'].every(n=>assets.has(n)));
+   check('actual_task_cards',await dock.locator('[data-task-id]').count()>0);
+   check('actual_reception_session',await page.locator('[data-naumi-context-session="'+source.homeSessionId+'"]').count()===1);
+diff --git a/scripts/verify-task-card-recycling-ui.mjs b/scripts/verify-task-card-recycling-ui.mjs
+new file mode 100644
+index 0000000..3faa9d5
+--- /dev/null
++++ b/scripts/verify-task-card-recycling-ui.mjs
+@@ -0,0 +1,50 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import assert from 'node:assert/strict';
++import {chromium} from '../desktop/node_modules/playwright/index.mjs';
++
++const runtime='E:/Workspace/naumi-desktop',e=path.resolve('evidence/task-card-recycling'),root=path.resolve('plugins/naumi-enterprise/assets');
++const bots=JSON.parse(fs.readFileSync(runtime+'/.dsh/naumi/bots.json','utf8')).bots,source=bots.find(b=>b.name.includes('主管'))??bots[0],target=bots.find(b=>b.id!==source.id);
++const old=new Date(Date.now()-600000).toISOString(),make=(id,status,extra={})=>({id,sourceBotId:source.id,sourceSessionId:source.homeSessionId,targetBotId:target.id,targetSessionId:target.sessionIds.at(-1),status,attempt:1,revision:1,subject:'整理本周活动文案',createdAt:old,updatedAt:old,...extra});
++let tasks=[make('current','running'),make('old','completed'),make('error','failed')],writes=0;
++const browser=await chromium.launch({headless:true,channel:'chrome'}),context=await browser.newContext({viewport:{width:1440,height:980},colorScheme:'light'}),page=await context.newPage(),checks=[],errors=[];
++page.setDefaultTimeout(15000);page.on('pageerror',error=>errors.push(error.message));await page.clock.install();
++const check=(name,value)=>{assert(value,name);checks.push(name);console.log('UI_PASS '+name);};
++await page.route('**/naumi/assets/**',async route=>{const name=new URL(route.request().url()).pathname.split('/').at(-1);if(!['bot-task-model.js','bot-task-ui.js','bot-task.css'].includes(name))return route.continue();await route.fulfill({status:200,contentType:name.endsWith('.css')?'text/css':'text/javascript',body:fs.readFileSync(path.join(root,name))});});
++await page.route('**/naumi/bot-tasks*',async route=>{const req=route.request();if(req.method()!=='GET'){writes++;return route.fulfill({status:409,body:'{}'});}const id=new URL(req.url()).searchParams.get('taskId');await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(id?{...tasks.find(t=>t.id===id),result:'原任务成果保留',delivery:{files:[]}}:{version:1,revision:1,tasks})});});
++await page.addInitScript(()=>{
++  localStorage.setItem('naumi.navigationMode.v1','bot');const Native=window.EventSource;window.__taskFeeds=[];
++  window.EventSource=class{constructor(url,options){if(!String(url).includes('/naumi/bot-tasks/events'))return new Native(url,options);window.__taskFeeds.push(this);}close(){this.closed=true;}};
++  window.__refreshTaskCards=()=>window.__taskFeeds.filter(s=>!s.closed).forEach(s=>s.onmessage?.({data:'changed'}));
++});
++const logs=['server.out.log','server.err.log'].map(n=>fs.readFileSync(runtime+'/logs/'+n,'utf8')).join('\n'),launch=[...logs.matchAll(/http:\/\/127\.0\.0\.1:3080\/?\?token=[A-Za-z0-9_~.%-]+/g)].at(-1)?.[0];assert(launch);
++const update=async patch=>{Object.assign(tasks[0],patch,{revision:tasks[0].revision+1,updatedAt:new Date(await page.evaluate(()=>Date.now())).toISOString()});await page.evaluate(()=>window.__refreshTaskCards());};
++try{
++  await page.goto(launch,{waitUntil:'domcontentloaded'});await page.locator('[data-bot-id="'+source.id+'"] .naumi-bot-open').click();
++  const dock=page.locator('.naumi-task-dock'),current=dock.locator(':scope > [data-task-id="current"]'),history=dock.locator('.nbt-history-toggle');await current.waitFor();
++  check('old_completed_cards_recycled_on_open',await dock.locator(':scope > article').count()===1&&await history.innerText().then(s=>s.includes('2')));
++  check('historical_failure_remains_discoverable',await dock.locator('.nbt-history-errors').innerText()==='异常 1');
++  const composer=page.locator('[contenteditable="true"]').first(),model=page.locator('[data-slot="conversation.input.model"] button');await composer.fill('新话题草稿，不受卡片回收影响');const modelBefore=await model.getAttribute('aria-label');
++  await page.clock.fastForward(60000);check('running_work_never_auto_hidden',await current.isVisible()&&await current.getByRole('button',{name:'收起任务卡片'}).count()===0);
++  await history.click();await dock.locator('.nbt-history [data-task-id="old"]').waitFor();await dock.locator('[data-task-id="old"]').getByRole('button',{name:'详情',exact:true}).click();await dock.getByText('原任务成果保留',{exact:true}).waitFor();check('history_and_result_remain_available',true);await history.click();
++  await dock.screenshot({path:e+'/task-cards-active.png',animations:'disabled'});
++  await update({status:'completed'});await page.waitForFunction(()=>document.querySelector('.naumi-task-dock > [data-task-id="current"]')?.dataset.taskState==='completed');
++  check('completion_gets_short_visible_receipt',await current.isVisible());await page.clock.fastForward(8100);await current.waitFor({state:'detached'});
++  check('completed_card_auto_recycles_without_new_event',await dock.locator(':scope > article').count()===0);check('recycled_dock_is_compact',await dock.evaluate(el=>el.getBoundingClientRect().height<=35));
++  check('draft_and_model_preserved',await composer.innerText()==='新话题草稿，不受卡片回收影响'&&await model.getAttribute('aria-label')===modelBefore);
++  await update({status:'running',attempt:2});await current.waitFor();await current.getByRole('button',{name:'详情',exact:true}).click();await current.locator('pre').waitFor();
++  await update({status:'completed'});await page.waitForFunction(()=>document.querySelector('.naumi-task-dock > [data-task-id="current"]')?.dataset.taskState==='completed');await page.clock.fastForward(9000);
++  check('reading_expanded_result_is_not_interrupted',await current.isVisible());await current.getByRole('button',{name:'收起',exact:true}).click();await current.waitFor({state:'detached'});check('closing_expired_result_recycles_it',true);
++  await update({status:'completed',attempt:3});await current.waitFor();await page.setViewportSize({width:360,height:950});check('narrow_card_controls_fit',await current.evaluate(el=>el.scrollWidth<=el.clientWidth+2&&el.getBoundingClientRect().right<=innerWidth));await page.setViewportSize({width:1440,height:980});
++  await current.getByRole('button',{name:'收起任务卡片'}).click();await current.waitFor({state:'detached'});check('manual_dismiss_does_not_stop_or_delete_task',tasks[0].status==='completed'&&writes===0);
++  await composer.fill('');await page.reload({waitUntil:'domcontentloaded'});await page.locator('[data-bot-id="'+source.id+'"] .naumi-bot-open').click();await history.waitFor();
++  check('manual_dismiss_survives_reload',await current.count()===0&&await page.evaluate(()=>JSON.parse(localStorage.getItem('naumi.taskCards.dismissed.v1')).some(k=>k.includes('current'))));
++  await update({status:'running',attempt:4});await current.waitFor();check('retry_reappears_despite_prior_dismissal',await current.isVisible());
++  await update({status:'failed'});await page.waitForFunction(()=>document.querySelector('.naumi-task-dock > [data-task-id="current"]')?.dataset.taskState==='failed');await page.clock.fastForward(8100);await current.waitFor({state:'detached'});check('failed_card_recycles_with_exception_badge',await dock.locator('.nbt-history-errors').innerText()==='异常 2');
++  await dock.screenshot({path:e+'/task-cards-recycled.png',animations:'disabled'});
++  for(let i=0;i<25;i++)tasks.push(make('history-'+i,'completed'));await page.evaluate(()=>window.__refreshTaskCards());await page.waitForFunction(()=>document.querySelector('.nbt-history-toggle')?.textContent.includes('28'));
++  await history.click();check('history_initial_render_is_bounded',await dock.locator('.nbt-history article').count()===10);await dock.getByRole('button',{name:'更多记录',exact:true}).click();check('history_can_load_more',await dock.locator('.nbt-history article').count()===20);await history.click();
++  check('one_shared_activity_subscription_per_page',await page.evaluate(()=>window.__taskFeeds.filter(s=>!s.closed).length)===1);check('zero_model_or_task_writes',writes===0);check('zero_page_errors',errors.length===0);
++  fs.writeFileSync(e+'/UI_VERIFICATION.json',JSON.stringify({tier:'real Harness shell, candidate three assets, read-only controlled task catalog and clock; no model/task writes',checks,errors,finishedAt:new Date().toISOString()},null,2)+'\n');
++  console.log('RECYCLE_UI checks='+checks.length+' errors='+errors.length+' model_task_writes='+writes+' contexts_closed=1');
++}finally{await context.close();await browser.close();}
+diff --git a/scripts/verify-task-card-recycling.mjs b/scripts/verify-task-card-recycling.mjs
+new file mode 100644
+index 0000000..7de3766
+--- /dev/null
++++ b/scripts/verify-task-card-recycling.mjs
+@@ -0,0 +1,15 @@
++import assert from 'node:assert/strict';
++import path from 'node:path';
++import {pathToFileURL} from 'node:url';
++const mode=process.argv[2]??'modified',dir=mode==='modified'?'plugins/naumi-enterprise/assets':process.argv[3]??'evidence/task-card-recycling/original/plugins/naumi-enterprise/assets';
++const model=await import(pathToFileURL(path.resolve(dir,'bot-task-model.js'))),now=Date.parse('2026-11-17T05:00:00Z');
++const rows=['running','completed','failed'].map(status=>({id:'task-'+status,sourceSessionId:'chat',targetSessionId:'job',attempt:1,status,updatedAt:new Date(now-60000).toISOString()}));
++if(mode==='baseline'||mode==='rollback'){
++  assert.equal(model.taskDockRows,undefined);assert.equal(model.sessionTasks(rows,'chat').length,3);
++  console.log(`${mode.toUpperCase()} visible_cards=3 completed_card=STICKY history=ABSENT original_behavior=PASS`);
++}else{
++  const first=model.taskDockRows(rows,'chat',{now});assert.equal(first.current.length,1);assert.equal(first.history.length,2);
++  const done={...rows[1],updatedAt:new Date(now).toISOString()};assert.equal(model.taskDockRows([done],'chat',{now}).current.length,1);assert.equal(model.taskDockRows([done],'chat',{now:now+8000}).history.length,1);
++  const storage={getItem:()=>null,setItem:()=>{}},dismissed=model.dismissTaskCard(done,[],storage);assert.equal(model.taskDockRows([done],'chat',{now,dismissed}).current.length,0);
++  console.log('MODIFIED active_cards=1 archived_cards=2 auto_recycle_ms=8000 manual_dismiss=PASS task_data=UNCHANGED');
++}
+diff --git a/tests/naumi-task-card-recycling.test.mjs b/tests/naumi-task-card-recycling.test.mjs
+new file mode 100644
+index 0000000..17dd79d
+--- /dev/null
++++ b/tests/naumi-task-card-recycling.test.mjs
+@@ -0,0 +1,55 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import {taskDockRows,TASK_CARD_RETENTION_MS,taskCardIdentity,dismissTaskCard,readTaskCardDismissals,TASK_CARD_DISMISSALS_KEY} from '../plugins/naumi-enterprise/assets/bot-task-model.js';
++
++const now=Date.parse('2026-11-17T05:00:00Z');
++const task=(status,age=0,extra={})=>({id:'task-'+status,sourceSessionId:'chat',targetSessionId:'worker',status,attempt:1,revision:2,updatedAt:new Date(now-age).toISOString(),...extra});
++const memory=()=>{const data=new Map();return {getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,v)};};
++
++test('old settled cards recycle immediately while all active/unknown states stay visible without mutation',()=>{
++  const tasks=['queued','starting','running','waiting','future-state','completed','failed','cancelled','interrupted'].map(s=>task(s,600000)),before=JSON.stringify(tasks);
++  const view=taskDockRows(tasks,'chat',{now});
++  assert.deepEqual(new Set(view.current.map(t=>t.status)),new Set(['queued','starting','running','waiting','future-state']));
++  assert.equal(view.history.length,4);assert.equal(view.errors,2);assert.equal(view.nextExpiry,null);assert.equal(JSON.stringify(tasks),before);
++  assert.equal(taskDockRows(tasks,'other',{now}).current.length,0);
++});
++
++test('a new completion gets eight seconds then moves to history without another HTTP event',()=>{
++  const tasks=[task('completed'),task('cancelled',1000)];
++  const first=taskDockRows(tasks,'chat',{now});assert.equal(first.current.length,2);assert.equal(first.nextExpiry,now+TASK_CARD_RETENTION_MS-1000);
++  const next=taskDockRows(tasks,'chat',{now:now+TASK_CARD_RETENTION_MS});assert.equal(next.current.length,0);assert.equal(next.history.length,2);assert.equal(next.nextExpiry,null);
++  assert.equal(taskDockRows(tasks,'worker',{now:now+TASK_CARD_RETENTION_MS}).history.length,2);
++});
++
++test('expanded results stay readable until collapsed; manual dismissal overrides the reading pin',()=>{
++  const t=task('completed',60000),pinned=[t.id];
++  assert.equal(taskDockRows([t],'chat',{now,pinned}).current.length,1);
++  assert.equal(taskDockRows([t],'chat',{now,pinned}).nextExpiry,null);
++  assert.equal(taskDockRows([t],'chat',{now,pinned,dismissed:[taskCardIdentity(t)]}).history.length,1);
++  assert.equal(taskDockRows([t],'chat',{now}).current.length,0);
++});
++
++test('manual recycling persists on refresh, is bounded and never hides running work or its new attempt',()=>{
++  const storage=memory(),t=task('completed');const dismissed=dismissTaskCard(t,[],storage);
++  assert.deepEqual(readTaskCardDismissals(storage),dismissed);assert.equal(taskDockRows([t],'chat',{now,dismissed:readTaskCardDismissals(storage)}).current.length,0);
++  const retry={...t,status:'running',attempt:2};assert.equal(taskDockRows([retry],'chat',{now,dismissed}).current.length,1);
++  assert.equal(dismissTaskCard(retry,dismissed,storage),dismissed);
++  assert.equal(taskDockRows([{...retry,status:'completed'}],'chat',{now,dismissed}).current.length,1);
++  const many=Array.from({length:600},(_,i)=>'old-'+i);assert.equal(dismissTaskCard(t,many,storage).length,500);
++  assert(!storage.getItem(TASK_CARD_DISMISSALS_KEY).includes('sourceSessionId'));
++});
++
++test('invalid storage, disabled persistence and invalid/future timestamps never strand terminal cards or break chat',()=>{
++  const storage=memory();storage.setItem(TASK_CARD_DISMISSALS_KEY,'not-json');assert.deepEqual(readTaskCardDismissals(storage),[]);
++  const blocked={getItem(){throw Error('blocked');},setItem(){throw Error('full');}};
++  assert.deepEqual(readTaskCardDismissals(blocked),[]);assert.equal(dismissTaskCard(task('failed'),[],blocked).length,1);
++  for(const updatedAt of ['invalid',new Date(now+60000).toISOString()])assert.equal(taskDockRows([task('completed',0,{updatedAt})],'chat',{now}).history.length,1);
++});
++
++test('UI uses one expiry timer and retains explicit history, result preview and the native input/model ownership',()=>{
++  const ui=fs.readFileSync('plugins/naumi-enterprise/assets/bot-task-ui.js','utf8');
++  assert(ui.includes('view.nextExpiry'));assert(!ui.includes('setInterval'));assert(ui.includes('clearTimeout(timer)'));
++  assert(ui.includes('nbt-history-toggle'));assert(ui.includes('historyLimit'));assert(ui.includes('sidebarRight.openResource'));
++  assert(ui.includes("name:'conversation.input.dock'"));assert(!ui.includes('session.prompt'));assert(!ui.includes('localStorage.clear'));
++});
