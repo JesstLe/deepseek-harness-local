@@ -55,3 +55,7 @@
 整合树全仓784/784（0 skip），源UI17项、实际已安装carrier的隔离UI17项均通过，分别2 boots/1 loopback请求/0真供应商。主模型位置、原SVG哈希与原输入器保持。源码副本回滚6原文件恢复/11新文件移除，原始17项测试通过，当前修改源文件仍保留。第二次副本测试漏desktop/package.json，同为副本依赖遗漏，已补齐，原失败日志保留。四件套及manifest记载精确命令与层级，最终主线和运行回执在VERIFICATION/DEPLOYMENT追加。
 
 当前本模块剩余：源码合入推送、7文件运行加载、四件套最终重开与清理。整体Goal继续active，后续审视D3文件快照/attempt与业务验收精确绑定、完整真实使用、最终新版本安装升级与更新分发；已公开0.3.6不是包括本模块的新版本。
+
+## 主线与实际加载完成
+
+源码已普通合并并推送main 0070f4bdfb7bd9aab5f05795da789770cac1d411；从该固定提交执行 `node scripts/deploy-session-import.mjs apply E:/Workspace/naumi-desktop`，exit0，SESSION_IMPORT_LOADED files=7 http=200 running=0。104 sessions / 4 bots / revision47保持；143无关运行文件、113权威会话/配置文件、44其他未跟踪证据保持，模型组、员工export、任务与群账本一致，真实模型0/真实导入0/来源写入0/企业配置变化0。host/client为已验收薄增量，package只追加2files，未顺带覆盖旧可选模块。窗口已释放。本模块源码/主线/隔离原生链路/运行加载/副本回滚已收口；最终包含本切片的新安装版仍在整体Goal后续。
