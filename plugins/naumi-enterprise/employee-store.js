@@ -157,7 +157,7 @@ export class EmployeeStore{
     this.ready();z.number().int().positive().parse(before);z.number().int().min(1).max(100).parse(limit);
     return this.db.prepare('SELECT seq,type,json,sync_state FROM events WHERE bot_id=? AND seq<? ORDER BY seq DESC LIMIT ?').all(botId,before,limit).map(r=>({seq:r.seq,type:r.type,...JSON.parse(r.json),syncState:r.sync_state}));
   }
-  export(botId){return {version:1,domain:'local-owner',syncState:'local_only',profile:this.profile(botId),memories:this.allMemories(botId),work:{goals:this.entitiesOfType(botId,'goal'),deliveries:this.entitiesOfType(botId,'delivery'),artifacts:this.entitiesOfType(botId,'artifact'),reviews:this.entitiesOfType(botId,'review')},exportedAt:this.now()};}
+  export(botId){return {version:1,domain:'local-owner',syncState:'local_only',profile:this.profile(botId),memories:this.allMemories(botId),work:{goals:this.entitiesOfType(botId,'goal'),goalProposals:this.entitiesOfType(botId,'goalproposal'),deliveries:this.entitiesOfType(botId,'delivery'),artifacts:this.entitiesOfType(botId,'artifact'),reviews:this.entitiesOfType(botId,'review')},exportedAt:this.now()};}
   context(botId){const p=this.profile(botId),memories=this.memories(botId,{limit:8});
     const value={profile:Object.fromEntries(PROFILE_FIELDS.map(k=>[k,p[k].slice(0,900)])),memories:memories.map(m=>({id:m.id,kind:m.kind,text:m.text.slice(0,450)}))};
     while(JSON.stringify(value).length>7800){
