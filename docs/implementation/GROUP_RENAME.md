@@ -42,3 +42,5 @@
 共享 main 在提交间新增 `6192368`（primary Bot 模块）。本任务已普通 merge 为 `e664224`，随后将最新 main 同步到任务 worktree；primary 的默认接待、群成员与 UI 逻辑原样保留。最终回滚基线调整为 `6192368`，避免源代码回滚撤销别人的新增模块。当前运行的并行主线加载已包含三个群后端文件和群页面 JS，本任务发布仅补齐缺失的 catalog 和 CSS（以部署哈希比对为准），不重复重启服务。初次检测服务正处于并行发布间隙，读取失败；之后确认 92 Sessions、running=0 才继续。
 
 最终整合全量：`node --test tests/*.test.mjs desktop/tests/*.test.cjs`，581/581，通过；整合后的真实 Harness 页面复测 11 项通过，零 pageerror、零推理。
+
+发布验证脚本首次比较持久化 JSON 与 SQLite null-prototype 行对象时，deepStrictEqual 仅因对象原型差异失败（业务数据未变、尚未发起改名）；改用完整行序列化 SHA256 比较，避免日志展开用户消息。仅复测发布验证脚本，不重复业务全量。
