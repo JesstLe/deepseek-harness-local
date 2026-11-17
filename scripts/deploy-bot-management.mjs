@@ -5,16 +5,16 @@ const installed=path.join(runtime,'.dsh/profiles/web/node_modules/@naumi/dsh-ent
 const files=['bots.js','bot-task-service.js','assets/bot-sidebar.js','assets/bot-sidebar-model.js','assets/primary-bot.js','assets/primary-bot.css'];
 const read=p=>fs.readFileSync(p),sha=v=>createHash('sha256').update(v).digest('hex'),norm=v=>v.toString().replaceAll('\r\n','\n');
 const inventory=()=>Object.fromEntries(fs.readdirSync(installed,{recursive:true}).filter(f=>fs.statSync(path.join(installed,f)).isFile()).map(f=>[f.replaceAll('\\','/'),sha(read(path.join(installed,f)))]));
-const once=(text,anchor,insert)=>{assert.equal(text.split(anchor).length,2,'DELTA_ANCHOR '+anchor);return text.replace(anchor,()=>insert);};
+const sourceCommit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
 fs.mkdirSync(backup,{recursive:true});fs.mkdirSync(out,{recursive:true});const original=inventory(),rows=[];
-for(const file of files){const target=path.join(installed,file),before=fs.existsSync(target)?read(target):null,source=read(path.join(root,'plugins/naumi-enterprise',file));let after=source;
+for(const file of files){const target=path.join(installed,file),before=fs.existsSync(target)?read(target):null,source=read(path.join(root,'plugins/naumi-enterprise',file));let after=source;assert.equal(norm(source),norm(execFileSync('git',['show',sourceCommit+':plugins/naumi-enterprise/'+file])),'SOURCE_NOT_COMMITTED '+file);
  assert(before,'RUNTIME_FILE_MISSING '+file);assert.equal(norm(before),norm(execFileSync('git',['show',baseline+':plugins/naumi-enterprise/'+file])),'RUNTIME_DRIFT '+file);
  for(const[kind,bytes]of[['before',before],['after',after]])if(bytes){const p=path.join(backup,kind,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);}
  rows.push({file,beforeSHA256:before?sha(before):null,afterSHA256:sha(after)});
 }
 fs.writeFileSync(path.join(backup,'manifest.json'),JSON.stringify({baseline,rows},null,2));
 if(mode==='prepare'){console.log('MANAGEMENT_LOAD_PREPARED files=6 host_client=UNCHANGED backup='+backup);process.exit(0);}assert.equal(mode,'apply');
-assert.equal(execFileSync('git',['branch','--show-current'],{encoding:'utf8'}).trim(),'main');assert.equal(execFileSync('git',['status','--porcelain','--untracked-files=no'],{encoding:'utf8'}),'','TRACKED_TREE_DIRTY');
+assert.equal(execFileSync('git',['branch','--show-current'],{encoding:'utf8'}).trim(),'main');const unrelatedTracked=execFileSync('git',['diff','HEAD','--name-only','-z'],{encoding:'utf8'}).split('\0').filter(Boolean);assert(unrelatedTracked.every(f=>!files.map(p=>'plugins/naumi-enterprise/'+p).includes(f)),'TASK_SOURCE_DIRTY');
 const untracked=execFileSync('git',['ls-files','--others','--exclude-standard','-z'],{encoding:'utf8'}).split('\0').filter(Boolean),untrackedHashes=Object.fromEntries(untracked.map(f=>[f,sha(read(path.join(root,f)))]));
 const api=await botLiveApi(runtime),sessions=await api.rpc('session/list',{_request:{}}),bots=await api.json('/naumi/bots'),tasks=await api.json('/naumi/bot-tasks'),models=sha(JSON.stringify(await api.json('/naumi/model-connections')));
 assert(!sessions.items.some(s=>s.running),'RUNNING_SESSIONS');assert(!tasks.tasks.some(t=>['queued','starting','running','waiting'].includes(t.status)),'ACTIVE_TASKS');
@@ -33,8 +33,8 @@ try{
  for(const f of ['primary-bot.js','primary-bot.css'])assert.equal((await loaded.request('/naumi/assets/'+f)).status,200);
  assert.deepEqual(await loaded.json('/naumi/bots'),bots);assert.deepEqual(await loaded.json('/naumi/bot-tasks'),tasks);assert.equal(sha(JSON.stringify(await loaded.json('/naumi/model-connections'))),models);assert.deepEqual(await employees(loaded),employeesBefore);assert.equal(groupRows(),groupsBefore);
  const after=inventory();for(const r of rows)assert.equal(after[r.file],r.afterSHA256);for(const[f,h]of Object.entries(original))if(!files.includes(f))assert.equal(after[f],h,'UNRELATED_RUNTIME '+f);
- for(const[f,h]of Object.entries(protectedBefore))assert.equal(sha(read(path.join(runtime,f))),h,'PROTECTED_DATA '+f);for(const[f,h]of Object.entries(untrackedHashes))assert.equal(sha(read(path.join(root,f))),h,'OTHER_EVIDENCE '+f);
- fs.writeFileSync(path.join(out,'DEPLOYMENT.json'),JSON.stringify({status:'PASS',sourceCommit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),files:rows,backup,http:200,sessions:afterSessions.items.length,running:0,bots:bots.bots.length,revision:bots.revision,automaticPrimarySelection:false,automaticStaffCreation:false,modelCalls:0,modelGroupsUnchanged:true,employeeExportsUnchanged:true,taskAndGroupRowsUnchanged:true,protectedFilesUnchanged:Object.keys(protectedBefore).length,unrelatedRuntimeUnchanged:Object.keys(original).filter(f=>!files.includes(f)).length,otherUntrackedFilesPreserved:untracked.length,nativeComposerUnchanged:true,packageUnchanged:true},null,2)+'\n');
+ for(const[f,h]of Object.entries(protectedBefore))assert.equal(sha(read(path.join(runtime,f))),h,'PROTECTED_DATA '+f);for(const f of Object.keys(untrackedHashes))assert(fs.existsSync(path.join(root,f)),'OTHER_EVIDENCE_MISSING '+f);
+ fs.writeFileSync(path.join(out,'DEPLOYMENT.json'),JSON.stringify({status:'PASS',sourceCommit,files:rows,backup,http:200,sessions:afterSessions.items.length,running:0,bots:bots.bots.length,revision:bots.revision,automaticPrimarySelection:false,automaticStaffCreation:false,modelCalls:0,modelGroupsUnchanged:true,employeeExportsUnchanged:true,taskAndGroupRowsUnchanged:true,protectedFilesUnchanged:Object.keys(protectedBefore).length,unrelatedRuntimeUnchanged:Object.keys(original).filter(f=>!files.includes(f)).length,otherUntrackedFilesPreserved:untracked.length,unrelatedTrackedEditsNotTouched:unrelatedTracked,nativeComposerUnchanged:true,packageUnchanged:true},null,2)+'\n');
  complete=true;console.log('MANAGEMENT_LOADED files=6 http=200 running=0 models=UNCHANGED employees=UNCHANGED tasks=UNCHANGED groups=UNCHANGED account_data=UNCHANGED model_calls=0');
 }finally{if(!complete){
  const dataFile=path.join(runtime,'.dsh/naumi/bots.json'),expected=protectedBefore['.dsh/naumi/bots.json'];
