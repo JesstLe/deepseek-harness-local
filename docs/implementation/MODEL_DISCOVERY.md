@@ -27,3 +27,5 @@ OpenAI Completions/Responses使用Bearer；Anthropic使用x-api-key与anthropic-
 ## 未完成项与下一步
 
 本次不调用真实供应商、不发布新安装包；正式本地接入和Git整合按验证文件记载。
+
+主线同步：d5033d4 → origin/main e089a7a → 64b2df5；模块计数1。保留他人任务续办与打包清单变化。定向27/27、原生设置UI/HTTP18/18、集中438/438，整合最新主线后442/442通过；副本恢复3个原始文件并通过15项基线。截图已打开检查。
