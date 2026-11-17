@@ -162,6 +162,7 @@ export class BotGroupStore {
     return {taskId:row?.task_id??null,attachments:JSON.parse(row?.attachments??'[]'),requestAttachments:JSON.parse(row?.request_attachments??'[]')};
   }
   hasPost(id){return !!this.db.prepare('SELECT 1 FROM posts WHERE id=?').get(id);}
+  postById(roomId,id){const row=this.db.prepare('SELECT id,seq,text,created_at AS createdAt FROM posts WHERE room_id=? AND id=?').get(roomId,id);return row?this.withReplies([row])[0]:null;}
 
   reply(roomId,id) {
     return this.db.prepare(`SELECT r.id,r.state,r.session_id AS sessionId,p.seq AS postSeq,m.bot_id AS botId

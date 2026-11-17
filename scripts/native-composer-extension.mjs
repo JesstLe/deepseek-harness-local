@@ -4,7 +4,8 @@ import {createHash,randomUUID} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 
 export const NATIVE_COMPOSER_SHA='9a37949cc76603ea3a965ce4d0d6ca65885de4a9808345c38748e595ac396378';
-export const PATCHED_COMPOSER_SHA='c38cc967d672238279fbcad9aee94fa85b380dbcd58d1be8826521d3e5065cda';
+export const LEGACY_COMPOSER_SHA='c38cc967d672238279fbcad9aee94fa85b380dbcd58d1be8826521d3e5065cda';
+export const PATCHED_COMPOSER_SHA='3e8bdc0131242f879070e4a94abc280b5217b1e21278105406620ceefdd2e8c3';
 export const COMPOSER_EXTENSION='Naumi scoped composer transport v1';
 const sha=value=>createHash('sha256').update(value).digest('hex');
 
@@ -12,7 +13,8 @@ const sha=value=>createHash('sha256').update(value).digest('hex');
  * editor, submit machine, uploads, slots, model control and queue remain owned
  * by ui-conversation. Only an explicit Session-scoped transport can opt in. */
 export function extendNativeComposer(original){
-  if(original.includes(COMPOSER_EXTENSION)){if(sha(original)!==PATCHED_COMPOSER_SHA)throw Error('NATIVE_COMPOSER_EXTENSION_CHANGED');return original;}
+  if(original.includes(REFERENCE_RENDERER_EXTENSION)){if(sha(original)!==PATCHED_COMPOSER_SHA)throw Error('NATIVE_COMPOSER_EXTENSION_CHANGED');return original;}
+  if(sha(original)===LEGACY_COMPOSER_SHA)return extendReferenceRendering(original);
   if(sha(original)!==NATIVE_COMPOSER_SHA)throw Error('NATIVE_COMPOSER_UPSTREAM_CHANGED');
   let code=original;
   const replace=(a,b)=>{if(code.split(a).length!==2)throw Error('NATIVE_COMPOSER_ANCHOR_CHANGED');code=code.replace(a,b);};
@@ -65,7 +67,25 @@ export function extendNativeComposer(original){
             });
             slots.inject("main", function* () {`);
   replace('yield registerComposerBar();','yield registerSharedComposer();\n                yield registerGroupComposer();\n                yield registerComposerBar();');
-  return code;
+  return extendReferenceRendering(code);
+}
+
+export const REFERENCE_RENDERER_EXTENSION='Naumi native reference presentation v1';
+function extendReferenceRendering(original){
+ let code=original;const replace=(a,b)=>{if(code.split(a).length!==2)throw Error('REFERENCE_RENDER_ANCHOR_CHANGED');code=code.replace(a,b);};
+ replace('function ReferenceChip({ label, appearance, invalid }) {',`// ${REFERENCE_RENDERER_EXTENSION}
+        const NativeReferencePresentation = react.createContext(null);
+        function ReferenceChip({ source, refId, label, appearance, invalid }) {
+            const render=react.useContext(NativeReferencePresentation);
+            const custom=render?.({source,ref:refId,label,appearance,invalid});
+            if(custom!==undefined&&custom!==null)return custom;`);
+ replace('(ReferenceChip, {\n\t\t\t\t\tlabel: this.__label,',`(ReferenceChip, {
+                    source:this.__source, refId:this.__ref,
+\t\t\t\t\tlabel: this.__label,`);
+ replace('keyboard: shell,',`keyboard: shell,
+                        renderReference:reference=>inputTriggers?.renderReference?.(reference),`);
+ replace('return (0, react_jsx_runtime.jsx)(InputBar,{...props,useSession});',`return (0,react_jsx_runtime.jsx)(NativeReferencePresentation.Provider,{value:props.renderReference,children:(0, react_jsx_runtime.jsx)(InputBar,{...props,useSession})});`);
+ return code;
 }
 
 /** Atomic replacement breaks package-manager hardlinks; never writes a shared

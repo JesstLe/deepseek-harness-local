@@ -44,3 +44,7 @@ const stop = inputTriggers.registerSessionTrigger(sessionId, {
 整合后集中全量 599/599 通过。最终原生菜单 UI 22 项通过，零页面错误、零推理；主线既有员工管理/群改名场景与本次原生 Session 级 provider 共存。
 
 实际加载预检发现运行 host.js 保留了先前源/运行差异（桌面身份、钉钉和更新等并未整包装载）；首次预检在任何写入之前停止。发布器已收窄为仅从本次 main 提取一个 bot-mentions.js 资源注册行，插入原运行 host；不以源码整文件覆盖这些既有差异。其余三个群资源和原生 trigger bundle 仍执行固定哈希比对与备份。
+
+## 选中后输入框内展示（迭代 2）
+
+上述第一阶段的纯文本 onPick 已由后续原生 ReferenceInsert 替代；当前实现、原生引用节点、颜色/形象、稳定身份序列化与恢复验收见 [GROUP_MENTION_CHIPS.md](GROUP_MENTION_CHIPS.md)。候选列表本身继续复用本模块。第一阶段实际加载来源 e620bd9、101 个受保护文件与 100 个无关插件文件保持，消息/任务/模型未变，详见原 DEPLOYMENT.json。
