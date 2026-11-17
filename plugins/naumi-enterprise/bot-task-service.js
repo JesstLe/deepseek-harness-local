@@ -27,11 +27,13 @@ export class BotTaskService{
     const bot=this.directory.forSession(member.root.id);if(!bot)fail('BOT_NOT_BOUND');
     if(write&&bot.status!=='active')fail('BOT_ARCHIVED');return {root:member.root,bot};
   }
+  assertAdmission(...ids){for(const id of ids){if(this.directory.lifecycleLocks?.has(id))fail('BOT_BUSY');if(this.directory.list().bots.find(b=>b.id===id)?.status!=='active')fail('BOT_ARCHIVED');}}
   current(taskId){const task=this.store.read().tasks.find(t=>t.id===taskId);if(!task)fail('BOT_TASK_NOT_FOUND');return task;}
   authorized(agent,taskId,write=false){const caller=this.caller(agent,write),task=this.current(taskId);
     if(![task.sourceBotId,task.targetBotId].includes(caller.bot.id))fail('BOT_TASK_FORBIDDEN');
     // Bot-wide reads are intentional; writes belong to the exact task endpoints.
     // A new reception/test Session bound to the same Bot is not a write grant.
+    if(write)this.assertAdmission(task.sourceBotId,task.targetBotId);
     if(write&&caller.bot.id===task.sourceBotId&&caller.root.id!==task.sourceSessionId)fail('BOT_TASK_SESSION_REQUIRED');
     return {caller,task};}
   serial(taskId,fn){
@@ -54,7 +56,7 @@ export class BotTaskService{
       if(task.targetBotId===args.targetBotId)fail('BOT_HANDOFF_DIFFERENT_BOT_REQUIRED');
     }
     const target=this.directory.list().bots.find(b=>b.id===args.targetBotId);
-    if(!target)fail('BOT_NOT_FOUND');if(target.status!=='active')fail('BOT_ARCHIVED');
+    if(!target)fail('BOT_NOT_FOUND');this.assertAdmission(source.id,target.id);if(target.status!=='active')fail('BOT_ARCHIVED');
     const lineage=parent?.lineage??[source.id];
     if(parent&&TERMINAL.has(parent.status))fail('BOT_PARENT_TASK_CLOSED');
     if(lineage.includes(target.id))fail('BOT_TASK_CYCLE');if(lineage.length>=5)fail('BOT_TASK_DEPTH_LIMIT');
@@ -62,6 +64,7 @@ export class BotTaskService{
     const intent={...(args.goal?{goal:args.goal}:{}),...(args.acceptance!==undefined?{acceptance:args.acceptance}:{}),...(sourceMessage?{source:sourceMessage}:{})};
     const profile=await this.runtime.profile(target);signal?.throwIfAborted();
     const value=await this.store.change(doc=>{
+      this.assertAdmission(source.id,target.id);
       const existing=doc.tasks.find(t=>t.sourceSessionId===root.id&&t.key===args.idempotencyKey);
       if(existing){if(!sameDispatch(existing,args))fail('BOT_TASK_IDEMPOTENCY_CONFLICT');return {value:existing,unchanged:true};}
       if(doc.tasks.length>=1000)fail('BOT_TASK_CAPACITY');
@@ -151,7 +154,7 @@ export class BotTaskService{
       if(this.directory.list().bots.find(b=>b.id===current.targetBotId)?.status!=='active')fail('BOT_ARCHIVED');
       if(current.status==='completed'&&this.runtime.isRunning(current.targetSessionId))fail('BOT_TASK_STILL_RUNNING');
       await this.store.change(doc=>{
-        const t=doc.tasks.find(t=>t.id===task.id);if(t.revision!==args.expectedRevision)fail('BOT_TASK_CONFLICT');
+        const t=doc.tasks.find(t=>t.id===task.id);this.assertAdmission(t.sourceBotId,t.targetBotId);if(t.revision!==args.expectedRevision)fail('BOT_TASK_CONFLICT');
         const acceptance=args.acceptance??t.amendment?.acceptance;
         t.amendment={text:args.message,...(acceptance!==undefined?{acceptance}:{}),...(sourceMessage?{source:sourceMessage}:{})};
         if(t.status==='completed'){
@@ -176,7 +179,7 @@ export class BotTaskService{
       if(this.runtime.isRunning(current.targetSessionId))fail('BOT_TASK_STILL_RUNNING');
       // An explicit retry clears stale parked input before adding a new attempt message.
       await this.runtime.cancel(current.targetSessionId);
-      await this.store.change(doc=>{const task=doc.tasks.find(t=>t.id===taskId);
+      await this.store.change(doc=>{const task=doc.tasks.find(t=>t.id===taskId);this.assertAdmission(task.sourceBotId,task.targetBotId);
         if(caller.bot.id!==task.sourceBotId)fail('BOT_TASK_SENDER_REQUIRED');if(task.revision!==expectedRevision)fail('BOT_TASK_CONFLICT');
         if(!['failed','interrupted','cancelled'].includes(task.status))fail('BOT_TASK_NOT_RETRYABLE');
         if(task.attempt>=100)fail('BOT_TASK_RETRY_LIMIT');if(this.runtime.isRunning(task.targetSessionId))fail('BOT_TASK_STILL_RUNNING');
