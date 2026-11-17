@@ -41,11 +41,14 @@ test('native leaf relocation preserves exact injected actions, store, locale and
 test('parent/child slot owners cannot accidentally be relocated as leaves',()=>{
  assert.throws(()=>options({options:{},children:{child:{}}},'parent'),/Only leaf/);
 });
-test('all preexisting enterprise front-end code is byte-equivalent apart from declared UI install and desktop-only connection action',()=>{
+test('preexisting enterprise front-end remains byte-equivalent apart from declared context, browser, desktop and group additions',()=>{
  const desktopAction=",globalThis.naumiDesktop?.connectionSettings&&h('button',{className:'naumi-btn',onClick:()=>globalThis.naumiDesktop.connectionSettings()},'连接设置')";
  assert.equal(source.split(desktopAction).length,2);
  const start=source.indexOf('window.__ModuleLoader__.load');
- const restored=source.slice(start).replace(desktopAction,'').split('\n').filter(line=>!line.includes("void import('/naumi/assets/browser-client.js')")).join('\n').replace("    installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);\n",'');
+ const lazy="    const BotGroups=React.lazy(()=>import('/naumi/assets/bot-groups.js').then(module=>({default:module.createBotGroupsPage(ctx,React)}))\n      .catch(()=>({default:()=>h('p',{className:'naumi-page',role:'alert'},'群聊界面加载失败，请刷新页面。')})));\n";
+ const grouped="      for(const [id]of PANELS)yield ctx.slots.register({name:'main',key:id},()=>id==='naumi-bot-groups'\n        ? h(React.Suspense,{fallback:h('p',{role:'status',className:'naumi-page'},'正在载入群聊…')},h(BotGroups)) : h(Page,{page:id}));";
+ assert(source.includes(lazy));assert(source.includes(grouped));assert(source.includes("['naumi-bot-groups','Bot 群聊','chat'],"));
+ const restored=source.slice(start).replace(desktopAction,'').replace(lazy,'').replace("['naumi-bot-groups','Bot 群聊','chat'],",'').replace(grouped,"      for(const [id]of PANELS)yield ctx.slots.register({name:'main',key:id},()=>h(Page,{page:id}));").split('\n').filter(line=>!line.includes("void import('/naumi/assets/browser-client.js')")).join('\n').replace("    installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);\n",'');
  assert.equal(restored.replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'));
 });
 test('team presentation has no direct credential, model, permission or persistence writes',()=>{

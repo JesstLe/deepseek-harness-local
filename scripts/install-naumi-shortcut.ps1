@@ -21,7 +21,7 @@ $backup=Join-Path $root ('runtime/product-shortcut-'+[guid]::NewGuid().ToString(
 New-Item -ItemType Directory -Path $backup | Out-Null
 $hashes=@()
 foreach($p in $recognized){Copy-Item -LiteralPath $p -Destination $backup;$hashes+=@{name=(Split-Path $p -Leaf);sha256=(Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash}}
-$pwsh=(Get-Command pwsh.exe -CommandType Application).Source
+$pwsh=@(Get-Command pwsh.exe -CommandType Application)[0].Source
 $compiler=Join-Path ([Environment]::GetFolderPath('Windows')) 'Microsoft.NET/Framework/v4.0.30319/csc.exe'
 if(!(Test-Path -LiteralPath $compiler -PathType Leaf)){throw 'NAUMI_SHORTCUT_COMPILER_MISSING'}
 # Keep each launcher next to its receipt so backed-up shortcuts can still find their original target.

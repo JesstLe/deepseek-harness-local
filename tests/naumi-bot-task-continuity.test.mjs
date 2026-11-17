@@ -15,7 +15,9 @@ test('completed work continues in the exact same task, Bot, workspace and Sessio
     const next=await f.service.continue(f.sender,{taskId:first.id,expectedRevision:before.revision,idempotencyKey:'edit-1',message:'把原稿标题改成第二个'});await f.service.settled();
     assert.equal(next.id,first.id);assert.equal(next.targetSessionId,first.targetSessionId);assert.equal(next.targetBotId,first.targetBotId);assert.equal(next.task,first.task);assert.equal(next.attempt,2);
     assert.equal(f.store.read().tasks.length,1);assert.deepEqual(f.directory.list().bots,bots);assert.equal(f.service.current(first.id).instruction,'把原稿标题改成第二个');
-    assert(f.deliveries.filter(d=>d.sessionId===first.targetSessionId).at(-1).text.includes('本轮明确补充/修改：把原稿标题改成第二个'));
+    const delivered=f.deliveries.filter(d=>d.sessionId===first.targetSessionId).at(-1).text;
+    const amendment=JSON.parse(delivered.split('本轮明确补充/修改：')[1].split('\n')[0]);
+    assert.equal(amendment.text,'把原稿标题改成第二个');assert.deepEqual(amendment,f.service.current(first.id).amendment);
     await f.finish(next,{text:'标题修改完成'});assert.equal(f.service.current(first.id).result,'标题修改完成');assert.equal(f.deliveries.at(-1).mode,'followup');
   }finally{await f.cleanup();}
 });

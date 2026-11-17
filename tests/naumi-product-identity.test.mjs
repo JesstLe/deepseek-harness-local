@@ -70,6 +70,7 @@ test('desktop shortcut migrates to a GUI launcher and keeps rollback targets usa
 
     const args = [...first.Arguments.matchAll(/"([^"]+)"/g)].map(match => match[1]);
     assert.equal(args.length, 2);
+    assert(fs.statSync(args[0]).isFile(), 'launcher uses one executable, not concatenated PATH matches');
     assert.equal(args[1], startScript);
     execFileSync(first.TargetPath, args, {cwd: first.WorkingDirectory, windowsHide: true, timeout: 10000});
     assert.equal(fs.readFileSync(path.join(folder, 'started'), 'utf8'), folder);
