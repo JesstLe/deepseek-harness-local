@@ -1,14 +1,14 @@
 // Final production installer, real silent install/uninstall into an owned new path.
 // Preserve the pre-existing development shortcut; never adopt another product install.
 import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import{createHash}from'node:crypto';import{execFileSync,spawnSync}from'node:child_process';import{fileURLToPath}from'node:url';
-const root=path.resolve(process.argv[2]??fileURLToPath(new URL('../..',import.meta.url))),pwsh='D:/DEV/PowerShell/pwsh.exe',e=path.join(root,'evidence/installer-path-fix'),base=path.join(root,'runtime/installer-path-installed-035'),target=path.join(base,'中文 空格','Naumi'),setup=path.join(root,'runtime/naumi-desktop-release-0.3.5/Naumi-Setup-0.3.5-x64.exe'),sha=b=>createHash('sha256').update(b).digest('hex');
+const root=path.resolve(process.argv[2]??fileURLToPath(new URL('../..',import.meta.url))),pwsh='D:/DEV/PowerShell/pwsh.exe',e=path.join(root,'evidence/installer-path-fix'),base=path.join(root,'runtime/i035'),target=path.join(base,'中文 空格','Naumi'),setup=path.join(root,'runtime/naumi-desktop-release-0.3.5/Naumi-Setup-0.3.5-x64.exe'),sha=b=>createHash('sha256').update(b).digest('hex');
 fs.mkdirSync(e,{recursive:true});assert(!fs.existsSync(target),'TEST_TARGET_EXISTS');assert(target.startsWith(path.join(root,'runtime')+path.sep));
 const ps=script=>execFileSync(pwsh,['-NoProfile','-Command',script],{encoding:'utf8',windowsHide:true}).trim(),quote=v=>"'"+v.replaceAll("'","''")+"'";
 const snapshot=()=>JSON.parse(ps(`$g='fef98446-cfc3-5773-96cc-aa410c507d30';$reg=@();foreach($h in @('HKCU:','HKLM:')){foreach($p in @('Software\\'+$g,'Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\'+$g,'Software\\Classes\\AppUserModelId\\com.naumi.desktop')){if(Test-Path -LiteralPath ($h+'\\'+$p)){$reg+=($h+'\\'+$p)}}};$d=Join-Path ([Environment]::GetFolderPath('Desktop')) 'Naumi.lnk';$s=Join-Path ([Environment]::GetFolderPath('Programs')) 'Naumi.lnk';@{registry=$reg;desktop=$d;desktopHash=if(Test-Path -LiteralPath $d){(Get-FileHash -LiteralPath $d).Hash}else{''};menu=$s;menuHash=if(Test-Path -LiteralPath $s){(Get-FileHash -LiteralPath $s).Hash}else{''}}|ConvertTo-Json -Compress`));
 const before=snapshot();assert.equal(before.registry.length,0,'EXISTING_PRODUCT_REGISTRY_PRESERVED');assert.equal(before.menuHash,'','EXISTING_MENU_PRESERVED');
 fs.mkdirSync(base,{recursive:true});fs.writeFileSync(path.join(e,'INSTALL_BEFORE.json'),JSON.stringify(before,null,2)+'\n');
 const exits=[];
-function run(file,args,label){const r=spawnSync(file,args,{cwd:base,windowsHide:true,windowsVerbatimArguments:true,encoding:'utf8',timeout:180000});exits.push({stage:label,exit:r.status,signal:r.signal});assert.equal(r.status,0,label+' '+r.error?.message);console.log('INSTALLED_NATIVE stage='+label+' exit=0');}
+function run(file,args,label){const r=spawnSync(file,args,{cwd:base,windowsHide:true,windowsVerbatimArguments:true,encoding:'utf8',timeout:600000});exits.push({stage:label,exit:r.status,signal:r.signal});assert.equal(r.status,0,label+' '+r.error?.message);console.log('INSTALLED_NATIVE stage='+label+' exit=0');}
 function assertDesktop(){const now=snapshot();assert.equal(now.desktopHash,before.desktopHash,'USER_DESKTOP_SHORTCUT_CHANGED');}
 let installed=false,removed=false;
 try{

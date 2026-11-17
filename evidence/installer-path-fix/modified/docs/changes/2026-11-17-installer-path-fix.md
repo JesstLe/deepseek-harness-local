@@ -23,10 +23,11 @@
 - Win32 `GetFullPathNameW` 不要求目录已存在；校验驱动绝对路径、非法字符、长度与返回值。UNC/设备/相对路径不进入当前本机目录安装链。
 - `NaumiInstallLeave` 先读取到 candidate、规范化、按目录名补 Naumi、再验证，成功才提交 `$INSTDIR`；空结果保持原选择并停留页面。
 - `customCheckAppRunning` 最前增加安装/卸载最终目录 guard；静默与更新也验证，失败 exit43，既有活动门禁 exit42 不变。
+- 最终包真实安装进一步发现ZIP解压器MAX_PATH边界：深层测试目录已正确写入图标，但在包内长相对路径处停止，超时结束。不是再次变成根路径。新增 build-time path budget，从实际 inventory 的最长路径计算安装目录上限（当前66字符），交互/静默安装都在写入前拒绝过长目录；卸载不应用安装长度上限以免阻止清理旧深目录。包内路径增长导致预算不足时构建失败，不静默截断路径。
 
 ## 本次实现与迁移状态
 
-- 新目录、中文空格、父目录补 Naumi、尾斜线4类；相对、drive-relative、UNC、空串4类：真实 NSIS 8/8通过，验证阶段无目录写入。
+- 新目录、中文空格、父目录补 Naumi、尾斜线4类；相对、drive-relative、UNC、空串、超预算5类：真实 NSIS 9/9通过，验证阶段无目录写入。
 - 版本 package/lock/PRODUCT_VERSION 同步0.3.5，保留Logo和定制浅色安装UI。
 - 已将有缺陷0.3.4标记预发布并撤下Latest，临时稳定通道恢复0.3.2；新0.3.5正式发布后接替Latest。不删除旧资产、不覆盖已分发二进制。
 - 安装包只从固定main构建，结果见证据，发布SHA与最终证据提交分别记录。
@@ -35,6 +36,7 @@
 
 - `node desktop/scripts/verify-installer-path.mjs --baseline`：生产回调失败复现，exit1。
 - `node desktop/scripts/verify-installer-path.mjs`：原生行为 `NATIVE_PATH cases=8 pass=8 ... no_writes=PASS exit=0`。
+- 追加路径长度边界后：`NATIVE_PATH cases=9 pass=9 ... long_path=REJECTED ... exit=0`；首次过长实际安装失败如实留在OVERLONG_INSTALL，受影响目录为本任务创建的隔离fixture，记录文件清单后已清理，不是用户安装目录。
 - 全仓、源码副本回滚、实际包/安装/卸载、远端资产哈希见 `evidence/installer-path-fix/VERIFICATION.txt`。
 
 ## 未完成项与下一步

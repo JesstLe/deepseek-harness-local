@@ -29,7 +29,7 @@ index d270c2c..7b09db5 100644
  
  - 左下角「设置」右侧新增「检查更新」，支持查看版本、下载进度和更新说明
 diff --git a/desktop/installer/maintenance.nsh b/desktop/installer/maintenance.nsh
-index ee715f8..43f1cdd 100644
+index ee715f8..fe955b7 100644
 --- a/desktop/installer/maintenance.nsh
 +++ b/desktop/installer/maintenance.nsh
 @@ -16,6 +16,22 @@
@@ -46,7 +46,7 @@ index ee715f8..43f1cdd 100644
 +  Pop $NaumiCanonicalTarget
 +  ${If} $NaumiCanonicalTarget == ""
 +    ${IfNot} ${Silent}
-+      MessageBox MB_OK|MB_ICONEXCLAMATION "请选择完整的本机安装路径，再重试安装。"
++      MessageBox MB_OK|MB_ICONEXCLAMATION "安装位置无效或过长，请选择较短的完整本机路径，再重试安装。"
 +    ${EndIf}
 +    SetErrorLevel 43
 +    Quit
@@ -56,10 +56,23 @@ index ee715f8..43f1cdd 100644
    Push $7
    Push $R8
 diff --git a/desktop/installer/presentation.nsh b/desktop/installer/presentation.nsh
-index ff77b6d..6adb789 100644
+index ff77b6d..fdf6384 100644
 --- a/desktop/installer/presentation.nsh
 +++ b/desktop/installer/presentation.nsh
-@@ -19,8 +19,10 @@ Var NaumiPage
+@@ -3,6 +3,12 @@
+ !include MUI2.nsh
+ !include nsDialogs.nsh
+ !include FileFunc.nsh
++; Generated from the final staged payload by build-desktop.mjs. Native fixtures
++; use the same pinned-layout fallback when no staged runtime exists.
++!if /FileExists "${NAUMI_WIZARD_DIR}\..\..\runtime\installer-path-budget.nsh"
++  !include "${NAUMI_WIZARD_DIR}\..\..\runtime\installer-path-budget.nsh"
++!endif
++!define /IfNDef NAUMI_MAX_INSTALLDIR_CHARS 66
+ !define /IfNDef MUI_ICON "${NAUMI_WIZARD_DIR}\..\app\assets\naumi.ico"
+ !define /IfNDef MUI_UNICON "${NAUMI_WIZARD_DIR}\..\app\assets\naumi.ico"
+ !define MUI_BGCOLOR FFFFFF
+@@ -19,8 +25,10 @@ Var NaumiPage
  !ifndef BUILD_UNINSTALLER
  Var NaumiPathField
  Var NaumiRunCheck
@@ -70,7 +83,7 @@ index ff77b6d..6adb789 100644
  
  !macro NaumiHideChrome ID
    GetDlgItem $0 $HWNDPARENT ${ID}
-@@ -192,7 +194,78 @@ Function ${PREFIX}${EVENT}
+@@ -192,7 +200,84 @@ Function ${PREFIX}${EVENT}
  FunctionEnd
  !macroend
  
@@ -131,6 +144,12 @@ index ff77b6d..6adb789 100644
 +      StrCpy $0 $0 -1
 +    ${EndIf}
 +  ${EndIf}
++  !if "${PREFIX}" == ""
++    StrLen $1 $0
++    ${If} $1 > ${NAUMI_MAX_INSTALLDIR_CHARS}
++      Goto naumi_path_invalid
++    ${EndIf}
++  !endif
 +  StrCpy $R0 $0
 +  Goto naumi_path_return
 +  naumi_path_invalid:
@@ -149,7 +168,7 @@ index ff77b6d..6adb789 100644
  !insertmacro NaumiFailure "" ".onInstFailed"
  !insertmacro NaumiFunctions "" "install"
  Function NaumiBrowse
-@@ -222,24 +295,27 @@ Function NaumiInstall
+@@ -222,24 +307,27 @@ Function NaumiInstall
    nsDialogs::Show
  FunctionEnd
  Function NaumiInstallLeave
@@ -157,20 +176,21 @@ index ff77b6d..6adb789 100644
 -  StrLen $0 $INSTDIR
 -  ${If} $0 < 4
 -    MessageBox MB_OK|MB_ICONEXCLAMATION "请选择有效的安装位置。"
--    Abort
--  ${EndIf}
--  StrCpy $0 $INSTDIR 1 1
--  StrCpy $1 $INSTDIR 1 2
--  ${If} $0 != ":"
--  ${OrIf} $1 != "\"
 +  ${NSD_GetText} $NaumiPathField $NaumiCandidatePath
 +  Push $NaumiCandidatePath
 +  Call NaumiCanonicalPath
 +  Pop $NaumiCandidatePath
 +  ${If} $NaumiCandidatePath == ""
-     MessageBox MB_OK|MB_ICONEXCLAMATION "请选择完整的本机安装路径。"
++    MessageBox MB_OK|MB_ICONEXCLAMATION "安装位置无效或过长，请选择较短的完整本机路径（最多 ${NAUMI_MAX_INSTALLDIR_CHARS} 个字符）。"
      Abort
    ${EndIf}
+-  StrCpy $0 $INSTDIR 1 1
+-  StrCpy $1 $INSTDIR 1 2
+-  ${If} $0 != ":"
+-  ${OrIf} $1 != "\"
+-    MessageBox MB_OK|MB_ICONEXCLAMATION "请选择完整的本机安装路径。"
+-    Abort
+-  ${EndIf}
 -  GetFullPathName $INSTDIR "$INSTDIR"
 -  ${GetFileName} "$INSTDIR" $0
 +  ${GetFileName} "$NaumiCandidatePath" $0
@@ -181,7 +201,7 @@ index ff77b6d..6adb789 100644
 +    Pop $NaumiCandidatePath
 +  ${EndIf}
 +  ${If} $NaumiCandidatePath == ""
-+    MessageBox MB_OK|MB_ICONEXCLAMATION "请选择完整的本机安装路径。"
++    MessageBox MB_OK|MB_ICONEXCLAMATION "安装位置无效或过长，请选择较短的完整本机路径（最多 ${NAUMI_MAX_INSTALLDIR_CHARS} 个字符）。"
 +    Abort
    ${EndIf}
 +  ; Commit only a checked, nonempty, drive-absolute result. NSIS GetFullPathName
@@ -190,7 +210,7 @@ index ff77b6d..6adb789 100644
  FunctionEnd
  Function NaumiDoneLeave
    ${NSD_GetState} $NaumiRunCheck $0
-@@ -260,6 +336,7 @@ Function ${PREFIX}NaumiConfirm
+@@ -260,6 +348,7 @@ Function ${PREFIX}NaumiConfirm
  FunctionEnd
  !macroend
  !macro NaumiUninstallerFunctions
@@ -229,23 +249,53 @@ index e51af92..7152416 100644
    "private": true,
    "description": "Naumi 企业协作桌面端",
    "author": "Naumi",
+diff --git a/desktop/scripts/build-desktop.mjs b/desktop/scripts/build-desktop.mjs
+index 558fa97..6992580 100644
+--- a/desktop/scripts/build-desktop.mjs
++++ b/desktop/scripts/build-desktop.mjs
+@@ -8,6 +8,15 @@ import {createRequire} from 'node:module';
+ import {fileURLToPath,pathToFileURL} from 'node:url';
+ const root=fileURLToPath(new URL('../..',import.meta.url));
+ const sha=b=>createHash('sha256').update(b).digest('hex');
++export function installPathBudget(files){
++ if(!Array.isArray(files)||!files.length)throw Error('NSIS_PATH_INVENTORY_REQUIRED');
++ // nsisunz's Win32 destination buffer is MAX_PATH, including the NUL. Compute
++ // admission from the longest real shipped backend path, not a guessed UX cap.
++ const longest=Math.max(...files.map(file=>path.win32.join('resources','backend',file.path).length),48);
++ const maxInstallDirChars=259-1-longest;
++ if(!Number.isInteger(maxInstallDirChars)||maxInstallDirChars<32)throw Error('NSIS_PAYLOAD_PATH_BUDGET_EXHAUSTED');
++ return {maxInstallDirChars,longestPayloadPathChars:longest,maxDestinationChars:259};
++}
+ export function presentationScript(raw,engine,metadata){
+  const normalized=raw.replaceAll('\r\n','\n');
+  if(sha(normalized)!==metadata.originalEngineSHA256 || sha(engine)!==metadata.modifiedEngineSHA256 ||
+@@ -32,6 +41,9 @@ export async function buildDesktop(args=process.argv.slice(2)){
+  for(const arg of args)if(arg!=='--dir'&&!arg.startsWith('--output='))throw Error('UNKNOWN_BUILD_ARGUMENT '+arg);
+  const output=args.find(a=>a.startsWith('--output='))?.slice('--output='.length);
+  const callerCwd=process.cwd();
++ const budget=installPathBudget(JSON.parse(fs.readFileSync(path.join(root,'runtime/desktop-backend/runtime-files.json'))));
++ fs.writeFileSync(path.join(root,'runtime/installer-path-budget.nsh'),'!define NAUMI_MAX_INSTALLDIR_CHARS '+budget.maxInstallDirChars+'\n');
++ console.log('NSIS_PATH_BUDGET '+JSON.stringify(budget));
+  const restore=installPresentationHook(NsisTarget,fs.readFileSync(path.join(dir,'engine.nsi'),'utf8'),metadata);
+  try{
+   process.chdir(path.join(root,'desktop'));
 diff --git a/desktop/scripts/verify-installed-035.mjs b/desktop/scripts/verify-installed-035.mjs
 new file mode 100644
-index 0000000..00513b9
+index 0000000..1e694cf
 --- /dev/null
 +++ b/desktop/scripts/verify-installed-035.mjs
 @@ -0,0 +1,31 @@
 +// Final production installer, real silent install/uninstall into an owned new path.
 +// Preserve the pre-existing development shortcut; never adopt another product install.
 +import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import{createHash}from'node:crypto';import{execFileSync,spawnSync}from'node:child_process';import{fileURLToPath}from'node:url';
-+const root=path.resolve(process.argv[2]??fileURLToPath(new URL('../..',import.meta.url))),pwsh='D:/DEV/PowerShell/pwsh.exe',e=path.join(root,'evidence/installer-path-fix'),base=path.join(root,'runtime/installer-path-installed-035'),target=path.join(base,'中文 空格','Naumi'),setup=path.join(root,'runtime/naumi-desktop-release-0.3.5/Naumi-Setup-0.3.5-x64.exe'),sha=b=>createHash('sha256').update(b).digest('hex');
++const root=path.resolve(process.argv[2]??fileURLToPath(new URL('../..',import.meta.url))),pwsh='D:/DEV/PowerShell/pwsh.exe',e=path.join(root,'evidence/installer-path-fix'),base=path.join(root,'runtime/i035'),target=path.join(base,'中文 空格','Naumi'),setup=path.join(root,'runtime/naumi-desktop-release-0.3.5/Naumi-Setup-0.3.5-x64.exe'),sha=b=>createHash('sha256').update(b).digest('hex');
 +fs.mkdirSync(e,{recursive:true});assert(!fs.existsSync(target),'TEST_TARGET_EXISTS');assert(target.startsWith(path.join(root,'runtime')+path.sep));
 +const ps=script=>execFileSync(pwsh,['-NoProfile','-Command',script],{encoding:'utf8',windowsHide:true}).trim(),quote=v=>"'"+v.replaceAll("'","''")+"'";
 +const snapshot=()=>JSON.parse(ps(`$g='fef98446-cfc3-5773-96cc-aa410c507d30';$reg=@();foreach($h in @('HKCU:','HKLM:')){foreach($p in @('Software\\'+$g,'Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\'+$g,'Software\\Classes\\AppUserModelId\\com.naumi.desktop')){if(Test-Path -LiteralPath ($h+'\\'+$p)){$reg+=($h+'\\'+$p)}}};$d=Join-Path ([Environment]::GetFolderPath('Desktop')) 'Naumi.lnk';$s=Join-Path ([Environment]::GetFolderPath('Programs')) 'Naumi.lnk';@{registry=$reg;desktop=$d;desktopHash=if(Test-Path -LiteralPath $d){(Get-FileHash -LiteralPath $d).Hash}else{''};menu=$s;menuHash=if(Test-Path -LiteralPath $s){(Get-FileHash -LiteralPath $s).Hash}else{''}}|ConvertTo-Json -Compress`));
 +const before=snapshot();assert.equal(before.registry.length,0,'EXISTING_PRODUCT_REGISTRY_PRESERVED');assert.equal(before.menuHash,'','EXISTING_MENU_PRESERVED');
 +fs.mkdirSync(base,{recursive:true});fs.writeFileSync(path.join(e,'INSTALL_BEFORE.json'),JSON.stringify(before,null,2)+'\n');
 +const exits=[];
-+function run(file,args,label){const r=spawnSync(file,args,{cwd:base,windowsHide:true,windowsVerbatimArguments:true,encoding:'utf8',timeout:180000});exits.push({stage:label,exit:r.status,signal:r.signal});assert.equal(r.status,0,label+' '+r.error?.message);console.log('INSTALLED_NATIVE stage='+label+' exit=0');}
++function run(file,args,label){const r=spawnSync(file,args,{cwd:base,windowsHide:true,windowsVerbatimArguments:true,encoding:'utf8',timeout:600000});exits.push({stage:label,exit:r.status,signal:r.signal});assert.equal(r.status,0,label+' '+r.error?.message);console.log('INSTALLED_NATIVE stage='+label+' exit=0');}
 +function assertDesktop(){const now=snapshot();assert.equal(now.desktopHash,before.desktopHash,'USER_DESKTOP_SHORTCUT_CHANGED');}
 +let installed=false,removed=false;
 +try{
@@ -268,7 +318,7 @@ index 0000000..00513b9
 +}catch(error){fs.writeFileSync(path.join(e,'INSTALL_PENDING.json'),JSON.stringify({installed,removed,target,exits,error:String(error)},null,2));throw error;}
 diff --git a/desktop/scripts/verify-installer-path.mjs b/desktop/scripts/verify-installer-path.mjs
 new file mode 100644
-index 0000000..db9dc6d
+index 0000000..3938ad4
 --- /dev/null
 +++ b/desktop/scripts/verify-installer-path.mjs
 @@ -0,0 +1,49 @@
@@ -276,7 +326,7 @@ index 0000000..db9dc6d
 +// controls. No product registration, shortcuts, payload installation or user profiles.
 +import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import{createRequire}from'node:module';import{fileURLToPath}from'node:url';import{execFileSync,spawnSync}from'node:child_process';
 +const root=path.resolve(process.argv.find(x=>x.startsWith('--root='))?.slice(7)??fileURLToPath(new URL('../..',import.meta.url))),r=createRequire(import.meta.url),{getMakeNsisPath}=r('app-builder-lib/out/toolsets/windows.js'),tool=await getMakeNsisPath(),baseline=process.argv.includes('--baseline'),dir=path.join(root,'runtime/installer-path-regression'),q=s=>s.replaceAll('/','\\').replaceAll('$','$$');
-+fs.mkdirSync(dir,{recursive:true});const exe=path.join(dir,'regression.exe'),receipt=path.join(dir,'receipt.txt'),parent=path.join(dir,'not-created');assert(!fs.existsSync(parent));
++fs.mkdirSync(dir,{recursive:true});const exe=path.join(dir,'regression.exe'),receipt=path.join(dir,'receipt.txt'),parent=path.win32.join(path.parse(root).root,'np35-uncreated');assert(!fs.existsSync(parent));
 +const cases=[path.join(parent,'Naumi'),path.join(parent,'中文 空格','Naumi'),path.join(parent,'chosen-parent'),path.join(parent,'Naumi')+'\\'];
 +const body=cases.map((input,i)=>`System::Call 'user32::CreateWindowExW(i 0,w "EDIT",w "${q(input)}",i 0,i 0,i 0,i 1,i 1,p 0,p 0,p 0,p 0)p.r0'
 +StrCpy $NaumiPathField $0
@@ -285,7 +335,7 @@ index 0000000..db9dc6d
 +FileWriteUTF16LE $9 "${i}=$INSTDIR$\\r$\\n"
 +System::Call 'user32::DestroyWindow(p $NaumiPathField)'
 +`).join('\n');
-+const extra=baseline?'':[['relative','Naumi'],['drive-relative','E:Naumi'],['unc','\\\\server\\share\\Naumi'],['empty','']].map(([label,input])=>`Push "${q(input)}"
++const extra=baseline?'':[['relative','Naumi'],['drive-relative','E:Naumi'],['unc','\\\\server\\share\\Naumi'],['empty',''],['too-long','E:\\'+('x'.repeat(70))+'\\Naumi']].map(([label,input])=>`Push "${q(input)}"
 +Call NaumiCanonicalPath
 +Pop $0
 +FileWriteUTF16LE $9 "invalid-${label}=$0$\\r$\\n"`).join('\n');
@@ -320,7 +370,7 @@ index 0000000..db9dc6d
 +const lines=fs.readFileSync(receipt,'utf16le').trim().split(/\r?\n/),values=Object.fromEntries(lines.map(line=>{const i=line.indexOf('=');return[line.slice(0,i),line.slice(i+1)];}));assert(!fs.existsSync(parent),'VALIDATION_CREATED_TARGET');
 +if(baseline){assert.equal(values[0],'\\Naumi');console.log('BASELINE native_page_leave=FAIL selected_absolute_path='+cases[0]+' actual='+values[0]+' exit=1');process.exitCode=1;}
 +else{for(const [i,input]of cases.entries()){const normalized=path.win32.normalize(input).replace(/\\$/,'');const expected=path.win32.basename(normalized).toLowerCase()==='naumi'?normalized:path.win32.join(normalized,'Naumi');assert.equal(values[i],expected,'PATH_'+i);}
-+for(const key of Object.keys(values).filter(k=>k.startsWith('invalid-')))assert.equal(values[key],'',key);console.log('NATIVE_PATH cases=8 pass=8 invalid_rejected=4 new_parent=PASS unicode_spaces=PASS trailing_slash=PASS no_writes=PASS exit=0');}
++for(const key of Object.keys(values).filter(k=>k.startsWith('invalid-')))assert.equal(values[key],'',key);console.log('NATIVE_PATH cases=9 pass=9 invalid_rejected=5 new_parent=PASS unicode_spaces=PASS trailing_slash=PASS long_path=REJECTED no_writes=PASS exit=0');}
 diff --git a/desktop/scripts/verify-release-035.mjs b/desktop/scripts/verify-release-035.mjs
 new file mode 100644
 index 0000000..57e3296
@@ -372,10 +422,10 @@ index 0000000..57e3296
 +}catch(error){if(application){const page=await application.firstWindow();console.error('PACKAGE_DIAGNOSTIC '+(await page.locator('body').innerText()).slice(0,2000));await page.screenshot({path:path.join(out,'package-failure.png')}).catch(()=>{});if(home){for(const name of ['server.err.log','server.out.log']){const file=path.join(home,'logs',name);if(fs.existsSync(file))console.error(fs.readFileSync(file,'utf8').slice(-5000));}}}throw error;}
 +finally{if(application)await application.close();server.closeAllConnections();await new Promise(r=>server.close(r));}
 diff --git a/desktop/tests/installer-ui.test.cjs b/desktop/tests/installer-ui.test.cjs
-index 225dc34..2832e7c 100644
+index 225dc34..7413018 100644
 --- a/desktop/tests/installer-ui.test.cjs
 +++ b/desktop/tests/installer-ui.test.cjs
-@@ -32,10 +32,20 @@ test('completion remains explicit and failures cannot display false completion',
+@@ -32,10 +32,28 @@ test('completion remains explicit and failures cannot display false completion',
  test('buttons retain native semantics and local path validation is non-destructive',()=>{
   assert(source.includes('${NSD_CreateButton}'));assert(source.includes('${NSD_OnClick}'));
   assert(source.includes('nsDialogs::SelectFolderDialog'));assert(source.includes('${If} $0 != error'));
@@ -394,15 +444,32 @@ index 225dc34..2832e7c 100644
 + const gate=read('desktop/installer/maintenance.nsh');assert(gate.indexOf('Call NaumiCanonicalPath')<gate.indexOf('!insertmacro NaumiExtractMaintenance',gate.indexOf('!macro customCheckAppRunning')));
 + assert(gate.includes('Call un.NaumiCanonicalPath'));assert(gate.includes('SetErrorLevel 43'));
 +});
++
++test('ZIP extraction admission is derived from real payload paths before any file write',async()=>{
++ const {installPathBudget}=await import('../scripts/build-desktop.mjs');
++ const value=installPathBudget([{path:'x'.repeat(174)}]);assert.equal(value.longestPayloadPathChars,192);assert.equal(value.maxInstallDirChars,66);
++ assert.equal(value.maxInstallDirChars+1+value.longestPayloadPathChars,259);
++ assert.throws(()=>installPathBudget([]),/INVENTORY_REQUIRED/);assert.throws(()=>installPathBudget([{path:'x'.repeat(260)}]),/BUDGET_EXHAUSTED/);
++ assert(source.includes('$1 > ${NAUMI_MAX_INSTALLDIR_CHARS}'));assert(source.includes('installer-path-budget.nsh'));
++});
  test('one light layout scales geometry and uses high resolution branded assets',()=>{
   for(const s of ['MUI_BGCOLOR FFFFFF','GetDpiForWindow','NaumiScale','820 520','NaumiRail','Microsoft YaHei UI'])assert(source.includes(s));
   const assets={'logo.bmp':[88,88],'rail.bmp':[432,1040],'action-install.bmp':[320,88],'action-browse.bmp':[168,80]};
+@@ -65,5 +83,7 @@ test('presentation build hook preserves both native builder phases and restores
+  const original=Target.prototype.computeFinalScript,restore=installPresentationHook(Target,engine,meta),target=new Target;
+  try{target.computeFinalScript(raw,false,['x64']);target.computeFinalScript(raw,true,['x64']);assert.deepEqual(calls.map(c=>c.installer),[false,true]);assert(calls.every(c=>c.raw===engine&&c.owner===target));assert.throws(()=>presentationScript(raw+'x',engine,meta),/SOURCE_CHANGED/);}finally{restore();}
+  assert.equal(Target.prototype.computeFinalScript,original);
+- const builder=read('desktop/scripts/build-desktop.mjs');assert(builder.includes("publish:'never'"));assert(!builder.includes('writeFile'));
++ const builder=read('desktop/scripts/build-desktop.mjs');assert(builder.includes("publish:'never'"));
++ const hook=builder.slice(builder.indexOf('export function installPresentationHook'),builder.indexOf('export async function buildDesktop'));assert(!hook.includes('writeFile'));
++ assert(builder.includes("path.join(root,'runtime/installer-path-budget.nsh')"));
+ });
 diff --git a/docs/changes/2026-11-17-installer-path-fix.md b/docs/changes/2026-11-17-installer-path-fix.md
 new file mode 100644
-index 0000000..2b1f426
+index 0000000..c77be2b
 --- /dev/null
 +++ b/docs/changes/2026-11-17-installer-path-fix.md
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,45 @@
 +# 0.3.5：新目录安装路径丢失修复
 +
 +## 模块与职责
@@ -428,10 +495,11 @@ index 0000000..2b1f426
 +- Win32 `GetFullPathNameW` 不要求目录已存在；校验驱动绝对路径、非法字符、长度与返回值。UNC/设备/相对路径不进入当前本机目录安装链。
 +- `NaumiInstallLeave` 先读取到 candidate、规范化、按目录名补 Naumi、再验证，成功才提交 `$INSTDIR`；空结果保持原选择并停留页面。
 +- `customCheckAppRunning` 最前增加安装/卸载最终目录 guard；静默与更新也验证，失败 exit43，既有活动门禁 exit42 不变。
++- 最终包真实安装进一步发现ZIP解压器MAX_PATH边界：深层测试目录已正确写入图标，但在包内长相对路径处停止，超时结束。不是再次变成根路径。新增 build-time path budget，从实际 inventory 的最长路径计算安装目录上限（当前66字符），交互/静默安装都在写入前拒绝过长目录；卸载不应用安装长度上限以免阻止清理旧深目录。包内路径增长导致预算不足时构建失败，不静默截断路径。
 +
 +## 本次实现与迁移状态
 +
-+- 新目录、中文空格、父目录补 Naumi、尾斜线4类；相对、drive-relative、UNC、空串4类：真实 NSIS 8/8通过，验证阶段无目录写入。
++- 新目录、中文空格、父目录补 Naumi、尾斜线4类；相对、drive-relative、UNC、空串、超预算5类：真实 NSIS 9/9通过，验证阶段无目录写入。
 +- 版本 package/lock/PRODUCT_VERSION 同步0.3.5，保留Logo和定制浅色安装UI。
 +- 已将有缺陷0.3.4标记预发布并撤下Latest，临时稳定通道恢复0.3.2；新0.3.5正式发布后接替Latest。不删除旧资产、不覆盖已分发二进制。
 +- 安装包只从固定main构建，结果见证据，发布SHA与最终证据提交分别记录。
@@ -440,6 +508,7 @@ index 0000000..2b1f426
 +
 +- `node desktop/scripts/verify-installer-path.mjs --baseline`：生产回调失败复现，exit1。
 +- `node desktop/scripts/verify-installer-path.mjs`：原生行为 `NATIVE_PATH cases=8 pass=8 ... no_writes=PASS exit=0`。
++- 追加路径长度边界后：`NATIVE_PATH cases=9 pass=9 ... long_path=REJECTED ... exit=0`；首次过长实际安装失败如实留在OVERLONG_INSTALL，受影响目录为本任务创建的隔离fixture，记录文件清单后已清理，不是用户安装目录。
 +- 全仓、源码副本回滚、实际包/安装/卸载、远端资产哈希见 `evidence/installer-path-fix/VERIFICATION.txt`。
 +
 +## 未完成项与下一步
@@ -472,13 +541,13 @@ index 2282eb8..d55bdb9 100644
 +export const PRODUCT_VERSION="0.3.5";
 diff --git a/scripts/installer-path-evidence.mjs b/scripts/installer-path-evidence.mjs
 new file mode 100644
-index 0000000..f888bf3
+index 0000000..b963b24
 --- /dev/null
 +++ b/scripts/installer-path-evidence.mjs
 @@ -0,0 +1,38 @@
 +import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID}from'node:crypto';import{execFileSync,spawnSync}from'node:child_process';
 +const root=process.cwd(),dir=path.join(root,'evidence/installer-path-fix'),baseline='31d78709602b70b01629eec78d2ad6f3ec3bc716',sha=b=>createHash('sha256').update(b).digest('hex');
-+const files=['.gitattributes','CHANGELOG.md','desktop/package.json','desktop/package-lock.json','plugins/naumi-enterprise/product-version.js','desktop/installer/presentation.nsh','desktop/installer/maintenance.nsh','desktop/tests/installer-ui.test.cjs','desktop/scripts/verify-installer-path.mjs','desktop/scripts/verify-release-035.mjs','desktop/scripts/verify-installed-035.mjs','docs/changes/2026-11-17-installer-path-fix.md','docs/implementation/INSTALLER_UI.md','scripts/installer-path-evidence.mjs'];
++const files=['.gitattributes','CHANGELOG.md','desktop/package.json','desktop/package-lock.json','plugins/naumi-enterprise/product-version.js','desktop/installer/presentation.nsh','desktop/installer/maintenance.nsh','desktop/tests/installer-ui.test.cjs','desktop/scripts/build-desktop.mjs','desktop/scripts/verify-installer-path.mjs','desktop/scripts/verify-release-035.mjs','desktop/scripts/verify-installed-035.mjs','docs/changes/2026-11-17-installer-path-fix.md','docs/implementation/INSTALLER_UI.md','scripts/installer-path-evidence.mjs'];
 +const mode=process.argv[2];
 +if(mode==='prepare'){
 + const records=[];

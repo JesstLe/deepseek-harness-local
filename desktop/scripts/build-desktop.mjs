@@ -8,6 +8,15 @@ import {createRequire} from 'node:module';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 const root=fileURLToPath(new URL('../..',import.meta.url));
 const sha=b=>createHash('sha256').update(b).digest('hex');
+export function installPathBudget(files){
+ if(!Array.isArray(files)||!files.length)throw Error('NSIS_PATH_INVENTORY_REQUIRED');
+ // nsisunz's Win32 destination buffer is MAX_PATH, including the NUL. Compute
+ // admission from the longest real shipped backend path, not a guessed UX cap.
+ const longest=Math.max(...files.map(file=>path.win32.join('resources','backend',file.path).length),48);
+ const maxInstallDirChars=259-1-longest;
+ if(!Number.isInteger(maxInstallDirChars)||maxInstallDirChars<32)throw Error('NSIS_PAYLOAD_PATH_BUDGET_EXHAUSTED');
+ return {maxInstallDirChars,longestPayloadPathChars:longest,maxDestinationChars:259};
+}
 export function presentationScript(raw,engine,metadata){
  const normalized=raw.replaceAll('\r\n','\n');
  if(sha(normalized)!==metadata.originalEngineSHA256 || sha(engine)!==metadata.modifiedEngineSHA256 ||
@@ -32,6 +41,9 @@ export async function buildDesktop(args=process.argv.slice(2)){
  for(const arg of args)if(arg!=='--dir'&&!arg.startsWith('--output='))throw Error('UNKNOWN_BUILD_ARGUMENT '+arg);
  const output=args.find(a=>a.startsWith('--output='))?.slice('--output='.length);
  const callerCwd=process.cwd();
+ const budget=installPathBudget(JSON.parse(fs.readFileSync(path.join(root,'runtime/desktop-backend/runtime-files.json'))));
+ fs.writeFileSync(path.join(root,'runtime/installer-path-budget.nsh'),'!define NAUMI_MAX_INSTALLDIR_CHARS '+budget.maxInstallDirChars+'\n');
+ console.log('NSIS_PATH_BUDGET '+JSON.stringify(budget));
  const restore=installPresentationHook(NsisTarget,fs.readFileSync(path.join(dir,'engine.nsi'),'utf8'),metadata);
  try{
   process.chdir(path.join(root,'desktop'));

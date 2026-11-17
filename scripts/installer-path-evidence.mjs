@@ -1,6 +1,6 @@
 import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID}from'node:crypto';import{execFileSync,spawnSync}from'node:child_process';
 const root=process.cwd(),dir=path.join(root,'evidence/installer-path-fix'),baseline='31d78709602b70b01629eec78d2ad6f3ec3bc716',sha=b=>createHash('sha256').update(b).digest('hex');
-const files=['.gitattributes','CHANGELOG.md','desktop/package.json','desktop/package-lock.json','plugins/naumi-enterprise/product-version.js','desktop/installer/presentation.nsh','desktop/installer/maintenance.nsh','desktop/tests/installer-ui.test.cjs','desktop/scripts/verify-installer-path.mjs','desktop/scripts/verify-release-035.mjs','desktop/scripts/verify-installed-035.mjs','docs/changes/2026-11-17-installer-path-fix.md','docs/implementation/INSTALLER_UI.md','scripts/installer-path-evidence.mjs'];
+const files=['.gitattributes','CHANGELOG.md','desktop/package.json','desktop/package-lock.json','plugins/naumi-enterprise/product-version.js','desktop/installer/presentation.nsh','desktop/installer/maintenance.nsh','desktop/tests/installer-ui.test.cjs','desktop/scripts/build-desktop.mjs','desktop/scripts/verify-installer-path.mjs','desktop/scripts/verify-release-035.mjs','desktop/scripts/verify-installed-035.mjs','docs/changes/2026-11-17-installer-path-fix.md','docs/implementation/INSTALLER_UI.md','scripts/installer-path-evidence.mjs'];
 const mode=process.argv[2];
 if(mode==='prepare'){
  const records=[];
