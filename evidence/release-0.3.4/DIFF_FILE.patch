@@ -1,0 +1,252 @@
+diff --git a/.gitattributes b/.gitattributes
+index cf9d3f4..ec0cc67 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -230,6 +230,9 @@ plugins/naumi-ui-layout/UPSTREAM.json text eol=lf
+ /evidence/desktop-updates/** -text whitespace=cr-at-eol
+ /evidence/desktop-updates/DIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab,cr-at-eol
+ /evidence/desktop-updates/ROLLBACK.sh text eol=lf
++/evidence/release-0.3.4/** -text whitespace=cr-at-eol
++/evidence/release-0.3.4/DIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab,cr-at-eol
++/evidence/release-0.3.4/ROLLBACK.sh text eol=lf
+ /desktop/app/identity* text eol=lf
+ /desktop/app/identity-style/** -text
+ /desktop/app/main.cjs text eol=lf
+@@ -244,3 +247,4 @@ plugins/naumi-ui-layout/UPSTREAM.json text eol=lf
+ /evidence/unified-identity/*.log -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
+ /evidence/unified-identity/DIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab,cr-at-eol
+ /evidence/unified-identity/ROLLBACK.sh text eol=lf
++/evidence/release-0.3.4/*.txt -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 9575901..d270c2c 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -5,6 +5,14 @@
+ 面向用户书写，中文，每个版本一个小节，格式固定为 `## x.y.z - 日期`。
+ 
+ 
++## 0.3.4 - 2026-11-17
++
++- 左下角「设置」右侧新增「检查更新」，支持查看版本、下载进度和更新说明
++- 更新下载完成后可「重启并更新」，任务运行中保留更新并支持稍后重试
++- 接入 Naumi 统一账号登录，登录页复用 Naumi 产品样式，不同账号的本地数据保持隔离
++- 修复首次登录后尚未连接企业协作时的工作台启动问题
++- 包含全新 Naumi 安装／卸载界面与 Logo，内置钉钉 CLI 和本地浏览器组件
++
+ ## 0.3.3 - 2026-11-17
+ 
+ - 全新 Naumi 安装与卸载界面：统一浅色品牌侧区、Logo、字体和操作按钮
+diff --git a/desktop/package-lock.json b/desktop/package-lock.json
+index 2a93113..7e944f7 100644
+--- a/desktop/package-lock.json
++++ b/desktop/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "naumi-desktop",
+-  "version": "0.3.3",
++  "version": "0.3.4",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "naumi-desktop",
+-      "version": "0.3.3",
++      "version": "0.3.4",
+       "license": "UNLICENSED",
+       "dependencies": {
+         "electron-updater": "^6.6.2"
+diff --git a/desktop/package.json b/desktop/package.json
+index 8715c25..e51af92 100644
+--- a/desktop/package.json
++++ b/desktop/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "naumi-desktop",
+-  "version": "0.3.3",
++  "version": "0.3.4",
+   "private": true,
+   "description": "Naumi 企业协作桌面端",
+   "author": "Naumi",
+diff --git a/desktop/scripts/verify-release-034.mjs b/desktop/scripts/verify-release-034.mjs
+new file mode 100644
+index 0000000..d3f7c55
+--- /dev/null
++++ b/desktop/scripts/verify-release-034.mjs
+@@ -0,0 +1,41 @@
++// A real packaged app and bundled backend, with only the external account/update APIs controlled.
++// Never installs over an employee profile, downloads an update, sends model requests or touches 3080.
++import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import http from 'node:http';import assert from 'node:assert/strict';import{createRequire}from'node:module';import{fileURLToPath}from'node:url';import{spawnSync}from'node:child_process';
++const root=fileURLToPath(new URL('../..',import.meta.url)),require=createRequire(import.meta.url),{_electron}=require('playwright'),out=path.join(root,'evidence/release-0.3.4'),exe=path.join(root,'runtime/naumi-desktop-release-0.3.4/win-unpacked/Naumi.exe');
++fs.mkdirSync(out,{recursive:true});const userData=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-034-package-')),requests=[];let application,workerPid,home;
++const server=http.createServer(async(req,res)=>{
++ const pathname=req.url.split('?')[0];
++ const send=(value,status=200)=>{res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(value));};
++ requests.push({method:req.method,path:req.url});
++ if(pathname==='/latest.yml'){res.writeHead(200,{'content-type':'text/yaml'});res.end('version: 0.3.4\nfiles:\n  - url: Naumi-Setup-0.3.4-x64.exe\n    sha512: '+Buffer.alloc(64).toString('base64')+'\npath: Naumi-Setup-0.3.4-x64.exe\nsha512: '+Buffer.alloc(64).toString('base64')+'\nreleaseDate: 2026-11-17T00:00:00Z\n');return;}
++ if(req.url==='/api/auth/login'){
++  let text='';for await(const part of req)text+=part;const input=JSON.parse(text);if(input.email!=='release@example.test'||input.password!=='fixture-only-password')return send({error:'wrong'},401);
++  res.setHeader('set-cookie','nv_user=release; HttpOnly; Path=/; SameSite=Lax');return send({ok:true,user:{email:'release@example.test'}});
++ }
++ if(req.url==='/api/auth/session')return send({user:req.headers.cookie?.includes('nv_user=release')?{email:'release@example.test',name:'Release QA'}:null});
++ if(req.url==='/api/auth/logout'){res.setHeader('set-cookie','nv_user=; Max-Age=0; Path=/');return send({ok:true});}
++ res.writeHead(404).end();
++});await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;
++const env={...process.env,NAUMI_USER_DATA:userData,NAUMI_IDENTITY_ORIGIN:origin,NAUMI_UPDATE_URL:origin,NAUMI_TEST:'1',NAUMI_TEST_HIDDEN:'1'};
++for(const name of ['NAUMI_ROOT','NAUMI_DSH_HOME','NAUMI_NODE','NAUMI_HOST_URL','NAUMI_ENTERPRISE_ORIGIN','ELECTRON_RUN_AS_NODE','NAUMI_UPDATE_DEV'])delete env[name];
++env.PATH=process.env.SystemRoot+'\\System32;'+process.env.SystemRoot;
++try{
++ application=await _electron.launch({executablePath:exe,args:[],env,timeout:90000});const page=await application.firstWindow();
++ await page.waitForURL('**/identity.html',{timeout:60000});await page.locator('#account').waitFor();assert(!(await page.locator('body').innerText()).includes('DESIGN'));assert.equal(await page.locator('.mg-brand-lockup').getAttribute('aria-label'),'Naumi');
++ await page.locator('#account').fill('release@example.test');await page.locator('#password').fill('fixture-only-password');await page.locator('#submit').click();
++ await Promise.race([page.waitForURL(/^http:\/\/127\.0\.0\.1:/,{timeout:120000}),page.waitForURL('**/startup.html?error=**',{timeout:120000}).then(()=>{throw Error('PACKAGE_BOOT '+new URL(page.url()).searchParams.get('error'));})]);
++ await page.locator('.nup-trigger').waitFor({timeout:60000});
++ const info=await application.evaluate(({app})=>{const t=globalThis.__naumiTest;return{version:app.getVersion(),packaged:app.isPackaged,home:t.settings.home,backend:t.settings.root,owned:t.backend.owned,enterprise:!!t.enterprise};});
++ assert.equal(info.version,'0.3.4');assert.equal(info.packaged,true);assert.equal(info.owned,true);assert.equal(info.enterprise,false);assert(info.backend.includes('resources'));assert(info.home.startsWith(userData+path.sep));home=info.home;
++ assert(!fs.existsSync(path.join(home,'desktop-enterprise.json')));workerPid=JSON.parse(fs.readFileSync(path.join(home,'desktop-backend.json'))).pid;
++ const placement=await page.evaluate(()=>{const u=document.querySelector('.nup-trigger'),f=u.closest('[class*="_footArea"]'),s=f.querySelector('[class*="_settingsArea"]');const a=u.getBoundingClientRect(),b=s.getBoundingClientRect();return{right:a.left>=b.right-1,row:Math.abs(a.top-b.top)<10};});assert(placement.right&&placement.row,JSON.stringify(placement));
++ await page.locator('.nup-trigger').click();await page.locator('.nup-status').filter({hasText:'已是最新版本'}).waitFor({timeout:30000});assert((await page.locator('.nup-version').innerText()).includes('0.3.4'));assert(requests.some(r=>r.path==='/latest.yml'));assert(!requests.some(r=>r.path.endsWith('.exe')));
++ const updates=await page.evaluate(()=>window.naumiDesktop.updateState());assert.equal(updates.enabled,true);assert.equal(updates.status,'idle');assert.equal(updates.currentVersion,'0.3.4');assert(updates.lastChecked);
++ await page.screenshot({path:path.join(out,'packaged-update.png')});
++ const cli=spawnSync(path.join(info.backend,'node.exe'),[path.join(info.backend,'runtime/dingtalk-cli.cjs'),'auth','status','--readonly','--format','json'],{cwd:home,env:{SystemRoot:process.env.SystemRoot,PATH:env.PATH,DSH_HOME:home},encoding:'utf8',timeout:15000});assert.equal(cli.status,0,cli.stderr);assert.equal(JSON.parse(cli.stdout).authenticated,false);
++ const manifest=JSON.parse(fs.readFileSync(path.join(info.backend,'runtime-manifest.json')));assert.equal(manifest.version,'0.3.4');assert.equal(manifest.dingtalk.version,'1.0.68');assert.equal(manifest.personalCredentials,false);assert.equal(manifest.browserProfiles,false);
++ await application.close();application=null;await new Promise(r=>setTimeout(r,150));let alive=false;try{process.kill(workerPid,0);alive=true;}catch{}assert.equal(alive,false,'OWNED_WORKER_NOT_STOPPED');
++ const report={status:'PASS',version:info.version,realPackagedMain:true,realBundledBackend:true,accountAPI:'controlled fixture',updateAPI:'controlled same-version manifest',settingsRight:true,checkUpdates:true,logo:true,dingtalk:'1.0.68 / unauthenticated',noEnterpriseConnectionBoot:true,workerStopped:true,modelCalls:0,realEmployeeTouched:false,service3080Touched:false,installerExecuted:false,exit:0};
++ fs.writeFileSync(path.join(out,'PACKAGE.json'),JSON.stringify(report,null,2)+'\n');console.log('PACKAGE version=0.3.4 login=PASS bundled_backend=PASS settings_right=PASS check_update=PASS dingtalk=PASS worker_stop=PASS model_calls=0 exit=0');
++}catch(error){if(application){const page=await application.firstWindow();console.error('PACKAGE_DIAGNOSTIC '+(await page.locator('body').innerText()).slice(0,2000));await page.screenshot({path:path.join(out,'package-failure.png')}).catch(()=>{});if(home){for(const name of ['server.err.log','server.out.log']){const file=path.join(home,'logs',name);if(fs.existsSync(file))console.error(fs.readFileSync(file,'utf8').slice(-5000));}}}throw error;}
++finally{if(application)await application.close();server.closeAllConnections();await new Promise(r=>server.close(r));}
+diff --git a/docs/changes/2026-11-17-release-0.3.4.md b/docs/changes/2026-11-17-release-0.3.4.md
+new file mode 100644
+index 0000000..9cab48f
+--- /dev/null
++++ b/docs/changes/2026-11-17-release-0.3.4.md
+@@ -0,0 +1,34 @@
++# Naumi Desktop 0.3.4 正式发版
++
++## 模块与职责
++
++- 本线程负责版本冻结、打包检查与正式 Release；分支 `codex/release-0.3.4`。
++- 初始 main/origin/main：`ce0d3c93b2534b18ded32b6543c71b503ca8a73d`。
++- 独立开发目录 `E:/Workspace/naumi-desktop-release-034`；构建只在整合后的固定 main 执行。功能模块计数 1。
++- 保留其他任务的群聊 worktree、安装器 worktree、3080、员工会话和私有配置。
++
++## 公共接口、依赖方向、数据/状态归属
++
++- 桌面 package/lock 与产品展示版本统一为 0.3.4；CHANGELOG 是发布说明来源。
++- 沿用标准 electron-builder 两阶段 NSIS + Naumi presentation hook，保留 Logo、默认卸载保留数据、维护门禁与原生浏览器。
++- 复用已通过的更新机制与设置右侧入口，Release 使用 `latest.yml` + x64 installer，并绑定固定 main SHA。
++- 身份由 Canvas API 管理；企业协作连接单独授权。账号首次登录、尚未配置企业协作时，不创建企业连接，也不阻止本地工作台启动。
++
++## 调研结论、本次实现与迁移状态
++
++1. 发版检查发现 `desktopCollaborationOrigin` 在未连接企业协作的全新账号目录强读不存在的 `desktop-enterprise.json`。真实模块基线复现 `ACCOUNT_ONLY_STARTUP=ENOENT`，exit 1；此前身份 E2E 使用 backend adapter，未覆盖该组装链。
++2. 最小修复：仅在既没有声明 enterprise origin、也没有既有绑定时采用已校验的界面默认 origin；不写连接、不生成登录态。原生有限桥仍拒绝无企业会话的数据请求；已有绑定仍必须与环境中的 issuer 精确一致。
++3. 新增三项启动/issuer/未授权边界测试；发布包使用隔离账号 API fixture、真实打包主进程/预加载和真实内置后端进行登录启动与检查更新验收。无真实账号密码或模型调用。
++4. 输出到版本专属 `runtime/naumi-desktop-release-0.3.4`，不覆盖被现有窗口使用的旧目录。
++
++## 验证命令、结果及证据层级
++
++- 修改前更新/安装器/身份模块基线 46/46，exit 0；账号无企业连接模块复现 ENOENT，exit 1。
++- 全仓回归、源码副本回滚、构建和实包检查见 `evidence/release-0.3.4/VERIFICATION.txt`。
++- 单独记录源码整合 SHA、build 源 SHA、安装包 SHA256/SHA512、远端 tag、更新 manifest 和下载校验，不把 Git 合并等同于 Release 发布。
++- 安装包首次启动/登录/本地后端/更新面板检查与当前员工安装覆盖升级分开记录；不覆盖员工现有安装来验收。
++
++## 未完成项与下一步
++
++- 本文初稿为发版准备记录；最终构建与公开 Release 结果追加到 `evidence/release-0.3.4/RELEASE.json` 及 VERIFICATION，不依赖会话记忆。
++- 高 DPI/多显示器完整矩阵、员工真实账号业务任务与未来 0.3.4→后续版本覆盖升级不是本轮受控实包验收结果。
+diff --git a/plugins/naumi-enterprise/desktop-enterprise.js b/plugins/naumi-enterprise/desktop-enterprise.js
+index e2a267a..90a5a3c 100644
+--- a/plugins/naumi-enterprise/desktop-enterprise.js
++++ b/plugins/naumi-enterprise/desktop-enterprise.js
+@@ -23,7 +23,11 @@ export class DesktopEnterpriseTransport{
+ }
+ export function desktopCollaborationOrigin(fallback,env=process.env){
+  if(!env.NAUMI_DESKTOP_INSTANCE_ID)return fallback;
+- const config=JSON.parse(fs.readFileSync(path.join(env.DSH_HOME,'desktop-enterprise.json'),'utf8'));
++ const file=path.join(env.DSH_HOME,'desktop-enterprise.json');
++ // A Canvas account can open the local workbench before linking enterprise collaboration.
++ // No business session is granted: desktop requests still go through the scoped native bridge.
++ if(!env.NAUMI_ENTERPRISE_ORIGIN&&!fs.existsSync(file))return fallback;
++ const config=JSON.parse(fs.readFileSync(file,'utf8'));
+  if(config.version!==1||config.origin!==env.NAUMI_ENTERPRISE_ORIGIN)throw Error('ENTERPRISE_CONFIG_INVALID');
+  const u=new URL(config.origin);if(u.origin!==config.origin||u.username||u.password||u.protocol!=='https:'&&!(u.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(u.hostname)))throw Error('ENTERPRISE_CONFIG_INVALID');return u.origin;
+ }
+diff --git a/plugins/naumi-enterprise/product-version.js b/plugins/naumi-enterprise/product-version.js
+index 5d79a43..2282eb8 100644
+--- a/plugins/naumi-enterprise/product-version.js
++++ b/plugins/naumi-enterprise/product-version.js
+@@ -1 +1 @@
+-export const PRODUCT_VERSION="0.3.3";
++export const PRODUCT_VERSION="0.3.4";
+diff --git a/scripts/release-034-evidence.mjs b/scripts/release-034-evidence.mjs
+new file mode 100644
+index 0000000..5e74e01
+--- /dev/null
++++ b/scripts/release-034-evidence.mjs
+@@ -0,0 +1,37 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID}from'node:crypto';import{execFileSync,spawnSync}from'node:child_process';
++const root=process.cwd(),dir=path.join(root,'evidence/release-0.3.4'),baseline='ce0d3c93b2534b18ded32b6543c71b503ca8a73d',sha=b=>createHash('sha256').update(b).digest('hex');
++const files=['.gitattributes','CHANGELOG.md','desktop/package.json','desktop/package-lock.json','plugins/naumi-enterprise/product-version.js','plugins/naumi-enterprise/desktop-enterprise.js','tests/naumi-account-only-startup.test.mjs','desktop/scripts/verify-release-034.mjs','docs/changes/2026-11-17-release-0.3.4.md','scripts/release-034-evidence.mjs'];
++const mode=process.argv[2];
++if(mode==='prepare'){
++ const records=[];
++ for(const file of files){const modified=fs.readFileSync(path.join(root,file));let original=null;try{original=execFileSync('git',['show',baseline+':'+file],{stdio:['ignore','pipe','ignore']});}catch{}
++  for(const [kind,bytes]of[['modified',modified],['original',original]])if(bytes){const target=path.join(dir,kind,file);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,bytes);}
++  records.push({file,originalSHA256:original?sha(original):null,modifiedSHA256:sha(modified)});
++ }
++ fs.writeFileSync(path.join(dir,'manifest.json'),JSON.stringify({baseline,files:records},null,2)+'\n');
++ fs.writeFileSync(path.join(dir,'DIFF_FILE.patch'),execFileSync('git',['diff','--cached','--binary',baseline,'--',...files],{maxBuffer:10*1024*1024}));
++ execFileSync('python',['-c',`import pathlib,zipfile;p=pathlib.Path(r'${dir}');z=zipfile.ZipFile(p/'MODIFIED_FILE.zip','w',zipfile.ZIP_DEFLATED);[z.write(f,f.relative_to(p).as_posix()) for d in ['original','modified'] for f in sorted((p/d).rglob('*')) if f.is_file()];z.write(p/'manifest.json','manifest.json');z.close()`]);
++ console.log('ARTIFACTS files='+records.length+' original_hashes=PASS modified_hashes=PASS');
++}else if(mode==='rollback'){
++ assert(process.argv.includes('--test'),'COPY_TEST_REQUIRED');const manifest=JSON.parse(fs.readFileSync(path.join(dir,'manifest.json'))).files;
++ const parent=path.join(root,'runtime','release-034-rollback-'+randomUUID()),copy=path.join(parent,'copy');fs.mkdirSync(copy,{recursive:true});const tar=path.join(parent,'baseline.tar');
++ fs.writeFileSync(tar,execFileSync('git',['archive',baseline],{maxBuffer:200*1024*1024}));execFileSync('C:/Windows/System32/tar.exe',['-xf',tar,'-C',copy]);
++ for(const m of manifest){const target=path.join(copy,m.file);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(path.join(dir,'modified',m.file),target);assert.equal(sha(fs.readFileSync(target)),m.modifiedSHA256);}
++ for(const m of manifest){const target=path.join(copy,m.file);if(m.originalSHA256){fs.copyFileSync(path.join(dir,'original',m.file),target);assert.equal(sha(fs.readFileSync(target)),m.originalSHA256);}else fs.unlinkSync(target);}
++ fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');fs.symlinkSync(path.join(root,'desktop/node_modules'),path.join(copy,'desktop/node_modules'),'junction');
++ const command=['--test','--test-concurrency=1','tests/*.test.mjs','desktop/tests/*.test.cjs'],result=spawnSync(process.execPath,command,{cwd:copy,encoding:'utf8',windowsHide:true,timeout:240000,maxBuffer:15*1024*1024});
++ fs.writeFileSync(path.join(dir,'ROLLBACK.txt'),(result.stdout??'')+(result.stderr??''));assert.equal(result.status,0,'ROLLBACK_TESTS_FAILED');
++ const tests=Number((result.stdout.match(/(?:ℹ |# )tests (\d+)/)??[])[1]);assert(tests);
++ assert.equal(JSON.parse(fs.readFileSync(path.join(copy,'desktop/package.json'))).version,'0.3.3');assert(fs.readFileSync(path.join(copy,'plugins/naumi-enterprise/assets/desktop-updates.js'),'utf8').includes('installDesktopUpdatesUI'));
++ for(const m of manifest)assert.equal(sha(fs.readFileSync(path.join(root,m.file))),m.modifiedSHA256,'CURRENT_MODIFIED_CHANGED');
++ execFileSync('git',['apply','--reverse','--check',path.join(dir,'DIFF_FILE.patch')]);
++ const output='ROLLBACK tests='+tests+' pass='+tests+' fail=0 exit=0\nRESTORED version=0.3.3 update_entry=settings_right source_hashes=PASS\nCURRENT version=0.3.4 source=modified service3080=untouched';
++ fs.writeFileSync(path.join(dir,'ROLLBACK_RESULT.json'),JSON.stringify({status:'PASS',tests,exit:0,copy,command:'node '+command.join(' '),output},null,2)+'\n');console.log(output);
++}else if(mode==='reopen'){
++ const manifest=JSON.parse(fs.readFileSync(path.join(dir,'manifest.json'))).files;
++ for(const m of manifest){assert.equal(sha(fs.readFileSync(path.join(root,m.file))),m.modifiedSHA256);assert.equal(sha(fs.readFileSync(path.join(dir,'modified',m.file))),m.modifiedSHA256);if(m.originalSHA256)assert.equal(sha(fs.readFileSync(path.join(dir,'original',m.file))),m.originalSHA256);}
++ execFileSync('python',['-c',`import pathlib,zipfile,json,hashlib;p=pathlib.Path(r'${dir}');z=zipfile.ZipFile(p/'MODIFIED_FILE.zip');assert z.testzip() is None;m=json.loads(z.read('manifest.json'));assert all(hashlib.sha256(z.read('modified/'+r['file'])).hexdigest()==r['modifiedSHA256'] for r in m['files'])`]);
++ const report=fs.readFileSync(path.join(dir,'VERIFICATION.txt'),'utf8');for(const name of ['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh']){assert(fs.readFileSync(path.join(dir,name)).length>0);assert(report.includes('E:/Workspace/naumi-desktop/evidence/release-0.3.4/'+name));}
++ assert.equal(JSON.parse(fs.readFileSync(path.join(dir,'ROLLBACK_RESULT.json'))).status,'PASS');execFileSync('D:/DEV/Git/bin/bash.exe',['-n',path.join(dir,'ROLLBACK.sh')]);
++ execFileSync('git',['apply','--reverse','--check',path.join(dir,'DIFF_FILE.patch')]);console.log('REOPEN files='+manifest.length+' zip_crc=PASS hashes=PASS patch=PASS verification=PASS rollback=PASS');
++}else throw Error('EXPECTED prepare|rollback|reopen');
+diff --git a/tests/naumi-account-only-startup.test.mjs b/tests/naumi-account-only-startup.test.mjs
+new file mode 100644
+index 0000000..495a1a7
+--- /dev/null
++++ b/tests/naumi-account-only-startup.test.mjs
+@@ -0,0 +1,23 @@
++import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import os from 'node:os';
++import {desktopCollaborationOrigin,DesktopEnterpriseTransport}from'../plugins/naumi-enterprise/desktop-enterprise.js';
++test('unlinked Canvas account can boot without manufacturing an enterprise connection',()=>{
++ const home=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-account-only-'));
++ try{const env={DSH_HOME:home,NAUMI_DESKTOP_INSTANCE_ID:'fixture'};assert.equal(desktopCollaborationOrigin('http://127.0.0.1:3112',env),'http://127.0.0.1:3112');assert.deepEqual(fs.readdirSync(home),[]);}
++ finally{fs.rmdirSync(home);}
++});
++test('an existing enterprise binding still requires the exact configured issuer',()=>{
++ const home=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-account-bound-')),file=path.join(home,'desktop-enterprise.json');
++ try{fs.writeFileSync(file,JSON.stringify({version:1,origin:'https://enterprise.example.test'}));const env={DSH_HOME:home,NAUMI_DESKTOP_INSTANCE_ID:'fixture'};
++ assert.throws(()=>desktopCollaborationOrigin('http://127.0.0.1:3112',env),/ENTERPRISE_CONFIG_INVALID/);
++ assert.throws(()=>desktopCollaborationOrigin('http://127.0.0.1:3112',{...env,NAUMI_ENTERPRISE_ORIGIN:'https://other.example.test'}),/ENTERPRISE_CONFIG_INVALID/);
++ assert.equal(desktopCollaborationOrigin('',{...env,NAUMI_ENTERPRISE_ORIGIN:'https://enterprise.example.test'}),'https://enterprise.example.test');}
++ finally{fs.unlinkSync(file);fs.rmdirSync(home);}
++});
++test('declared enterprise without its binding fails closed and an unlinked transport grants no session',async()=>{
++ const home=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-account-missing-'));
++ try{const env={DSH_HOME:home,NAUMI_DESKTOP_INSTANCE_ID:'fixture',NAUMI_ENTERPRISE_ORIGIN:'https://enterprise.example.test'};
++ assert.throws(()=>desktopCollaborationOrigin('http://127.0.0.1:3112',env),/ENOENT/);
++ const transport=new DesktopEnterpriseTransport({origin:'http://127.0.0.1:3112',home,standalone:true});
++ await assert.rejects(transport.fetch('/api/workspace'),/COLLABORATION_LOGIN_REQUIRED/);}
++ finally{fs.rmdirSync(home);}
++});

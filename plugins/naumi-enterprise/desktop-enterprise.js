@@ -23,7 +23,11 @@ export class DesktopEnterpriseTransport{
 }
 export function desktopCollaborationOrigin(fallback,env=process.env){
  if(!env.NAUMI_DESKTOP_INSTANCE_ID)return fallback;
- const config=JSON.parse(fs.readFileSync(path.join(env.DSH_HOME,'desktop-enterprise.json'),'utf8'));
+ const file=path.join(env.DSH_HOME,'desktop-enterprise.json');
+ // A Canvas account can open the local workbench before linking enterprise collaboration.
+ // No business session is granted: desktop requests still go through the scoped native bridge.
+ if(!env.NAUMI_ENTERPRISE_ORIGIN&&!fs.existsSync(file))return fallback;
+ const config=JSON.parse(fs.readFileSync(file,'utf8'));
  if(config.version!==1||config.origin!==env.NAUMI_ENTERPRISE_ORIGIN)throw Error('ENTERPRISE_CONFIG_INVALID');
  const u=new URL(config.origin);if(u.origin!==config.origin||u.username||u.password||u.protocol!=='https:'&&!(u.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(u.hostname)))throw Error('ENTERPRISE_CONFIG_INVALID');return u.origin;
 }
