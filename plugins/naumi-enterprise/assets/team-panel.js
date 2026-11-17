@@ -1,9 +1,11 @@
 import {naumiMonitorReadings,naumiPortalOptions,teamTaskGroups,teamSchedules,scheduleTime,scheduleToggleRequest,memberState,teamInitials,readEnvironment} from './team-panel-model.js';
-import {botCatalog,botForSession,botTone} from './bot-sidebar-model.js';
+import {botCatalog,botForSession,botActivity} from './bot-sidebar-model.js';
+import {createBotAvatar} from './bot-avatar.js';
+import {taskActivity,employeeTaskState} from './bot-task-model.js';
 
 /** A presentation adapter over native Team, Schedule and resource actions. */
 export function installTeamPanel(ctx,React,createPortal,Icon){
-  const h=React.createElement,{useState,useEffect,useLayoutEffect,useMemo,useRef,useSyncExternalStore}=React;
+  const h=React.createElement,{useState,useEffect,useLayoutEffect,useMemo,useRef,useSyncExternalStore}=React,Avatar=createBotAvatar(React);
   const docks=new Map(),listeners=new Map(),relocated=new WeakSet(),originals=new Map(),disposers=[];
   const register=dispose=>{if(typeof dispose==='function')disposers.push(dispose);};
   const getDock=(id,key)=>docks.get(id)?.[key]??null;
@@ -93,6 +95,7 @@ export function installTeamPanel(ctx,React,createPortal,Icon){
     const profile=useSessions(s=>s.projectionsBySession[leadId]?.values.naumiTeamProfile);
     const catalogSource=botCatalog(),catalog=useSyncExternalStore(catalogSource.subscribe,catalogSource.getSnapshot,catalogSource.getSnapshot),bot=botForSession(catalog.bots,leadId);
     const status=useSessionStatus(s=>s.get(sessionId));
+    const allSessions=useSessions(s=>s),allStatus=useSessionStatus(s=>s),activity=taskActivity(),jobs=useSyncExternalStore(activity.subscribe,activity.getSnapshot,activity.getSnapshot);
     const input=useInput(s=>s),stats=useProjection('sessionStats'),usage=useProjection('tokenUsage'),pressure=useProjection('contextPressure');
     const readings=naumiMonitorReadings(stats,usage,pressure),groups=useMemo(()=>teamTaskGroups(team),[team]);
     const [geometry,setGeometry]=useState(null),[preference,setPreference]=useState(null),[files,setFiles]=useState([]),[error,setError]=useState(null),[tab,setTab]=useState('activity');
@@ -122,7 +125,7 @@ export function installTeamPanel(ctx,React,createPortal,Icon){
     const side=geometry&&h('aside',{className:'naumi-context-panel'+(!room?' drawer':''),hidden:!open,'aria-label':'智能体团队','data-naumi-context-session':sessionId,'data-team-id':leadId,onKeyDown:e=>{if(e.key==='Escape'&&!room&&!e.defaultPrevented){e.preventDefault();close();}},style:{left:geometry.left+geometry.width-width,top:geometry.top,width,height:geometry.height}},
       h('header',{className:'naumi-context-head'},h('span',null,'团队'),h('button',{type:'button',className:'naumi-context-icon','aria-label':'收起智能体团队',onClick:close},'×')),
       h('div',{className:'naumi-context-scroll'},
-        h('section',{className:'naumi-team-identity'},h('div',{className:'naumi-team-avatar'+(bot?' naumi-bot-avatar '+botTone(bot.id):''),'aria-hidden':true},bot?h(Icon,{name:bot.kind==='team'?'layers':'spark',size:30}):profile?.name?teamInitials(profile.name):h('img',{src:'/naumi/assets/symbol.svg',alt:'',width:32,height:32})),h('h2',{'data-team-name':true},name),
+        h('section',{className:'naumi-team-identity'},bot?h(Avatar,{bot,className:'naumi-team-avatar',state:jobs.status==='ready'?employeeTaskState(bot,jobs.tasks,botActivity(bot,allSessions,allStatus)):botActivity(bot,allSessions,allStatus)}):h('div',{className:'naumi-team-avatar','aria-hidden':true},profile?.name?teamInitials(profile.name):h('img',{src:'/naumi/assets/symbol.svg',alt:'',width:32,height:32})),h('h2',{'data-team-name':true},name),
           h('details',{className:'naumi-team-roster',key:leadId},h('summary',null,h('span',{className:'naumi-team-faces','aria-hidden':true},members.slice(0,4).map(m=>h('span',{key:m.id},teamInitials(m.name)))),h('span',null,team?`${members.length} 位成员`:'成员待同步'),h('span',{className:'naumi-roster-chevron','aria-hidden':true},'⌄')),
             members.map(member=>h(Member,{key:member.id,member,sessionId,useSessions,useSessionStatus,onError:setError})),h('div',{className:'naumi-roster-actions'},h('div',{className:'naumi-team-native',ref:refs.team}),h('div',{className:'naumi-child-native',ref:refs.children})))),
         (team?.failure||profile?.failure)&&h('p',{className:'naumi-context-error',role:'alert'},team?.failure??profile.failure),

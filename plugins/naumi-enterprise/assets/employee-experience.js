@@ -1,4 +1,5 @@
 import {createEmployeeClient,errorLabel} from './employee-center-model.js';
+import {createAppearanceDialog} from './bot-avatar.js';
 import {EXPERIENCE_EVENT,SIMPLE_FIELDS,advancedEmployeeAccess,restoreWorkStyle,publicMemory,cleanEmployeeLanding,hasSession} from './employee-experience-model.js';
 
 export function createEmployeeExperience(React,{client=createEmployeeClient()}={}){
@@ -43,12 +44,12 @@ export function createEmployeeExperience(React,{client=createEmployeeClient()}={
  return Experience;
 }
 export function installEmployeeExperience(ctx,React,createPortal){
- const h=React.createElement,Experience=createEmployeeExperience(React);
+ const h=React.createElement,Experience=createEmployeeExperience(React),Appearance=createAppearanceDialog(React);
  const stale=cleanEmployeeLanding(globalThis.sessionStorage);if(stale&&!hasSession(globalThis.location))ctx.layout.selectPanel('naumi-workbench');
- function Overlay(){const [request,setRequest]=React.useState(null),[error,setError]=React.useState('');React.useEffect(()=>{let closed=false,center;const listener=async event=>{const {bot,mode}=event.detail??{};if(!bot?.id||!['style','memories','forget','restore','advanced'].includes(mode))return;setError('');
+ function Overlay(){const [request,setRequest]=React.useState(null),[error,setError]=React.useState('');React.useEffect(()=>{let closed=false,center;const listener=async event=>{const {bot,mode}=event.detail??{};if(!bot?.id||!['appearance','style','memories','forget','restore','advanced'].includes(mode))return;setError('');
    if(mode==='advanced'){if(!await advancedEmployeeAccess()){if(!closed)setError('请使用企业管理员账号');return;}const module=await import('./employee-center.js');if(closed)return;center??=module.installEmployeeCenter(ctx,React,()=>null,{showNavigation:false});ctx.layout.selectPanel('naumi-employees');return;}
    setRequest({bot,mode});};window.addEventListener(EXPERIENCE_EVENT,listener);return()=>{closed=true;window.removeEventListener(EXPERIENCE_EVENT,listener);center?.();};},[]);
-  return createPortal(h(React.Fragment,null,request&&h(Experience,{key:request.bot.id+'-'+request.mode,...request,onClose:()=>{setRequest(null);document.querySelector('[data-bot-id="'+CSS.escape(request.bot.id)+'"] .naumi-bot-menu-toggle')?.focus();}}),error&&h('div',{role:'alert',className:'nx-toast',onClick:()=>setError('')},error)),document.body);
+  return createPortal(h(React.Fragment,null,request&&h(request.mode==='appearance'?Appearance:Experience,{key:request.bot.id+'-'+request.mode,...request,onClose:()=>{setRequest(null);document.querySelector('[data-bot-id="'+CSS.escape(request.bot.id)+'"] .naumi-bot-menu-toggle')?.focus();}}),error&&h('div',{role:'alert',className:'nx-toast',onClick:()=>setError('')},error)),document.body);
  }
  return ctx.slots.inject('shell.overlay',()=>ctx.slots.register({name:'shell.overlay',id:'naumi-employee-experience',order:95},Overlay));
 }

@@ -6,10 +6,12 @@ import {z} from 'zod';
 import {defineTool} from '@deepseek-ai/dsh-tools';
 import {installBotTasks} from './bot-tasks.js';
 import {installEmployees} from './employees.js';
+import {BOT_FORMS,BOT_PALETTES} from './assets/bot-appearance-model.js';
 
 const name=z.string().trim().min(1).max(80).refine(v=>!/[\u0000-\u001f\u007f]/u.test(v));
 const id=z.string().min(1).max(200),revision=z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-const botSchema=z.object({id,kind:z.enum(['agent','team']),name,purpose:z.string().trim().min(1).max(4000),status:z.enum(['active','archived']),revision,cwd:z.string().min(1),agentPreset:z.string().optional(),homeSessionId:id,sessionIds:z.array(id).min(1).max(1000),createdAt:z.string().datetime(),updatedAt:z.string().datetime()}).strict();
+const appearanceSchema=z.object({shape:z.enum(BOT_FORMS.map(f=>f.id)),palette:z.enum(BOT_PALETTES.map(p=>p.id))}).strict();
+const botSchema=z.object({id,kind:z.enum(['agent','team']),name,purpose:z.string().trim().min(1).max(4000),status:z.enum(['active','archived']),revision,cwd:z.string().min(1),agentPreset:z.string().optional(),homeSessionId:id,sessionIds:z.array(id).min(1).max(1000),createdAt:z.string().datetime(),updatedAt:z.string().datetime(),appearance:appearanceSchema.optional()}).strict();
 const documentSchema=z.object({version:z.literal(1),revision:z.number().int().nonnegative(),bots:z.array(botSchema).max(1000)}).strict().superRefine((value,ctx)=>{
   const bots=new Set(),sessions=new Set();for(const bot of value.bots){if(bots.has(bot.id)||!bot.sessionIds.includes(bot.homeSessionId))ctx.addIssue({code:'custom',message:'Invalid Bot identity'});bots.add(bot.id);for(const session of bot.sessionIds){if(sessions.has(session))ctx.addIssue({code:'custom',message:'Session belongs to two Bots'});sessions.add(session);}}
 });
@@ -66,6 +68,14 @@ export class BotDirectory {
       if(nextStatus==='active'&&next.bots.some(b=>b.id!==bot.id&&b.status==='active'&&b.name.toLocaleLowerCase()===nextName.toLocaleLowerCase()))fail('BOT_NAME_EXISTS');
       if(Object.entries(fields).every(([key,value])=>bot[key]===value))return {bot,unchanged:true};
       Object.assign(bot,fields,{revision:bot.revision+1,updatedAt:this.now()});return {bot};
+    });
+  }
+  appearance(botId,expectedRevision,input){
+    id.parse(botId);revision.parse(expectedRevision);const appearance=appearanceSchema.parse(input);
+    return this.transact(next=>{
+      const bot=next.bots.find(b=>b.id===botId);if(!bot)fail('BOT_NOT_FOUND');if(bot.status!=='active')fail('BOT_ARCHIVED');if(bot.revision!==expectedRevision)fail('BOT_CONFLICT');
+      if(bot.appearance?.shape===appearance.shape&&bot.appearance?.palette===appearance.palette)return {bot,unchanged:true};
+      Object.assign(bot,{appearance,revision:bot.revision+1,updatedAt:this.now()});return {bot};
     });
   }
   bind(botId,sessionId,expectedRevision,cwd){
@@ -125,7 +135,11 @@ export function installBots(ctx,{directory,collaborationOrigin}={}){
         if(req.headers['x-naumi-bots']!=='1'){send(403,{error:'BOT_SAME_ORIGIN_REQUIRED'});return;}
         if(req.headers.origin&&![`http://${req.headers.host}`,`https://${req.headers.host}`].includes(req.headers.origin)){send(403,{error:'BOT_SAME_ORIGIN_REQUIRED'});return;}
         let text='',size=0;for await(const chunk of req){size+=chunk.length;if(size>4096){send(413,{error:'BOT_REQUEST_TOO_LARGE'});return;}text+=chunk.toString();}
-        let input;try{input=z.object({action:z.literal('bind'),botId:id,sessionId:id,expectedRevision:revision}).strict().parse(JSON.parse(text));}catch{send(400,{error:'BOT_INVALID_REQUEST'});return;}
+        let input;try{input=z.discriminatedUnion('action',[
+          z.object({action:z.literal('bind'),botId:id,sessionId:id,expectedRevision:revision}).strict(),
+          z.object({action:z.literal('appearance'),botId:id,expectedRevision:revision,appearance:appearanceSchema}).strict(),
+        ]).parse(JSON.parse(text));}catch{send(400,{error:'BOT_INVALID_REQUEST'});return;}
+        if(input.action==='appearance'){send(200,await store.appearance(input.botId,input.expectedRevision,input.appearance));return;}
         const header=scope.sessions.get(input.sessionId)?.header??(await scope.sessionPersistence.stat(input.sessionId))?.header;
         if(!header){send(404,{error:'BOT_SESSION_NOT_FOUND'});return;}
         if(header.origin==='subagent'||(header.delegationDepth??0)>0){send(403,{error:'BOT_ROOT_SESSION_REQUIRED'});return;}
