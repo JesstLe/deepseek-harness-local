@@ -29,7 +29,7 @@ if(mode==='prepare'){
  const manifest=JSON.parse(fs.readFileSync(e+'/hashes.json'));
  for(const m of manifest){assert.equal(sha(fs.readFileSync(path.join(root,m.file))),m.modifiedSHA256);assert.equal(sha(fs.readFileSync(path.join(e,'modified',m.file))),m.modifiedSHA256);if(m.originalSHA256)assert.equal(sha(fs.readFileSync(path.join(e,'original',m.file))),m.originalSHA256);}
  execFileSync('python',['-c',`import pathlib,zipfile,json,hashlib; p=pathlib.Path(r'${e}'); z=zipfile.ZipFile(p/'MODIFIED_FILE.zip'); m=json.loads(z.read('hashes.json')); assert m==json.loads((p/'hashes.json').read_text()); [(lambda b,h: (_ for _ in ()).throw(AssertionError()) if hashlib.sha256(b).hexdigest()!=h else None)(z.read('modified/'+r['file']),r['modifiedSHA256']) for r in m]; assert z.testzip() is None`]);
- const verification=fs.readFileSync(e+'/VERIFICATION.txt','utf8');for(const name of ['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh']){fs.readFileSync(e+'/'+name);assert(verification.includes('E:\\Workspace\\naumi-desktop\\evidence\\custom-model-auth\\'+name));}
+ const verification=fs.readFileSync(e+'/VERIFICATION.txt','utf8');for(const name of ['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh']){fs.readFileSync(e+'/'+name);assert(verification.includes('E:\\Workspace\\naumi-desktop\\evidence\\product-identity\\'+name));}
  assert(fs.readFileSync(e+'/DIFF_FILE.patch','utf8').includes('product-identity.js'));execFileSync('D:/DEV/Git/bin/bash.exe',['-n',e+'/ROLLBACK.sh']);assert.equal(JSON.parse(fs.readFileSync(e+'/ROLLBACK_RESULT.json')).status,'PASS');
  console.log('REOPEN files='+manifest.length+' zip=PASS hashes=PASS patch=PASS verification=PASS rollback=PASS');
 }else throw Error('EXPECTED prepare|rollback|reopen');

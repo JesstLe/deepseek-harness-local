@@ -1,8 +1,8 @@
 diff --git a/.gitattributes b/.gitattributes
-index f4628e9..87af33c 100644
+index f4628e9..613b1d9 100644
 --- a/.gitattributes
 +++ b/.gitattributes
-@@ -164,3 +164,35 @@ plugins/naumi-ui-layout/UPSTREAM.json text eol=lf
+@@ -164,3 +164,36 @@ plugins/naumi-ui-layout/UPSTREAM.json text eol=lf
  
  /plugins/naumi-enterprise/assets/grok-ball.js -text
  /plugins/naumi-enterprise/third-party/grok-ball/LICENSE -text
@@ -38,6 +38,7 @@ index f4628e9..87af33c 100644
 +/docs/implementation/PRODUCT_IDENTITY.md text eol=lf
 +/evidence/product-identity/** -text whitespace=cr-at-eol
 +/evidence/product-identity/ROLLBACK.sh text eol=lf
++/evidence/product-identity/DIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab,cr-at-eol
 diff --git a/DEPLOYMENT.md b/DEPLOYMENT.md
 index d72a690..fcac46e 100644
 --- a/DEPLOYMENT.md
@@ -593,7 +594,7 @@ index 0000000..6b504d3
 +Write-Output "NAUMI_SHORTCUT canonical=1 legacy_removed=$(@($recognized | Where-Object {$_ -ne $target}).Count) logo=1 rollback_copy=PASS"
 diff --git a/scripts/product-identity-evidence.mjs b/scripts/product-identity-evidence.mjs
 new file mode 100644
-index 0000000..d6c2b96
+index 0000000..8606a4f
 --- /dev/null
 +++ b/scripts/product-identity-evidence.mjs
 @@ -0,0 +1,35 @@
@@ -628,7 +629,7 @@ index 0000000..d6c2b96
 + const manifest=JSON.parse(fs.readFileSync(e+'/hashes.json'));
 + for(const m of manifest){assert.equal(sha(fs.readFileSync(path.join(root,m.file))),m.modifiedSHA256);assert.equal(sha(fs.readFileSync(path.join(e,'modified',m.file))),m.modifiedSHA256);if(m.originalSHA256)assert.equal(sha(fs.readFileSync(path.join(e,'original',m.file))),m.originalSHA256);}
 + execFileSync('python',['-c',`import pathlib,zipfile,json,hashlib; p=pathlib.Path(r'${e}'); z=zipfile.ZipFile(p/'MODIFIED_FILE.zip'); m=json.loads(z.read('hashes.json')); assert m==json.loads((p/'hashes.json').read_text()); [(lambda b,h: (_ for _ in ()).throw(AssertionError()) if hashlib.sha256(b).hexdigest()!=h else None)(z.read('modified/'+r['file']),r['modifiedSHA256']) for r in m]; assert z.testzip() is None`]);
-+ const verification=fs.readFileSync(e+'/VERIFICATION.txt','utf8');for(const name of ['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh']){fs.readFileSync(e+'/'+name);assert(verification.includes('E:\\Workspace\\naumi-desktop\\evidence\\custom-model-auth\\'+name));}
++ const verification=fs.readFileSync(e+'/VERIFICATION.txt','utf8');for(const name of ['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh']){fs.readFileSync(e+'/'+name);assert(verification.includes('E:\\Workspace\\naumi-desktop\\evidence\\product-identity\\'+name));}
 + assert(fs.readFileSync(e+'/DIFF_FILE.patch','utf8').includes('product-identity.js'));execFileSync('D:/DEV/Git/bin/bash.exe',['-n',e+'/ROLLBACK.sh']);assert.equal(JSON.parse(fs.readFileSync(e+'/ROLLBACK_RESULT.json')).status,'PASS');
 + console.log('REOPEN files='+manifest.length+' zip=PASS hashes=PASS patch=PASS verification=PASS rollback=PASS');
 +}else throw Error('EXPECTED prepare|rollback|reopen');
