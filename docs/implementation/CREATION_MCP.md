@@ -37,3 +37,8 @@ Naumi固定交付：main `8dcf44189ebad64c289ec333063486a00ccfb447`；client1.1.
 - 本轮不修改共享3080服务、不接入个人生产令牌、不重建EXE。其他线程的0.3.6安装器草稿/快捷方式验收保持独立，不把本切片加入已经固定的安装候选。
 - 副本回滚恢复10个原文件、移除15个本任务新增源文件；复跑原基线45项；实际结果以PACKAGE_RESULT.json为准。首轮回滚测试副本缺少未修改的root package与desktop/vendor元数据，已修复副本输入清单；并非产品回滚失败。
 - 安装器/生产运行/真实账号授权仍需在固定main构建及授权后分别验收。源码合并不等于已安装到员工客户端；保留所有通用画布能力缺口。
+
+## 主线同步与最终验证
+- 实现提交 e86ca33；再次fetch并普通merge整合origin/main aa33222d9fda07de3314b139927854789d51b68b，整合提交8617053。唯一冲突为.gitattributes末尾追加规则，双方全部保留；没有产品源码冲突。
+- 最新主线包含其他线程安装器快捷方式修复与既有验收证据，保持不变。集中整合验证 node --test tests/naumi-creation.test.mjs desktop/tests/identity.test.cjs desktop/tests/installer-ui.test.cjs tests/agent-desktop.test.mjs tests/naumi-enterprise.test.mjs → tests64/pass64/fail0，exit0。
+- 本切片不改已固定的0.3.6安装候选，已向安装器线程发送公共文件归属协调；尚未部署到员工实际运行包。下一步由固定main构建新版本后完成正式账号授权与运行验收。
