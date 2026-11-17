@@ -138,7 +138,7 @@ window.__ModuleLoader__.load({
 				reload
 			]);
 			const initial = (0, react.useRef)(useStore((state) => state.byTab[tab.id]));
-			const initialUrl = (0, react.useRef)(tab.navigation.params?.url);
+			const initialUrl = (0, react.useRef)(tab.navigation.params?.url ?? (currentBrowserTarget(initial.current) === void 0 ? "https://baidu.com" : void 0));
 			const viewportId = (0, react.useId)();
 			const [mountEpoch, setMountEpoch] = (0, react.useState)(0);
 			const state = useBrowserState(tab.id);
