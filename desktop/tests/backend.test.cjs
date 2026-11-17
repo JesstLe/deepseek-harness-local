@@ -13,6 +13,7 @@ function fixture(){
   write(name+'/runtime-manifest.json',{product:'Naumi',schemaVersion:2,desktop:{profileVersion:1,identityProtocol:2},version:name,inventorySHA256:sha(files),nodeSHA256:sha(exe)});
   for(const [n,t]of [['profile.json','{"name":"fresh-profile"}'],['profile.yml','fresh-profile'],['home.yml','fresh-home']])write(name+'/defaults/'+n,t);
   write(name+'/plugins/naumi-enterprise/assets/symbol.svg','fixture-naumi-logo');
+  for(const file of ['managed-workspace.cjs','managed-workspace.ps1'])write(name+'/plugins/naumi-enterprise/'+file,fs.readFileSync(path.join(source,'plugins/naumi-enterprise',file),'utf8'));
   const program=`const http=require('http'),fs=require('fs'),path=require('path');void(async()=>{const {desktopIdentityHandler}=await import(${JSON.stringify(identityModule)});const home=process.env.DSH_HOME,id=JSON.parse(fs.readFileSync(path.join(home,'desktop-instance.json'))),handler=desktopIdentityHandler({...id,bundleId:process.env.NAUMI_DESKTOP_BUNDLE_ID}),port=Number(process.argv[process.argv.indexOf('--port')+1]);const server=http.createServer((q,r)=>{if(q.url==='/naumi/desktop-instance')handler(q,r);else r.end('fixture-naumi-logo');});server.on('error',e=>{console.error(e.code);process.exit(1);});server.listen(port,'127.0.0.1',()=>setTimeout(()=>console.log('http://127.0.0.1:'+port+'/?token=fixture-token'),${bootstrapDelayMs}));})();`;
   write(name+'/node_modules/@deepseek-ai/dsh/lib/bin.js',program);return runtimeReference(root);
  }

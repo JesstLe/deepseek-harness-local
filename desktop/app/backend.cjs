@@ -90,7 +90,7 @@ async function ensureBackend(settings,{fetcher=fetch,startTimeoutMs=90000,pollMs
   profile.prepareProfile(settings);
   settings.workspace??=path.join(settings.home,'workspace');
   if(profile.exists(settings.workspace)&&(!fs.lstatSync(settings.workspace).isDirectory()||fs.lstatSync(settings.workspace).isSymbolicLink()))throw Error('PROFILE_WORKSPACE_UNMANAGED');
-  fs.mkdirSync(settings.workspace,{recursive:true});
+  await require(path.join(settings.root,'plugins/naumi-enterprise/managed-workspace.cjs')).createManagedWorkspace(settings.workspace,{parent:settings.home});
  }else{
   if(await logoProbe(settings,{fetcher}))return {launchURL:launchFromLog(settings),owned:false};
   if(await portTaken(settings.url))throw Error('LOCAL_PORT_OCCUPIED');

@@ -1,6 +1,7 @@
 import {EmployeeWorkStore} from './employee-work-store.js';
 import {installBotWorkspaceMigration} from './bot-workspace-migration.js';
 import {installBotOverview} from './bot-overview.js';
+import managedWorkspace from './managed-workspace.cjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -182,7 +183,7 @@ export class PrimaryBotService{
       const pending=await this.directory.reserveCreation({...input,actor,fields,profile:prior?.profile??await this.defaultProfile()});
       if(pending.state==='completed')return this.directory.list().bots.find(b=>b.id===pending.botId);
       const base=path.resolve(path.dirname(this.directory.file),'workspaces'),cwd=path.resolve(pending.cwd);if(path.dirname(cwd)!==base)fail('BOT_WORKSPACE_MISMATCH');
-      await fs.promises.mkdir(base,{recursive:true});if((await fs.promises.lstat(base)).isSymbolicLink())fail('BOT_WORKSPACE_MISMATCH');await fs.promises.mkdir(cwd,{recursive:true});if((await fs.promises.lstat(cwd)).isSymbolicLink())fail('BOT_WORKSPACE_MISMATCH');
+      await fs.promises.mkdir(base,{recursive:true});if((await fs.promises.lstat(base)).isSymbolicLink())fail('BOT_WORKSPACE_MISMATCH');await managedWorkspace.createManagedWorkspace(cwd,{parent:base});
       const workspace=await registry.create(cwd,pending.name);if(path.resolve(workspace.path).toLowerCase()!==cwd.toLowerCase())fail('BOT_WORKSPACE_MISMATCH');
       await runtime.ensure(pending.sessionId,{create:true,cwd,profile:pending.profile});const stored=await runtime.snapshot(pending.sessionId);if(!stored)fail('BOT_PRIMARY_SESSION_PENDING');
       if(stored.header?.origin==='subagent'||(stored.header?.delegationDepth??0)>0)fail('BOT_ROOT_SESSION_REQUIRED');if(path.resolve(stored.header.cwd).toLowerCase()!==cwd.toLowerCase())fail('BOT_WORKSPACE_MISMATCH');
