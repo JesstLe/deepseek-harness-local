@@ -1,5 +1,6 @@
 /** Async presentation-only module; the original enterprise app below stays intact. */
 function installNaumiContextUI(ctx,React,createPortal,Icon){
+  ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/plugin-market.js').then(module=>{if(!closed)dispose=module.installPluginMarketUI(ctx,React);}).catch(error=>console.error('Naumi plugin market:',error));return()=>{closed=true;dispose?.();};});
   ctx.effect(()=>{
     let dispose,closed=false;
     void import('/naumi/assets/primary-bot.js').then(module=>{if(!closed)dispose=module.installPrimaryBotUI(ctx,React);}).catch(error=>console.error('Naumi primary Bot:',error));

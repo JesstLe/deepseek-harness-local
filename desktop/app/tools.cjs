@@ -54,7 +54,7 @@ class BrowserTools {
   return info(entry);
  }
 }
-async function startBridge({home,guests,window,enterprise,maintenance}){
+async function startBridge({home,guests,window,enterprise,market,maintenance}){
  const token=randomBytes(32).toString('hex'),runtime=new BrowserTools(guests,window);
  const file=path.join(home,'naumi-desktop-bridge.json');
  const server=http.createServer(async(req,res)=>{
@@ -68,6 +68,12 @@ async function startBridge({home,guests,window,enterprise,maintenance}){
    catch(error){send(409,{error:/^INSTALL_[A-Z_]+$/.test(error.message)?error.message:'INSTALL_ACTIVITY_UNKNOWN'});}return;
   }
   if(maintenance?.blocked()){send(503,{error:'INSTALL_MAINTENANCE_ACTIVE'});return;}
+  if(req.method==='POST'&&req.url==='/market/request'){
+   if(!market){send(503,{error:'MARKET_LOGIN_REQUIRED'});return;}
+   const controller=new AbortController(),abort=()=>{if(!res.writableEnded)controller.abort();};res.on('close',abort);
+   try{let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>3*1024*1024+8192)throw Error('MARKET_BODY_INVALID');chunks.push(chunk);}send(200,{ok:true,data:await market.perform(JSON.parse(Buffer.concat(chunks)),{signal:controller.signal})});}
+   catch(error){send(502,{ok:false,error:/^MARKET_[A-Z_]+$/.test(error.message)?error.message:'MARKET_UNAVAILABLE_NO_REPLAY'});}finally{res.off('close',abort);}return;
+  }
   if(req.method==='POST'&&req.url==='/enterprise/request'){
    if(!enterprise){send(503,{error:'ENTERPRISE_SESSION_NOT_CONFIGURED'});return;}
    const controller=new AbortController(),abort=()=>{if(!res.writableEnded)controller.abort();};res.on('close',abort);
@@ -80,7 +86,7 @@ async function startBridge({home,guests,window,enterprise,maintenance}){
   catch(error){send(400,{ok:false,error:/^[A-Z_0-9]{3,80}$/.test(error.message)?error.message:'NATIVE_BROWSER_OPERATION_FAILED_NO_REPLAY'});}
  });
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
- fs.mkdirSync(home,{recursive:true});fs.writeFileSync(file,JSON.stringify({version:1,port:server.address().port,token,pid:process.pid,...(enterprise?{enterprise:enterprise.descriptor()}:{})}),{mode:0o600});
+ fs.mkdirSync(home,{recursive:true});fs.writeFileSync(file,JSON.stringify({version:1,port:server.address().port,token,pid:process.pid,...(enterprise?{enterprise:enterprise.descriptor()}:{}),...(market?.descriptor()?{market:market.descriptor()}:{})}),{mode:0o600});
  return {runtime,close:async()=>{server.closeAllConnections();await new Promise(r=>server.close(r));try{if(JSON.parse(fs.readFileSync(file,'utf8')).token===token)fs.unlinkSync(file);}catch{}}};
 }
 module.exports={BrowserTools,startBridge,snapshotScript};
