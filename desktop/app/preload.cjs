@@ -21,5 +21,11 @@ contextBridge.exposeInMainWorld('naumiDesktop',{
   updateState:()=>ipcRenderer.invoke('naumi:update-state'),
   checkUpdates:()=>ipcRenderer.invoke('naumi:update-check'),
   onUpdateState:listener=>subscribe('naumi:update-state',listener),
+  openIdentityRegistration:origin=>ipcRenderer.invoke('naumi:identity-register',origin),
+  identityState:()=>ipcRenderer.invoke('naumi:identity-state'),
+  loginIdentity:value=>ipcRenderer.invoke('naumi:identity-login',value),
+  openIdentity:()=>ipcRenderer.invoke('naumi:identity-open'),
+  logoutIdentity:()=>ipcRenderer.invoke('naumi:identity-logout'),
+  resumeIdentity:()=>ipcRenderer.invoke('naumi:identity-resume'),
   product:'Naumi'
 });
