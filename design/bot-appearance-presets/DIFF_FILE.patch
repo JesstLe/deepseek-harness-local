@@ -1,0 +1,102 @@
+diff --git a/design/bot-appearance-presets/ORIGINAL_FILE.mjs b/design/bot-appearance-presets/MODIFIED_FILE.mjs
+index e9108a9..ee33a7e 100644
+--- a/design/bot-appearance-presets/ORIGINAL_FILE.mjs
++++ b/design/bot-appearance-presets/MODIFIED_FILE.mjs
+@@ -1,65 +1,34 @@
+-export const MODE_KEY='naumi.navigationMode.v1';
+-export const navigationMode=value=>value==='bot'?'bot':'threads';
+-export function botForSession(bots,sessionId){return bots.find(bot=>bot.sessionIds.includes(sessionId))??null;}
+-export function botSessions(bot,sessions,workspaces){return bot.sessionIds.filter(id=>sessions.byId[id]&&!workspaces?.archivedSessionIds?.includes(id)).map(id=>({...sessions.byId[id],sessionId:id}));}
+-export function botTarget(bot,sessions,status,workspaces){
+-  const rows=botSessions(bot,sessions,workspaces);return rows.find(s=>status.get(s.sessionId)?.running??s.running)?.sessionId??rows.at(-1)?.sessionId??null;
++// Shape and palette are independent axes. No identity, role or task-state mutation.
++export const SHAPES=Object.freeze([
++  {id:'pebble',name:'圆团',path:'M50 14C73 14 86 30 86 52C86 75 73 86 50 86S14 75 14 52C14 30 27 14 50 14Z'},
++  {id:'capsule',name:'豆荚',path:'M40 13H60C75 13 81 24 81 39V63C81 79 70 87 50 87S19 79 19 63V39C19 24 25 13 40 13Z'},
++  {id:'cube',name:'方糖',path:'M31 18H69Q84 18 84 33V67Q84 82 69 82H31Q16 82 16 67V33Q16 18 31 18Z'},
++  {id:'spark',name:'星团',path:'M50 10C58 10 61 23 66 26S84 25 88 33S80 50 80 55S88 73 81 79S63 77 57 80S45 93 37 88S32 73 26 69S9 64 11 54S23 43 25 37S23 20 32 17S43 13 50 10Z'},
++  {id:'sprout',name:'芽芽',path:'M47 24C33 21 20 30 17 45C12 66 24 85 47 86C70 88 85 75 84 55C84 36 72 26 56 25C65 21 70 14 69 7C57 7 49 14 47 24Z'},
++  {id:'antenna',name:'机灵',path:'M47 22V13C40 9 43 3 50 3S60 9 53 13V22H67Q82 22 82 37V65Q82 81 66 81H34Q18 81 18 65V37Q18 22 33 22Z'},
++].map(Object.freeze));
++export const PALETTES=Object.freeze([
++  {id:'iris',name:'鸢尾紫',base:'#A58BDC',light:'#E9DFF9',shade:'#8062B7',ink:'#403251'},
++  {id:'sky',name:'晴空蓝',base:'#7CA8E1',light:'#DFEDFF',shade:'#5280BC',ink:'#263D59'},
++  {id:'mint',name:'薄荷绿',base:'#79BBA7',light:'#DCF3E7',shade:'#4D9580',ink:'#294B40'},
++  {id:'peach',name:'杏桃橙',base:'#E9AC82',light:'#FFEDD8',shade:'#C78255',ink:'#614330'},
++  {id:'rose',name:'蔷薇粉',base:'#DA94B0',light:'#FBE3ED',shade:'#B86F8E',ink:'#5D3548'},
++  {id:'citrus',name:'柠檬黄',base:'#DBC36D',light:'#FFF4C7',shade:'#B49B47',ink:'#554B27'},
++  {id:'slate',name:'雾石灰',base:'#9CAFC0',light:'#E7EDF4',shade:'#71889F',ink:'#344351'},
++  {id:'lilac',name:'雾丁香',base:'#B2A6CB',light:'#ECE5F7',shade:'#8D80AA',ink:'#443C53'},
++].map(Object.freeze));
++const hash=value=>{let n=2166136261;for(const c of String(value)){n^=c.codePointAt(0);n=Math.imul(n,16777619);}n^=n>>>16;n=Math.imul(n,0x85ebca6b);n^=n>>>13;n=Math.imul(n,0xc2b2ae35);return(n^(n>>>16))>>>0;};
++export function resolveAppearance(bot={}){
++  const shape=SHAPES.find(s=>s.id===bot.appearance?.shape)??SHAPES[hash('shape:'+bot.id)%SHAPES.length];
++  const palette=PALETTES.find(p=>p.id===bot.appearance?.palette)??PALETTES[hash('palette:'+bot.id)%PALETTES.length];
++  return {shape:shape.id,palette:palette.id};
+ }
+-export function currentSessionId(sessions,activePanelId){return activePanelId!==null?null:Object.values(sessions.byId).find(row=>(row.retainedBy?.mainView??0)>0)?.id??null;}
+-export function botSelected(bot,sessionId,sessions){return bot.sessionIds.includes(sessionId)||bot.sessionIds.some(id=>sessions.projectionsBySession[id]?.values.agentTeam?.members.some(member=>member.id===sessionId));}
+-export function botActivity(bot,sessions,status){
+-  const ids=new Set(bot.sessionIds);for(const id of bot.sessionIds)for(const m of sessions.projectionsBySession[id]?.values.agentTeam?.members??[])ids.add(m.id);
+-  let known=false,running=false;for(const id of ids){const state=status.get(id);if(state?.pendingInteraction)return 'waiting';const active=state?.running??sessions.byId[id]?.running;if(typeof active==='boolean')known=true;if(active)running=true;}
+-  return running?'running':known?'idle':'unknown';
++export function avatarSVG(appearance,{size=80,uid='bot',label=''}={}){
++  const shape=SHAPES.find(s=>s.id===appearance.shape),palette=PALETTES.find(p=>p.id===appearance.palette);
++  if(!shape||!palette)throw Error('BOT_APPEARANCE_INVALID');
++  if(!Number.isFinite(size)||size<16||size>512)throw Error('BOT_AVATAR_SIZE_INVALID');
++  if(!/^[a-zA-Z][\w-]*$/.test(uid))throw Error('BOT_AVATAR_UID_INVALID');
++  const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
++  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="${size}" height="${size}" ${label?`role="img" aria-label="${escape(label)}"`:'aria-hidden="true"'}><defs><linearGradient id="${uid}-body" x1="0" y1="0" x2=".75" y2="1"><stop stop-color="${palette.light}"/><stop offset=".52" stop-color="${palette.base}"/><stop offset="1" stop-color="${palette.shade}"/></linearGradient><linearGradient id="${uid}-glint" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".65"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><path d="${shape.path}" fill="url(#${uid}-body)"/><path d="M30 31Q42 21 58 26" fill="none" stroke="url(#${uid}-glint)" stroke-width="5" stroke-linecap="round"/><rect x="27" y="39" width="46" height="30" rx="14" fill="${palette.light}" fill-opacity=".72"/><path d="M39 49V54M61 49V54" stroke="${palette.ink}" stroke-width="4.8" stroke-linecap="round"/><path d="M45 60Q50 64 55 60" fill="none" stroke="${palette.ink}" stroke-width="2.4" stroke-linecap="round"/></svg>`;
+ }
+-export function botSummary(bot,sessions){
+-  for(const id of [...bot.sessionIds].reverse()){
+-    const values=sessions.projectionsBySession[id]?.values??sessions.byId[id]?.projections?.values;
+-    const active=values?.agentTeam?.tasks?.find(t=>t.status==='in_progress');if(active)return active.subject;
+-  }
+-  const rows=botSessions(bot,sessions),last=rows.at(-1);return last?(sessions.projectionsBySession[last.sessionId]?.values.title??last.projections?.values?.title??'新任务'):'暂无任务';
+-}
+-export function botTone(id){let hash=0;for(const char of id)hash=(hash*31+char.charCodeAt(0))>>>0;return ['violet','blue','green','orange'][hash%4];}
+-export function newBotTaskRequest(bot,workspaces){
+-  const normalize=value=>value?.replaceAll('\\','/').replace(/\/$/,'').toLocaleLowerCase();
+-  const workspace=workspaces.items.find(w=>normalize(w.path)===normalize(bot.cwd));
+-  return {...(workspace?{workspaceId:workspace.workspaceId}:{cwd:bot.cwd}),...(bot.agentPreset?{agentPreset:bot.agentPreset}:{})};
+-}
+-
+-/** One shared subscription for the sidebar and right panel. Never polls or writes names from the browser. */
+-export function createBotCatalog({fetcher=globalThis.fetch,eventSource=url=>new EventSource(url),windowTarget=globalThis.window}={}){
+-  const listeners=new Set();let snapshot={status:'idle',bots:[],revision:0},controller=null,events=null,epoch=0,started=false,pending=null,again=false;
+-  const publish=value=>{snapshot=value;for(const listener of listeners)listener();};
+-  const stopEvents=()=>{events?.close();events=null;};
+-  const refresh=()=>{
+-    if(!started)return Promise.resolve();
+-    if(pending){again=true;return pending;}
+-    const generation=epoch;controller=new AbortController();publish({...snapshot,status:'loading'});
+-    pending=Promise.resolve().then(async()=>{
+-      do{
+-        again=false;
+-        try{
+-          const response=await fetcher('/naumi/bots',{method:'GET',credentials:'same-origin',cache:'no-store',signal:AbortSignal.any([controller.signal,AbortSignal.timeout(8000)])});
+-          if(generation!==epoch)return;
+-          if(!response.ok){if(response.status===401||response.status===403){stopEvents();publish({status:'forbidden',bots:[],revision:0});}else publish({...snapshot,status:'error'});return;}
+-          const value=await response.json();if(generation!==epoch)return;
+-          if(value.version!==1||!Array.isArray(value.bots))throw Error('BOT_DIRECTORY_INVALID');
+-          publish({status:'ready',bots:value.bots,revision:value.revision});
+-          if(started&&!events){events=eventSource('/naumi/bots/events');events.onmessage=()=>void refresh();events.onerror=()=>{if(started&&generation===epoch){stopEvents();publish({...snapshot,status:'error'});void refresh();}};}
+-        }catch(error){if(generation===epoch&&!controller.signal.aborted)publish({...snapshot,status:'error'});}
+-      }while(again&&generation===epoch);
+-    }).finally(()=>{if(generation===epoch)pending=null;});return pending;
+-  };
+-  const focus=()=>{if(started)void refresh();};
+-  return {
+-    getSnapshot:()=>snapshot,
+-    subscribe(listener){listeners.add(listener);if(!started){started=true;epoch++;windowTarget?.addEventListener('focus',focus);void refresh();}return()=>{listeners.delete(listener);if(listeners.size===0){started=false;epoch++;controller?.abort();stopEvents();pending=null;again=false;windowTarget?.removeEventListener('focus',focus);snapshot={status:'idle',bots:[],revision:0};}};},
+-    refresh,
+-    async bind(bot,sessionId){
+-      const response=await fetcher('/naumi/bots',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','x-naumi-bots':'1'},body:JSON.stringify({action:'bind',botId:bot.id,sessionId,expectedRevision:bot.revision}),signal:AbortSignal.timeout(12000)});
+-      const value=await response.json().catch(()=>({error:response.status===401||response.status===403?'BOT_AUTH_REQUIRED':'BOT_BIND_FAILED'}));if(!response.ok){await refresh();throw Error(value.error??'BOT_BIND_FAILED');}await refresh();return value;
+-    },
+-  };
+-}
+-let shared;
+-export function botCatalog(){return shared??=createBotCatalog();}
++export const combinations=()=>SHAPES.flatMap(shape=>PALETTES.map(palette=>({shape:shape.id,palette:palette.id})));
