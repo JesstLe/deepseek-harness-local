@@ -10,6 +10,7 @@ const {localSettings,ensureBackend,stopBackend,createQuitGate,maintenanceRequest
 const installerState=require('./installer-state.cjs');
 const {createDesktopUpdates}=require('./updates.cjs');
 const {IdentityRuntime}=require('./identity-runtime.cjs');
+const {MarketSession}=require('./market.cjs');
 const {identityOrigin}=require('./identity.cjs');
 const {randomUUID}=require('node:crypto');
 app.setName('Naumi');app.setAppUserModelId('com.naumi.desktop');
@@ -17,6 +18,7 @@ if(process.env.NAUMI_USER_DATA)app.setPath('userData',path.resolve(process.env.N
 if(process.env.NAUMI_TEST_HIDDEN==='1'){app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');app.commandLine.appendSwitch('disable-renderer-backgrounding');}
 const locked=app.requestSingleInstanceLock();
 let identityRuntime=null,identityUserData=null;
+const market=new MarketSession({identity:()=>identityRuntime});
 let window,primarySession,guests,bridge,backend,settings,enterprise,login,loginAfterBoot=false,booting=false,closing=false,connecting=false,editingConnection=false,connectionFlight,maintenanceTicket=null,maintenanceUntil=0,updates=null;
 if(!locked){app.quit();}else{
 app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.show();window.focus();}});
@@ -75,7 +77,7 @@ app.whenReady().then(async()=>{
    const checked=await verifyConnection(origin,(url,options)=>primarySession.fetch(url,options),{signal:connectionFlight.signal});
    const state=workspaceSummary(identityUserData??app.getPath('userData')),changed=state.configured&&state.origin!==checked.origin;
    if(changed){
-    if((enterprise?.running??0)>0||(bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');
+    if((enterprise?.running??0)>0||market.running>0||(bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');
     if(backend?.owned){const r=require('./profile.cjs').runtimeReceipt(settings.home,settings.identity.id);if(!r||r.pid===null||isAlive(r.pid))await assertWorkspaceIdle(settings,(url,options)=>primarySession.fetch(url,options));connectionFlight.signal.throwIfAborted();await stopBackend(backend);backend=null;}
     else {const r=require('./profile.cjs').runtimeReceipt(settings.home,settings.identity.id);if(r&&(r.pid===null||isAlive(r.pid)))throw Error('WORKSPACE_BACKEND_STOP_REQUIRED');}
     await bridge?.close();bridge=null;
@@ -156,7 +158,7 @@ async function boot(){
   const account=identityRuntime?.active?'identity-'+identityRuntime.active.profileId+'-'+settings.workspaceId:!settings.isolated||settings.workspaceId==='default'?'local':'enterprise-'+settings.workspaceId;
   if(!guests){guests=new Guests({hostURL:settings.url,account,timeout:process.env.NAUMI_TEST==='1'?Number(process.env.NAUMI_TEST_TIMEOUT??30000):30000});guests.attach(window);}
   else if(guests.hostURL!==settings.url||guests.account!==account)await guests.reset({hostURL:settings.url,account});
-  if(!bridge)bridge=await startBridge({home:settings.home,guests,window,enterprise,maintenance:{blocked:maintenanceBlocked,perform:performMaintenance,quit:ticket=>{if(maintenanceBlocked()&&ticket===maintenanceTicket)app.quit();}}});
+  if(!bridge)bridge=await startBridge({home:settings.home,guests,window,enterprise,market,maintenance:{blocked:maintenanceBlocked,perform:performMaintenance,quit:ticket=>{if(maintenanceBlocked()&&ticket===maintenanceTicket)app.quit();}}});
   editingConnection=false;await window.loadURL(backend.launchURL);
   if(loginAfterBoot){loginAfterBoot=false;openEnterpriseLogin();}
  }catch(error){await showStartup(error.message);}
@@ -164,7 +166,7 @@ async function boot(){
 }
 function accountApp(){return {isPackaged:app.isPackaged,getPath:name=>name==='userData'&&identityUserData?identityUserData:app.getPath(name)};}
 async function assertAccountIdle(){
- if((enterprise?.running??0)>0||(bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');
+ if((enterprise?.running??0)>0||market.running>0||(bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');
  if(backend&&!backend.owned)throw Error('WORKSPACE_BACKEND_STOP_REQUIRED');
  if(backend?.owned)await assertWorkspaceIdle(settings,(url,options)=>primarySession.fetch(url,options));
 }
@@ -172,7 +174,7 @@ function maintenanceBlocked(){if(maintenanceTicket&&Date.now()>=maintenanceUntil
 async function canInstallUpdate(){
  if(closing||booting||connecting)return {ok:false,reason:'WORKSPACE_BUSY'};
  if(maintenanceBlocked())return {ok:false,reason:'INSTALL_MAINTENANCE_ACTIVE'};
- if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0)return {ok:false,reason:'WORKSPACE_OPERATIONS_IN_FLIGHT'};
+ if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0||market.running>0)return {ok:false,reason:'WORKSPACE_OPERATIONS_IN_FLIGHT'};
  const ticket=randomUUID().replaceAll('-','')+randomUUID().replaceAll('-','');
  try{await performMaintenance('quiesce',ticket);return {ok:true,release:()=>performMaintenance('resume',ticket)};}
  catch{return {ok:false,reason:'INSTALL_ACTIVITY_UNKNOWN'};}
@@ -188,7 +190,7 @@ async function performMaintenance(action,ticket,{accountTransition=false}={}){
  if(action==='resume'){if(backend&&settings)await maintenanceRequest(settings,'resume',ticket);maintenanceTicket=null;return;}
  if(booting||(connecting&&!accountTransition)||closing||!settings?.isolated||!backend?.owned)throw Error('INSTALL_ACTIVITY_UNKNOWN');
  maintenanceTicket=ticket;maintenanceUntil=Date.now()+30000;
- try{if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0)throw Error('INSTALL_OPERATIONS_IN_FLIGHT');await maintenanceRequest(settings,'quiesce',ticket);}
+ try{if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0||market.running>0)throw Error('INSTALL_OPERATIONS_IN_FLIGHT');await maintenanceRequest(settings,'quiesce',ticket);}
  catch(error){maintenanceTicket=null;throw error;}
 }
 function isAlive(pid){try{process.kill(pid,0);return true;}catch(error){return error.code!=='ESRCH';}}

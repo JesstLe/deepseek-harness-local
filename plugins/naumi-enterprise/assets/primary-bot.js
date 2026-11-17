@@ -11,14 +11,14 @@ export function enterBotMode(ctx,catalog){
 }
 export function installPrimaryBotUI(ctx,React){
  const h=React.createElement,Dialog=createEmployeeDialog(ctx,React);
- function CreationOverlay(){const [open,setOpen]=React.useState(false);React.useEffect(()=>{const show=()=>setOpen(true);window.addEventListener(CREATE_BOT_EVENT,show);return()=>window.removeEventListener(CREATE_BOT_EVENT,show);},[]);return open?h(Dialog,{onClose:()=>setOpen(false)}):null;}
+ function CreationOverlay(){const [open,setOpen]=React.useState(false);React.useEffect(()=>{const show=e=>setOpen({fields:e.detail?.fields});window.addEventListener(CREATE_BOT_EVENT,show);return()=>window.removeEventListener(CREATE_BOT_EVENT,show);},[]);return open?h(Dialog,{initialFields:open.fields,onClose:()=>setOpen(false)}):null;}
  const main=ctx.slots.inject('main',()=>ctx.slots.register({name:'main',key:PRIMARY_PANEL},createPrimaryBotPage(ctx,React)));
  const overlay=ctx.slots.inject('shell.overlay',()=>ctx.slots.register({name:'shell.overlay',id:'naumi-create-bot',order:95},CreationOverlay));
  return()=>{main();overlay();};
 }
 export function createEmployeeDialog(ctx,React){
- const h=React.createElement,source=botCatalog();return function EmployeeDialog({onClose}){
-  const catalog=React.useSyncExternalStore(source.subscribe,source.getSnapshot,source.getSnapshot),[name,setName]=React.useState(''),[purpose,setPurpose]=React.useState(''),[kind,setKind]=React.useState('agent'),[busy,setBusy]=React.useState(false),[error,setError]=React.useState(''),form=React.useRef(null),request=React.useRef(null),flight=React.useRef(false),alive=React.useRef(true),prior=React.useRef(document.activeElement);
+ const h=React.createElement,source=botCatalog();return function EmployeeDialog({onClose,initialFields}){
+  const catalog=React.useSyncExternalStore(source.subscribe,source.getSnapshot,source.getSnapshot),[name,setName]=React.useState(initialFields?.name??''),[purpose,setPurpose]=React.useState(initialFields?.purpose??''),[kind,setKind]=React.useState(initialFields?.kind??'agent'),[busy,setBusy]=React.useState(false),[error,setError]=React.useState(''),form=React.useRef(null),request=React.useRef(null),flight=React.useRef(false),alive=React.useRef(true),prior=React.useRef(document.activeElement);
   React.useEffect(()=>{alive.current=true;form.current?.querySelector('input')?.focus();return()=>{alive.current=false;prior.current?.isConnected&&prior.current.focus();};},[]);
   const pending=catalog.creations?.find(c=>c.actor==='owner'&&c.state==='pending'),locked=busy||!!pending;
   React.useEffect(()=>{if(pending){request.current=pending.requestId;setName(pending.name);setPurpose(pending.purpose);setKind(pending.kind);}},[pending?.requestId]);
