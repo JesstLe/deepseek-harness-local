@@ -59,3 +59,7 @@ D1–D4共同属于第一优先级，顺序为依赖安排，不是把主动性�
 ## D2 连续性接续
 
 补齐旧风格/人设赋值的有效投影：当前档案替换旧值后，历史赋值保留审计但不继续作为active记忆注入新会话，全部状态中标为已替换。复用原员工/Session/记忆工具开展隔离新会话、双模型、宿主重启、人设候选确认、临时要求与遗忘验收，详见[连续性记录](../implementation/EMPLOYEE_CONTINUITY_D2.md)。历史工作区迁移、任务关联和最终安装交付仍分别验收。
+
+## D3 目标—任务—交付接续
+
+已确认工作目标通过workGoalId/workGoalRevision绑定原bot_dispatch，任务保留最初目标快照与显式更新历史；精确受托Session向源目标保存交付，未赋予跨员工记忆/目标管理权。日常页复用原TaskCard续办/停止/文件预览与原交付审核表单，owner确认后才验收；返工沿原task/Session形成新版本与当时验收条件。具体源码/主线/隔离壳/加载状态以[实现记录](../implementation/WORK_GOAL_TASK_LINKS.md)与evidence/work-goal-task-links为准。Codex/Claude导入和包含本切片的最终安装/更新分发仍继续。

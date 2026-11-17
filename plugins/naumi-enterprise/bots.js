@@ -1,3 +1,4 @@
+import {EmployeeWorkStore} from './employee-work-store.js';
 import {installBotWorkspaceMigration} from './bot-workspace-migration.js';
 import {installBotOverview} from './bot-overview.js';
 import fs from 'node:fs';
@@ -253,11 +254,11 @@ export function createBotTools(ctx,directory,operations){
 export function installBots(ctx,{directory,collaborationOrigin}={}){
   return ctx.inject(['agents','agentTeams','agentPresets','sessions','sessionPersistence','tools','systemPrompt'],scope=>{
     const store=directory??new BotDirectory(path.join(process.env.DSH_HOME??path.join(os.homedir(),'.dsh'),'naumi','bots.json'));
-    let taskService,groupService;
-    const taskRuntime=installBotTasks(scope,store,{onReady:service=>{taskService=service;installBotOverview(scope,store,service);installBotWorkspaceMigration(scope,store,service,()=>groupService);}});
+    let taskService,groupService,employeeWork;
+    const taskRuntime=installBotTasks(scope,store,{workGoalsReady:()=>!!employeeWork,readWorkGoal:(botId,goalId)=>{if(!employeeWork)throw Error('BOT_WORK_GOALS_UNAVAILABLE');const goal=employeeWork.goal(botId,goalId);if(['planned','in_progress'].includes(goal.status))employeeWork.validateGraph(botId,{...goal,status:'in_progress'});return goal;},onReady:service=>{taskService=service;installBotOverview(scope,store,service);installBotWorkspaceMigration(scope,store,service,()=>groupService);}});
     const groupRuntime=installBotGroups(scope,store,()=>taskService,{onReady:service=>{groupService=service;}});
     const imRuntime=installIMGateway(scope,store,()=>taskService,()=>groupService);
-    const employeeRuntime=installEmployees(scope,store,{collaborationOrigin});
+    const employeeRuntime=installEmployees(scope,store,{collaborationOrigin,onReady:({store:data})=>{employeeWork=new EmployeeWorkStore(data);taskService?.kick();}});
     const primary=new PrimaryBotService({directory:store,context:scope,getRuntime:()=>taskService?.runtime,
       workspaceRegistry:scope.get?.('workspaceRegistry'),workspaceController:scope.get?.('workspaceController'),agentPresets:scope.agentPresets,agentDefaultModel:scope.get?.('agentDefaultModel'),getTasks:()=>taskService});
     const installed=new Map(),streams=new Set();
