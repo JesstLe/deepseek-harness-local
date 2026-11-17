@@ -78,26 +78,26 @@ export class EmployeeWorkStore{
     });
   }
   artifact(botId,artifactId){const value=this.store.entity(botId,artifactId);if(!value||!artifactId.startsWith('artifact-'))fail('WORK_ARTIFACT_NOT_FOUND');if(digest(value.content)!==value.sha256)fail('WORK_ARTIFACT_CORRUPT');return value;}
-  addArtifact(botId,deliveryId,version,name,text,actor){
-    const artifact={id:'artifact-'+randomUUID(),botId,deliveryId,revision:1,version,fileName:name,content:text,sha256:digest(text),bytes:Buffer.byteLength(text,'utf8'),createdAt:this.store.now()};
+  addArtifact(botId,deliveryId,version,name,text,actor,metadata={}){
+    const artifact={id:'artifact-'+randomUUID(),botId,deliveryId,revision:1,version,...metadata,fileName:name,content:text,sha256:digest(text),bytes:Buffer.byteLength(text,'utf8'),createdAt:this.store.now()};
     return this.store.put(artifact,'artifact','artifact_create',actor);
   }
-  createDelivery(botId,{operationId,...input},actor={kind:'owner'}){
-    input=z.object({goalId:id,title,fileName,content,sourceTaskId:id.nullable().default(null)}).strict().parse(input);guardText(input);
-    return this.store.mutate(botId,operationId,'delivery_create',input,actor,()=>{
+  createDelivery(botId,{operationId,...input},actor={kind:'owner'},metadata={}){
+    input=z.object({goalId:id,title,fileName,content,sourceTaskId:id.nullable().default(null)}).strict().parse(input);metadata=z.object({executorBotId:id.optional(),sourceGoalRevision:rev.optional()}).strict().parse(metadata);guardText(input);
+    return this.store.mutate(botId,operationId,'delivery_create',{...input,...metadata},actor,()=>{
       const goal=this.goal(botId,input.goalId);if(['completed','cancelled'].includes(goal.status))fail('WORK_GOAL_CLOSED');if(this.deliveries(botId).length>=1000)fail('WORK_CAPACITY');
-      const time=this.store.now(),deliveryId='delivery-'+randomUUID(),artifact=this.addArtifact(botId,deliveryId,1,input.fileName,input.content,actor);
-      return this.save({id:deliveryId,botId,revision:1,goalId:input.goalId,title:input.title,sourceTaskId:input.sourceTaskId,businessStatus:'draft',version:1,
+      const time=this.store.now(),deliveryId='delivery-'+randomUUID(),artifact=this.addArtifact(botId,deliveryId,1,input.fileName,input.content,actor,{acceptanceCriteria:[...goal.criteria],...(metadata.sourceGoalRevision?{sourceGoalRevision:metadata.sourceGoalRevision}:{})});
+      return this.save({id:deliveryId,botId,revision:1,goalId:input.goalId,title:input.title,sourceTaskId:input.sourceTaskId,...metadata,businessStatus:'draft',version:1,
         artifactIds:[artifact.id],currentArtifactId:artifact.id,reviewIds:[],acceptanceCriteria:[...goal.criteria],createdAt:time,updatedAt:time},'delivery','delivery_create',actor);
     });
   }
-  reviseDelivery(botId,{deliveryId,expectedRevision,operationId,fileName:name,content:text},actor={kind:'owner'}){
-    rev.parse(expectedRevision);fileName.parse(name);content.parse(text);guardText({name,text});
-    return this.store.mutate(botId,operationId,'delivery_revise',{deliveryId,expectedRevision,name,text},actor,()=>{
+  reviseDelivery(botId,{deliveryId,expectedRevision,operationId,fileName:name,content:text},actor={kind:'owner'},metadata={}){
+    rev.parse(expectedRevision);fileName.parse(name);content.parse(text);metadata=z.object({sourceGoalRevision:rev.optional()}).strict().parse(metadata);guardText({name,text});
+    return this.store.mutate(botId,operationId,'delivery_revise',{deliveryId,expectedRevision,name,text,...metadata},actor,()=>{
       const d=this.delivery(botId,deliveryId);if(d.revision!==expectedRevision)fail('WORK_CONFLICT');if(!['draft','changes_requested'].includes(d.businessStatus))fail('WORK_DELIVERY_IMMUTABLE');if(d.version>=100)fail('WORK_VERSION_LIMIT');
       const g=this.goal(botId,d.goalId);if(['completed','cancelled'].includes(g.status))fail('WORK_GOAL_CLOSED');
-      const artifact=this.addArtifact(botId,d.id,d.version+1,name,text,actor);
-      return this.save({...d,revision:d.revision+1,version:d.version+1,currentArtifactId:artifact.id,artifactIds:[...d.artifactIds,artifact.id],businessStatus:'draft',acceptanceCriteria:[...g.criteria]},'delivery','delivery_revise',actor);
+      const artifact=this.addArtifact(botId,d.id,d.version+1,name,text,actor,{acceptanceCriteria:[...g.criteria],...(metadata.sourceGoalRevision?{sourceGoalRevision:metadata.sourceGoalRevision}:{})});
+      return this.save({...d,...metadata,revision:d.revision+1,version:d.version+1,currentArtifactId:artifact.id,artifactIds:[...d.artifactIds,artifact.id],businessStatus:'draft',acceptanceCriteria:[...g.criteria]},'delivery','delivery_revise',actor);
     });
   }
   transition(botId,{deliveryId,expectedRevision,operationId,action,reason='',checkedCriteria=[]},actor={kind:'owner'}){
@@ -112,13 +112,13 @@ export class EmployeeWorkStore{
       if(action==='request_changes'&&!reason.trim())fail('WORK_REASON_REQUIRED');
       if(action==='accept'&&(new Set(checkedCriteria).size!==d.acceptanceCriteria.length||d.acceptanceCriteria.some((_,i)=>!checkedCriteria.includes(i))))fail('WORK_CRITERIA_UNCHECKED');
       const states={submit:'submitted',start_review:'in_review',request_changes:'changes_requested',accept:'accepted',cancel:'cancelled'};
-      const review={id:'review-'+randomUUID(),botId,revision:1,deliveryId:d.id,version:d.version,artifactId:d.currentArtifactId,action,reason,checkedCriteria,
+      const review={id:'review-'+randomUUID(),botId,revision:1,deliveryId:d.id,version:d.version,artifactId:d.currentArtifactId,action,reason,checkedCriteria,acceptanceCriteria:[...d.acceptanceCriteria],
         reviewer:actor.kind==='owner'?'local-owner':actor.sessionId,reviewerKind:actor.kind,createdAt:this.store.now()};
       this.store.put(review,'review','review_record',actor);
       const result=this.save({...d,businessStatus:states[action],revision:d.revision+1,reviewIds:[...d.reviewIds,review.id]},'delivery','delivery_'+action,actor);
-      if(action==='accept'&&reason.trim()&&this.store.profile(botId).autoLearning&&this.store.allMemories(botId).length<5000){
-        const time=this.store.now();this.store.put({id:'memory-'+randomUUID(),botId,revision:1,kind:'procedure',text:'已验收交付反馈：'+reason,status:'candidate',pinned:false,expiresAt:null,
-          source:{kind:'owner',note:'review:'+review.id},createdAt:time,updatedAt:time},'memory','acceptance_learning_candidate',actor);
+      if(action==='accept'&&reason.trim()&&this.store.profile(d.executorBotId??botId).autoLearning&&this.store.allMemories(d.executorBotId??botId).length<5000){
+        const time=this.store.now();this.store.put({id:'memory-'+randomUUID(),botId:d.executorBotId??botId,revision:1,kind:'procedure',text:'已验收交付反馈：'+reason,status:'candidate',pinned:false,expiresAt:null,
+          source:{kind:'owner',note:'review:'+botId+':'+review.id},createdAt:time,updatedAt:time},'memory','acceptance_learning_candidate',actor);
       }
       return result;
     });

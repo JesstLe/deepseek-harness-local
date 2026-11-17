@@ -3,21 +3,23 @@ import {botCatalog} from './bot-sidebar-model.js';
 
 export function createBotTaskCard(scope,React,activity=taskActivity()){
   const h=React.createElement,{useState,useEffect,useRef}=React;
-  function TaskCard({task,bots,onDismiss,onExpanded}){
-    const [expanded,setExpanded]=useState(false),[detail,setDetail]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[note,setNote]=useState(''),[accepted,setAccepted]=useState(false),request=useRef(null);
+  function TaskCard({task,bots,onDismiss,onExpanded,currentWorkGoal,onTaskChanged}){
+    const [expanded,setExpanded]=useState(false),[detail,setDetail]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[note,setNote]=useState(''),[accepted,setAccepted]=useState(false),[refreshGoal,setRefreshGoal]=useState(false),request=useRef(null);
     useEffect(()=>{
       if(!expanded)return;const abort=new AbortController();setError('');
       void fetch('/naumi/bot-tasks?taskId='+encodeURIComponent(task.id),{credentials:'same-origin',cache:'no-store',signal:abort.signal}).then(async r=>{if(!r.ok)throw Error();const value=await r.json();if(!abort.signal.aborted)setDetail(value);}).catch(()=>{if(!abort.signal.aborted)setError('任务读取失败');});
       return()=>abort.abort();
     },[expanded,task.id,task.revision]);
+    useEffect(()=>setRefreshGoal(false),[currentWorkGoal?.revision]);
+    const reference=task.workGoalUpdates?.at(-1)??task.workGoal,goalChanged=currentWorkGoal&&reference&&(reference.title!==currentWorkGoal.title||reference.description!==currentWorkGoal.description||JSON.stringify(reference.criteria)!==JSON.stringify(currentWorkGoal.criteria)),goalPaused=currentWorkGoal&&!['planned','in_progress'].includes(currentWorkGoal.status);
     const target=bots.find(b=>b.id===task.targetBotId),open=()=>{try{scope.layout?.beginNavigation?.();scope.uiWorkspace.openSession(task.targetSessionId);}catch{setError('任务会话暂未就绪');}};
     const amend=async event=>{
-      event.preventDefault();const text=note.trim();if(busy||!text)return;setBusy(true);setError('');setAccepted(false);
-      if(request.current?.text!==text)request.current={text,key:'ui-continue-'+crypto.randomUUID()};
+      event.preventDefault();const text=note.trim(),pendingSameText=request.current?.text===text,workGoalRevision=pendingSameText?request.current.workGoalRevision:goalChanged&&refreshGoal?currentWorkGoal.revision:undefined;if(busy||!text||!pendingSameText&&(goalPaused||goalChanged&&!refreshGoal))return;setBusy(true);setError('');setAccepted(false);
+      if(request.current?.text!==text||request.current?.workGoalRevision!==workGoalRevision)request.current={text,workGoalRevision,key:'ui-continue-'+crypto.randomUUID()};
       try{
-        const r=await fetch('/naumi/bot-tasks',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','x-naumi-bot-tasks':'1'},body:JSON.stringify({action:'continue',sourceSessionId:task.sourceSessionId,taskId:task.id,expectedRevision:task.revision,idempotencyKey:request.current.key,message:text})});
-        if(!r.ok){await activity.refresh();setError(r.status===409?'任务状态已更新，请重试这条补充':'补充未确认受理，请重试');return;}
-        setNote('');setAccepted(true);request.current=null;await activity.refresh();
+        const r=await fetch('/naumi/bot-tasks',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','x-naumi-bot-tasks':'1'},body:JSON.stringify({action:'continue',sourceSessionId:task.sourceSessionId,taskId:task.id,expectedRevision:task.revision,idempotencyKey:request.current.key,message:text,...workGoalRevision?{workGoalRevision}:{}})});
+        if(!r.ok){await activity.refresh();onTaskChanged?.();setError(r.status===409?'任务状态已更新，请重试这条补充':'补充未确认受理，请重试');return;}
+        setNote('');setAccepted(true);request.current=null;await activity.refresh();onTaskChanged?.();
       }catch{setError('补充未确认受理，请重试');}finally{setBusy(false);}
     };
     const openFile=async f=>{try{if(f.snapshot){const r=await fetch('/naumi/bot-file-version?'+new URLSearchParams({taskId:task.id,sessionId:f.sessionId,seq:String(f.seq),index:String(f.index)}),{credentials:'same-origin',cache:'no-store'});if(!r.ok)throw Error('文件版本校验失败');}scope.sidebarRight.openResource(filePreviewAddress(f));}catch(e){setError(e.message);}};
@@ -31,7 +33,7 @@ export function createBotTaskCard(scope,React,activity=taskActivity()){
       h('div',{className:'nbt-subject'},task.subject),
       expanded&&h('div',{className:'nbt-detail'},task.progress&&h('p',null,task.progress),detail?.result&&h('pre',null,detail.result),detail?.delivery?.files?.map(f=>h('button',{type:'button',className:'nbt-file',key:f.sessionId+':'+f.seq+':'+f.index,onClick:()=>openFile(f)},'↗ ',f.description??f.path.split(/[\\/]/).at(-1))),
         detail?.deliveryHistory?.slice().reverse().map(v=>h('section',{key:v.attempt,className:'nbt-version'},h('strong',null,'版本 '+v.attempt),...v.files.map(f=>h('button',{type:'button',className:'nbt-file',key:f.seq+':'+f.index,onClick:()=>openFile(f)},'↗ '+(f.description??f.path.split(/[\\/]/).at(-1)))))),
-        (ACTIVE_TASKS.has(task.status)||task.status==='completed')&&h('form',{className:'nbt-amend',onSubmit:amend},h('textarea',{'aria-label':'补充这项任务',placeholder:'补充或修改这项任务…',value:note,onChange:e=>{setNote(e.target.value);setAccepted(false);},disabled:busy,maxLength:16000,rows:2}),h('button',{type:'submit',disabled:busy||!note.trim()},busy?'受理中…':task.status==='completed'?'继续修改':'补充要求'),accepted&&h('span',{role:'status'},'已受理')),
+        (ACTIVE_TASKS.has(task.status)||task.status==='completed')&&h('form',{className:'nbt-amend',onSubmit:amend},h('textarea',{'aria-label':'补充这项任务',placeholder:'补充或修改这项任务…',value:note,onChange:e=>{setNote(e.target.value);setAccepted(false);},disabled:busy,maxLength:16000,rows:2}),goalChanged&&h('label',null,h('input',{type:'checkbox',checked:refreshGoal,onChange:e=>{request.current=null;setRefreshGoal(e.target.checked);},disabled:busy||goalPaused}),'采用当前目标要求'),h('button',{type:'submit',disabled:busy||!note.trim()||request.current?.text!==note.trim()&&(goalPaused||goalChanged&&!refreshGoal)},busy?'受理中…':task.status==='completed'?'继续修改':'补充要求'),accepted&&h('span',{role:'status'},'已受理')),
         ACTIVE_TASKS.has(task.status)&&h('button',{type:'button',className:'nbt-cancel',onClick:cancel,disabled:busy},busy?'处理中…':'停止任务')),
       error&&h('div',{className:'nbt-error',role:'alert'},error));
   }

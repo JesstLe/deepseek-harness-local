@@ -10,17 +10,21 @@ export const TASK_STATES=['queued','starting','running','waiting','completed','f
 export const TERMINAL=new Set(['completed','failed','cancelled','interrupted']);
 const profileSchema=z.object({agentPreset:id.optional(),model:z.object({provider:id,model:id,reasoningEffort:id.optional()}).strict(),
   permissions:z.array(z.object({type:z.enum(['permission/preset','sandbox/mode','approval/policy']),data:z.record(z.string(),z.unknown())}).strict()).max(3)}).strict();
+export const workGoalReference=z.object({botId:id,goalId:id,revision:z.number().int().positive(),title:z.string().min(1).max(120),description:z.string().max(4000).default(''),criteria:z.array(z.string().min(1).max(500)).min(1).max(20)}).strict();
 const taskSchema=z.object({id,key:id,sourceBotId:id,sourceSessionId:id,targetBotId:id,targetSessionId:id,targetCwd:z.string().min(1).max(4096),
   profile:profileSchema,task:text,status:z.enum(TASK_STATES),revision:z.number().int().positive(),attempt:z.number().int().positive().max(100),
   messageId:id,lineage:z.array(id).min(2).max(5),parentTaskId:id.optional(),createdAt:stamp,updatedAt:stamp,
   output:z.enum(['text','files']).optional(),replyMode:z.enum(['background','wait']).optional(),delivery:deliveryCheck.optional(),deliveryHistory:z.array(z.object({attempt:z.number().int().positive(),files:z.array(fileReference).max(8),createdAt:stamp}).strict()).max(100).optional(),
+  workGoal:workGoalReference.optional(),workGoalUpdates:z.array(workGoalReference).max(100).optional(),
   intent:taskIntent.optional(),amendment:taskAmendment.optional(),handoff:taskHandoff.optional(),
   instruction:text.optional(),result:z.string().max(32000).optional(),progress:z.string().max(4000).optional(),error:id.optional()}).strict();
 const outboxSchema=z.object({id,taskId:id,key:z.string().min(1).max(400),messageId:id,fromSessionId:id,toSessionId:id,
-  attempt:z.number().int().positive(),taskStatus:z.enum(TASK_STATES),kind:z.enum(['message','progress','blocked','result','status']),text,acceptance:taskAcceptance.optional(),files:z.array(fileReference).max(8).optional(),delivered:z.boolean(),error:id.optional(),createdAt:stamp}).strict();
+  attempt:z.number().int().positive(),taskStatus:z.enum(TASK_STATES),kind:z.enum(['message','progress','blocked','result','status']),text,acceptance:taskAcceptance.optional(),workGoalRevision:z.number().int().positive().optional(),files:z.array(fileReference).max(8).optional(),delivered:z.boolean(),error:id.optional(),createdAt:stamp}).strict();
 const schema=z.object({version:z.literal(1),revision:z.number().int().nonnegative(),tasks:z.array(taskSchema).max(1000),outbox:z.array(outboxSchema).max(10000)}).strict().superRefine((doc,ctx)=>{
   const ids=new Set(),keys=new Set(),sessions=new Set();
   for(const task of doc.tasks){const key=task.sourceSessionId+'\0'+task.key;if(ids.has(task.id)||keys.has(key)||sessions.has(task.targetSessionId)||new Set(task.lineage).size!==task.lineage.length)ctx.addIssue({code:'custom',message:'Duplicate Bot task identity'});
+    if(task.workGoal&&(task.workGoal.botId!==task.sourceBotId||(task.workGoalUpdates??[]).some((r,i,rows)=>r.botId!==task.workGoal.botId||r.goalId!==task.workGoal.goalId||r.revision<=(i?rows[i-1].revision:task.workGoal.revision))))ctx.addIssue({code:'custom',message:'Invalid task work goal reference'});
+    if(!task.workGoal&&task.workGoalUpdates?.length)ctx.addIssue({code:'custom',message:'Missing initial task work goal reference'});
     if(task.handoff&&!ids.has(task.handoff.taskId))ctx.addIssue({code:'custom',message:'Invalid Bot task handoff'});
     ids.add(task.id);keys.add(key);sessions.add(task.targetSessionId);}
   const messages=new Set();for(const m of doc.outbox){const key=m.taskId+'\0'+m.key;if(!ids.has(m.taskId)||messages.has(key))ctx.addIssue({code:'custom',message:'Invalid Bot outbox'});messages.add(key);}
