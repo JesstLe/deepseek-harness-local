@@ -70,18 +70,21 @@ export class ModelConnections{
   const parsed=z.union([save,remove,refresh]).safeParse(input);if(!parsed.success)throw error('MODEL_INVALID_REQUEST');const p=parsed.data;
   const ns=this.namespace();if(!this.ctx.settings.writable)throw error('MODEL_SETTINGS_READ_ONLY',403);if(ns.revision!==p.expectedRevision)throw error('MODEL_SETTINGS_CONFLICT',409);
   if(p.action==='refresh-specs'){
-   const result=refreshModelSpecs(ns.value.providers??{}),ids=[...new Set(result.changes.map(row=>row.group))];
-   if(ids.length)await this.ctx.settings.mutate('llm-pi-ai',ids.map(id=>({op:'set',path:['providers',id,'models'],value:result.providers[id].models})),ns.revision);
+   const result=refreshModelSpecs(ns.value.providers??{});
+   // Describe.value is schema-normalized (including implicit input/compat defaults).
+   // Write only the two requested numeric leaves, never materialize a whole model array.
+   const ops=result.changes.flatMap(row=>{const index=ns.value.providers[row.group].models.findIndex(m=>m.id===row.model);return ['contextWindow','maxTokens'].map(key=>({op:'set',path:['providers',row.group,'models',String(index),key],value:row.after[key]}));});
+   if(ops.length)await this.ctx.settings.mutate('llm-pi-ai',ops,ns.revision);
    return {...await this.read(),specRefresh:{changed:result.changes.length,changes:result.changes,unknown:result.unknown,conditional:result.conditional}};
   }
-  const previous=ns.value.providers?.[p.id];let newRef;
+  const previous=ns.value.providers?.[p.id],stored=ns.user?.providers?.[p.id]??previous;let newRef;
   if(p.action==='remove'){
    if(!previous)throw error('MODEL_GROUP_NOT_FOUND',404);
    await this.ctx.settings.mutate('llm-pi-ai',[{op:'unset',path:['providers',p.id]}],ns.revision);
   }else{
    if(new Set(p.models.map(m=>m.id)).size!==p.models.length)throw error('MODEL_DUPLICATE_ID');
    if(!p.apiKey&&!previous?.apiKeyEnv)throw error('MODEL_KEY_REQUIRED');
-   const profile={...previous,displayName:p.displayName,baseURL:endpoint(p.baseURL),api:p.api,models:p.models.map(m=>configureModelSpec(m,previous?.models?.find(old=>old.id===m.id),previous??{})),apiKeyEnv:previous?.apiKeyEnv};
+   const profile={...stored,displayName:p.displayName,baseURL:endpoint(p.baseURL),api:p.api,models:p.models.map(m=>configureModelSpec(m,(stored?.models??previous?.models)?.find(old=>old.id===m.id),previous??{})),apiKeyEnv:previous?.apiKeyEnv};
    if(p.apiKey){if(/[\r\n\u0000-\u001f\u007f]/.test(p.apiKey))throw error('MODEL_KEY_INVALID');newRef='NAUMI_MODEL_'+randomUUID().replaceAll('-','').toUpperCase();profile.apiKeyEnv=newRef;await this.ctx.credentials.set(newRef,p.apiKey);}
    try{await this.ctx.settings.mutate('llm-pi-ai',[{op:'set',path:['providers',p.id],value:profile}],ns.revision);}
    catch(e){if(newRef)try{await this.ctx.credentials.unset(newRef);}catch{throw error('MODEL_SAVE_CLEANUP_FAILED',500);}throw e;}
