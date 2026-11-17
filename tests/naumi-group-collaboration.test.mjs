@@ -9,7 +9,7 @@ import {taskFixture} from './helpers/bot-task-fixture.mjs';
 import {botTaskHost} from './helpers/bot-task-host.mjs';
 import {botGroupHttpFixture} from './helpers/bot-group-http.mjs';
 import {extendNativeComposer,NATIVE_COMPOSER_SHA} from '../scripts/native-composer-extension.mjs';
-import {groupTimeline,roomWorking,groupReplyView,watchGroupReplies} from '../plugins/naumi-enterprise/assets/bot-chat-model.js';
+import {groupTimeline,roomWorking,groupReplyView,watchGroupReplies,groupInterruptTargets} from '../plugins/naumi-enterprise/assets/bot-chat-model.js';
 
 async function setup(){
   const f=await taskFixture(),file=path.join(f.dir,'groups.sqlite');let store=new BotGroupStore(file),groups;
@@ -155,4 +155,11 @@ test('runtime group attachments reuse native admission and reject receipts stage
     await assert.rejects(f.service.runtime.admitGroupAttachments(f.target.id,[{type:'file',receiptId:'upload'}],'request-2'),/NOT_STAGED/);
     await layer.dispose();
   }finally{await f.cleanup();}
+});
+
+test('Stop targets only each member current reply and preserves their later queued topics',()=>{
+ const rows=[{id:'current',sessionId:'a',state:'sent'},{id:'later',sessionId:'a',state:'queued'},
+  {id:'other-member',sessionId:'b',state:'starting'},{id:'later-b',sessionId:'b',state:'queued'},
+  {id:'first-queued',sessionId:'c',state:'queued'},{id:'next-queued',sessionId:'c',state:'queued'}];
+ assert.deepEqual(groupInterruptTargets(rows).map(r=>r.id),['current','other-member','first-queued']);assert.equal(rows[1].state,'queued');assert.equal(rows[3].state,'queued');
 });
