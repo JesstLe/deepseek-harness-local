@@ -22,7 +22,7 @@ function normalizeNotes(notes){
 }
 function createDesktopUpdates({app,updater,notify,canInstall=()=>({ok:true}),broadcast=()=>{},log=()=>{},startupDelayMs=15000,intervalMs=24*60*60*1000,fetcher=fetch,feedTimeoutMs=8000}){
  if(!app||typeof app.getVersion!=='function'||!updater||typeof notify!=='function')throw Error('UPDATE_MODULE_INVALID');
- const state={enabled:false,status:'disabled',currentVersion:app.getVersion(),version:null,notes:'',progress:null,error:null};
+ const state={enabled:false,status:'disabled',currentVersion:app.getVersion(),version:null,notes:'',progress:null,error:null,lastChecked:null};
  const listeners=new Set();let started=false,timer=null,interval=null,retryTimer=null,feedBase=null,appliedFeedBase=null,candidateIndex=0;
  const candidates=()=>{const override=feedOverride();return override?.url?[override.url]:DEFAULT_FEED_BASES;};
  async function resolveFeedBase(){
@@ -37,30 +37,51 @@ function createDesktopUpdates({app,updater,notify,canInstall=()=>({ok:true}),bro
   }
   return null;
  }
- const snapshot=()=>({enabled:state.enabled,status:state.status,currentVersion:state.currentVersion,version:state.version,notes:state.notes,progress:state.progress?{...state.progress}:null,error:state.error});
+ const snapshot=()=>({enabled:state.enabled,status:state.status,currentVersion:state.currentVersion,version:state.version,notes:state.notes,progress:state.progress?{...state.progress}:null,error:state.error,lastChecked:state.lastChecked});
  const publish=patch=>{Object.assign(state,patch);const value=snapshot();for(const listener of listeners)try{listener(value)}catch{}broadcast(value);return value;};
  async function announce(){
   const value=snapshot();let choice;
   try{choice=await notify(value);}catch(error){log('notify failed',error);return;}
   if(choice!==0)return;
-  const gate=canInstall();if(!gate?.ok){log('install deferred',gate);return;}
-  try{updater.quitAndInstall(true,true);}catch(error){log('install failed',error);publish({error:'UPDATE_INSTALL_FAILED'});}
+  await install();
+ }
+ let installing=false,installGate=null,installError=null,releaseFlight=null;
+ function releaseInstallGate(){
+  if(!installGate)return releaseFlight;
+  const gate=installGate;installGate=null;
+  releaseFlight=Promise.resolve().then(()=>gate.release?.()).catch(error=>log('install resume failed',error));
+  return releaseFlight;
+ }
+ async function install(){
+  if(state.status!=='ready')return {ok:false,error:'UPDATE_NOT_READY'};
+  if(installing)return {ok:false,error:'UPDATE_INSTALL_BUSY'};
+  installing=true;let gate,handedOff=false;
+  try{
+   gate=await canInstall();
+   if(!gate?.ok){log('install deferred',gate);publish({error:'UPDATE_INSTALL_BUSY'});return {ok:false,error:'UPDATE_INSTALL_BUSY'};}
+   installGate=gate;installError=null;publish({error:null});updater.quitAndInstall(true,true);
+   if(installError)throw installError;
+   handedOff=true;return {ok:true};
+  }catch(error){log('install failed',error);await releaseInstallGate();publish({error:'UPDATE_INSTALL_FAILED'});return {ok:false,error:'UPDATE_INSTALL_FAILED'};}
+  finally{if(!handedOff)installing=false;}
  }
  function start(){
   if(started)return {ok:true};
   const override=feedOverride();if(override?.error)return {ok:false,error:override.error};
-  started=true;updater.autoDownload=false;updater.autoInstallOnAppQuit=true;
+  started=true;updater.autoDownload=false;updater.autoInstallOnAppQuit=false;
   updater.on('checking-for-update',()=>publish({status:'checking',error:null}));
   updater.on('update-available',info=>{
    publish({status:'downloading',version:typeof info?.version==='string'?info.version:null,notes:normalizeNotes(info?.releaseNotes),progress:null,error:null});
    Promise.resolve(updater.downloadUpdate()).catch(error=>{log('download failed',error);publish({status:'idle',error:'UPDATE_DOWNLOAD_FAILED'});});
   });
-  updater.on('update-not-available',()=>publish({status:'idle',version:null,notes:'',progress:null,error:null}));
+  updater.on('update-not-available',()=>publish({status:'idle',version:null,notes:'',progress:null,error:null,lastChecked:Date.now()}));
   updater.on('download-progress',progress=>publish({progress:{percent:Math.max(0,Math.min(100,Number(progress?.percent)||0)),transferred:Number(progress?.transferred)||0,total:Number(progress?.total)||0,bytesPerSecond:Number(progress?.bytesPerSecond)||0}}));
   updater.on('update-downloaded',()=>{publish({status:'ready',error:null});void announce();});
   updater.on('error',error=>{
    log('updater error',error);
-   publish({status:state.status==='ready'||state.status==='downloading'?state.status:'idle',error:'UPDATE_CHECK_FAILED'});
+   if(installing&&state.status==='ready'){installError=error;installing=false;void releaseInstallGate();publish({error:'UPDATE_INSTALL_FAILED'});return;}
+   const wasDownloading=state.status==='downloading';
+   publish({status:state.status==='ready'?'ready':'idle',error:wasDownloading?'UPDATE_DOWNLOAD_FAILED':'UPDATE_CHECK_FAILED'});
    if(!feedOverride()&&!retryTimer){retryTimer=setTimeout(()=>{retryTimer=null;feedBase=null;void check();},10000);if(retryTimer.unref)retryTimer.unref();}
   });
   publish({enabled:true,status:'idle',error:null});
@@ -70,10 +91,12 @@ function createDesktopUpdates({app,updater,notify,canInstall=()=>({ok:true}),bro
  }
  async function check(){
   if(!started){const result=start();if(!result.ok)return result;}
-  if(state.status==='checking'||state.status==='downloading')return {ok:true,status:state.status};
+  if(state.status==='checking'||state.status==='downloading'||state.status==='ready')return {ok:true,status:state.status};
+  publish({status:'checking',error:null});
   if(!feedBase){
    const base=await resolveFeedBase();
-   if(!base)return {ok:false,error:'UPDATE_FEED_UNREACHABLE'};
+   if(!started)return {ok:false,error:'UPDATE_STOPPED'};
+   if(!base){publish({status:'idle',error:'UPDATE_FEED_UNREACHABLE'});return {ok:false,error:'UPDATE_FEED_UNREACHABLE'};}
    if(base!==appliedFeedBase){updater.setFeedURL({provider:'generic',url:base});appliedFeedBase=base;}
   }
   try{await updater.checkForUpdates();return {ok:true,status:state.status};}
@@ -83,6 +106,6 @@ function createDesktopUpdates({app,updater,notify,canInstall=()=>({ok:true}),bro
   if(timer)clearTimeout(timer);if(interval)clearInterval(interval);if(retryTimer)clearTimeout(retryTimer);timer=interval=retryTimer=null;started=false;feedBase=appliedFeedBase=null;
   updater.removeAllListeners();publish({enabled:false,status:'disabled',version:null,notes:'',progress:null,error:null});
  }
- return {start,check,snapshot,stop,onState(listener){listeners.add(listener);return ()=>listeners.delete(listener);}};
+ return {start,check,install,snapshot,stop,onState(listener){listeners.add(listener);return ()=>listeners.delete(listener);}};
 }
 module.exports={createDesktopUpdates,feedOverride,normalizeNotes,defaultFeedBases:DEFAULT_FEED_BASES};

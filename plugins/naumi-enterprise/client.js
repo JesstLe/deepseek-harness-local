@@ -2,6 +2,11 @@
 function installNaumiContextUI(ctx,React,createPortal,Icon){
   ctx.effect(()=>{
     let dispose,closed=false;
+    void import('/naumi/assets/desktop-updates.js').then(module=>{if(!closed)dispose=module.installDesktopUpdatesUI(ctx,React,createPortal);}).catch(error=>console.error('Naumi updates:',error));
+    return()=>{closed=true;dispose?.();};
+  });
+  ctx.effect(()=>{
+    let dispose,closed=false;
     void import('/naumi/assets/product-identity.js').then(module=>{if(!closed)dispose=module.installProductIdentity(ctx,{version:window.__NAUMI__?.productVersion});}).catch(error=>console.error('Naumi product identity:',error));
     return()=>{closed=true;dispose?.();};
   });
