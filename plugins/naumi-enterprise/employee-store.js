@@ -99,9 +99,36 @@ export class EmployeeStore{
       return this.put({...value,...patch,revision:value.revision+1,updatedAt:this.now()},'memory','memory_update',actor);
     });
   }
+  forgetMemory(botId,{memoryId,expectedRevision,profileRevision,operationId},actor={kind:'owner'}){
+    expected.parse(expectedRevision);expected.parse(profileRevision);
+    return this.mutate(botId,operationId,'memory_forget',{memoryId,expectedRevision,profileRevision},actor,()=>{
+      const memory=this.entity(botId,memoryId),profile=this.profile(botId);
+      if(!memory||!memoryId.startsWith('memory-'))fail('EMP_MEMORY_NOT_FOUND');
+      if(memory.revision!==expectedRevision||profile.revision!==profileRevision)fail('EMP_CONFLICT');
+      if(memory.status==='deleted')fail('EMP_MEMORY_DELETED');
+      this.clearForgottenPreference(botId,profile,memory,actor);
+      return this.put({...memory,status:'deleted',revision:memory.revision+1,updatedAt:this.now()},'memory','memory_forget',actor);
+    });
+  }
+  clearForgottenPreference(botId,profile,memory,actor){
+    if(memory.kind!=='preference')return;
+    const fields=['communicationStyle','workStyle'].filter(field=>profile[field]&&profile[field]===memory.text);
+    if(fields.length)this.applyProfile(botId,profile.revision,Object.fromEntries(fields.map(field=>[field,''])),actor,'explicit_forgetting');
+  }
+  forgetExplicit(botId,messageId,text,sessionId){
+    const exact=text.match(/^(?:忘记|忘掉)(?:我的)?偏好[：:]\s*(.{1,500})$/u),last=/^(?:忘记|忘掉)刚才那条偏好[。！!]?$/u.test(text);
+    if(!exact&&!last)return null;assertPublicText(text);
+    const actor={kind:'user',sessionId,messageId,quote:text};
+    return this.mutate(botId,'forget:'+messageId,'explicit_forgetting',{text,sessionId},actor,()=>{
+      const eligible=this.allMemories(botId).filter(m=>m.kind==='preference'&&m.status==='active'&&!m.proposedProfile),matches=exact?eligible.filter(m=>m.text===exact[1].trim()):this.db.prepare("SELECT entity_id FROM events WHERE bot_id=? AND type='memory' AND json_extract(json,'$.action')='explicit_learning' AND json_extract(json,'$.source.kind')='user' AND json_extract(json,'$.source.sessionId')=? ORDER BY seq DESC").all(botId,sessionId).map(row=>eligible.find(m=>m.id===row.entity_id)).filter(Boolean).slice(0,1);
+      for(const memory of matches){this.clearForgottenPreference(botId,this.profile(botId),memory,actor);this.put({...memory,status:'deleted',revision:memory.revision+1,updatedAt:this.now()},'memory','explicit_forgetting',actor);}
+      return {forgotten:matches.length>0,count:matches.length};
+    });
+  }
   learnExplicit(botId,messageId,text,sessionId){
-    const p=this.profile(botId);if(!p.autoLearning)return {learned:false,reason:'learning_disabled'};
     if(text.length>1000||/[\r\n]/.test(text)||/(这一次|这次|本次|暂时|仅此|以下是|引用|他说|她说)/u.test(text))return {learned:false,reason:'not_explicit'};
+    const forgotten=this.forgetExplicit(botId,messageId,text,sessionId);if(forgotten)return forgotten;
+    const p=this.profile(botId);if(!p.autoLearning)return {learned:false,reason:'learning_disabled'};
     const custom=text.match(/^记住我的偏好[：:]\s*(.{1,500})[。！!]?$/u),style=text.match(/^以后回复[：:，,\s]*(先给结论|简洁直接|详细解释|少用术语)[。！!]?$/u);
     if(!custom&&!style)return {learned:false,reason:'not_explicit'};
     if(style&&p.lockedFields.includes('communicationStyle'))return {learned:false,reason:'field_locked'};

@@ -51,7 +51,7 @@ export class EmployeeService{
   }
   owner(command){
     const {action,botId,...input}=command;this.bot(botId,{write:true});
-    const methods={profile_update:'updateProfile',profile_restore:'restoreProfile',memory_create:'createMemory',memory_update:'updateMemory'};
+    const methods={profile_update:'updateProfile',profile_restore:'restoreProfile',memory_create:'createMemory',memory_update:'updateMemory',memory_forget:'forgetMemory'};
     if(!methods[action])fail('EMP_INVALID_ACTION');return this.store[methods[action]](botId,input,{kind:'owner'});
   }
 }

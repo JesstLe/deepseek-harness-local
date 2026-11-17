@@ -58,3 +58,7 @@ owner确认的run_agent规则、原子持久队列、原AgentLoop/Native工具�
 卸载观察超时的原命令exit1保留，独立只读复核exit0确认最终清理与数据保留；NSIS_INSTALLATION.json明确reconciledAfterObserverTimeout。观察器增加单次启动、300秒后置状态等待与持久checkpoint；4项回归通过，修订runner完整真机链未重跑。
 
 下一M5.5：安装器认证quiesce、硬杀遗留worker/运行中任务/句柄与失败恢复；新企业工作区回退旧客户端的兼容阻止/恢复；随后业务schema矩阵、干净员工机/真实HTTPS账号/供应商预算与真实业务验收、签名和依赖审查。总目标active。
+
+## 员工能力隐式化交互增量
+
+按用户确认隐藏默认员工中心，把日常操作融入Bot菜单；保留后台记忆/人设/心跳与权限/预算边界。新增原子遗忘（记忆与精确匹配偏好字段）、显式遗忘指令、可见习惯恢复和角色驱动的按需高级展示。源码/模块验证与实际运行加载分开记录，结果以evidence/employee-experience/VERIFICATION.txt为准。协作线程保留文件卡片/结构化产物和bot-task*归属。本增量不关闭设备/模型/员工业务与安装故障验收。
