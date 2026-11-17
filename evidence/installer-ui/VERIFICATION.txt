@@ -82,7 +82,7 @@ Zip originals and modified bytes checked; patch reverse-check checked; shell syn
 ROLLBACK.sh Git executable mode100755 checked before commit.
 
 BUILD / DELIVERY
-Pending fixed-main build receipt; append actual build provenance to BUILD.json.
+Fixed-main build succeeded; provenance and package checks are recorded in BUILD.json.
 This slice does not run full-product install/upgrade/downgrade/removal or publish a Release.
 The existing 3080 service, configurations, task ledger and employee data were not touched.
 
@@ -94,3 +94,33 @@ skips standard uninstaller generation and leaves UNINSTALLER_OUT_FILE unset. All
 retained as BUILD_ATTEMPT1/2/3.log. Final fix removes nsis.script and uses a build-process-local
 computeFinalScript input substitution for both stock phases; no third-party file edits or
 installer transaction replacement. A ninth targeted test covers both phases and hook restoration.
+
+FINAL BUILD AND REOPEN
+Fixed build input: main 318cfbb8989859fca33a5816acd627e132087888.
+Command (cwd E:/Workspace/naumi-desktop):
+npm --prefix desktop run build -- --output=../runtime/naumi-desktop-release-0.3.3
+Input: fresh stage, pinned builder, production shared presentation, publish=never.
+Literal result: NAUMI_BUILDER stock_uninstaller=1 stock_signing=1 stock_size_check=1 engine_delta=1
+STAGED_RUNTIME_VERIFIED {"files":45472,"version":"0.3.3","dingtalk":"1.0.68","hashes":"PASS"}
+Exit status: 0. Full log BUILD.log; all three earlier build failures retained separately.
+Package: E:/Workspace/naumi-desktop/runtime/naumi-desktop-release-0.3.3/Naumi-Setup-0.3.3-x64.exe
+Bytes: 494113957
+SHA256: f96d64ac18100de6dcbe7b881430f3a18cd907644f95dc5ee29e0df9ea7f267f
+Validation command: node evidence/installer-ui/PACKAGE_CHECK.mjs
+Input: actual setup EXE, packaged ASAR, packaged inventory, fixed-main plugin content and 5 old setup EXEs.
+Literal output: PACKAGE_CHECK files=45472 asar_sources=6 old_installers=5 archive=PASS hashes=PASS exit=0
+Exit status: 0. Full 7-Zip output: PACKAGE_ARCHIVE_TEST.log, Everything is Ok.
+Initial validator errors (Windows ASAR separators, Git checkout CRLF variants, limited 7za lacking
+NSIS support) are retained as PACKAGE_CHECK_ATTEMPT*.log. Nine checkout-EOL-only variants
+are enumerated in BUILD.json; every packaged inventory file has its exact SHA256 verified.
+Actual installer EXE and desktop EXE both expose the Naumi N icon: installer-icon.png / desktop-icon.png.
+EXE_VERSION.json: ProductName=Naumi, ProductVersion=0.3.3.
+
+Concurrent integration: main advanced during the fixed build to cf3859221257e4f0463e940d627e057a5d991f22
+with official model specification source. That subsequent module is retained in source main, but
+not represented as included in this fixed-318cfbb installer. No mutable stage is used as package identity proof.
+Latest integrated source command: node --test tests/*.test.mjs desktop/tests/*.test.cjs
+Input: cf38592 with installer UI + Bot integrity + official model specification module.
+Literal result: ℹ tests 482; ℹ pass 482; ℹ fail 0. Exit status: 0. LATEST_MAIN_TESTS.log.
+Source/evidence merge and fixed installer build are complete; no GitHub Release publication,
+product install/upgrade/downgrade/uninstall or real-model execution was performed in this slice.
