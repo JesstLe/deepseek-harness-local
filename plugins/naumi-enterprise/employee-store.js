@@ -142,11 +142,20 @@ export class EmployeeStore{
       return {learned:true,memory,profile:this.profile(botId)};
     });
   }
+  memoryEffective(memory,profile){
+    // Old explicit field assignments are history, not competing current instructions.
+    if(memory.proposedProfile&&Object.entries(memory.proposedProfile).some(([field,value])=>profile[field]!==value))return false;
+    if(memory.kind==='preference'&&memory.source?.kind==='user'){
+      const style=memory.source.quote?.match(/^以后回复[：:，,\s]*(先给结论|简洁直接|详细解释|少用术语)[。！!]?$/u);
+      if(style&&memory.text===style[1]&&profile.communicationStyle!==memory.text)return false;
+    }
+    return true;
+  }
   memories(botId,{query='',status='active',kind='all',offset=0,limit=20}={}){
     z.string().max(300).parse(query);z.enum(['active','candidate','rejected','deleted','all']).parse(status);z.enum([...memoryKinds,'all']).parse(kind);z.number().int().min(0).max(5000).parse(offset);z.number().int().min(1).max(100).parse(limit);
-    const q=query.trim().toLocaleLowerCase(),tokens=q.split(/\s+/u).filter(Boolean),time=this.clock().getTime();
-    return this.allMemories(botId).filter(m=>(kind==='all'||m.kind===kind)&&(status==='all'||m.status===status)&&(status!=='active'||!m.expiresAt||Date.parse(m.expiresAt)>time))
-      .map(m=>({...m,_score:q?tokens.reduce((n,t)=>n+(m.text.toLocaleLowerCase().includes(t)?1:0),0):1})).filter(m=>m._score>0)
+    const q=query.trim().toLocaleLowerCase(),tokens=q.split(/\s+/u).filter(Boolean),time=this.clock().getTime(),profile=this.profile(botId);
+    return this.allMemories(botId).filter(m=>(kind==='all'||m.kind===kind)&&(status==='all'||m.status===status)&&(status!=='active'||((!m.expiresAt||Date.parse(m.expiresAt)>time)&&this.memoryEffective(m,profile))))
+      .map(m=>({...m,...m.status==='active'&&!this.memoryEffective(m,profile)?{effective:false}:{},_score:q?tokens.reduce((n,t)=>n+(m.text.toLocaleLowerCase().includes(t)?1:0),0):1})).filter(m=>m._score>0)
       .sort((a,b)=>Number(b.pinned)-Number(a.pinned)||b._score-a._score||b.updatedAt.localeCompare(a.updatedAt)||a.id.localeCompare(b.id)).slice(offset,offset+limit).map(({_score,...m})=>m);
   }
   history(botId,{after=0,limit=50}={}){
