@@ -14,6 +14,75 @@ test('product version is generated from the desktop manifest and packaged withou
 test('running logo changes are scoped, reuse the Naumi SVG and honor reduced motion without DOM rewriting',()=>{const css=fs.readFileSync('plugins/naumi-enterprise/assets/product-identity.css','utf8'),js=fs.readFileSync('plugins/naumi-enterprise/assets/product-identity.js','utf8');assert(css.includes('[data-chat-running] [class$="_runningIcon"]'));assert(css.includes('/naumi/assets/symbol.svg'));assert(css.includes('prefers-reduced-motion:reduce'));for(const x of ['MutationObserver','innerHTML','textContent','localStorage','fetch(','setInterval'])assert(!js.includes(x));});
 test('maintenance entry points and smoke checks use real Naumi identity, not the engine branding',()=>{for(const f of ['deploy-bot-communication.ps1','deploy-bot-lifecycle.ps1','deploy-employee-center.ps1','deploy-employee-foundation.ps1','deploy-employee-sync.ps1']){const s=fs.readFileSync('scripts/'+f,'utf8');assert(!/Start-DeepSeek|Stop-DeepSeek/.test(s));assert(s.includes('Start-Naumi.ps1'));assert(s.includes('Stop-Naumi.ps1'));}assert(!fs.readFileSync('scripts/verify-http.mjs','utf8').includes('/DeepSeek|deepseek/'));assert(!fs.readFileSync('Start-Naumi.ps1','utf8').includes("'DeepSeek|deepseek"));});
 
-test('desktop consolidation verifies a canonical native launcher and rollback on a second copy',{skip:process.platform!=='win32'},()=>{const folder=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-shortcut-test-')),root=process.cwd(),q=s=>"'"+s.replaceAll("'","''")+"'";try{const setup="$w=New-Object -ComObject WScript.Shell; $s=$w.CreateShortcut("+q(path.join(folder,'Naumi 企业协作.lnk'))+"); $s.TargetPath='D:/DEV/PowerShell/pwsh.exe'; $s.Arguments='-File \""+path.join(root,'Start-Naumi.ps1')+"\"'; $s.WorkingDirectory="+q(root)+"; $s.Save()";execFileSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-Command',setup]);const result=execFileSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-File','scripts/install-naumi-shortcut.ps1','-Root',root,'-DesktopPath',folder],{encoding:'utf8'});assert(result.includes('NAUMI_SHORTCUT canonical=1 legacy_removed=1 logo=1 rollback_copy=PASS'));assert(fs.existsSync(path.join(folder,'Naumi.lnk')));assert(!fs.existsSync(path.join(folder,'Naumi 企业协作.lnk')));}finally{assert(path.resolve(folder).startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(folder,{recursive:true,force:true});}});
+test('desktop shortcut migrates to a GUI launcher and keeps rollback targets usable', {skip: process.platform !== 'win32'}, () => {
+  const folder = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'naumi shortcut test-')));
+  const desktop = path.join(folder, 'Desktop');
+  const startScript = path.join(folder, 'Start-NaumiDesktop.ps1');
+  const icon = path.join(folder, 'desktop', 'app', 'assets', 'naumi.ico');
+  const shortcut = path.join(desktop, 'Naumi.lnk');
+  const legacy = path.join(desktop, 'Naumi 企业协作.lnk');
+  const quote = value => "'" + value.replaceAll("'", "''") + "'";
+  const powershell = args => execFileSync('pwsh.exe', ['-NoProfile', ...args], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+    timeout: 20000,
+  });
+  const runCommand = lines => powershell([
+    '-EncodedCommand', Buffer.from(lines.join('; '), 'utf16le').toString('base64'),
+  ]);
+  const createShortcut = (file, args) => runCommand([
+    '$ErrorActionPreference = "Stop"',
+    '$w = New-Object -ComObject WScript.Shell',
+    '$s = $w.CreateShortcut(' + quote(file) + ')',
+    '$s.TargetPath = (Get-Process -Id $PID).Path',
+    '$s.Arguments = ' + quote(args),
+    '$s.Save()',
+  ]);
+  const install = () => powershell(['-File', 'scripts/install-naumi-shortcut.ps1', '-Root', folder, '-DesktopPath', desktop]);
+  const readLink = () => JSON.parse(runCommand([
+    '$w = New-Object -ComObject WScript.Shell',
+    '$s = $w.CreateShortcut(' + quote(shortcut) + ')',
+    '$s | Select-Object TargetPath, Arguments, WorkingDirectory | ConvertTo-Json -Compress',
+  ]));
+  try {
+    fs.mkdirSync(desktop);
+    fs.mkdirSync(path.dirname(icon), {recursive: true});
+    fs.copyFileSync('desktop/app/assets/naumi.ico', icon);
+    fs.writeFileSync(startScript, '[IO.File]::WriteAllText((Join-Path $PSScriptRoot "started"), (Get-Location).Path)\n');
+    createShortcut(shortcut, '-NoProfile');
+    const unrelated = fs.readFileSync(shortcut);
+    assert.throws(install, {stderr: /NAUMI_SHORTCUT_ALREADY_OWNED/});
+    assert.deepEqual(fs.readFileSync(shortcut), unrelated);
+    fs.unlinkSync(shortcut);
+
+    createShortcut(legacy, '-File "' + startScript + '"');
+    const legacyBytes = fs.readFileSync(legacy);
+    assert.match(install(), /NAUMI_SHORTCUT canonical=1 legacy_removed=1 logo=1 rollback_copy=PASS/);
+    assert(!fs.existsSync(legacy));
+    const first = readLink();
+    const firstBackup = path.dirname(first.TargetPath);
+    assert.equal(path.basename(first.TargetPath), 'NaumiLauncher.exe');
+    assert.deepEqual(fs.readFileSync(path.join(firstBackup, 'rollback-copy', path.basename(legacy))), legacyBytes);
+    const image = fs.readFileSync(first.TargetPath);
+    const optionalHeader = image.readUInt32LE(0x3c) + 24;
+    assert.equal(image.readUInt16LE(optionalHeader + 68), 2, 'Windows GUI subsystem');
+
+    const args = [...first.Arguments.matchAll(/"([^"]+)"/g)].map(match => match[1]);
+    assert.equal(args.length, 2);
+    assert.equal(args[1], startScript);
+    execFileSync(first.TargetPath, args, {cwd: first.WorkingDirectory, windowsHide: true, timeout: 10000});
+    assert.equal(fs.readFileSync(path.join(folder, 'started'), 'utf8'), folder);
+
+    const firstShortcut = fs.readFileSync(shortcut);
+    assert.match(install(), /legacy_removed=0 logo=1 rollback_copy=PASS/);
+    const next = readLink();
+    assert.notEqual(next.TargetPath, first.TargetPath);
+    assert(fs.existsSync(first.TargetPath));
+    assert.deepEqual(fs.readFileSync(path.join(path.dirname(next.TargetPath), 'rollback-copy', 'Naumi.lnk')), firstShortcut);
+  } finally {
+    fs.rmSync(folder, {recursive: true, force: true});
+  }
+});
 
 test('generated brand allowlist covers every scanned active dictionary key without mutating interpolation values',()=>{const report=buildProductCopyKeys({write:false});assert(report.modules>30);for(const[ns,keys]of Object.entries(report.namespaces))for(const key of keys){assert(PRODUCT_COPY_KEYS[ns]?.has(key),ns+':'+key);assert(!/DeepSeek Harness|深度求索|\bDSH\b/.test(productCopy(ns,key,'DeepSeek Harness / DSH / 深度求索中','zh',PRODUCT_VERSION)));}const locale={translate:()=> 'DeepSeek Harness {value}',getSnapshot:()=>({active:'zh'})},dispose=installProductIdentity({locale});assert.equal(locale.translate('pluginManager','installGuideSafety',{value:'DeepSeek Harness DSH'}),'Naumi DeepSeek Harness DSH');dispose();});
