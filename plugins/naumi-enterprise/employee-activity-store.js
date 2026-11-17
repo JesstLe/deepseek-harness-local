@@ -13,6 +13,7 @@ const trigger=z.discriminatedUnion('kind',[
 const action=z.discriminatedUnion('kind',[
   z.object({kind:z.literal('notify'),text:z.string().trim().min(1).max(1000)}).strict(),
   z.object({kind:z.literal('queue_goal'),title:z.string().trim().min(1).max(120),description:z.string().max(4000).default(''),criteria:z.array(z.string().trim().min(1).max(500)).min(1).max(20)}).strict(),
+  z.object({kind:z.literal('run_local_agent'),sessionId:id,goalId:id,provider:z.string().min(1).max(160),model:z.string().min(1).max(160),reasoningEffort:z.string().min(1).max(100).optional(),prompt:z.string().trim().min(1).max(4000),maxModelRequests:z.number().int().min(1).max(20),maxSeconds:z.number().int().min(10).max(3600),maxToolCalls:z.number().int().min(1).max(100),allowedTools:z.array(z.enum(['employee_profile','employee_memory_search','employee_work','employee_delivery_create','employee_delivery_revise','employee_delivery_submit','employee_activity_report','employee_capabilities','str_replace_editor'])).min(1).max(9).refine(v=>new Set(v).size===v.length)}).strict(),
   z.object({kind:z.literal('run_agent'),sessionId:id,taskId:z.string().uuid(),goalId:id,model:z.string().min(1).max(80),prompt:z.string().trim().min(1).max(4000),maxModelRequests:z.number().int().min(1).max(20),maxSeconds:z.number().int().min(10).max(3600)}).strict(),
 ]);
 const window=z.object({timeZone:z.string().min(1).max(100).refine(v=>{try{new Intl.DateTimeFormat('en',{timeZone:v});return true;}catch{return false;}}),days:z.array(z.number().int().min(1).max(7)).min(1).max(7).refine(v=>new Set(v).size===v.length),startMinute:z.number().int().min(0).max(1439),endMinute:z.number().int().min(1).max(1440)}).strict().refine(v=>v.startMinute<v.endMinute,'Use an explicit non-overnight work window');
@@ -57,7 +58,7 @@ export class EmployeeActivityStore{
       return this.store.put({...r,config,configVersion:args.config?randomUUID():r.configVersion,enabled,revision:r.revision+1,approvedAt:enabled?time:null,approvalId:enabled?randomUUID():null,nextAt:this.next(config,Date.parse(time)),updatedAt:time},'proactive_rule',action,owner);
     });
   }
-  validateScope(botId,config){if(config.trigger.kind==='goal_due'&&config.trigger.goalId)this.work.goal(botId,config.trigger.goalId);if(config.action.kind==='run_agent')this.work.goal(botId,config.action.goalId);}
+  validateScope(botId,config){if(config.trigger.kind==='goal_due'&&config.trigger.goalId)this.work.goal(botId,config.trigger.goalId);if(['run_agent','run_local_agent'].includes(config.action.kind))this.work.goal(botId,config.action.goalId);}
   next(config,now){return config.trigger.kind==='every'?new Date(now+config.trigger.seconds*1000).toISOString():config.trigger.kind==='at'?config.trigger.at:null;}
   occurrence(botId,r,now){
     const t=r.config.trigger;
@@ -73,7 +74,7 @@ export class EmployeeActivityStore{
     let actions=0;
     for(const botId of botIds)for(const rule of this.rules(botId)){
       if(!rule.enabled||!rule.approvedAt||rule.actionCount>=rule.config.maxActions||!inWorkWindow(rule.config.workWindow,now))continue;
-      if(rule.config.action.kind==='run_agent'&&this.store.entitiesOfType(botId,'proactive_ai').some(j=>j.ruleId===rule.id&&!['awaiting_review','failed','cancelled','expired','reviewed_stopped'].includes(j.state)))continue;
+      if(['run_agent','run_local_agent'].includes(rule.config.action.kind)&&this.store.entitiesOfType(botId,'proactive_ai').some(j=>j.ruleId===rule.id&&!['awaiting_review','failed','cancelled','expired','reviewed_stopped'].includes(j.state)))continue;
       for(const o of this.occurrence(botId,rule,now)){
         const r=this.rule(botId,rule.id);if(!r.enabled||r.revision!==rule.revision||r.actionCount>=r.config.maxActions)break;
         if(r.lastActionAt&&now-Date.parse(r.lastActionAt)<r.config.cooldownSeconds*1000)break;
@@ -83,9 +84,9 @@ export class EmployeeActivityStore{
           // Re-read under BEGIN IMMEDIATE. Two processes cannot commit the same occurrence twice.
           const live=this.rule(botId,r.id);if(live.revision!==r.revision||!live.enabled)fail('ACT_CONFLICT');
           if(this.store.entitiesOfType(botId,'proactive_run').length>=10000)fail('ACT_RUN_CAPACITY');
-          const time=this.store.now(),effectId=(r.config.action.kind==='notify'?'notification-':r.config.action.kind==='run_agent'?'ai-job-':'goal-')+key([receiptId,'effect']);
+          const time=this.store.now(),effectId=(r.config.action.kind==='notify'?'notification-':['run_agent','run_local_agent'].includes(r.config.action.kind)?'ai-job-':'goal-')+key([receiptId,'effect']);
           if(r.config.action.kind==='notify')this.store.put({id:effectId,botId,revision:1,text:r.config.action.text,ruleId:r.id,sourceGoalId:o.goalId??null,readAt:null,createdAt:time},'notification','rule_notification',system);
-          else if(r.config.action.kind==='run_agent'){
+          else if(['run_agent','run_local_agent'].includes(r.config.action.kind)){
             if(this.store.entitiesOfType(botId,'proactive_ai').length>=10000)fail('ACT_AI_CAPACITY');
             this.store.put({id:effectId,botId,revision:1,ruleId:r.id,ruleTitle:r.config.title,configVersion:r.configVersion,approvedAt:r.approvedAt,approvalId:r.approvalId,sourceRunId:receiptId,action:r.config.action,workWindow:r.config.workWindow,state:'queued',reason:null,modelRequestIds:[],modelRequests:0,messageId:null,turn:null,createdAt:time,updatedAt:time},'proactive_ai','ai_queued',{kind:'owner',note:'Explicitly approved AI rule; queued is not execution or business acceptance'});
           }

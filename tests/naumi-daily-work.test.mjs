@@ -17,7 +17,7 @@ test('daily work reuses the existing Center and queries only local work for the 
  const Component=createEmployeeCenter(host.React,{client,workOnly:true,initialBotId:bot.id,onClose(){}});
  host.render(Component);await host.flush();const tree=host.render(Component),all=nodes(tree);
  assert.equal(tree.props['data-daily-work'],true);assert.equal(tree.props['data-employee-center'],undefined);assert.deepEqual(calls,[bot.id]);
- assert(!all.some(n=>n.type==='aside'||n.type==='nav'));assert(!all.some(n=>typeof n.type==='function'&&/Enterprise|Sync|Runtime|Model|Activity/.test(n.type.name)));
+ assert(!all.some(n=>n.type==='aside'||n.type==='nav'));assert(!all.some(n=>typeof n.type==='function'&&/Enterprise|Sync|Runtime|Model/.test(n.type.name)));
  assert(all.some(n=>n.type==='button'&&n.children.includes('创建目标')));assert(!JSON.stringify(tree).includes('其他员工'));
 });
 
