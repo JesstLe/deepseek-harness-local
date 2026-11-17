@@ -20,10 +20,10 @@ index e37dd4c..afbd96a 100644
      fs.copyFileSync(process.execPath,path.join(staged,'node.exe'));
 diff --git a/docs/implementation/GROUP_LIVE_COLLABORATION.md b/docs/implementation/GROUP_LIVE_COLLABORATION.md
 new file mode 100644
-index 0000000..121f5a0
+index 0000000..65cf5b3
 --- /dev/null
 +++ b/docs/implementation/GROUP_LIVE_COLLABORATION.md
-@@ -0,0 +1,51 @@
+@@ -0,0 +1,53 @@
 +# 群内异步协作与原生输入区
 +
 +## 模块与职责
@@ -75,11 +75,13 @@ index 0000000..121f5a0
 +- 已整合远端账号/更新/0.3.4 发布主线至 e148c01，保留其 client 追加注册、发布脚本、版本和全部证据。集中回归 554/554，通过后普通合入并推送主线。
 +- 从固定 main 31d78709602b70b01629eec78d2ad6f3ec3bc716 实际增量加载 9 个插件文件及 1 个上游 composer 扩展文件。HTTP 200，群协作 contract=1，实际模块批次包含扩展；90 个无关运行文件及 87 个配置/原始 Session 文件哈希保持，模型、员工 export、任务与原四张群表行保持。
 +- 加载后 79 sessions / 0 running / 3 bots。服务继续运行，所有隔离浏览器和测试宿主已关闭；没有使用真实业务群发送测试任务或调用模型。安装包未重新构建。源码归档、副本回滚和加载证据均独立保存，副本回滚不降级真实账本。
++
++停止按钮额外收窄为每位成员的当前一条回复；其后已排队的新话题继续保留。两份前端资源已从 main 3e22d6b 增量加载，未再次重启，仍为 79 sessions / 0 running；定向 19/19 验证当前回复选择、排队保留与原图标守卫。
 diff --git a/plugins/naumi-enterprise/assets/bot-chat-model.js b/plugins/naumi-enterprise/assets/bot-chat-model.js
-index e141ad5..8674e93 100644
+index e141ad5..565c03f 100644
 --- a/plugins/naumi-enterprise/assets/bot-chat-model.js
 +++ b/plugins/naumi-enterprise/assets/bot-chat-model.js
-@@ -3,16 +3,26 @@ export const CHAT_EVENT='naumi:conversation';
+@@ -3,16 +3,34 @@ export const CHAT_EVENT='naumi:conversation';
  export const PIN_KEY='naumi.botPinned.v1';
  const ACTIVE_KEY='naumi.groupSelection.v1';
  const memoryDrafts=new Map();
@@ -99,6 +101,14 @@ index e141ad5..8674e93 100644
 + for(const item of activity)rows.push({...item,order:Number.MAX_SAFE_INTEGER});
 + return rows.sort((a,b)=>a.createdAt.localeCompare(b.createdAt)||a.order-b.order||a.id.localeCompare(b.id));
 +}
++/** Stop one current reply per member; preserve later queued chat topics. */
++export function groupInterruptTargets(replies){
++ const targets=new Map();
++ for(const r of replies){if(!['queued','starting','sent'].includes(r.state))continue;const prior=targets.get(r.sessionId);
++  if(!prior||prior.state==='queued'&&r.state!=='queued')targets.set(r.sessionId,r);
++ }
++ return [...targets.values()];
++}
  export function conversationRows(bots,rooms,query='',pinned=null){const q=query.trim().toLocaleLowerCase();const rows=[...bots.filter(b=>b.status==='active').map(bot=>({kind:'bot',id:bot.id,bot,name:bot.name,pinned:bot.id===pinned})),...rooms.map(room=>({kind:'group',id:room.id,room,name:room.name,pinned:false}))];return rows.filter(r=>!q||r.name.toLocaleLowerCase().includes(q)).sort((a,b)=>Number(b.pinned)-Number(a.pinned));}
  export async function groupRequest(url='/naumi/bot-groups',{signal,body,fetcher=globalThis.fetch}={}){
   const r=await fetcher(url,{credentials:'same-origin',cache:'no-store',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(15000)]):AbortSignal.timeout(15000),...(body?{method:'POST',headers:{'Content-Type':'application/json','x-naumi-bot-groups':'1'},body:JSON.stringify(body)}:{})});
@@ -109,7 +119,7 @@ index e141ad5..8674e93 100644
  export function createGroupCatalog({fetcher=globalThis.fetch,target=globalThis.window,storage=globalThis.sessionStorage}={}){
   let selected=null;try{selected=storage?.getItem(ACTIVE_KEY)??null;}catch{}
   let snapshot={status:'idle',rooms:[],details:{},selected,creating:false},abort=null,pending=null,timer=null,alive=false,generation=0;
-@@ -50,9 +60,10 @@ export function groupReplyView(entries,messageId,sessionId){
+@@ -50,9 +68,10 @@ export function groupReplyView(entries,messageId,sessionId){
  export function watchGroupReplies(ctx,replies,onValue,{schedule=cb=>requestAnimationFrame(cb),cancel=id=>cancelAnimationFrame(id)}={}){
   const sessions=ctx.get?.('sessions')??ctx.sessions;if(!sessions?.retain)return()=>{};
   let closed=false,frame=null;const handles=[],stops=[],values={};
@@ -143,7 +153,7 @@ index b633b2b..e666b9e 100644
 +/* Native ui-conversation owns editor, send/stop, uploads, models and Queue. */
 +.nbc-native-dock{flex:none;padding:12px 30px 24px;max-height:48%;overflow:visible}.nbc-native-dock>div{max-width:792px;margin-left:auto;margin-right:auto}.nbc-group-controls{display:flex;align-items:center;gap:8px}.nbc-group-controls .nbc-mentions{margin:0;flex:1}.nbc-task-selection{display:flex;align-items:center;gap:12px;border-left:2px solid #a498bf;padding:3px 8px;margin-bottom:7px;font-size:12px;color:#686075}.nbc-task-selection span{min-width:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.nbc-task-receipt{display:flex;align-items:center;gap:10px;align-self:center;max-width:100%;font-size:11px;color:#8a8e99}.nbc-task-receipt button{border:0;background:none;color:#75638f;max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:inherit;padding:3px}.nbc-task-link{border:0;background:none;color:#89739e;font-size:11px;padding:5px 2px;margin-top:3px}.nbc-attachment{display:block;font-size:12px;padding:4px 0}@media(max-width:800px){.nbc-native-dock{padding:10px 16px 17px}}
 diff --git a/plugins/naumi-enterprise/assets/bot-groups.js b/plugins/naumi-enterprise/assets/bot-groups.js
-index 4ce097d..e61f227 100644
+index 4ce097d..870bc57 100644
 --- a/plugins/naumi-enterprise/assets/bot-groups.js
 +++ b/plugins/naumi-enterprise/assets/bot-groups.js
 @@ -1,8 +1,8 @@
@@ -153,7 +163,7 @@ index 4ce097d..e61f227 100644
  import {createBotAvatar} from './bot-avatar.js';
  import {createChatMarkdown} from './bot-chat-markdown.js';
 -import {groupCatalog,groupRequest,groupError,roomDraft,watchGroupReplies} from './bot-chat-model.js';
-+import {groupCatalog,groupRequest,groupError,roomDraft,watchGroupReplies,roomWorking,groupTimeline} from './bot-chat-model.js';
++import {groupCatalog,groupRequest,groupError,roomDraft,watchGroupReplies,roomWorking,groupTimeline,groupInterruptTargets} from './bot-chat-model.js';
  
  export function createBotGroupsPage(ctx,React){
   const h=React.createElement,{useEffect,useState,useRef,useSyncExternalStore}=React,groups=groupCatalog(),catalog=botCatalog(),Avatar=createBotAvatar(React),Markdown=createChatMarkdown(React);
@@ -221,7 +231,7 @@ index 4ce097d..e61f227 100644
 -  return h('section',{className:'nbc-conversation','aria-label':room.name},h('header',{className:'nbc-header'},h('div',{className:'nbc-title'},h(Faces,{members:room.members,bots}),h('div',null,h('h1',null,room.name),working&&h('span',{className:'nbc-working'},'正在协作'))),h('div',{className:'nbc-header-actions'},h('button',{type:'button',className:'nbc-members-button',onClick:()=>setDrawer(drawer==='members'?null:'members'),'aria-label':'群成员'},room.members.length,' 位成员',icon('users',17)),action('任务与文件',()=>setDrawer(drawer==='tasks'?null:'tasks'),'files',{'aria-expanded':drawer==='tasks'}))),
 -   h('div',{className:'nbc-main'},h('div',{className:'nbc-timeline',ref:timeline,role:'log','aria-label':'群消息记录',onScroll:e=>{const n=e.currentTarget;follow.current=n.scrollHeight-n.scrollTop-n.clientHeight<90;}},h('div',{className:'nbc-transcript'},readError&&h('div',{className:'nbc-error',role:'alert'},readError,h('button',{type:'button',onClick:()=>refresh.current?.()},'重试')),!data&&!readError&&h('div',{className:'nbc-loading',role:'status'},'载入中…'),data&&posts.length===0&&h('div',{className:'nbc-empty'},h(Faces,{members:room.members,bots}),h('h2',null,room.name)),posts.length>=50&&!end&&h('button',{type:'button',className:'nbc-history',onClick:loadOlder,disabled:loadingOlder},loadingOlder?'载入中…':'更早的消息'),posts.flatMap(post=>[h('article',{key:post.id,className:'nbc-message nbc-user'},h('div',{className:'nbc-message-body'},h('div',{className:'nbc-bubble'},h(Markdown,{text:post.text})))),...post.replies.map(bubble)]))),drawer==='tasks'&&h(TaskDrawer,{tasks:data?.tasks??[],bots,onClose:()=>setDrawer(null)}),drawer==='members'&&h('aside',{className:'nbc-drawer','aria-label':'群成员'},h('header',null,h('h3',null,'群成员'),action('关闭成员',()=>setDrawer(null),'close')),room.members.map(m=>{const b=bots.find(b=>b.id===m.botId);return h('div',{key:m.botId,className:'nbc-person'},b&&h(Avatar,{bot:b,staticPreview:true}),h('strong',null,label(m.botId)),m.botId===room.defaultBotId&&h('span',null,'默认接话'));}))),
 -   h('div',{className:'nbc-dock'},h('form',{className:'nbc-composer',onSubmit:send},error&&h('div',{className:'nbc-error',role:'alert'},error),(mentions||draft.targets.length>0)&&h('div',{className:'nbc-mentions','aria-label':'点名成员'},targets.map(m=>h('button',{type:'button',key:m.botId,'aria-pressed':draft.targets.includes(m.botId),disabled:sending,onClick:()=>update({...draft,targets:draft.targets.includes(m.botId)?draft.targets.filter(id=>id!==m.botId):[...draft.targets,m.botId]})},'@'+label(m.botId)))),h('textarea',{ref:input,'aria-label':'群消息',placeholder:'发送消息，@ 提及成员',value:draft.text,maxLength:8000,disabled:sending,rows:2,onChange:e=>update({...draft,text:e.target.value}),onKeyDown:e=>{if(e.key==='@')setMentions(true);if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing&&!e.isComposing){e.preventDefault();if(!sending&&draft.text.trim())void send(e);}}}),h('div',{className:'nbc-compose-actions'},action('点名成员',()=>setMentions(!mentions),'at',{'aria-expanded':mentions}),h('button',{type:'submit',className:'nbc-send','aria-label':'发送',disabled:sending||!draft.text.trim()},icon('send'))))));
-+  const stopReply=async()=>{setError('');try{for(const r of replies.filter(r=>['queued','starting','sent'].includes(r.state)))await groupRequest(undefined,{body:{action:'interrupt',roomId:room.id,replyId:r.id}});void refresh.current?.();}catch(e){if(alive.current)setError(groupError(e));}};
++  const stopReply=async()=>{setError('');try{for(const r of groupInterruptTargets(replies))await groupRequest(undefined,{body:{action:'interrupt',roomId:room.id,replyId:r.id}});void refresh.current?.();}catch(e){if(alive.current)setError(groupError(e));}};
 +  const targets=room.members.filter(m=>bots.some(b=>b.id===m.botId&&b.status==='active')),working=roomWorking(data),selectTask=t=>{if(!t)return;update({...draft,taskId:t.id,targets:[]});setDrawer(null);};
 +  const botWorking=id=>(data?.tasks??[]).some(t=>t.targetBotId===id&&['starting','running'].includes(t.status));
 +  const bubble=reply=>{if(reply.type==='relay'&&!live[reply.id]?.text&&!live[reply.id]?.files?.length)return null;const bot=bots.find(b=>b.id===reply.botId),view=live[reply.id],text=reply.type==='task-message'?reply.text:reply.state==='completed'?reply.text:view?.text,active=['queued','starting','sent'].includes(reply.state);return h('article',{key:reply.id,className:'nbc-message nbc-assistant','data-reply-id':reply.id},h('div',{className:'nbc-message-avatar'},bot?h(Avatar,{bot,state:active||botWorking(reply.botId)?'running':'idle'}):null),h('div',{className:'nbc-message-body'},h('div',{className:'nbc-speaker'},label(reply.botId)),text?h('div',{className:'nbc-bubble'},h(Markdown,{text})):active?h('div',{className:'nbc-typing',role:'status','aria-label':label(reply.botId)+'正在回复'},h('i'),h('i'),h('i')):h('div',{className:'nbc-bubble nbc-interrupted'},reply.state==='blocked'?'需要你确认':'回复未完成',h('button',{type:'button',onClick:()=>openSession(reply.sessionId)},'查看会话')),h(Files,{files:reply.files??view?.files}),reply.taskId&&h('button',{type:'button',className:'nbc-task-link',onClick:()=>selectTask((data?.tasks??[]).find(t=>t.id===reply.taskId))},'调整这项任务')))};
@@ -834,7 +844,7 @@ index 0000000..c908719
 +}
 diff --git a/scripts/package-group-collaboration.mjs b/scripts/package-group-collaboration.mjs
 new file mode 100644
-index 0000000..e789504
+index 0000000..e920a0d
 --- /dev/null
 +++ b/scripts/package-group-collaboration.mjs
 @@ -0,0 +1,35 @@
@@ -856,7 +866,7 @@ index 0000000..e789504
 +console.log('ROLLBACK_SOURCE_RESTORED files='+manifest.rows.length+' hashes=PASS runtime_data=UNTOUCHED');
 +`;
 +fs.writeFileSync(path.join(out,'rollback.mjs'),rollback);fs.writeFileSync(path.join(out,'ROLLBACK.sh'),'#!/usr/bin/env bash\nset -euo pipefail\n[ "$#" -eq 1 ] || { echo "Usage: ROLLBACK.sh EXPLICIT_SOURCE_COPY"; exit 2; }\nhere="$(cd -- "$(dirname -- "$0")" && pwd)"\nnode "$here/rollback.mjs" "$1"\n');
-+fs.writeFileSync(path.join(out,'.gitattributes'),'* -text whitespace=cr-at-eol\nDIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab\nROLLBACK.sh text eol=lf\n');
++fs.writeFileSync(path.join(out,'.gitattributes'),'* -text whitespace=cr-at-eol\nDIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab\nROLLBACK.sh text eol=lf\n*.log -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol\n');
 +const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-group-rollback-')),archive=path.join(tmp,'base.tar');fs.writeFileSync(archive,execFileSync('git',['archive',base],{maxBuffer:100*1024*1024}));execFileSync('tar',['-xf',archive,'-C',tmp]);fs.unlinkSync(archive);
 +fs.symlinkSync(path.join(root,'node_modules'),path.join(tmp,'node_modules'),'junction');fs.symlinkSync(path.join(root,'desktop/node_modules'),path.join(tmp,'desktop/node_modules'),'junction');
 +const args=['--test','tests/naumi-bot-groups.test.mjs','tests/naumi-bot-groups-http.test.mjs','tests/naumi-unified-chat.test.mjs','tests/naumi-async-bot.test.mjs'];
@@ -916,10 +926,10 @@ index 721f1db..bf74741 100644
   assert(source.includes(migration));
 diff --git a/tests/naumi-group-collaboration.test.mjs b/tests/naumi-group-collaboration.test.mjs
 new file mode 100644
-index 0000000..5e9ddbf
+index 0000000..073fb33
 --- /dev/null
 +++ b/tests/naumi-group-collaboration.test.mjs
-@@ -0,0 +1,158 @@
+@@ -0,0 +1,165 @@
 +import test from 'node:test';
 +import assert from 'node:assert/strict';
 +import fs from 'node:fs';
@@ -931,7 +941,7 @@ index 0000000..5e9ddbf
 +import {botTaskHost} from './helpers/bot-task-host.mjs';
 +import {botGroupHttpFixture} from './helpers/bot-group-http.mjs';
 +import {extendNativeComposer,NATIVE_COMPOSER_SHA} from '../scripts/native-composer-extension.mjs';
-+import {groupTimeline,roomWorking,groupReplyView,watchGroupReplies} from '../plugins/naumi-enterprise/assets/bot-chat-model.js';
++import {groupTimeline,roomWorking,groupReplyView,watchGroupReplies,groupInterruptTargets} from '../plugins/naumi-enterprise/assets/bot-chat-model.js';
 +
 +async function setup(){
 +  const f=await taskFixture(),file=path.join(f.dir,'groups.sqlite');let store=new BotGroupStore(file),groups;
@@ -1077,4 +1087,11 @@ index 0000000..5e9ddbf
 +    await assert.rejects(f.service.runtime.admitGroupAttachments(f.target.id,[{type:'file',receiptId:'upload'}],'request-2'),/NOT_STAGED/);
 +    await layer.dispose();
 +  }finally{await f.cleanup();}
++});
++
++test('Stop targets only each member current reply and preserves their later queued topics',()=>{
++ const rows=[{id:'current',sessionId:'a',state:'sent'},{id:'later',sessionId:'a',state:'queued'},
++  {id:'other-member',sessionId:'b',state:'starting'},{id:'later-b',sessionId:'b',state:'queued'},
++  {id:'first-queued',sessionId:'c',state:'queued'},{id:'next-queued',sessionId:'c',state:'queued'}];
++ assert.deepEqual(groupInterruptTargets(rows).map(r=>r.id),['current','other-member','first-queued']);assert.equal(rows[1].state,'queued');assert.equal(rows[3].state,'queued');
 +});

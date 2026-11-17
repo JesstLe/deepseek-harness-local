@@ -2,7 +2,7 @@ import {filePreviewAddress,taskLabel,taskActivity} from './bot-task-model.js';
 import {botCatalog} from './bot-sidebar-model.js';
 import {createBotAvatar} from './bot-avatar.js';
 import {createChatMarkdown} from './bot-chat-markdown.js';
-import {groupCatalog,groupRequest,groupError,roomDraft,watchGroupReplies,roomWorking,groupTimeline} from './bot-chat-model.js';
+import {groupCatalog,groupRequest,groupError,roomDraft,watchGroupReplies,roomWorking,groupTimeline,groupInterruptTargets} from './bot-chat-model.js';
 
 export function createBotGroupsPage(ctx,React){
  const h=React.createElement,{useEffect,useState,useRef,useSyncExternalStore}=React,groups=groupCatalog(),catalog=botCatalog(),Avatar=createBotAvatar(React),Markdown=createChatMarkdown(React);
@@ -61,7 +61,7 @@ export function createBotGroupsPage(ctx,React){
     if(alive.current){setDraft(roomDraft(room.id));setMentions(false);follow.current=true;void refresh.current?.();}void groups.refresh();return {kind:'success'};
    }catch(e){if(alive.current)setError(groupError(e));return {kind:'error'};}finally{flight.current=false;if(alive.current)setSending(false);}
   };
-  const stopReply=async()=>{setError('');try{for(const r of replies.filter(r=>['queued','starting','sent'].includes(r.state)))await groupRequest(undefined,{body:{action:'interrupt',roomId:room.id,replyId:r.id}});void refresh.current?.();}catch(e){if(alive.current)setError(groupError(e));}};
+  const stopReply=async()=>{setError('');try{for(const r of groupInterruptTargets(replies))await groupRequest(undefined,{body:{action:'interrupt',roomId:room.id,replyId:r.id}});void refresh.current?.();}catch(e){if(alive.current)setError(groupError(e));}};
   const targets=room.members.filter(m=>bots.some(b=>b.id===m.botId&&b.status==='active')),working=roomWorking(data),selectTask=t=>{if(!t)return;update({...draft,taskId:t.id,targets:[]});setDrawer(null);};
   const botWorking=id=>(data?.tasks??[]).some(t=>t.targetBotId===id&&['starting','running'].includes(t.status));
   const bubble=reply=>{if(reply.type==='relay'&&!live[reply.id]?.text&&!live[reply.id]?.files?.length)return null;const bot=bots.find(b=>b.id===reply.botId),view=live[reply.id],text=reply.type==='task-message'?reply.text:reply.state==='completed'?reply.text:view?.text,active=['queued','starting','sent'].includes(reply.state);return h('article',{key:reply.id,className:'nbc-message nbc-assistant','data-reply-id':reply.id},h('div',{className:'nbc-message-avatar'},bot?h(Avatar,{bot,state:active||botWorking(reply.botId)?'running':'idle'}):null),h('div',{className:'nbc-message-body'},h('div',{className:'nbc-speaker'},label(reply.botId)),text?h('div',{className:'nbc-bubble'},h(Markdown,{text})):active?h('div',{className:'nbc-typing',role:'status','aria-label':label(reply.botId)+'正在回复'},h('i'),h('i'),h('i')):h('div',{className:'nbc-bubble nbc-interrupted'},reply.state==='blocked'?'需要你确认':'回复未完成',h('button',{type:'button',onClick:()=>openSession(reply.sessionId)},'查看会话')),h(Files,{files:reply.files??view?.files}),reply.taskId&&h('button',{type:'button',className:'nbc-task-link',onClick:()=>selectTask((data?.tasks??[]).find(t=>t.id===reply.taskId))},'调整这项任务')))};
