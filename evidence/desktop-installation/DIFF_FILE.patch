@@ -1,0 +1,914 @@
+diff --git a/original/.gitattributes.snapshot b/modified/.gitattributes.snapshot
+index 1d089b6..5dd4669 100644
+--- a/original/.gitattributes.snapshot
++++ b/modified/.gitattributes.snapshot
+@@ -132,3 +132,10 @@ plugins/naumi-ui-layout/UPSTREAM.json text eol=lf
+ /scripts/*desktop-enterprise*.mjs text eol=lf
+ /docs/implementation/DESKTOP_ENTERPRISE_M5_3.md text eol=lf
+ /evidence/desktop-enterprise/*.log -text whitespace=cr-at-eol,-blank-at-eol
++/evidence/desktop-installation/** -text whitespace=cr-at-eol
++/evidence/desktop-installation/*.log -text whitespace=cr-at-eol,-blank-at-eol
++/evidence/desktop-installation/DIFF_FILE.patch -text whitespace=-blank-at-eol
++/evidence/desktop-installation/ROLLBACK.sh text eol=lf
++/scripts/*desktop-installation*.mjs text eol=lf
++/scripts/installer-environment.ps1 text eol=lf
++/docs/implementation/DESKTOP_INSTALLATION_M5_4.md text eol=lf
+diff --git a/original/.gitignore b/modified/.gitignore
+index 6eb16c1..3345b22 100644
+--- a/original/.gitignore
++++ b/modified/.gitignore
+@@ -16,3 +16,7 @@ evidence/desktop-lifecycle/pack-*/
+ /evidence/desktop-enterprise/modified-fixture*/
+ /evidence/desktop-enterprise/rollback-copy-*/
+ /evidence/desktop-enterprise/pack-*/
++/evidence/desktop-installation/rollback-copy-*/
++/evidence/desktop-installation/pack-*/
++/evidence/desktop-installation/baseline-fixture*/
++/evidence/desktop-installation/modified-fixture*/
+diff --git a/original/desktop/app/backend.cjs b/modified/desktop/app/backend.cjs
+index 1cf924d..b80f26b 100644
+--- a/original/desktop/app/backend.cjs
++++ b/modified/desktop/app/backend.cjs
+@@ -3,6 +3,7 @@ const fs=require('node:fs'),path=require('node:path'),net=require('node:net');
+ const {spawn}=require('node:child_process');
+ const {createHash,createHmac,randomBytes,randomUUID,timingSafeEqual}=require('node:crypto');
+ const profile=require('./profile.cjs');
++const {currentWorkspace}=require('./workspaces.cjs');
+ const delay=ms=>new Promise(r=>setTimeout(r,ms));
+ function localURL(value){const u=new URL(value);if(u.protocol!=='http:'||u.hostname!=='127.0.0.1'||u.username||u.password||u.pathname!=='/'||u.search||u.hash||!u.port)throw Error('INVALID_LOCAL_BACKEND');return u.origin;}
+ function localSettings(app,{resourcesPath=process.resourcesPath,environment=process.env}={}){
+@@ -15,10 +16,10 @@ function localSettings(app,{resourcesPath=process.resourcesPath,environment=proc
+   if(environment.NAUMI_ROOT&&environment.NAUMI_TEST!=='1'){fs.mkdirSync(path.dirname(link),{recursive:true});fs.writeFileSync(link,JSON.stringify({root},null,2)+'\n');}
+   return {root,home:environment.NAUMI_DSH_HOME??c.home,url:environment.NAUMI_HOST_URL??`http://${c.host}:${c.port}`,node:environment.NAUMI_NODE??'node.exe',logDir:path.join(root,'logs'),isolated:false};
+  }
+- root=path.join(resourcesPath,'backend');const runtime=profile.runtimeReference(root),home=path.join(userData,'harness');
++ root=path.join(resourcesPath,'backend');const runtime=profile.runtimeReference(root),selected=currentWorkspace(userData),home=selected.home;
+  const legacyAdoption=fs.existsSync(path.join(home,'profiles/web/package.json'))&&!profile.exists(path.join(home,'desktop-profile.json'));
+  const identity=profile.identity(home),receipt=profile.runtimeReceipt(home,identity.id);
+- return {root,home,workspace:path.join(home,'workspace'),url:localURL(environment.NAUMI_HOST_URL??`http://127.0.0.1:${receipt?.port??3080}`),node:path.join(root,'node.exe'),logDir:path.join(home,'logs'),isolated:true,identity,runtime,legacyAdoption};
++ return {root,home,workspaceId:selected.id,workspace:path.join(home,'workspace'),url:localURL(environment.NAUMI_HOST_URL??`http://127.0.0.1:${receipt?.port??3080}`),node:path.join(root,'node.exe'),logDir:path.join(home,'logs'),isolated:true,identity,runtime,legacyAdoption};
+ }
+ function launchFromLog(settings){
+  for(const name of ['server.out.log','server.err.log']){let text='';try{text=fs.readFileSync(path.join(settings.logDir,name),'utf8');}catch{}const urls=text.match(/http:\/\/127\.0\.0\.1:\d+\/?\?token=[A-Za-z0-9_~.%-]+/g)??[];for(const url of urls.reverse())if(new URL(url).origin===settings.url)return url;}
+diff --git a/original/desktop/app/connect.css b/modified/desktop/app/connect.css
+index c17c2f3..3627174 100644
+--- a/original/desktop/app/connect.css
++++ b/modified/desktop/app/connect.css
+@@ -1 +1,3 @@
+ :root{font:15px "Segoe UI","Microsoft YaHei",sans-serif;color:#17243a;background:#f5f7fb;color-scheme:light}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(ellipse at 50% 0%,#e8edff,transparent 65%)}main{width:min(440px,90vw);padding:40px;background:#fff;border:1px solid #e5eaf3;border-radius:22px;box-shadow:0 22px 70px #1c315610}h1{font-size:25px;letter-spacing:-.6px;margin:22px 0 30px}label{display:block;font-weight:600;margin-bottom:10px}input,button{width:100%;font:inherit;border-radius:10px}input{height:48px;border:1px solid #ccd5e4;padding:0 14px;background:#fff;color:#17243a}input:focus{outline:3px solid #e4eaff;border-color:#6479e8}button{height:47px;border:0;background:#5369d8;color:white;font-weight:600;cursor:pointer}button:hover{background:#4358c4}button:disabled{opacity:.6;cursor:wait}#error{font-size:13px;color:#c24040;min-height:20px;margin:12px 0}
++
++.secondary{margin-top:10px;background:#f0f3f9;color:#42516a}.secondary:hover{background:#e6ebf5}nav{display:grid;gap:7px;margin-top:24px;padding-top:18px;border-top:1px solid #e8edf5}nav button{height:auto;min-height:36px;padding:8px 10px;text-align:left;background:transparent;color:#53627a;font-size:12px;overflow-wrap:anywhere}nav button:hover,nav button[data-active=true]{background:#f0f3fc;color:#455fc8}button[hidden],nav[hidden]{display:none}
+diff --git a/original/desktop/app/connect.html b/modified/desktop/app/connect.html
+index 8f283c3..5dd2e93 100644
+--- a/original/desktop/app/connect.html
++++ b/modified/desktop/app/connect.html
+@@ -1 +1 @@
+-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'"><title>Naumi</title><link rel="stylesheet" href="connect.css"><main><img src="assets/symbol.svg" alt="Naumi" width="56" height="56"><h1>连接企业</h1><form id="connection"><label for="origin">企业地址</label><input id="origin" name="origin" type="url" placeholder="https://" autocomplete="url" required autofocus><p id="error" role="alert"></p><button type="submit">连接</button></form></main><script src="connect.js"></script></html>
++<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'"><title>Naumi</title><link rel="stylesheet" href="connect.css"><main><img src="assets/symbol.svg" alt="Naumi" width="56" height="56"><h1>连接企业</h1><form id="connection"><label for="origin">企业地址</label><input id="origin" name="origin" type="url" placeholder="https://" autocomplete="url" required autofocus><p id="error" role="alert"></p><button type="submit">连接</button><button id="cancel" type="button" class="secondary" hidden>取消</button><button id="back" type="button" class="secondary" hidden>返回工作台</button></form><nav id="workspaces" aria-label="企业工作区" hidden></nav></main><script src="connect.js"></script></html>
+diff --git a/original/desktop/app/connect.js b/modified/desktop/app/connect.js
+index a2bda8a..0ea13e3 100644
+--- a/original/desktop/app/connect.js
++++ b/modified/desktop/app/connect.js
+@@ -1,3 +1,8 @@
+ 'use strict';
+-const form=document.querySelector('#connection'),button=form.querySelector('button'),error=document.querySelector('#error');
+-form.addEventListener('submit',async e=>{e.preventDefault();button.disabled=true;error.textContent='';try{const result=await window.naumiDesktop.connectEnterprise(document.querySelector('#origin').value.trim());if(!result.ok)error.textContent=({ENTERPRISE_ORIGIN_INVALID:'请输入 HTTPS 企业地址',ENTERPRISE_PROFILE_SWITCH_REQUIRED:'此工作区已连接其他企业',ENTERPRISE_CONFIG_INVALID:'企业配置需要修复'})[result.error]??'连接未完成，请重试';}catch{error.textContent='连接未完成，请重试';}finally{button.disabled=false;}});
++const form=document.querySelector('#connection'),button=form.querySelector('[type=submit]'),error=document.querySelector('#error'),origin=document.querySelector('#origin'),back=document.querySelector('#back'),cancel=document.querySelector('#cancel'),list=document.querySelector('#workspaces');
++const messages={ENTERPRISE_ORIGIN_INVALID:'请输入 HTTPS 企业地址',ENTERPRISE_CONNECTION_UNAVAILABLE:'企业服务暂不可达',ENTERPRISE_CONNECTION_INCOMPATIBLE:'企业接口不匹配',ENTERPRISE_CONNECTION_CANCELLED:'已取消连接',WORKSPACE_RUNNING_TASKS:'请先停止当前工作区的运行任务',WORKSPACE_ACTIVITY_UNKNOWN:'当前任务状态未确认，请重试',WORKSPACE_OPERATIONS_IN_FLIGHT:'当前操作尚未结束',WORKSPACE_BACKEND_STOP_REQUIRED:'请先关闭原工作区进程',WORKSPACE_SETTINGS_BUSY:'正在切换工作区'};
++let state={entries:[]};const label=()=>button.textContent=state.configured&&!state.entries.some(e=>e.origin===origin.value.trim())?'新建工作区':'连接';
++async function refresh(){state=await window.naumiDesktop.connectionState();origin.value=state.origin??'';back.hidden=!state.configured;list.hidden=!state.entries.length;for(const entry of state.entries){const item=document.createElement('button');item.type='button';item.textContent=entry.origin;item.dataset.active=String(entry.active);item.addEventListener('click',()=>{origin.value=entry.origin;label();origin.focus();});list.append(item);}label();}
++origin.addEventListener('input',label);cancel.addEventListener('click',()=>window.naumiDesktop.cancelConnection());back.addEventListener('click',()=>window.naumiDesktop.resumeWorkspace());
++form.addEventListener('submit',async e=>{e.preventDefault();button.disabled=true;back.disabled=true;cancel.hidden=false;error.textContent='';try{const result=await window.naumiDesktop.connectEnterprise(origin.value.trim());if(!result.ok)error.textContent=messages[result.error]??'连接未完成，请重试';}catch{error.textContent='连接未完成，请重试';}finally{button.disabled=false;back.disabled=false;cancel.hidden=true;}});
++void refresh().catch(()=>{error.textContent='连接配置需要修复';});
+diff --git a/original/desktop/app/guests.cjs b/modified/desktop/app/guests.cjs
+index dba5745..5c54fca 100644
+--- a/original/desktop/app/guests.cjs
++++ b/modified/desktop/app/guests.cjs
+@@ -58,5 +58,6 @@ class Guests {
+   entries(sessionId){return [...this.leases.values()].filter(e=>e.sessionId===sessionId&&e.guest&&!e.guest.isDestroyed());}
+   selected(sessionId){return this.entries(sessionId).sort((a,b)=>(b.selectedAt??0)-(a.selectedAt??0))[0];}
+   async flush(){for(const partition of this.partitions)await session.fromPartition(partition).cookies.flushStore();}
++  async reset({hostURL,account}){await this.flush();for(const entry of [...this.leases.values()])await this.release(entry.owner,entry.lease);this.hostURL=hostURL;this.account=account;}
+ }
+ module.exports={Guests};
+diff --git a/original/desktop/app/main.cjs b/modified/desktop/app/main.cjs
+index e29ee17..bb795cd 100644
+--- a/original/desktop/app/main.cjs
++++ b/modified/desktop/app/main.cjs
+@@ -1,8 +1,9 @@
+ 'use strict';
+ const path=require('node:path');
+ const fs=require('node:fs');
+-const {app,BrowserWindow,ipcMain,Menu,nativeTheme,shell,session}=require('electron');
++const {app,BrowserWindow,ipcMain,Menu,nativeTheme,shell,session,dialog}=require('electron');
+ const {readConnection,connect,EnterpriseSession}=require('./enterprise.cjs');
++const {workspaceSummary,selectWorkspace,verifyConnection,assertWorkspaceIdle}=require('./workspaces.cjs');
+ const {Guests}=require('./guests.cjs');
+ const {startBridge}=require('./tools.cjs');
+ const {localSettings,ensureBackend,stopBackend,createQuitGate}=require('./backend.cjs');
+@@ -10,7 +11,7 @@ app.setName('Naumi');app.setAppUserModelId('com.naumi.desktop');
+ if(process.env.NAUMI_USER_DATA)app.setPath('userData',path.resolve(process.env.NAUMI_USER_DATA));
+ if(process.env.NAUMI_TEST_HIDDEN==='1'){app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');app.commandLine.appendSwitch('disable-renderer-backgrounding');}
+ const locked=app.requestSingleInstanceLock();
+-let window,primarySession,guests,bridge,backend,settings,enterprise,login,loginAfterBoot=false,booting=false,closing=false;
++let window,primarySession,guests,bridge,backend,settings,enterprise,login,loginAfterBoot=false,booting=false,closing=false,connecting=false,editingConnection=false,connectionFlight;
+ if(!locked){app.quit();}else{
+ app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.show();window.focus();}});
+ app.whenReady().then(async()=>{
+@@ -32,21 +33,46 @@ app.whenReady().then(async()=>{
+   }catch{}return {action:'deny'};
+  });
+  window.webContents.on('did-fail-load',(_e,code,description,_url,main)=>{if(main&&code!==-3&&!booting)void showStartup(description+' ('+code+')');});
+- const trusted=event=>{if(event.sender!==window.webContents||event.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');if(!settings||new URL(event.senderFrame.url).origin!==settings.url)throw Error('INVALID_DESKTOP_ORIGIN');};
++ const ownFrame=event=>{if(event.sender!==window.webContents||event.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');};
++ const localPage=(event,names)=>{ownFrame(event);const u=new URL(event.senderFrame.url);return u.protocol==='file:'&&names.some(name=>u.pathname===require('node:url').pathToFileURL(path.join(__dirname,name)).pathname);};
++ const trusted=event=>{ownFrame(event);if(!settings||new URL(event.senderFrame.url).origin!==settings.url||connecting)throw Error('INVALID_DESKTOP_ORIGIN');};
+  ipcMain.handle('naumi:browser-acquire',(e,workspace)=>{trusted(e);return guests.acquire(e.sender,workspace);});
+  ipcMain.handle('naumi:browser-release',(e,lease)=>{trusted(e);return guests.release(e.sender,lease);});
+  ipcMain.handle('naumi:browser-bind',(e,value)=>{trusted(e);return guests.bind(e.sender,value);});
+  ipcMain.handle('naumi:retry',e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');void boot();});
+- ipcMain.handle('naumi:enterprise-connect',(e,origin)=>{
+-  if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame||new URL(e.senderFrame.url).protocol!=='file:'||new URL(e.senderFrame.url).pathname!==new URL(require('node:url').pathToFileURL(path.join(__dirname,'connect.html')).href).pathname||!settings?.isolated)throw Error('INVALID_DESKTOP_SENDER');
+-  try{connect(settings.home,origin);loginAfterBoot=true;void boot();return {ok:true};}catch(error){return {ok:false,error:/^ENTERPRISE_[A-Z_]+$/.test(error.message)?error.message:'ENTERPRISE_CONFIG_INVALID'};}
++ ipcMain.handle('naumi:connection-state',e=>{if(!localPage(e,['connect.html','startup.html']))trusted(e);if(!settings?.isolated)return {available:false};return {available:true,...workspaceSummary(app.getPath('userData'))};});
++ ipcMain.handle('naumi:connection-settings',async e=>{
++  if(!localPage(e,['startup.html']))trusted(e);if(!settings?.isolated||booting||connecting)return {ok:false,error:'WORKSPACE_SETTINGS_BUSY'};
++  try{if((bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');if(backend?.owned){const r=require('./profile.cjs').runtimeReceipt(settings.home,settings.identity.id);if(!r||r.pid===null||isAlive(r.pid))await assertWorkspaceIdle(settings,(url,options)=>primarySession.fetch(url,options));}}
++  catch(error){const code=/^WORKSPACE_[A-Z_]+$/.test(error.message)?error.message:'WORKSPACE_ACTIVITY_UNKNOWN';if(process.env.NAUMI_TEST_HIDDEN!=='1')await dialog.showMessageBox(window,{type:'info',buttons:['返回工作台'],message:code==='WORKSPACE_RUNNING_TASKS'?'请先停止当前工作区的运行任务':'当前操作状态未确认，请稍后重试'});return {ok:false,error:code};}
++  editingConnection=true;if(login&&!login.isDestroyed())login.destroy();await window.loadFile(path.join(__dirname,'connect.html'));return {ok:true};
++ });
++ ipcMain.handle('naumi:connection-cancel',e=>{if(!localPage(e,['connect.html']))throw Error('INVALID_DESKTOP_SENDER');connectionFlight?.abort();return {ok:true};});
++ ipcMain.handle('naumi:connection-resume',e=>{if(!localPage(e,['connect.html'])||!settings?.isolated)throw Error('INVALID_DESKTOP_SENDER');if(connecting||booting)return {ok:false,error:'WORKSPACE_SETTINGS_BUSY'};void boot();return {ok:true};});
++ ipcMain.handle('naumi:enterprise-connect',async(e,origin)=>{
++  if(!localPage(e,['connect.html'])||!settings?.isolated)throw Error('INVALID_DESKTOP_SENDER');
++  if(connecting||booting)return {ok:false,error:'WORKSPACE_SETTINGS_BUSY'};connecting=true;connectionFlight=new AbortController();
++  try{
++   const checked=await verifyConnection(origin,(url,options)=>primarySession.fetch(url,options),{signal:connectionFlight.signal});
++   const state=workspaceSummary(app.getPath('userData')),changed=state.configured&&state.origin!==checked.origin;
++   if(changed){
++    if((enterprise?.running??0)>0||(bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');
++    if(backend?.owned){const r=require('./profile.cjs').runtimeReceipt(settings.home,settings.identity.id);if(!r||r.pid===null||isAlive(r.pid))await assertWorkspaceIdle(settings,(url,options)=>primarySession.fetch(url,options));connectionFlight.signal.throwIfAborted();await stopBackend(backend);backend=null;}
++    else {const r=require('./profile.cjs').runtimeReceipt(settings.home,settings.identity.id);if(r&&(r.pid===null||isAlive(r.pid)))throw Error('WORKSPACE_BACKEND_STOP_REQUIRED');}
++    await bridge?.close();bridge=null;
++   }
++   connectionFlight.signal.throwIfAborted();selectWorkspace(app.getPath('userData'),checked.origin);
++   if(changed){settings=localSettings(app);enterprise=null;}
++   loginAfterBoot=true;void showStartup().then(()=>boot());return {ok:true};
++  }catch(error){return {ok:false,error:connectionFlight.signal.aborted?'ENTERPRISE_CONNECTION_CANCELLED':/^(ENTERPRISE|WORKSPACE)_[A-Z_]+$/.test(error.message)?error.message:'ENTERPRISE_CONNECTION_UNAVAILABLE'};}
++  finally{connecting=false;connectionFlight=null;}
+  });
+  ipcMain.handle('naumi:enterprise-login',e=>{trusted(e);openEnterpriseLogin();return {ok:true};});
+  await showStartup();
+  if(process.env.NAUMI_TEST_HIDDEN!=='1')window.show();
+  await boot();
+ }).catch(error=>{console.error('NAUMI_DESKTOP_START_FAILED',error.message);app.quit();});
+-const quitGate=createQuitGate({shutdown:async()=>{try{if(login&&!login.isDestroyed()){login.webContents.stop();login.destroy();}await guests?.flush();await primarySession?.cookies.flushStore();await enterprise?.session.cookies.flushStore();}finally{await bridge?.close();await stopBackend(backend);}},onReady:()=>app.quit(),onError:()=>app.exit(1)});
++const quitGate=createQuitGate({shutdown:async()=>{try{connectionFlight?.abort();if(login&&!login.isDestroyed()){login.webContents.stop();login.destroy();}await guests?.flush();await primarySession?.cookies.flushStore();await enterprise?.session.cookies.flushStore();}finally{await bridge?.close();await stopBackend(backend);}},onReady:()=>app.quit(),onError:()=>app.exit(1)});
+ app.on('before-quit',event=>{closing=true;quitGate.beforeQuit(event);});
+ app.on('window-all-closed',()=>app.quit());
+ }
+@@ -55,7 +81,7 @@ async function showStartup(error=''){
+  await window.loadFile(path.join(__dirname,'startup.html'),{query:error?{error}:{}});
+ }
+ async function boot(){
+- if(booting||closing)return;booting=true;
++ if(booting||closing||connecting)return;booting=true;
+  try{
+   settings??=localSettings(app);
+   if(settings.isolated){
+@@ -67,13 +93,16 @@ async function boot(){
+   }
+   const nextBackend=await ensureBackend(settings);
+   backend=backend?.owned&&!nextBackend.owned&&backend.child.exitCode===null&&backend.child.signalCode===null?{...nextBackend,owned:true,child:backend.child}:nextBackend;
+-  if(!guests){guests=new Guests({hostURL:settings.url,account:'local',timeout:process.env.NAUMI_TEST==='1'?Number(process.env.NAUMI_TEST_TIMEOUT??30000):30000});guests.attach(window);}
++  const account=!settings.isolated||settings.workspaceId==='default'?'local':'enterprise-'+settings.workspaceId;
++  if(!guests){guests=new Guests({hostURL:settings.url,account,timeout:process.env.NAUMI_TEST==='1'?Number(process.env.NAUMI_TEST_TIMEOUT??30000):30000});guests.attach(window);}
++  else if(guests.hostURL!==settings.url||guests.account!==account)await guests.reset({hostURL:settings.url,account});
+   if(!bridge)bridge=await startBridge({home:settings.home,guests,window,enterprise});
+-  await window.loadURL(backend.launchURL);
++  editingConnection=false;await window.loadURL(backend.launchURL);
+   if(loginAfterBoot){loginAfterBoot=false;openEnterpriseLogin();}
+  }catch(error){await showStartup(error.message);}
+  finally{booting=false;if(process.env.NAUMI_TEST==='1')globalThis.__naumiTest={window,guests,bridge,settings,backend,enterprise,get login(){return login;}};}
+ }
++function isAlive(pid){try{process.kill(pid,0);return true;}catch(error){return error.code!=='ESRCH';}}
+ function openEnterpriseLogin(){
+  if(closing||!enterprise||!settings?.enterpriseOrigin)return;
+  if(login&&!login.isDestroyed()){if(process.env.NAUMI_TEST_HIDDEN!=='1')login.focus();return;}
+@@ -82,5 +111,5 @@ function openEnterpriseLogin(){
+  login.webContents.setWindowOpenHandler(()=>({action:'deny'}));
+  for(const event of ['will-navigate','will-redirect'])login.webContents.on(event,(e,url)=>{if(!allowed(url))e.preventDefault();});
+  void login.loadURL(origin+'/login').catch(()=>{});
+- login.on('closed',()=>{login=null;if(!closing&&window&&!window.isDestroyed()&&new URL(window.webContents.getURL()).origin===settings.url)window.webContents.reload();});
++ login.on('closed',()=>{login=null;if(!closing&&!editingConnection&&window&&!window.isDestroyed()&&new URL(window.webContents.getURL()).origin===settings.url)window.webContents.reload();});
+ }
+diff --git a/original/desktop/app/preload.cjs b/modified/desktop/app/preload.cjs
+index 81a29a5..e89709c 100644
+--- a/original/desktop/app/preload.cjs
++++ b/modified/desktop/app/preload.cjs
+@@ -14,5 +14,9 @@ contextBridge.exposeInMainWorld('naumiDesktop',{
+   retry:()=>ipcRenderer.invoke('naumi:retry'),
+   connectEnterprise:origin=>ipcRenderer.invoke('naumi:enterprise-connect',origin),
+   loginEnterprise:()=>ipcRenderer.invoke('naumi:enterprise-login'),
++  connectionState:()=>ipcRenderer.invoke('naumi:connection-state'),
++  connectionSettings:()=>ipcRenderer.invoke('naumi:connection-settings'),
++  cancelConnection:()=>ipcRenderer.invoke('naumi:connection-cancel'),
++  resumeWorkspace:()=>ipcRenderer.invoke('naumi:connection-resume'),
+   product:'Naumi'
+ });
+diff --git a/original/desktop/app/startup.html b/modified/desktop/app/startup.html
+index 9dcf7dd..b349724 100644
+--- a/original/desktop/app/startup.html
++++ b/modified/desktop/app/startup.html
+@@ -1 +1 @@
+-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'"><title>Naumi</title><link rel="stylesheet" href="startup.css"><main><img src="assets/symbol.svg" alt="Naumi" width="68" height="68"><h1>Naumi</h1><div id="spinner" aria-label="正在启动"></div><p id="error" role="alert"></p><button id="retry" hidden>重新连接</button></main><script src="startup.js"></script></html>
++<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'"><title>Naumi</title><link rel="stylesheet" href="startup.css"><main><img src="assets/symbol.svg" alt="Naumi" width="68" height="68"><h1>Naumi</h1><div id="spinner" aria-label="正在启动"></div><p id="error" role="alert"></p><button id="retry" hidden>重新连接</button><button id="settings" hidden>连接设置</button></main><script src="startup.js"></script></html>
+diff --git a/original/desktop/app/startup.js b/modified/desktop/app/startup.js
+index a5378ef..9d5c106 100644
+--- a/original/desktop/app/startup.js
++++ b/modified/desktop/app/startup.js
+@@ -1,3 +1,5 @@
+ const error=new URLSearchParams(location.search).get('error');
+ if(error){document.querySelector('#spinner').hidden=true;document.querySelector('#error').textContent=error;document.querySelector('#retry').hidden=false;}
++if(error)window.naumiDesktop.connectionState().then(state=>{document.querySelector('#settings').hidden=!state.available;}).catch(()=>{});
++document.querySelector('#settings').addEventListener('click',()=>window.naumiDesktop.connectionSettings());
+ document.querySelector('#retry').addEventListener('click',()=>{document.querySelector('#retry').hidden=true;document.querySelector('#error').textContent='';document.querySelector('#spinner').hidden=false;window.naumiDesktop.retry();});
+diff --git a/modified/desktop/app/workspaces.cjs b/modified/desktop/app/workspaces.cjs
+new file mode 100644
+index 0000000..8e0068e
+--- /dev/null
++++ b/modified/desktop/app/workspaces.cjs
+@@ -0,0 +1,47 @@
++'use strict';
++const fs=require('node:fs'),path=require('node:path'),{randomUUID}=require('node:crypto');
++const {atomic,exists}=require('./profile.cjs');
++const {readConnection,connect,enterpriseOrigin}=require('./enterprise.cjs');
++const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
++function directory(file){if(exists(file)&&(!fs.lstatSync(file).isDirectory()||fs.lstatSync(file).isSymbolicLink()))throw Error('WORKSPACE_DIRECTORY_UNMANAGED');fs.mkdirSync(file,{recursive:true});}
++function homeFor(userData,id){if(id==='default')return path.join(userData,'harness');if(!uuid.test(id))throw Error('WORKSPACE_INDEX_INVALID');for(const p of[path.join(userData,'enterprise-workspaces'),path.join(userData,'enterprise-workspaces',id)])if(exists(p)&&(!fs.lstatSync(p).isDirectory()||fs.lstatSync(p).isSymbolicLink()))throw Error('WORKSPACE_DIRECTORY_UNMANAGED');return path.join(userData,'enterprise-workspaces',id,'harness');}
++function readWorkspaces(userData){
++ const file=path.join(userData,'desktop-workspaces.json');
++ if(!exists(file)){const legacy=readConnection(homeFor(userData,'default'));return {version:1,active:'default',entries:legacy?[{id:'default',origin:legacy.origin}]:[]};}
++ if(!fs.lstatSync(file).isFile()||fs.lstatSync(file).isSymbolicLink()||fs.statSync(file).size>1024*1024)throw Error('WORKSPACE_INDEX_INVALID');
++ let value;try{value=JSON.parse(fs.readFileSync(file,'utf8'));}catch{throw Error('WORKSPACE_INDEX_INVALID');}
++ if(value.version!==1||!Array.isArray(value.entries)||typeof value.active!=='string')throw Error('WORKSPACE_INDEX_INVALID');
++ const ids=new Set(),origins=new Set();for(const item of value.entries){if(!item||item.id!=='default'&&!uuid.test(item.id)||ids.has(item.id)||origins.has(item.origin)||enterpriseOrigin(item.origin)!==item.origin)throw Error('WORKSPACE_INDEX_INVALID');ids.add(item.id);origins.add(item.origin);}
++ if(value.entries.length?!ids.has(value.active):value.active!=='default')throw Error('WORKSPACE_INDEX_INVALID');return value;
++}
++function currentWorkspace(userData){const index=readWorkspaces(userData),entry=index.entries.find(e=>e.id===index.active),home=homeFor(userData,index.active);if(entry&&readConnection(home)?.origin!==entry.origin)throw Error('WORKSPACE_CONFIGURATION_MISMATCH');return {id:index.active,home,origin:entry?.origin??null};}
++function workspaceSummary(userData){const index=readWorkspaces(userData);return {configured:!!index.entries.length,origin:index.entries.find(e=>e.id===index.active)?.origin??'',entries:index.entries.map(e=>({id:e.id,origin:e.origin,active:e.id===index.active}))};}
++function selectWorkspace(userData,origin,{fault=()=>{}}={}){
++ origin=enterpriseOrigin(origin);directory(userData);const index=readWorkspaces(userData);let entry=index.entries.find(e=>e.origin===origin),created=false;
++ if(!entry){
++  const id=index.entries.length?randomUUID():'default',home=homeFor(userData,id);
++  if(id!=='default'){directory(path.join(userData,'enterprise-workspaces'));directory(path.dirname(home));}directory(home);
++  connect(home,origin);entry={id,origin};index.entries.push(entry);created=true;
++ }else if(readConnection(homeFor(userData,entry.id))?.origin!==origin)throw Error('WORKSPACE_CONFIGURATION_MISMATCH');
++ // Prepare the owned home first, then commit the single active pointer. A failed write never
++ // points to half-written employee data. Unreferenced prepared homes are retained, not erased.
++ fault('prepared');atomic(path.join(userData,'desktop-workspaces.json'),{...index,active:entry.id});fault('committed');
++ return {id:entry.id,home:homeFor(userData,entry.id),origin,created};
++}
++async function verifyConnection(origin,request,{signal,timeoutMs=8000}={}){
++ origin=enterpriseOrigin(origin);let response;
++ try{response=await request(origin+'/api/workspace',{method:'GET',credentials:'omit',redirect:'error',cache:'no-store',headers:{Accept:'application/json'},signal:AbortSignal.any([...(signal?[signal]:[]),AbortSignal.timeout(timeoutMs)])});}
++ catch(error){throw Error(signal?.aborted?'ENTERPRISE_CONNECTION_CANCELLED':'ENTERPRISE_CONNECTION_UNAVAILABLE');}
++ if(!response.headers.get('content-type')?.toLowerCase().includes('application/json'))throw Error('ENTERPRISE_CONNECTION_INCOMPATIBLE');
++ const reader=response.body?.getReader();if(!reader)throw Error('ENTERPRISE_CONNECTION_INCOMPATIBLE');const chunks=[];let size=0;
++ try{for(;;){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>65536)throw Error('ENTERPRISE_CONNECTION_INCOMPATIBLE');chunks.push(Buffer.from(value));}}finally{await reader.cancel().catch(()=>{});}
++ let value;try{value=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw Error('ENTERPRISE_CONNECTION_INCOMPATIBLE');}
++ const login=response.status===401&&value.code==='UNAUTHENTICATED',pending=response.status===403&&['ACCESS_PENDING','FORBIDDEN','MEMBER_INACTIVE','TENANT_INACTIVE'].includes(value.code),workspace=response.ok&&value.actor?.id&&Array.isArray(value.tasks);
++ if(!login&&!pending&&!workspace)throw Error('ENTERPRISE_CONNECTION_INCOMPATIBLE');return {origin,status:response.status};
++}
++async function assertWorkspaceIdle(settings,request){
++ const response=await request(settings.url+'/api/session/list',{method:'POST',credentials:'include',redirect:'error',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'client-request',rpcId:randomUUID(),method:'session/list',payload:{args:{_request:{}}}}),signal:AbortSignal.timeout(5000)});
++ if(!response.ok)throw Error('WORKSPACE_ACTIVITY_UNKNOWN');let body;try{body=await response.json();}catch{throw Error('WORKSPACE_ACTIVITY_UNKNOWN');}const result=body.result;
++ if(!result?.ok||!Array.isArray(result.value?.items))throw Error('WORKSPACE_ACTIVITY_UNKNOWN');if(result.value.items.some(s=>s.running===true))throw Error('WORKSPACE_RUNNING_TASKS');
++}
++module.exports={readWorkspaces,currentWorkspace,workspaceSummary,selectWorkspace,verifyConnection,assertWorkspaceIdle,homeFor};
+diff --git a/original/desktop/package-lock.json b/modified/desktop/package-lock.json
+index 5677530..f7641c7 100644
+--- a/original/desktop/package-lock.json
++++ b/modified/desktop/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "naumi-desktop",
+-  "version": "0.2.0",
++  "version": "0.2.1",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "naumi-desktop",
+-      "version": "0.2.0",
++      "version": "0.2.1",
+       "license": "UNLICENSED",
+       "devDependencies": {
+         "electron": "44.11.3",
+diff --git a/original/desktop/package.json b/modified/desktop/package.json
+index a678bf3..b66141b 100644
+--- a/original/desktop/package.json
++++ b/modified/desktop/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "naumi-desktop",
+-  "version": "0.2.0",
++  "version": "0.2.1",
+   "private": true,
+   "description": "Naumi 企业协作桌面端",
+   "author": "Naumi",
+@@ -66,7 +66,10 @@
+       "installerIcon": "app/assets/naumi.ico",
+       "uninstallerIcon": "app/assets/naumi.ico",
+       "installerHeaderIcon": "app/assets/naumi.ico",
+-      "deleteAppDataOnUninstall": false
++      "deleteAppDataOnUninstall": false,
++      "allowElevation": false,
++      "useZip": true,
++      "differentialPackage": false
+     },
+     "beforePack": "./scripts/verify-staged-runtime.cjs"
+   }
+diff --git a/modified/desktop/scripts/nsis-observer.mjs b/modified/desktop/scripts/nsis-observer.mjs
+new file mode 100644
+index 0000000..9270948
+--- /dev/null
++++ b/modified/desktop/scripts/nsis-observer.mjs
+@@ -0,0 +1,32 @@
++import fs from 'node:fs';
++import path from 'node:path';
++
++// NSIS launchers can exit before their self-copied uninstall process finishes.
++// An observation timeout never authorizes a second launch.
++export function createUninstallObserver({launch,isDirectoryAbsent,isEnvironmentRestored,checkpoint=()=>{},sleep=ms=>new Promise(r=>setTimeout(r,ms)),now=Date.now}) {
++  let started=false,completed=false;
++  return {
++    get started(){return started;},
++    get completed(){return completed;},
++    async run(timeout=300000){
++      if(completed)return;
++      if(!started){started=true;checkpoint({uninstallStarted:true});await launch();checkpoint({uninstallLauncherReturned:true});}
++      const end=now()+timeout;
++      while(now()<end){
++        if(await isDirectoryAbsent() && await isEnvironmentRestored()){
++          completed=true;checkpoint({uninstallCompleted:true});return;
++        }
++        await sleep(500);
++      }
++      checkpoint({uninstallObservationTimeout:true});
++      throw Error('NSIS_UNINSTALL_OBSERVATION_TIMEOUT');
++    }
++  };
++}
++
++export function writeCheckpoint(file,value){
++  const pending=file+'.pending';
++  fs.mkdirSync(path.dirname(file),{recursive:true});
++  fs.writeFileSync(pending,JSON.stringify(value,null,2)+'\n');
++  fs.renameSync(pending,file);
++}
+diff --git a/original/desktop/scripts/prepare-runtime.mjs b/modified/desktop/scripts/prepare-runtime.mjs
+index c0e90fb..8ac7014 100644
+--- a/original/desktop/scripts/prepare-runtime.mjs
++++ b/modified/desktop/scripts/prepare-runtime.mjs
+@@ -7,6 +7,9 @@ import {stageDingTalk} from './stage-dingtalk.mjs';
+ import {auditPackage} from '../../scripts/audit-enterprise-package.mjs';
+ const project=fileURLToPath(new URL('../..',import.meta.url));
+ const sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
++// Match normal production packaging: declarations and external source maps are development
++// artifacts. Keep all executable JS/native files, schemas, skills, licenses and font .map data.
++export function isRuntimeDevelopmentArtifact(file){return /\.d\.(?:ts|mts|cts)$|\.(?:js|mjs|cjs|css|ts|mts|cts)\.map$/i.test(file);}
+ export function verifyStagedImports(staged){
+   const script=`import{registerHooks}from'node:module';import{pathToFileURL}from'node:url';import path from'node:path';const base=pathToFileURL(process.cwd()+path.sep).href;registerHooks({resolve(specifier,context,next){const result=next(specifier,context);if(result.url.startsWith('file:')&&!result.url.startsWith(base))throw Error('STAGED_IMPORT_OUTSIDE_BUNDLE');return result;}});await import('./node_modules/@naumi/dsh-enterprise/host.js');console.log('STAGED_HOST_IMPORT_OK no_ancestor_dependencies=1');`;
+   const result=execFileSync(path.join(staged,'node.exe'),['--input-type=module','-e',script],{cwd:staged,encoding:'utf8',env:{SystemRoot:process.env.SystemRoot,PATH:path.dirname(process.execPath)}});
+@@ -18,7 +21,7 @@ export function runtimeInventory(target){
+   walk(target);return files;
+ }
+ export function scanRuntimeInventory(files){
+-  const forbidden=/(?:^|\/)(?:\.env(?:\..*)?|\.credentials[^/]*|cookies(?:\.sqlite)?|login data|local state|web data|employee[^/]*\.sqlite(?:-wal|-shm)?|sessions|logs|\.git|\.dsh|browser-profiles|naumi-desktop-bridge\.json|backend-link\.json|desktop-(?:instance|profile|profile-journal|backend|enterprise)\.json|device-private-key[^/]*|.*\.(?:pem|pfx|key))$/i;
++  const forbidden=/(?:^|\/)(?:\.env(?:\..*)?|\.credentials[^/]*|cookies(?:\.sqlite)?|login data|local state|web data|employee[^/]*\.sqlite(?:-wal|-shm)?|sessions|logs|\.git|\.dsh|browser-profiles|enterprise-workspaces|naumi-desktop-bridge\.json|backend-link\.json|desktop-(?:instance|profile|profile-journal|backend|enterprise|workspaces)\.json|device-private-key[^/]*|.*\.(?:pem|pfx|key))$/i;
+   // SDK source directories named sessions are code, not a copied employee session store.
+   for(const file of files)if(forbidden.test(file.path)||/^(?:sessions|logs|browser-profiles)\//i.test(file.path)||/(?:^|\/)(?:\.git|\.dsh|browser-profiles)\//i.test(file.path))throw Error('RUNTIME_PRIVATE_FILE '+file.path);
+   return {files:files.length,forbiddenPaths:0};
+@@ -33,7 +36,7 @@ export async function prepareRuntime({root=project,target=path.join(root,'runtim
+   fs.mkdirSync(runtime,{recursive:true});const staged=path.join(runtime,'desktop-stage-'+randomUUID());fs.mkdirSync(staged);
+   try{
+     // Only runtime dependencies and source plugins are input. No user home/profile/config is copied.
+-    fs.cpSync(path.join(root,'node_modules'),path.join(staged,'node_modules'),{recursive:true,dereference:true,filter:source=>!source.split(path.sep).some(x=>['.cache','.bin','dingtalk-workspace-cli'].includes(x))});
++    fs.cpSync(path.join(root,'node_modules'),path.join(staged,'node_modules'),{recursive:true,dereference:true,filter:source=>!source.split(path.sep).some(x=>['.cache','.bin','dingtalk-workspace-cli'].includes(x))&&!isRuntimeDevelopmentArtifact(source)});
+     fs.cpSync(path.join(root,'plugins'),path.join(staged,'plugins'),{recursive:true});
+     for(const [source,name]of [['naumi-enterprise','dsh-enterprise'],['naumi-ui-layout','dsh-ui-layout'],['naumi-sidebar-browser','dsh-sidebar-browser']])fs.cpSync(path.join(root,'plugins',source),path.join(staged,'node_modules/@naumi',name),{recursive:true});
+     fs.copyFileSync(process.execPath,path.join(staged,'node.exe'));
+diff --git a/modified/desktop/scripts/verify-desktop-workspaces.mjs b/modified/desktop/scripts/verify-desktop-workspaces.mjs
+new file mode 100644
+index 0000000..b65f5b2
+--- /dev/null
++++ b/modified/desktop/scripts/verify-desktop-workspaces.mjs
+@@ -0,0 +1,30 @@
++import {_electron as electron} from '../node_modules/playwright/index.mjs';
++import fs from'node:fs';import path from'node:path';import http from'node:http';import net from'node:net';import assert from'node:assert/strict';import{fileURLToPath}from'node:url';import{createRequire}from'node:module';import{EmployeeStore}from'../../plugins/naumi-enterprise/employee-store.js';import{DatabaseSync}from'node:sqlite';
++const root=fileURLToPath(new URL('../..',import.meta.url)),e=path.join(root,'evidence/desktop-installation'),exe=path.join(root,'runtime/naumi-desktop-release/win-unpacked/Naumi.exe'),userData=path.join(root,'.dsh/workspaces-'+Date.now()),require=createRequire(import.meta.url),{partitionFor}=require('../app/policy.cjs');fs.mkdirSync(e,{recursive:true});
++let offline=false,delay=false;const make=name=>http.createServer((q,r)=>{const json=(status,value)=>r.writeHead(status,{'Content-Type':'application/json'}).end(JSON.stringify(value));if(q.url==='/login'&&q.method==='GET'){r.writeHead(200,{'Content-Type':'text/html; charset=utf-8'}).end('<title>Workspace Login</title><form method="post" action="/login"><button>登录 '+name+'</button></form>');return;}if(q.url==='/login'&&q.method==='POST'){r.writeHead(303,{'Set-Cookie':'design_ops_session='+name.repeat(32)+'; Path=/; HttpOnly; Max-Age=3600; SameSite=Lax',Location:'/workbench'}).end();return;}if(q.url==='/workbench'){r.end('fixture');return;}if(q.url==='/api/workspace'){if(offline&&name==='a'){q.socket.destroy();return;}if(delay)return;if(!(q.headers.cookie??'').includes('design_ops_session='+name.repeat(32))){json(401,{code:'UNAUTHENTICATED'});return;}json(200,{actor:{id:name,name,tenantId:name,tenantName:name,roles:['designer']},tasks:[{id:name,title:name,status:'in_progress'}],members:[],projects:[],requests:[],products:[],deliverables:[],submissions:[]});return;}json(404,{code:'NOT_FOUND'});});
++const a=make('a'),b=make('b'),bad=http.createServer((_q,r)=>r.end('<html>not enterprise</html>'));for(const s of[a,b,bad])await new Promise(r=>s.listen(0,'127.0.0.1',r));const origin=s=>'http://127.0.0.1:'+s.address().port,A=origin(a),B=origin(b);const reserve=net.createServer();await new Promise(r=>reserve.listen(0,'127.0.0.1',r));const unavailable='http://127.0.0.1:'+reserve.address().port;await new Promise(r=>reserve.close(r));
++const sleep=ms=>new Promise(r=>setTimeout(r,ms)),alive=pid=>{try{process.kill(pid,0);return true;}catch{return false;}};let app,page,launcher,info;
++const seedHome=path.join(userData,'harness'),store=new EmployeeStore(path.join(seedHome,'naumi/employees.sqlite'));store.updateProfile('fixture',{expectedRevision:0,operationId:'profile',patch:{persona:'retained persona'}});store.createMemory('fixture',{operationId:'memory',kind:'fact',text:'retained memory'});store.close();
++async function wait(fn,timeout=15000){const end=Date.now()+timeout;while(Date.now()<end){const v=await fn();if(v)return v;await sleep(50);}throw Error('WORKSPACE_WAIT_TIMEOUT');}
++async function launch(){const env={...process.env,NAUMI_USER_DATA:userData,NAUMI_TEST:'1',NAUMI_TEST_HIDDEN:'1'};for(const k of['NAUMI_ROOT','NAUMI_DSH_HOME','NAUMI_NODE','NAUMI_HOST_URL','NAUMI_ENTERPRISE_ORIGIN','ELECTRON_RUN_AS_NODE'])delete env[k];env.PATH=process.env.SystemRoot+'\\System32;'+process.env.SystemRoot;app=await electron.launch({executablePath:exe,args:[],env,timeout:90000});launcher=app.process();page=await app.firstWindow();}
++async function ready(){await page.waitForURL(/^http:\/\/127\.0\.0\.1:/,{timeout:120000});await page.getByRole('button',{name:'工作台',exact:true}).first().waitFor({timeout:30000});info=await wait(()=>app.evaluate(()=>{const t=globalThis.__naumiTest;return t?.backend?{pid:process.pid,home:t.settings.home,url:t.settings.url,origin:t.settings.enterpriseOrigin,id:t.settings.identity.id,account:t.guests.account}:null;}));info.worker=JSON.parse(fs.readFileSync(path.join(info.home,'desktop-backend.json'))).pid;return {...info};}
++async function settings(){await Promise.all([page.waitForURL('**/connect.html'),page.evaluate(()=>{void window.naumiDesktop.connectionSettings();}).catch(error=>{if(!error.message.includes('Execution context was destroyed'))throw error;})]);await page.getByLabel('企业地址').waitFor();}
++async function choose(value){await page.getByLabel('企业地址').fill(value);await page.locator('form button[type=submit]').click();}
++async function getWorkspace(){return page.evaluate(async()=>{const r=await fetch('/naumi/workspace');return {status:r.status,body:await r.json()};});}
++async function close(){const own=info;let timer;try{await Promise.race([app.close(),new Promise((_r,reject)=>{timer=setTimeout(()=>reject(Error('WORKSPACE_CLOSE_TIMEOUT')),20000);})]);}finally{clearTimeout(timer);}assert.equal(launcher.exitCode,0);assert(!alive(own.pid));await wait(()=>!alive(own.worker),5000);app=null;}
++async function retained(){for(let attempt=0;;attempt++){let db;try{db=new DatabaseSync(path.join(seedHome,'naumi/employees.sqlite'),{readOnly:true});assert.equal(JSON.parse(db.prepare("SELECT json FROM entities WHERE bot_id='fixture' AND id='profile'").get().json).persona,'retained persona');assert(db.prepare("SELECT json FROM entities WHERE bot_id='fixture' AND type='memory'").all().some(r=>JSON.parse(r.json).text==='retained memory'));assert.equal(db.prepare('PRAGMA user_version').get().user_version,1);return;}catch(error){if(error.errcode!==1546||attempt>=20)throw error;await sleep(100);}finally{db?.close();}}}
++
++try{
++ await launch();await page.waitForURL('**/connect.html');await choose(unavailable);await page.getByRole('alert').filter({hasText:'企业服务暂不可达'}).waitFor();assert(!fs.existsSync(path.join(seedHome,'desktop-enterprise.json')));assert(!fs.existsSync(path.join(userData,'desktop-workspaces.json')));
++ await choose(origin(bad));await page.getByRole('alert').filter({hasText:'企业接口不匹配'}).waitFor();assert(!fs.existsSync(path.join(seedHome,'desktop-enterprise.json')));const png=await app.evaluate(async()=>{const image=await globalThis.__naumiTest.window.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true});return image.toPNG().toString('base64');});fs.writeFileSync(path.join(e,'connection-recovery.png'),Buffer.from(png,'base64'));assert(fs.statSync(path.join(e,'connection-recovery.png')).size>1000);
++ delay=true;await choose(A);await page.getByRole('button',{name:'取消',exact:true}).click();await page.getByRole('alert').filter({hasText:'已取消连接'}).waitFor();assert(!fs.existsSync(path.join(seedHome,'desktop-enterprise.json')));delay=false;
++ await choose(A);const first=await ready();const login=await wait(()=>app.windows().find(p=>p.url()===A+'/login'));await login.getByRole('button',{name:'登录 a'}).click();await login.waitForURL(A+'/workbench');await app.evaluate(()=>globalThis.__naumiTest.login.close());await ready();assert.equal((await getWorkspace()).status,200);await retained();
++ const partition=partitionFor(first.account,'fixture-workspace');await app.evaluate(async({session},{partition,url})=>{await session.fromPartition(partition).cookies.set({url,name:'workspace_fixture',value:'retained',expirationDate:Math.floor(Date.now()/1000)+3600});await session.fromPartition(partition).cookies.flushStore();},{partition,url:A});
++ await settings();await choose(B);const second=await ready();assert.notEqual(second.home,first.home);assert.notEqual(second.id,first.id);assert.notEqual(second.account,first.account);await wait(()=>!alive(first.worker),5000);assert.equal((await getWorkspace()).status,401);const Bpartition=partitionFor(second.account,'fixture-workspace');assert.equal(await app.evaluate(async({session},{partition,url})=>(await session.fromPartition(partition).cookies.get({url,name:'workspace_fixture'})).length,{partition:Bpartition,url:A}),0);await retained();
++ // Opening settings while the new login popup is still open must not trigger a competing reload.
++ await settings();await page.getByRole('navigation',{name:'企业工作区'}).getByRole('button',{name:A,exact:true}).click();await page.locator('form button[type=submit]').click();const returned=await ready();assert.equal(returned.home,first.home);assert.equal(returned.id,first.id);await wait(()=>!alive(second.worker),5000);await app.evaluate(()=>globalThis.__naumiTest.login?.close());await ready();assert.equal((await getWorkspace()).status,200);assert.equal(await app.evaluate(async({session},{partition,url})=>(await session.fromPartition(partition).cookies.get({url,name:'workspace_fixture'}))[0]?.value,{partition,url:A}),'retained');await retained();
++ offline=true;await close();await launch();await ready();assert.equal(info.home,first.home);assert.equal(info.id,first.id);const local=await page.evaluate(async()=>{const r=await fetch('/api/session/list',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'client-request',rpcId:'offline-owner',method:'session/list',payload:{args:{_request:{}}}})});return {status:r.status,ok:(await r.json()).result.ok};});assert.deepEqual(local,{status:200,ok:true});await settings();await page.getByRole('button',{name:'返回工作台'}).click();await ready();await retained();await close();
++ fs.writeFileSync(path.join(e,'WORKSPACE_RECOVERY.json'),JSON.stringify({status:'PASS',acceptance:'unpacked desktop, controlled enterprise fixtures',unavailableNotPersisted:true,incompatibleNotPersisted:true,cancelNotPersisted:true,workspaces:2,homesSeparated:true,instanceIdsSeparated:true,browserAccountsSeparated:true,browserCookieLeak:false,oldBrowserCookieRetained:true,oldCorporateSessionRetained:true,personaRetained:true,memoryRetained:true,schema:1,oldWorkerStopObserved:true,loginPopupSettingsRace:false,offlineRestartLocalWorkbench:true,realEmployeeTouched:false},null,2)+'\n');
++ console.log('WORKSPACE_RECOVERY unavailable=not_persisted incompatible=not_persisted cancel=not_persisted settings=PASS');console.log('WORKSPACE_ISOLATION homes=2 identities=separate browser_cookie_leak=0 old_cookie=retained old_session=retained old_worker_stop=observed');console.log('WORKSPACE_DATA persona=retained memory=retained schema=1 offline_restart=local_workbench real_employee=untouched');
++}catch(error){console.log('WORKSPACE_FAILURE '+error.message);if(page){try{console.log((await page.locator('body').innerText({timeout:3000})).slice(0,1300));await page.screenshot({path:path.join(e,'WORKSPACE_FAILURE.png'),timeout:5000});}catch{}}throw error;
++}finally{if(app)await Promise.race([app.close().catch(()=>{}),sleep(15000)]);for(const s of[a,b,bad]){s.closeAllConnections();await new Promise(r=>s.close(r));}}
+diff --git a/modified/desktop/scripts/verify-nsis-installation.mjs b/modified/desktop/scripts/verify-nsis-installation.mjs
+new file mode 100644
+index 0000000..c35efe6
+--- /dev/null
++++ b/modified/desktop/scripts/verify-nsis-installation.mjs
+@@ -0,0 +1,34 @@
++import {createUninstallObserver,writeCheckpoint} from './nsis-observer.mjs';
++import {_electron as electron} from '../node_modules/playwright/index.mjs';
++import fs from'node:fs';import path from'node:path';import http from'node:http';import assert from'node:assert/strict';import{fileURLToPath}from'node:url';import{spawnSync}from'node:child_process';import{createHash,generateKeyPairSync,sign,verify,randomUUID}from'node:crypto';import{DatabaseSync}from'node:sqlite';import{EmployeeStore}from'../../plugins/naumi-enterprise/employee-store.js';
++const root=fileURLToPath(new URL('../..',import.meta.url)),e=path.join(root,'evidence/desktop-installation'),base=path.join(root,'.dsh/ni-'+randomUUID().slice(0,8)),target=path.join(base,'app'),userData=path.join(base,'employee profile'),home=path.join(userData,'harness'),pwsh='D:/DEV/PowerShell/pwsh.exe',baseline=path.join(root,'runtime/installer-baseline-zip/Naumi-Legacy-Zip-0.2.0-x64.exe'),candidate=path.join(root,'runtime/naumi-desktop-release/Naumi-Setup-0.2.1-x64.exe');
++for(const file of ['desktop/package.json','evidence/desktop-installation/original/desktop/package.json']){const c=JSON.parse(fs.readFileSync(path.join(root,file)));assert.equal(c.build.appId,'com.naumi.desktop');assert.equal(c.build.nsis.deleteAppDataOnUninstall,false);}
++assert(path.resolve(target).startsWith(path.resolve(root,'.dsh')+path.sep));const marker={purpose:'real NSIS normal-stop lifecycle acceptance',target,userData};fs.mkdirSync(base,{recursive:true});fs.writeFileSync(path.join(base,'OWNED_TEST.json'),JSON.stringify(marker));assert(fs.realpathSync(base).startsWith(fs.realpathSync(root)+path.sep));assert(!fs.existsSync(target));
++const sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex'),sleep=ms=>new Promise(r=>setTimeout(r,ms)),alive=pid=>{try{process.kill(pid,0);return true;}catch{return false;}},canonical=v=>JSON.stringify(v,(_k,x)=>x&&typeof x==='object'&&!Array.isArray(x)?Object.fromEntries(Object.entries(x).sort(([a],[b])=>a.localeCompare(b))):x);
++const serverKeys=generateKeyPairSync('ed25519'),publicKey=serverKeys.publicKey.export({type:'spki',format:'pem'}).toString(),tenantId=randomUUID(),memberId=randomUUID();let origin,registrations=0,logins=0;
++const fixture=http.createServer(async(q,r)=>{const json=(status,v)=>r.writeHead(status,{'Content-Type':'application/json'}).end(JSON.stringify(v));if(q.url==='/login'&&q.method==='GET'){r.writeHead(200,{'Content-Type':'text/html; charset=utf-8'}).end('<title>Install Login</title><form method="post" action="/login"><button>登录测试企业</button></form>');return;}if(q.url==='/login'&&q.method==='POST'){logins++;r.writeHead(303,{'Set-Cookie':'design_ops_session='+'i'.repeat(32)+'; Path=/; HttpOnly; Max-Age=86400; SameSite=Lax',Location:'/workbench'}).end();return;}if(q.url==='/workbench'){r.end('fixture');return;}if(!(q.headers.cookie??'').includes('design_ops_session='+'i'.repeat(32))){json(401,{code:'UNAUTHENTICATED'});return;}if(q.url==='/api/workspace'){json(200,{actor:{id:memberId,tenantId,tenantName:'安装测试企业',name:'测试员工',roles:['designer']},tasks:[],members:[],projects:[],products:[],requests:[],deliverables:[],submissions:[]});return;}if(q.url==='/api/digital-employees'&&q.method==='GET'){json(200,{employees:[],projects:[],devices:[]});return;}if(q.url==='/api/digital-employees'&&q.method==='POST'){let text='';for await(const c of q)text+=c.toString();const p=JSON.parse(text);if(p.action!=='device.register'||!verify(null,Buffer.from(canonical({v:1,aud:'naumi-enrollment',deviceId:p.deviceId,publicKey:p.publicKey,operationId:p.operationId})),p.publicKey,Buffer.from(p.proof,'base64url'))){json(403,{code:'PROOF_INVALID'});return;}registrations++;const claims={v:1,aud:'naumi-desktop',iss:origin,tenantId,memberId,deviceId:p.deviceId,keyHash:createHash('sha256').update(Buffer.from(p.publicKey.replace(/-----[^-]+-----|\s/g,''),'base64')).digest('hex'),issuedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+43200000).toISOString(),authEpoch:1,bindings:[],projectIds:[],capabilities:[]},payload=Buffer.from(JSON.stringify(claims)).toString('base64url');json(200,{result:{tenantId,memberId,keyId:'install-fixture',serverPublicKey:publicKey,authorization:{kid:'install-fixture',payload,signature:sign(null,Buffer.from(payload),serverKeys.privateKey).toString('base64url')}}});return;}json(404,{code:'NOT_FOUND'});});await new Promise(r=>fixture.listen(0,'127.0.0.1',r));origin='http://127.0.0.1:'+fixture.address().port;
++function environment(action){const args=['-NoProfile','-File',path.join(root,'scripts/installer-environment.ps1'),action];if(action==='owned')args.push('-InstallDir',target);const result=spawnSync(pwsh,args,{cwd:root,encoding:'utf8',windowsHide:true,maxBuffer:2e6});if(result.status!==0)throw Error('INSTALL_ENVIRONMENT '+result.stdout+result.stderr);return result.stdout.trim();}
++async function wait(fn,timeout=120000){const end=Date.now()+timeout;while(Date.now()<end){if(await fn())return;await sleep(150);}throw Error('NSIS_WAIT_TIMEOUT');}
++const nativeExits=[],stages=[];let uninstallState={};
++function checkpoint(patch={}){uninstallState={...uninstallState,...patch};writeCheckpoint(path.join(e,'NSIS_CHECKPOINT.json'),{version:1,base,target,userData,stages,nativeExits,registrations,logins,installerBaselineSHA256:sha(baseline),installerCandidateSHA256:sha(candidate),...uninstallState});}
++const uninstall=createUninstallObserver({launch:()=>runInstaller(path.join(target,'Uninstall Naumi.exe'),true),isDirectoryAbsent:()=>!fs.existsSync(target),isEnvironmentRestored:()=>{try{environment('restored');return true;}catch{return false;}},checkpoint});
++function runInstaller(file,uninstall=false){assert(fs.existsSync(file));const q=s=>"'"+s.replaceAll("'","''")+"'",args=uninstall?"@('/S')":"@('/S',"+q('/D='+target)+")";const native='using System;using System.Runtime.InteropServices;public static class NaumiNsisExit{[DllImport("kernel32.dll",SetLastError=true)]public static extern uint WaitForSingleObject(IntPtr handle,uint milliseconds);[DllImport("kernel32.dll",SetLastError=true)]public static extern bool GetExitCodeProcess(IntPtr handle,out uint code);}';const code=`$ErrorActionPreference='Stop';Add-Type -TypeDefinition ${q(native)};$p=Start-Process -FilePath ${q(file)} -ArgumentList ${args} -WindowStyle Hidden -PassThru;$safe=$p.SafeHandle;$locked=$false;try{$safe.DangerousAddRef([ref]$locked);$handle=$safe.DangerousGetHandle();$wait=[NaumiNsisExit]::WaitForSingleObject($handle,[uint32]::MaxValue);if($wait -ne 0){throw 'NATIVE_WAIT_FAILED'};[uint32]$nativeExit=0;if(![NaumiNsisExit]::GetExitCodeProcess($handle,[ref]$nativeExit)){throw 'NATIVE_EXIT_UNKNOWN'};Write-Output ('NSIS_NATIVE_EXIT pid='+$p.Id+' code='+$nativeExit)}finally{if($locked){$safe.DangerousRelease()};$p.Dispose()};exit ([int]$nativeExit)`;const result=spawnSync(pwsh,['-NoProfile','-Command',code],{cwd:root,encoding:'utf8',windowsHide:true,maxBuffer:2e6});assert.equal(result.status,0,'NSIS_EXIT '+result.stdout+result.stderr);const match=result.stdout.match(/NSIS_NATIVE_EXIT pid=(\d+) code=(\d+)/);assert(match,'NATIVE_EXIT_RECEIPT_MISSING');assert.equal(Number(match[2]),0);nativeExits.push({file,pid:Number(match[1]),exitCode:Number(match[2])});console.log(match[0]);checkpoint();}
++
++async function install(file,version,resume=false){if(!resume)runInstaller(file);const state=environment('owned');assert(state.includes('version='+version),state);assert.equal(sha(path.join(target,'uninstallerIcon.ico')),sha(path.join(root,'desktop/app/assets/naumi.ico')));const backend=path.join(target,'resources/backend'),metadata=JSON.parse(fs.readFileSync(path.join(backend,'runtime-manifest.json')));assert.equal(metadata.version,version);assert.equal(sha(path.join(backend,'runtime-files.json')),metadata.inventorySHA256);const inventory=JSON.parse(fs.readFileSync(path.join(backend,'runtime-files.json')));for(const item of inventory)assert.equal(sha(path.join(backend,item.path)),item.sha256,'INSTALLED_RESOURCE_MISMATCH '+item.path);assert.equal(sha(path.join(backend,'node.exe')),metadata.nodeSHA256);console.log('NSIS_INSTALL version='+version+' exit=0 registry=owned logo=PASS runtime_version=PASS');}
++let app,page,launcher,workerPid,guiPid,identityId;
++async function launch(version,configure=false){const env={...process.env,NAUMI_USER_DATA:userData,NAUMI_TEST:'1',NAUMI_TEST_HIDDEN:'1'};for(const k of['NAUMI_ROOT','NAUMI_DSH_HOME','NAUMI_NODE','NAUMI_HOST_URL','NAUMI_ENTERPRISE_ORIGIN','ELECTRON_RUN_AS_NODE'])delete env[k];if(configure)env.NAUMI_ENTERPRISE_ORIGIN=origin;env.PATH=process.env.SystemRoot+'\\System32;'+process.env.SystemRoot;app=await electron.launch({executablePath:path.join(target,'Naumi.exe'),args:[],env,timeout:90000});launcher=app.process();page=await app.firstWindow();await page.waitForURL(/^http:\/\/127\.0\.0\.1:/,{timeout:120000});await page.getByRole('button',{name:'工作台',exact:true}).first().waitFor({timeout:30000});let info;await wait(async()=>{info=await app.evaluate(({app})=>{const t=globalThis.__naumiTest;return t?.backend?{pid:process.pid,version:app.getVersion(),home:t.settings.home,id:t.settings.identity.id,root:t.settings.root,verified:t.backend.instanceVerified}:null;});return !!info;},15000);assert.equal(info.version,version);assert.equal(info.home,home);assert.equal(info.root,path.join(target,'resources/backend'));assert(info.verified);if(identityId)assert.equal(info.id,identityId);identityId=info.id;guiPid=info.pid;workerPid=JSON.parse(fs.readFileSync(path.join(home,'desktop-backend.json'))).pid;return info;}
++async function request(url,body){return page.evaluate(async({url,body})=>{const r=await fetch(url,{...(body?{method:'POST',headers:{'Content-Type':'application/json','x-naumi-employee-sync':'1'},body:JSON.stringify(body)}:{})});return {status:r.status,body:await r.json()};},{url,body});}
++async function close(){let timer;try{await Promise.race([app.close(),new Promise((_r,reject)=>{timer=setTimeout(()=>reject(Error('INSTALLED_APP_CLOSE_TIMEOUT')),20000);})]);}finally{clearTimeout(timer);}assert.equal(launcher.exitCode,0);assert(!alive(guiPid));await wait(()=>!alive(workerPid),10000);app=null;}
++async function retained(){for(let attempt=0;;attempt++){let db;try{db=new DatabaseSync(path.join(home,'naumi/employees.sqlite'),{readOnly:true});assert.equal(JSON.parse(db.prepare("SELECT json FROM entities WHERE bot_id='fixture' AND id='profile'").get().json).persona,'retained persona');assert(db.prepare("SELECT json FROM entities WHERE bot_id='fixture' AND type='memory'").all().some(x=>JSON.parse(x.json).text==='retained memory'));assert.equal(db.prepare('SELECT state FROM install_fixture').get().state,'unknown');assert.equal(db.prepare('PRAGMA user_version').get().user_version,1);return;}catch(error){if(error.errcode!==1546||attempt>=20)throw error;await sleep(100);}finally{db?.close();}}}
++let completed=false;
++try{
++ environment('capture');checkpoint();await install(baseline,'0.2.0');const store=new EmployeeStore(path.join(home,'naumi/employees.sqlite'));store.updateProfile('fixture',{expectedRevision:0,operationId:'profile',patch:{persona:'retained persona'}});store.createMemory('fixture',{operationId:'memory',kind:'fact',text:'retained memory'});store.db.exec("CREATE TABLE install_fixture(state TEXT);INSERT INTO install_fixture VALUES('unknown')");store.close();
++ await launch('0.2.0',true);await page.evaluate(()=>window.naumiDesktop.loginEnterprise());let login;await wait(()=>{login=app.windows().find(p=>p.url()===origin+'/login');return !!login;},15000);await login.getByRole('button',{name:'登录测试企业'}).click();await login.waitForURL(origin+'/workbench');await app.evaluate(()=>globalThis.__naumiTest.login.close());await page.getByRole('button',{name:'工作台',exact:true}).first().waitFor();assert.equal((await request('/naumi/workspace')).status,200);const registration=await request('/naumi/employee-sync',{action:'enroll',name:'Installed fixture employee'});assert.equal(registration.status,200,JSON.stringify(registration.body));assert.equal(registration.body.registered,true);assert.equal(registration.body.enabled,false);await retained();await close();const deviceVaultHash=sha(path.join(home,'naumi/employee-sync.sqlite.device'));stages.push({version:'0.2.0',stage:'clean-install',status:'PASS'});checkpoint({deviceVaultHash});
++ for(const [file,version,stage]of[[candidate,'0.2.1','upgrade'],[baseline,'0.2.0','downgrade']]){await install(file,version);await launch(version);assert.equal((await request('/naumi/workspace')).status,200);const s=(await request('/naumi/employee-sync')).body;assert.equal(s.registered,true);assert.equal(s.enabled,false);assert.equal(sha(path.join(home,'naumi/employee-sync.sqlite.device')),deviceVaultHash);await retained();await close();stages.push({version,stage,status:'PASS'});checkpoint();console.log('NSIS_DATA stage='+stage+' identity=retained persona=retained memory=retained device_vault=retained session=retained unknown_fixture=retained schema=1 worker_stop=observed');}
++ assert.equal(logins,1);assert.equal(registrations,1);environment('owned');checkpoint({countersVerified:true});await uninstall.run();await retained();assert.equal(sha(path.join(home,'naumi/employee-sync.sqlite.device')),deviceVaultHash);completed=true;
++ const report={status:'PASS',acceptance:'real Windows per-user NSIS; normal-stop legacy single-enterprise profile upgrade/downgrade; not crash/in-flight or cross-workspace downgrade acceptance',stages,nativeExits,installerBaselineSHA256:sha(baseline),installerCandidateSHA256:sha(candidate),installedResourcesRoot:target,guiAndBackendStoppedBeforeChanges:true,payloadFormat:'zip-direct',legacyApplicationPayload:'original0.2.0 with development-only artifacts omitted; executed code retained',developmentPath:false,logo:true,uninstall:true,employeeUserDataRetained:true,personaRetained:true,memoryRetained:true,deviceVaultRetained:true,enterpriseLoginRetained:true,unknownFixtureRetained:true,schema:1,registrations,logins,existingRegistryAbsentRestored:true,customShortcutsPreserved:true,realUserDataPreserved:true,realEmployeeTouched:false};fs.writeFileSync(path.join(e,'NSIS_INSTALLATION.json'),JSON.stringify(report,null,2)+'\n');console.log('NSIS_LIFECYCLE clean_install=PASS upgrade=PASS downgrade=PASS uninstall=PASS registrations=1 logins=1');console.log(environment('restored'));console.log('NSIS_RETAINED employee_profile=1 private_upload=0 real_employee=untouched development_path=0');
++}finally{
++ if(app)await Promise.race([app.close().catch(()=>{}),sleep(15000)]);
++ if(!completed&&!uninstall.started&&fs.existsSync(path.join(target,'Uninstall Naumi.exe'))&&!alive(guiPid)&&!alive(workerPid)){try{environment('owned');await uninstall.run();console.log(environment('restored'));}catch(error){console.log('NSIS_CLEANUP_PENDING '+error.message);}}
++ fixture.closeAllConnections();await new Promise(r=>fixture.close(r));
++}
+diff --git a/modified/desktop/tests/nsis-observer.test.cjs b/modified/desktop/tests/nsis-observer.test.cjs
+new file mode 100644
+index 0000000..c7c8b1a
+--- /dev/null
++++ b/modified/desktop/tests/nsis-observer.test.cjs
+@@ -0,0 +1,21 @@
++'use strict';
++const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
++test('uninstall waits for directory and environment rather than launcher exit',async()=>{
++ const {createUninstallObserver}=await import('../scripts/nsis-observer.mjs');let tick=0,launches=0;const checkpoints=[];
++ const observer=createUninstallObserver({launch:()=>launches++,isDirectoryAbsent:()=>tick>=2,isEnvironmentRestored:()=>tick>=4,checkpoint:x=>checkpoints.push(x),now:()=>tick,sleep:async()=>{tick++;}});
++ await observer.run(10);await observer.run(10);assert.equal(launches,1);assert.equal(tick,4);assert(observer.completed);assert.deepEqual(checkpoints.at(-1),{uninstallCompleted:true});
++});
++test('timeout and resumed observation never repeat uninstall',async()=>{
++ const {createUninstallObserver}=await import('../scripts/nsis-observer.mjs');let tick=0,launches=0,removed=false;
++ const observer=createUninstallObserver({launch:()=>launches++,isDirectoryAbsent:()=>removed,isEnvironmentRestored:()=>true,now:()=>tick,sleep:async()=>{tick++;}});
++ await assert.rejects(observer.run(3),/OBSERVATION_TIMEOUT/);assert(observer.started);assert(!observer.completed);removed=true;await observer.run(3);assert.equal(launches,1);assert(observer.completed);
++});
++test('failed launcher stays started so cleanup cannot issue a duplicate',async()=>{
++ const {createUninstallObserver}=await import('../scripts/nsis-observer.mjs');let launches=0;
++ const observer=createUninstallObserver({launch:()=>{launches++;throw Error('launcher failed');},isDirectoryAbsent:()=>true,isEnvironmentRestored:()=>true});
++ await assert.rejects(observer.run(),/launcher failed/);assert(observer.started);await observer.run();assert.equal(launches,1);
++});
++test('checkpoint persists complete stage data atomically without a pending file',async()=>{
++ const {writeCheckpoint}=await import('../scripts/nsis-observer.mjs'),dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-nsis-checkpoint-')),file=path.join(dir,'checkpoint.json');
++ try{writeCheckpoint(file,{stages:['install'],nativeExits:[0]});writeCheckpoint(file,{stages:['install','upgrade'],nativeExits:[0,0]});assert.deepEqual(JSON.parse(fs.readFileSync(file)),{stages:['install','upgrade'],nativeExits:[0,0]});assert(!fs.existsSync(file+'.pending'));}finally{fs.unlinkSync(file);fs.rmdirSync(dir);}
++});
+diff --git a/modified/desktop/tests/workspaces.test.cjs b/modified/desktop/tests/workspaces.test.cjs
+new file mode 100644
+index 0000000..e9e4d0b
+--- /dev/null
++++ b/modified/desktop/tests/workspaces.test.cjs
+@@ -0,0 +1,21 @@
++'use strict';
++const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{pathToFileURL}=require('node:url');
++const {readWorkspaces,currentWorkspace,workspaceSummary,selectWorkspace,verifyConnection,assertWorkspaceIdle}=require('../app/workspaces.cjs');
++const {identity}=require('../app/profile.cjs'),{connect}=require('../app/enterprise.cjs');
++const create=()=>fs.mkdtempSync(path.join(os.tmpdir(),'naumi-workspaces-')),remove=p=>{assert(p.startsWith(os.tmpdir()+path.sep));fs.rmSync(p,{recursive:true,force:true});};
++const a='https://one.example',b='https://two.example';
++test('an empty profile retains the original default home without inventing configuration',()=>{const dir=create();try{assert.equal(currentWorkspace(dir).home,path.join(dir,'harness'));assert.equal(workspaceSummary(dir).configured,false);assert(!fs.existsSync(dir+'/desktop-workspaces.json'));assert(!fs.existsSync(dir+'/harness'));}finally{remove(dir);}});
++test('legacy configuration remains in the original home with identity and bytes preserved',()=>{const dir=create();try{fs.mkdirSync(dir+'/harness');const id=identity(dir+'/harness');connect(dir+'/harness',a);const before=fs.readFileSync(dir+'/harness/desktop-instance.json');assert.equal(currentWorkspace(dir).id,'default');assert.equal(workspaceSummary(dir).origin,a);const selected=selectWorkspace(dir,a);assert.equal(selected.created,false);assert.equal(selected.id,'default');assert.deepEqual(fs.readFileSync(dir+'/harness/desktop-instance.json'),before);assert.equal(identity(selected.home).id,id.id);}finally{remove(dir);}});
++test('new enterprise selection never rebinds an old home or inherits its identity/configuration',()=>{const dir=create();try{const first=selectWorkspace(dir,a),id=identity(first.home);fs.writeFileSync(first.home+'/private-memory.txt','retained');const original=fs.readFileSync(first.home+'/desktop-enterprise.json'),second=selectWorkspace(dir,b),other=identity(second.home);assert.notEqual(second.home,first.home);assert.notEqual(other.id,id.id);assert.equal(fs.existsSync(second.home+'/private-memory.txt'),false);assert.deepEqual(fs.readFileSync(first.home+'/desktop-enterprise.json'),original);assert.equal(selectWorkspace(dir,a).home,first.home);assert.equal(identity(first.home).id,id.id);assert.equal(fs.readFileSync(first.home+'/private-memory.txt','utf8'),'retained');assert.equal(workspaceSummary(dir).entries.length,2);}finally{remove(dir);}});
++test('actual EmployeeStore persona/memory/schema survives selecting and reopening an old enterprise',async()=>{const dir=create();try{const {EmployeeStore}=await import(pathToFileURL(path.resolve('plugins/naumi-enterprise/employee-store.js')));const first=selectWorkspace(dir,a),s=new EmployeeStore(first.home+'/employee.sqlite');s.updateProfile('fixture',{expectedRevision:0,operationId:'persona',patch:{persona:'retained persona'}});s.createMemory('fixture',{operationId:'memory',kind:'fact',text:'retained memory'});s.close();selectWorkspace(dir,b);selectWorkspace(dir,a);const reopened=new EmployeeStore(first.home+'/employee.sqlite');try{assert.equal(reopened.profile('fixture').persona,'retained persona');assert.equal(reopened.allMemories('fixture')[0].text,'retained memory');assert.equal(reopened.db.prepare('PRAGMA user_version').get().user_version,1);}finally{reopened.close();}}finally{remove(dir);}});
++test('prepared but uncommitted selection leaves the prior active index untouched and retains the prepared directory',()=>{const dir=create();try{selectWorkspace(dir,a);const before=fs.readFileSync(dir+'/desktop-workspaces.json');assert.throws(()=>selectWorkspace(dir,b,{fault:phase=>{if(phase==='prepared')throw Error('FIXTURE_EXIT');}}),/FIXTURE_EXIT/);assert.deepEqual(fs.readFileSync(dir+'/desktop-workspaces.json'),before);assert.equal(currentWorkspace(dir).origin,a);assert.equal(fs.readdirSync(dir+'/enterprise-workspaces').length,1);}finally{remove(dir);}});
++test('future/corrupt/path-injecting indexes fail without changing their contents',()=>{const dir=create();try{for(const index of [{version:99,active:'default',entries:[]},{version:1,active:'../../outside',entries:[{id:'../../outside',origin:a}]},{version:1,active:'default',entries:[{id:'default',origin:a},{id:'default',origin:b}]}]){const bytes=JSON.stringify(index);fs.writeFileSync(dir+'/desktop-workspaces.json',bytes);assert.throws(()=>readWorkspaces(dir),/INDEX_INVALID/);assert.equal(fs.readFileSync(dir+'/desktop-workspaces.json','utf8'),bytes);}}finally{remove(dir);}});
++test('workspace directory junctions do not redirect new employee homes outside userData',()=>{const dir=create(),outside=create();try{selectWorkspace(dir,a);fs.symlinkSync(outside,dir+'/enterprise-workspaces','junction');assert.throws(()=>selectWorkspace(dir,b),/DIRECTORY_UNMANAGED/);assert.equal(fs.readdirSync(outside).length,0);fs.unlinkSync(dir+'/enterprise-workspaces');}finally{remove(dir);remove(outside);}});
++test('mismatched on-disk enterprise configuration is not repaired by silently switching issuer',()=>{const dir=create();try{const first=selectWorkspace(dir,a);fs.writeFileSync(first.home+'/desktop-enterprise.json',JSON.stringify({version:1,origin:b}));assert.throws(()=>selectWorkspace(dir,a),/CONFIGURATION_MISMATCH/);assert.equal(JSON.parse(fs.readFileSync(first.home+'/desktop-enterprise.json')).origin,b);}finally{remove(dir);}});
++test('connection check uses only the fixed workspace endpoint, no credentials, and accepts explicit login state',async()=>{let seen;assert.deepEqual(await verifyConnection(a,async(url,options)=>{seen={url,options};return Response.json({code:'UNAUTHENTICATED'},{status:401});}),{origin:a,status:401});assert.equal(seen.url,a+'/api/workspace');assert.equal(seen.options.credentials,'omit');assert.equal(seen.options.redirect,'error');assert.deepEqual(seen.options.headers,{Accept:'application/json'});});
++test('connection check accepts permitted/pending state but rejects unrelated login/HTML/redirect/oversize responses',async()=>{for(const response of [Response.json({actor:{id:'fixture'},tasks:[]}),Response.json({code:'ACCESS_PENDING'},{status:403})])assert(await verifyConnection(a,async()=>response));for(const response of [new Response('login',{status:302}),Response.json({code:'NOT_FOUND'},{status:404}),Response.json({error:'unknown'},{status:401}),Response.json({x:'a'.repeat(66000)})])await assert.rejects(verifyConnection(a,async()=>response),/CONNECTION_INCOMPATIBLE/);});
++test('failed/cancelled checks never persist a workspace or retry a network request',async()=>{const dir=create();try{let calls=0;await assert.rejects(verifyConnection(a,async()=>{calls++;throw Error('private connection data');}),/^Error: ENTERPRISE_CONNECTION_UNAVAILABLE$/);assert.equal(calls,1);const controller=new AbortController();controller.abort();await assert.rejects(verifyConnection(a,async(_url,options)=>{options.signal.throwIfAborted();},{signal:controller.signal}),/CONNECTION_CANCELLED/);assert.equal(fs.readdirSync(dir).length,0);}finally{remove(dir);}});
++test('idle gate uses owner session list and refuses active or unknown work rather than stopping it',async()=>{let seen;await assertWorkspaceIdle({url:'http://127.0.0.1:30000'},async(url,options)=>{seen={url,options};return Response.json({result:{ok:true,value:{items:[{running:false}]}}});});assert.equal(seen.url,'http://127.0.0.1:30000/api/session/list');assert.equal(seen.options.credentials,'include');for(const [response,code]of [[Response.json({result:{ok:true,value:{items:[{running:true}]}}}),'RUNNING_TASKS'],[Response.json({result:{ok:false}}),'ACTIVITY_UNKNOWN'],[Response.json({},{status:403}),'ACTIVITY_UNKNOWN']])await assert.rejects(assertWorkspaceIdle({url:'http://127.0.0.1:30000'},async()=>response),new RegExp(code));});
++test('native guests reset flushes and releases old leases before changing origin/account without duplicate listeners',async()=>{const {Guests}=require('../app/guests.cjs');const g=new Guests({hostURL:'http://127.0.0.1:30000'});let flushed=0,closed=0;g.flush=async()=>flushed++;g.leases.set('old',{lease:'old',owner:{},guest:{isDestroyed:()=>false,close:()=>closed++}});await g.reset({hostURL:'http://127.0.0.1:30001',account:'enterprise-fixture'});assert.equal(flushed,1);assert.equal(closed,1);assert.equal(g.leases.size,0);assert.equal(g.hostURL,'http://127.0.0.1:30001');assert.equal(g.account,'enterprise-fixture');});
++
++test('production packaging omits declarations/external source maps, never executable code, schemas, licenses or font maps',async()=>{const {isRuntimeDevelopmentArtifact}=await import('../scripts/prepare-runtime.mjs');for(const file of['lib/a.d.ts','lib/a.d.mts','lib/a.d.cts','lib/a.js.map','lib/a.mjs.map','lib/a.css.map'])assert.equal(isRuntimeDevelopmentArtifact(file),true,file);for(const file of['lib/a.js','lib/a.mjs','lib/a.cjs','lib/a.ts','font.map','glyph.map','schema.json','LICENSE','SKILL.md','native.node','node.exe','lib/a.css'])assert.equal(isRuntimeDevelopmentArtifact(file),false,file);});
+diff --git a/modified/docs/implementation/DESKTOP_INSTALLATION_M5_4.md b/modified/docs/implementation/DESKTOP_INSTALLATION_M5_4.md
+new file mode 100644
+index 0000000..eb3bdf9
+--- /dev/null
++++ b/modified/docs/implementation/DESKTOP_INSTALLATION_M5_4.md
+@@ -0,0 +1,73 @@
++# M5.4 连接恢复、企业工作区与真实 NSIS 安装链
++
++日期：2026-11-17。完整目标 active。基线提交：1cea9056dddfa091a1a6cb8f5c767db8b05adbe0。
++
++## 设计决策
++
++企业地址修复不等于覆盖issuer。原已保存origin、签名设备、私人同步队列、员工记忆和浏览器状态都可能属于旧企业；直接重写配置会把这些数据带给另一服务器。因此采用独立企业工作区，并保留旧工作区以便返回。现有单企业配置仍在原userData/harness，身份和数据原字节保留。
++
++## 实现
++
++- 新`desktop-workspaces.json` version1：active和有限的id/origin列表，不存Cookie、凭证、私钥或任意绝对路径。
++- 默认id为default，沿用原harness。新增工作区UUID目录位于userData/enterprise-workspaces/id/harness，独立identity、SQLite、设备vault、同步和默认文件工作区。
++- 新目录和配置先准备，再原子提交active指针；失败保留原active，准备目录不自动删除。损坏/未来版本/路径注入/目录junction不被静默覆盖。
++- `connect`配置本身仍不可换issuer。返回已有地址只选原工作区，不复制旧home、不轮换原UUID/key、不重新登记设备。
++- 首次连接先以credentials=omit、禁止redirect的固定GET /api/workspace检查JSON接口。接受Naumi的401 UNAUTHENTICATED、受控权限待分配或合法workspace结构；这是接口兼容性检查，不代替TLS/账号/组织权限验证。超时8秒，响应最多64KiB，可取消。
++- 网络/接口错误、取消均不持久化新origin或active指针。
++- 连接页可从启动错误页或系统连接进入；已有工作区可返回本地工作台。启动已有工作区不等待企业在线，服务器故障不把本地历史页面锁在连接引导中。
++- 切换前检查原owner session/list。运行中、状态未知或桥操作未结束时不停止原worker。打开连接页本身也先检查，避免销毁正在使用的原生browser guest。
++- 原worker正常HMAC停止且观察退出后，再关闭旧bridge并选择新home；不按同名进程批量结束。
++- 原生browser namespace随工作区变化。Guests复用原attach监听器，reset先flush/release再更新account与hostURL；不重复注册监听器，动态端口重选时同步host。
++- 企业session继续按origin隔离；返回旧工作区沿用旧partition。登录popup在打开连接设置时关闭但不触发竞争reload。
++- Web页面不出现桌面专属操作；仅桌面系统连接增加一个功能按钮。旧frontend逐字节等价测试只排除这一个明确新增动作，其他原UI/模型/权限行为保持约束。
++
++## 版本和安装设计
++
++- 桌面候选0.2.1，正式appId/com.naumi.desktop、Naumi Logo和产品名不换成测试身份。
++- 0.2.0基线NSIS从已经验证的原unpacked产物构建；候选从当前源码构建。固定官方钉钉CLI、内置Node、原生Chromium和完整运行依赖继续入包。
++- `useZip=true/differentialPackage=false`：使用NSIS支持的ZIP直接解压，避免7z临时解压后再走CopyFiles逐文件复制。当前客户端未接自动差分更新，保留完整安装包升级路径。
++- 运行副本排除24,933份开发类型声明/外置源码映射，70,363降至45,430文件；源仓库和原始安装包不动。所有保留文件逐一验证旧SHA256不变，JS/native/schema/skills/license/font.map不作泛化裁剪。正式包和真实安装仍需完整导入/资源/桌面验证。
++- per-user、allowElevation=false；默认卸载不删除appData。实际测试前，精确检查产品GUID在HKCU/HKLM的32/64视图、AppUserModelId、标准快捷方式、默认安装目录和固定产品pin。存在旧注册安装/pin时不覆盖测试。
++- 已有自定义Naumi快捷方式以SHA256保护；真实APPDATA/Naumi只记录文件名/长度/写入时间，不读取浏览器Cookie或Local State内容。安装应用本身通过独立测试userData启动。
++- 实际NSIS安装目标只允许本工作树.dsh中明确拥有的测试目录；每次升级/卸载前核对注册表InstallLocation，防止结束或卸载别的安装。
++- 旧0.2.0应用的ZIP控制安装包 -> 正常停止GUI/worker -> 0.2.1 ZIP升级 -> 正常停止 -> 旧0.2.0应用ZIP降级 -> 卸载，分别观察版本、Logo、实际打包Node根路径和数据。
++- 原始7z NSIS在该机逐文件复制超过20分钟；5分钟观察器退出后原进程继续，最终进程已结束但.NET观察器退出码为null，按UNKNOWN保留，不记为通过。注册/标准快捷方式已清理，旧自定义快捷方式与真实用户数据metadata恢复一致。旧应用由原NSIS内嵌7z提取，校验7z头/内容CRC、原exe SHA不变，再仅去除开发文件后ZIP重包；程序JS/原生执行文件不改，不把该ZIP控制包混称为原7z安装器。
++- 单企业旧profile的人设/记忆/schema1、明确UNKNOWN样例、DPAPI设备vault、真实fixture登录Cookie和设备登记必须只初始化一次并跨版本保留。
++
++## 证据和验收矩阵
++
++| 门槛 | 证据 | 边界 |
++| --- | --- | --- |
++| 原315项基线 | BASELINE_TESTS.log | 原源码 |
++| 连接恢复/隔离/活动准入/路径保护 | MODIFIED_TESTS.log | 333项模块回归 |
++| 错地址/不可达/取消不落盘，A/B/A、cookie隔离、人格记忆、离线重启 | WORKSPACE_RECOVERY.json | 实际unpacked Electron + 受控企业 |
++| 真实安装/升级/降级/卸载 | NSIS_INSTALLATION.json | 正常停机、旧单企业profile；不是故障中升级 |
++| 包内源码与资源 | PACKAGE_CONTRACT.json | ASAR、正式npm包、逐文件hash和内置Node |
++| 源码副本回滚 | ROLLBACK_RESULT.json、VERIFICATION.txt | 原315项与原行为，实际新版保留 |
++
++四件套、完整原字节hash和各命令输入/输出/退出状态按evidence/desktop-installation/VERIFICATION.txt记录。以实际生成的结果文件为验收依据，未生成/未PASS的行不算完成。
++
++## 卸载观察器修正与独立复核
++
++真实 ZIP 安装链已经发出0.2.0安装、0.2.1升级、0.2.0降级的成功回执，逐一检查45,430份资源hash、Logo、真实installed执行路径、原identity、人设/记忆/schema1、DPAPI设备vault、企业登录与UNKNOWN样例。登录和登记各一次的断言在首次卸载前完成。
++
++原命令最终退出1：NSIS自复制卸载子进程尚在清理时，launcher已退出0；原30秒观察窗口超时，finally又发出一次卸载。`NSIS_INSTALLATION_ATTEMPT2.log`和`NSIS_ATTEMPT2_INPUT.mjs`保留原失败及输入，不将它改写为exit0。独立只读命令`node scripts/reconcile-desktop-installation.mjs .dsh/ni-2c0b82a4`随后exit0，验证安装目录/产品注册项/标准快捷方式消失、相关进程停止、原自定义快捷方式与真实APPDATA元数据不变，测试员工SQLite及vault仍在。报告明确`reconciledAfterObserverTimeout=true`；会话/计数/跨版本vault一致性采用已保存阶段断言，不在卸载后读取Cookie重造历史证据。
++
++新的`nsis-observer.mjs`在完整目录与环境恢复后才结束；等待300秒，超时只记录不重复启动，阶段与native退出码写持久checkpoint。4项回归覆盖延迟删除、超时继续观察不重复、launcher失败不重复、checkpoint覆盖写。修订后的整条真实安装链没有重跑，不能把单元测试称为修订runner真机验收。首次只读复核曾匹配自身PowerShell进程，失败日志保留；排除自身PID后复核通过。
++
++## 仍需完整推进的门槛
++
++1. 安装器对硬杀后独立worker、运行中任务和Windows句柄的认证quiesce/停止、失败回滚；本模块只验收正常停机安装链。
++2. 已选择新企业工作区时回退到不认识index的旧版本，需要明确的兼容/阻止/恢复策略；本模块降级矩阵只覆盖原单企业home，不宣称跨工作区旧版降级通过。
++3. 新业务schema的真实迁移/失败恢复/降级矩阵；当前员工SQLite仍schema1，无虚构schema升级。
++4. 真正干净员工机、远程HTTPS企业地址与员工本人授权、模型/供应商/定价预算、真实业务交付验收。
++5. 发布签名、依赖审查和最终发布分发。当前NSIS候选不等于正式发布完成。
++
++## 可复用接续提示
++
++```text
++接续Naumi完整目标：先核对GOAL_TRACKER和本文实际证据，保留现有未跟踪日志。
++员工数据按企业工作区保留，不覆盖issuer，不复制Cookie，不静默重放未知操作。
++下一补安装器认证quiesce、孤儿worker/运行中操作与跨工作区旧版回退策略，再业务schema和真实员工验收。
++不要把正常停机NSIS链、unpacked fixture、Git push当整目标完成。
++```
+diff --git a/original/docs/implementation/EMPLOYEE_PACKAGING_M5.md b/modified/docs/implementation/EMPLOYEE_PACKAGING_M5.md
+index 250188d..4106dfe 100644
+--- a/original/docs/implementation/EMPLOYEE_PACKAGING_M5.md
++++ b/modified/docs/implementation/EMPLOYEE_PACKAGING_M5.md
+@@ -68,3 +68,7 @@
+ ## M5.3 企业首次连接与归属
+ 
+ 新增首次企业origin配置、独立Electron企业session与有限业务请求桥；Cookie不拷贝到localhost，原设备签名/同步/运行门保留。实例协议2绑定listener port/homeHash/企业origin，拒绝relay和隐式home克隆，保留旧identity UUID/key。修复干净PATH下DPAPI shell发现和Windows回执短暂占用。315项本地回归通过；正式npm包73文件、候选产物/双profile登录/原生浏览器与故障恢复/副本回滚最终证据统一见evidence/desktop-enterprise/VERIFICATION.txt与DESKTOP_ENTERPRISE_M5_3.md。下一NSIS真实安装、已安装版本/业务数据迁移回退、签名/依赖和真实员工业务验收；完整目标active。
++
++## M5.4 工作区恢复与 NSIS 候选
++
++0.2.1新增可恢复首次连接及独立企业工作区，原home/identity/private store/原生浏览器资料不覆盖；有活动任务或未知活动状态不切换，旧worker认证退出后才选新home。正常启动不依赖企业在线。333回归与实际workspaces/NSIS/产物/副本恢复最终结果见evidence/desktop-installation/VERIFICATION.txt，细粒度边界见DESKTOP_INSTALLATION_M5_4.md。NSIS正常停机链不代表硬杀孤儿worker或跨工作区旧版降级已完成；总目标active。
+diff --git a/original/docs/prd/GOAL_TRACKER.md b/modified/docs/prd/GOAL_TRACKER.md
+index 75afd16..2f100f5 100644
+--- a/original/docs/prd/GOAL_TRACKER.md
++++ b/modified/docs/prd/GOAL_TRACKER.md
+@@ -48,3 +48,13 @@ owner确认的run_agent规则、原子持久队列、原AgentLoop/Native工具
+ 实例协议2绑定真实监听端口、规范home和企业origin；identity v1增量补homeHash并保留UUID/key，克隆/搬迁拒绝隐式复用。standalone新增浅色首次连接页与持久企业origin配置、独立企业session登录窗口和固定业务API桥；不复制Cookie到renderer/backend。catalog/manager/enroll/bind复用该桥，原设备签名通道/RBAC/私人同步确认不变。首次GUI桥出现时刷新能力；DPAPI采用绝对系统PowerShell；Windows回执原子rename加入有界handoff重试。315项集中回归通过，正式npm包73文件；最终桌面/产物/副本回滚结果见evidence/desktop-enterprise/VERIFICATION.txt，详见DESKTOP_ENTERPRISE_M5_3.md。
+ 
+ 下一M5.4：首次连接错误地址/不可达的修复UI、NSIS真实安装/升级/卸载、已安装版本/业务schema迁移回退与Windows数据handoff；再签名/依赖、真实HTTPS企业/员工登记绑定/供应商与业务验收。企业切换/目录搬迁需要显式迁移流程，不隐式继承旧issuer/设备/cache。整体目标active。
++
++## M5.4 企业工作区与 NSIS 正常停机链
++
++首次连接新增匿名固定接口检查、错误/取消不落盘、启动错误/系统连接修复入口；已有单企业home兼容保留。不同企业采用独立UUID home/设备/SQLite/浏览器namespace，不重写旧issuer；切换前检查真实owner会话与桥操作，认证停止旧worker后选择active，返回旧工作区恢复原数据。企业不可达仍可启动已有本地工作台。333项模块回归通过。
++
++桌面候选0.2.1，实际0.2.0基线NSIS已构建；0.2.1安装/正常停机升级/旧单企业profile降级/卸载的实际结果统一见evidence/desktop-installation/VERIFICATION.txt、WORKSPACE_RECOVERY.json和NSIS_INSTALLATION.json。完整记录见DESKTOP_INSTALLATION_M5_4.md。不把缺失或非PASS结果算验收完成。
++
++卸载观察超时的原命令exit1保留，独立只读复核exit0确认最终清理与数据保留；NSIS_INSTALLATION.json明确reconciledAfterObserverTimeout。观察器增加单次启动、300秒后置状态等待与持久checkpoint；4项回归通过，修订runner完整真机链未重跑。
++
++下一M5.5：安装器认证quiesce、硬杀遗留worker/运行中任务/句柄与失败恢复；新企业工作区回退旧客户端的兼容阻止/恢复；随后业务schema矩阵、干净员工机/真实HTTPS账号/供应商预算与真实业务验收、签名和依赖审查。总目标active。
+diff --git a/original/docs/prd/NAUMI_DIGITAL_EMPLOYEE_PRD.md b/modified/docs/prd/NAUMI_DIGITAL_EMPLOYEE_PRD.md
+index 1b40d3d..8469121 100644
+--- a/original/docs/prd/NAUMI_DIGITAL_EMPLOYEE_PRD.md
++++ b/modified/docs/prd/NAUMI_DIGITAL_EMPLOYEE_PRD.md
+@@ -363,3 +363,11 @@ HBT-003/004、CAP-001、BUD-001、LOC-004/005/006、EMP-002/003 扩展；独立
+ - 组织/设备登记的proof、签名离线授权、企业RBAC和原设备通道继续权威；首次连接不会自动登记或上传私人记忆。企业会话过期、权限拒绝、未知网络结果不由应用自动回放mutation；POST携带原始operationId，原企业事务回执去重覆盖Chromium可能的网络重传，并以同一UUID核对未知结果。
+ - CAP-001：GUI桥出现/重启触发能力刷新；干净系统PATH下DPAPI改用固定绝对系统PowerShell。Windows回执rename短暂占用有界重试并保留原权威文件。
+ - 315项集中模块回归通过。独立双profile Electron、候选正式包/hash、原生浏览器/主进程硬杀接回及副本回滚最终结果按evidence/desktop-enterprise/VERIFICATION.txt记录。真实远程HTTPS员工授权、模型/供应商业务、NSIS安装/升级/卸载、业务schema/已安装版本回退及签名审查仍分别验收，不以本地fixture替代。
++
++## M5.4 连接恢复与真实安装链增量（2026-11-17）
++
++- LOC/EMP：首次URL错误、不可达或取消不再写入连接配置。已有配置不以企业健康作为本地启动前置条件；错误页/系统连接有修复入口。
++- 企业切换采用独立userData子home和浏览器account，不覆盖旧origin/签名设备/私人记忆/缓存。版本1工作区active指针原子提交；旧单企业home原地兼容，无复制身份或自动登记。
++- 活动任务/未知状态/在途桥操作拒绝切换；正常HMAC停止旧worker并观察退出后再选择新home。旧企业session/browser与人格记忆在返回时继续使用。
++- 333项集中回归通过。实际unpacked A/B/A、离线重启与真实NSIS 0.2.0安装/0.2.1升级/0.2.0旧单企业profile降级/卸载证据以evidence/desktop-installation/VERIFICATION.txt及JSON结果为准；具体边界见DESKTOP_INSTALLATION_M5_4.md。
++- 故障中安装quiesce、跨工作区旧版回退、业务schema迁移降级、发布签名/依赖、干净员工机与真实企业/供应商业务继续保留为明确门槛，完整目标active。
+diff --git a/original/plugins/naumi-enterprise/client.js b/modified/plugins/naumi-enterprise/client.js
+index e40787b..db53ebc 100644
+--- a/original/plugins/naumi-enterprise/client.js
++++ b/modified/plugins/naumi-enterprise/client.js
+@@ -119,7 +119,7 @@ window.__ModuleLoader__.load({id:'@naumi/dsh-enterprise',factory(require){
+             h('div',{className:'naumi-filterbar'},...['all','unassigned','in_progress','quality_review','business_acceptance','accepted'].map(s=>h('button',{key:s,className:filter===s?'selected':'',onClick:()=>setFilter(s)},s==='all'?'全部':STATUS[s]))),data?h(TaskTable,{tasks:visible,data,onContext:setSelected}):h(ConnectionState,{state}))),
+         page==='naumi-delivery'&&h('section',{className:'naumi-card'},h('div',{className:'naumi-section-head'},h('h2',null,'交付与验收'),external(config.collaborationOrigin+'/reviews','打开交付中心')),data?h('div',{className:'naumi-deliveries'},data.deliverables.length?data.deliverables.map(d=>{const task=tasks.find(t=>t.id===d.taskId),versions=data.submissions.filter(s=>s.deliverableId===d.id);return h('article',{key:d.id,className:'naumi-delivery-item'},h('div',{className:'naumi-delivery-icon'},h(Icon,{name:'image',size:25})),h('div',{className:'naumi-delivery-info'},h('strong',null,d.name),h('span',null,task?.title??'')),h('span',{className:'naumi-version'},versions.length?'V'+Math.max(...versions.map(s=>s.version)):'尚未提交'),h(Badge,{status:d.status}),external(config.collaborationOrigin+'/review/'+encodeURIComponent(d.taskId),'打开审阅'));}):h('div',{className:'naumi-empty'},'暂无交付物')):h(ConnectionState,{state})),
+         page==='naumi-design'&&h(React.Fragment,null,h('div',{className:'naumi-design-top'},h('img',{src:'/naumi/assets/wordmark.svg',alt:'Naumi',width:136,height:34}),external(config.designOrigin+'/dashboard','打开设计中心','arrow','naumi-btn primary')),h(DesignGrid),h('div',{className:'naumi-design-links'},external(config.designOrigin+'/works','我的作品'),external(config.designOrigin+'/templates','模板中心'),external(config.designOrigin+'/tools','全部创作工具'))),
+-        page==='naumi-connections'&&h('section',{className:'naumi-card naumi-connections'},h('h2',null,'工作空间连接'),h('div',{className:'naumi-connection-row'},h(Icon,{name:'grid'}),h('div',null,h('strong',null,'企业协作'),h('code',null,config.collaborationOrigin)),h('span',{className:'naumi-badge '+(state.status==='ready'?'success':'')},state.status==='ready'?'已连接':'需要登录'),external(config.collaborationOrigin+'/login','打开')),h('div',{className:'naumi-connection-row'},h(Icon,{name:'spark'}),h('div',null,h('strong',null,'设计中心'),h('code',null,config.designOrigin)),external(config.designOrigin+'/dashboard','打开')),h('div',{className:'naumi-connection-row'},h(Icon,{name:'chat'}),h('div',null,h('strong',null,'AI 协作'),h('span',null,'会话 · 模型 · 文件 · 工具')),h('button',{className:'naumi-btn',onClick:()=>openAI()},'打开会话'))),
++        page==='naumi-connections'&&h('section',{className:'naumi-card naumi-connections'},h('h2',null,'工作空间连接'),h('div',{className:'naumi-connection-row'},h(Icon,{name:'grid'}),h('div',null,h('strong',null,'企业协作'),h('code',null,config.collaborationOrigin)),h('span',{className:'naumi-badge '+(state.status==='ready'?'success':'')},state.status==='ready'?'已连接':'需要登录'),external(config.collaborationOrigin+'/login','打开'),globalThis.naumiDesktop?.connectionSettings&&h('button',{className:'naumi-btn',onClick:()=>globalThis.naumiDesktop.connectionSettings()},'连接设置')),h('div',{className:'naumi-connection-row'},h(Icon,{name:'spark'}),h('div',null,h('strong',null,'设计中心'),h('code',null,config.designOrigin)),external(config.designOrigin+'/dashboard','打开')),h('div',{className:'naumi-connection-row'},h(Icon,{name:'chat'}),h('div',null,h('strong',null,'AI 协作'),h('span',null,'会话 · 模型 · 文件 · 工具')),h('button',{className:'naumi-btn',onClick:()=>openAI()},'打开会话'))),
+         selected&&data&&h(TaskContext,{task:selected,data,onClose:()=>setSelected(null)}));
+     }
+     ctx.effect(()=>{
+diff --git a/modified/scripts/installer-environment.ps1 b/modified/scripts/installer-environment.ps1
+new file mode 100644
+index 0000000..c1f6430
+--- /dev/null
++++ b/modified/scripts/installer-environment.ps1
+@@ -0,0 +1,53 @@
++param([ValidateSet('capture','owned','restored')][string]$Action='capture',[string]$InstallDir='')
++$ErrorActionPreference='Stop'
++$root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
++$e=Join-Path $root 'evidence/desktop-installation'
++$guid='fef98446-cfc3-5773-96cc-aa410c507d30'
++$relative=@("Software\$guid","Software\Microsoft\Windows\CurrentVersion\Uninstall\$guid","Software\Classes\AppUserModelId\com.naumi.desktop")
++function Registry-State {
++ $result=@()
++ foreach($hive in @([Microsoft.Win32.RegistryHive]::CurrentUser,[Microsoft.Win32.RegistryHive]::LocalMachine)){
++  foreach($view in @([Microsoft.Win32.RegistryView]::Registry64,[Microsoft.Win32.RegistryView]::Registry32)){
++   $base=[Microsoft.Win32.RegistryKey]::OpenBaseKey($hive,$view)
++   try{foreach($p in $relative){$key=$base.OpenSubKey($p);try{if($null -ne $key){$result+=@{hive="$hive";view="$view";path=$p;location=$key.GetValue('InstallLocation');version=$key.GetValue('DisplayVersion');uninstall=$key.GetValue('UninstallString')}}}finally{if($null -ne $key){$key.Dispose()}}}}finally{$base.Dispose()}
++  }
++ }
++ return @($result)
++}
++function Preserved-State {
++ $locations=@([Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('CommonDesktopDirectory'),[Environment]::GetFolderPath('Programs'),[Environment]::GetFolderPath('CommonPrograms'))
++ $links=@();$standard=@()
++ foreach($p in $locations){$standard+=Join-Path $p 'Naumi.lnk';$links+=@(Get-ChildItem -LiteralPath $p -Filter '*Naumi*.lnk' -Recurse -ErrorAction SilentlyContinue | Where-Object {$_.Name -ne 'Naumi.lnk'} | Sort-Object FullName | ForEach-Object {@{path=$_.FullName;hash=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash}})}
++ $data=Join-Path $env:APPDATA 'Naumi';$metadata=@();if(Test-Path -LiteralPath $data){$metadata=@(Get-ChildItem -LiteralPath $data -File -Recurse -Force -ErrorAction Stop | Sort-Object FullName | ForEach-Object {@{path=[IO.Path]::GetRelativePath($data,$_.FullName);size=$_.Length;written=$_.LastWriteTimeUtc.Ticks}})}
++ return @{shortcuts=@($links);standard=@($standard);realUserData=$data;realUserMetadata=@($metadata)}
++}
++$registry=@(Registry-State)
++if($Action -eq 'capture'){
++ if($registry.Count){throw 'EXISTING_PRODUCT_REGISTRY_PRESERVED'}
++ $state=Preserved-State
++ foreach($p in $state.standard){if(Test-Path -LiteralPath $p){throw 'EXISTING_PRODUCT_SHORTCUT_PRESERVED'}}
++ $default=Join-Path $env:LOCALAPPDATA 'Programs/Naumi';if(Test-Path -LiteralPath $default){throw 'EXISTING_DEFAULT_INSTALL_PRESERVED'}
++ if(@(Get-Process -Name Naumi -ErrorAction SilentlyContinue).Count){throw 'DESKTOP_PROCESS_RUNNING'}
++ $pinned=Join-Path $env:APPDATA 'Microsoft/Internet Explorer/Quick Launch/User Pinned/TaskBar'
++ if(Test-Path -LiteralPath $pinned){$shell=New-Object -ComObject Shell.Application;$folder=$shell.Namespace($pinned);if($null -ne $folder){foreach($item in $folder.Items()){if($item.Name -match 'Naumi' -or $item.ExtendedProperty('System.AppUserModel.ID') -eq 'com.naumi.desktop'){throw 'EXISTING_PINNED_PRODUCT_PRESERVED'}}}}
++
++ @{version=1;guid=$guid;registry=$registry;preserved=$state;defaultInstall=$default}|ConvertTo-Json -Depth 10|Set-Content -LiteralPath (Join-Path $e 'INSTALL_ENVIRONMENT.json') -Encoding utf8
++ Write-Output 'INSTALL_ENVIRONMENT registry=absent standard_shortcuts=absent existing_custom_shortcuts=protected real_user_data=protected'
++}elseif($Action -eq 'owned'){
++ $full=[IO.Path]::GetFullPath($InstallDir);$allowed=Join-Path $root '.dsh';if(!$full.StartsWith($allowed+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw 'TEST_INSTALL_TARGET_OUTSIDE_WORKSPACE'}
++ if(!$registry.Count){throw 'PRODUCT_REGISTRY_MISSING'}
++ $locations=@($registry | Where-Object {$_.location} | ForEach-Object {[IO.Path]::GetFullPath($_.location)})
++ if(!$locations.Count -or @($locations|Where-Object {![string]::Equals($_,$full,[StringComparison]::OrdinalIgnoreCase)}).Count){throw 'FOREIGN_INSTALL_REGISTRY_PRESERVED'}
++ $versions=@($registry|Where-Object {$_.version}|ForEach-Object {$_.version}|Select-Object -Unique)
++ if($versions.Count -ne 1){throw 'INSTALL_VERSION_UNKNOWN'}
++ Write-Output ('INSTALL_REGISTRY owned=1 version='+$versions[0])
++}else{
++ if($registry.Count){throw 'PRODUCT_REGISTRY_REMAINS'}
++ $before=Get-Content -LiteralPath (Join-Path $e 'INSTALL_ENVIRONMENT.json') -Raw|ConvertFrom-Json -AsHashtable
++ $now=Preserved-State
++ foreach($p in $before.preserved.standard){if(Test-Path -LiteralPath $p){throw 'TEST_SHORTCUT_REMAINS'}}
++ if(Test-Path -LiteralPath $before.defaultInstall){throw 'UNEXPECTED_DEFAULT_INSTALL'}
++ $old=@($before.preserved.shortcuts|ForEach-Object {[ordered]@{path=$_.path;hash=$_.hash}})|ConvertTo-Json -Depth 8 -Compress;$new=@($now.shortcuts|ForEach-Object {[ordered]@{path=$_.path;hash=$_.hash}})|ConvertTo-Json -Depth 8 -Compress;if($old -ne $new){throw 'EXISTING_SHORTCUTS_CHANGED'}
++ $old=@($before.preserved.realUserMetadata|ForEach-Object {[ordered]@{path=$_.path;size=$_.size;written=$_.written}})|ConvertTo-Json -Depth 8 -Compress;$new=@($now.realUserMetadata|ForEach-Object {[ordered]@{path=$_.path;size=$_.size;written=$_.written}})|ConvertTo-Json -Depth 8 -Compress;if($old -ne $new){throw 'REAL_USER_DATA_METADATA_CHANGED'}
++ Write-Output 'INSTALL_RESTORED registry=absent test_shortcuts=removed existing_shortcuts=unchanged real_user_data=unchanged'
++}
+diff --git a/modified/scripts/package-desktop-installation.mjs b/modified/scripts/package-desktop-installation.mjs
+new file mode 100644
+index 0000000..c9078c7
+--- /dev/null
++++ b/modified/scripts/package-desktop-installation.mjs
+@@ -0,0 +1,3 @@
++import fs from'node:fs';import path from'node:path';import{createHash}from'node:crypto';import{spawnSync,execFileSync}from'node:child_process';
++const e=path.resolve('evidence/desktop-installation'),sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex'),files=['.gitignore','.gitattributes','desktop/app/backend.cjs','desktop/app/main.cjs','desktop/app/preload.cjs','desktop/app/guests.cjs','desktop/app/connect.html','desktop/app/connect.js','desktop/app/connect.css','desktop/app/startup.html','desktop/app/startup.js','desktop/package.json','desktop/package-lock.json','desktop/scripts/prepare-runtime.mjs','desktop/tests/enterprise.test.cjs','desktop/scripts/verify-desktop-enterprise.mjs','plugins/naumi-enterprise/client.js','docs/prd/GOAL_TRACKER.md','docs/prd/NAUMI_DIGITAL_EMPLOYEE_PRD.md','docs/implementation/EMPLOYEE_PACKAGING_M5.md','tests/naumi-context-ui.test.mjs','desktop/app/workspaces.cjs','desktop/tests/workspaces.test.cjs','desktop/scripts/verify-desktop-workspaces.mjs','desktop/scripts/verify-nsis-installation.mjs','scripts/installer-environment.ps1','scripts/verify-desktop-installation-package.mjs','docs/implementation/DESKTOP_INSTALLATION_M5_4.md','scripts/repro-desktop-installation.mjs','scripts/package-desktop-installation.mjs','scripts/rollback-desktop-installation.mjs','scripts/reopen-desktop-installation.mjs','scripts/write-desktop-installation-verification.mjs','scripts/prune-desktop-installation-runtime.mjs','desktop/scripts/nsis-observer.mjs','desktop/tests/nsis-observer.test.cjs','scripts/reconcile-desktop-installation.mjs'],manifest=[];
++for(const file of files){const snapshotPath=file==='.gitattributes'?file+'.snapshot':file,old=path.join(e,'original',snapshotPath),now=path.join(e,'modified',snapshotPath);fs.mkdirSync(path.dirname(now),{recursive:true});fs.copyFileSync(file,now);manifest.push({path:file,snapshotPath,originalSHA256:fs.existsSync(old)?sha(old):null,modifiedSHA256:sha(now)});}fs.writeFileSync(path.join(e,'hashes.json'),JSON.stringify(manifest,null,2)+'\n');const diff=spawnSync('git',['-c','core.autocrlf=false','diff','--binary','--no-index','--','original','modified'],{cwd:e,encoding:'utf8',maxBuffer:10e6});if(![0,1].includes(diff.status))throw Error(diff.stderr);fs.writeFileSync(path.join(e,'DIFF_FILE.patch'),diff.stdout);fs.copyFileSync('scripts/rollback-desktop-installation.mjs',path.join(e,'rollback-desktop-installation.mjs'));fs.writeFileSync(path.join(e,'ROLLBACK.sh'),'#!/usr/bin/env bash\nset -euo pipefail\nHERE="$(cd -- "$(dirname -- "$0")" && pwd)"\nexec "${NAUMI_NODE:-node}" "$HERE/rollback-desktop-installation.mjs" "${1:---test}"\n',{mode:0o755});const q=s=>"'"+s.replaceAll("'","''")+"'";execFileSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-Command',`Compress-Archive -Path ${['original','modified','hashes.json'].map(p=>q(path.join(e,p))).join(',')} -DestinationPath ${q(path.join(e,'MODIFIED_FILE.zip'))} -Force`]);fs.writeFileSync(path.join(e,'PACKAGE.json'),JSON.stringify({branch:'fix/naumi-bot-lifecycle-20261116',baselineCommit:'1cea9056dddfa091a1a6cb8f5c767db8b05adbe0',changedFields:['desktop version0.2.1; per-user NSIS ZIP-direct, differentialPackage=false, no elevation/no appData deletion','runtime45430 files; development declarations/external maps excluded only from runtime copies; executable bytes retained','desktop-workspaces.json version1; atomic active pointer; legacy default home unchanged','anonymous fixed-endpoint connection check; errors/cancellation do not persist','independent home/identity/device/SQLite/browser namespace per enterprise; no issuer overwrite','owner idle and bridge-operation admission; observed authenticated old worker stop','Guests.reset flush/release/account/host update without duplicate listeners','startup/system-connection repair actions and existing offline local workbench'],files:files.length,originalFiles:manifest.filter(f=>f.originalSHA256).length,newFiles:manifest.filter(f=>!f.originalSHA256).length,zipSHA256:sha(path.join(e,'MODIFIED_FILE.zip')),liveDeployment:false,scope:'source module, unpacked fixture and separately recorded real NSIS normal-stop acceptance; not general crash/schema/cross-workspace downgrade'},null,2)+'\n');console.log('PACKAGE desktop_installation_files='+files.length+' zip=PASS rollback=copy_only');
+diff --git a/modified/scripts/prune-desktop-installation-runtime.mjs b/modified/scripts/prune-desktop-installation-runtime.mjs
+new file mode 100644
+index 0000000..6894509
+--- /dev/null
++++ b/modified/scripts/prune-desktop-installation-runtime.mjs
+@@ -0,0 +1,4 @@
++import fs from'node:fs';import path from'node:path';import assert from'node:assert/strict';import{createHash}from'node:crypto';import{runtimeInventory,scanRuntimeInventory,verifyStagedImports,isRuntimeDevelopmentArtifact}from'../desktop/scripts/prepare-runtime.mjs';
++const project=process.cwd(),sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex'),reports=[];
++for(const relative of['runtime/desktop-backend','runtime/b0/resources/backend']){const root=path.resolve(relative);assert(root.startsWith(path.resolve(project,'runtime')+path.sep));assert(fs.realpathSync(root).startsWith(fs.realpathSync(path.resolve(project,'runtime'))+path.sep));const mf=path.join(root,'runtime-manifest.json'),iv=path.join(root,'runtime-files.json'),m=JSON.parse(fs.readFileSync(mf)),inventory=JSON.parse(fs.readFileSync(iv));assert.equal(sha(iv),m.inventorySHA256);for(const f of inventory)assert.equal(sha(path.join(root,f.path)),f.sha256,'PRIOR_BYTES '+f.path);const removed=inventory.filter(f=>f.path.startsWith('node_modules/')&&isRuntimeDevelopmentArtifact(f.path));for(const f of removed){const target=path.resolve(root,f.path);assert(target.startsWith(root+path.sep));assert(!fs.lstatSync(target).isSymbolicLink());fs.unlinkSync(target);}const kept=inventory.filter(f=>!removed.includes(f));for(const f of kept)assert.equal(sha(path.join(root,f.path)),f.sha256,'KEPT_BYTES '+f.path);scanRuntimeInventory(kept);fs.writeFileSync(iv,JSON.stringify(kept,null,2)+'\n');m.inventorySHA256=sha(iv);m.productionOmissions={declarationsAndExternalSourceMaps:removed.length,executedFilesUnchanged:true};fs.writeFileSync(mf,JSON.stringify(m,null,2)+'\n');verifyStagedImports(root);reports.push({root,originalFiles:inventory.length,keptFiles:kept.length,removedFiles:removed.length,removed:removed.map(f=>({path:f.path,sha256:f.sha256})),keptHashInvariant:true,imports:'PASS'});console.log('PRODUCTION_RUNTIME version='+m.version+' original='+inventory.length+' kept='+kept.length+' omitted_dev='+removed.length+' executable_bytes=unchanged imports=PASS');}
++fs.writeFileSync('evidence/desktop-installation/PRODUCTION_RUNTIME.json',JSON.stringify({status:'PASS',sourceRepositoryUntouched:true,originalPayloadPreserved:'runtime/installer-baseline/original-app-0.2.0.7z',reports},null,2)+'\n');
+diff --git a/modified/scripts/reconcile-desktop-installation.mjs b/modified/scripts/reconcile-desktop-installation.mjs
+new file mode 100644
+index 0000000..0d4a756
+--- /dev/null
++++ b/modified/scripts/reconcile-desktop-installation.mjs
+@@ -0,0 +1,24 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import{createHash}from'node:crypto';import{spawnSync}from'node:child_process';import{DatabaseSync}from'node:sqlite';
++const root=process.cwd(),e=path.join(root,'evidence/desktop-installation'),sha=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
++const requested=path.resolve(process.argv[2]??'');assert.equal(requested,path.join(root,'.dsh/ni-2c0b82a4'),'EXPLICIT_PRIOR_RUN_REQUIRED');assert(fs.realpathSync(requested).startsWith(fs.realpathSync(path.join(root,'.dsh'))+path.sep));
++const marker=JSON.parse(fs.readFileSync(path.join(requested,'OWNED_TEST.json'))),target=path.join(requested,'app'),userData=path.join(requested,'employee profile'),home=path.join(userData,'harness');assert.equal(marker.target,target);assert.equal(marker.userData,userData);assert(!fs.existsSync(target),'UNINSTALL_DIRECTORY_REMAINS');
++const log=fs.readFileSync(path.join(e,'NSIS_INSTALLATION_ATTEMPT2.log'),'utf8'),input=fs.readFileSync(path.join(e,'NSIS_ATTEMPT2_INPUT.mjs'),'utf8');assert.match(log,/Error: NSIS_WAIT_TIMEOUT/);
++// Each receipt was emitted only after resource/version checks; each DATA receipt
++// was emitted after real installed launch, identity/cookie/vault/store and stop assertions.
++assert(input.indexOf('assert.equal(logins,1);assert.equal(registrations,1);')<input.indexOf("runInstaller(path.join(target,'Uninstall Naumi.exe'),true)"));
++for(const statement of ['await retained();await close();stages.push','assert.equal(info.version,version)','assert.equal(info.root,path.join(target','assert.equal(s.registered,true)','assert.equal(s.enabled,false)','assert.equal(sha(path.join(home,\'naumi/employee-sync.sqlite.device\')),deviceVaultHash)'])assert(input.includes(statement),'SOURCE_ASSERTION_MISSING');
++const versions=[...log.matchAll(/NSIS_INSTALL version=([\d.]+) exit=0 registry=owned logo=PASS runtime_version=PASS/g)].map(m=>m[1]);assert.deepEqual(versions,['0.2.0','0.2.1','0.2.0']);
++for(const stage of ['upgrade','downgrade'])assert(log.includes('NSIS_DATA stage='+stage+' identity=retained persona=retained memory=retained device_vault=retained session=retained unknown_fixture=retained schema=1 worker_stop=observed'));
++const nativeExits=[...log.matchAll(/NSIS_NATIVE_EXIT pid=(\d+) code=(\d+)/g)].map((m,i)=>({pid:Number(m[1]),exitCode:Number(m[2]),role:i<3?'install':i===3?'uninstall-launcher':'duplicate-cleanup-launcher'}));assert.equal(nativeExits.length,5);assert(nativeExits.every(x=>x.exitCode===0));
++let db;try{db=new DatabaseSync(path.join(home,'naumi/employees.sqlite'),{readOnly:true});assert.equal(JSON.parse(db.prepare("SELECT json FROM entities WHERE bot_id='fixture' AND id='profile'").get().json).persona,'retained persona');assert(db.prepare("SELECT json FROM entities WHERE bot_id='fixture' AND type='memory'").all().some(x=>JSON.parse(x.json).text==='retained memory'));assert.equal(db.prepare('SELECT state FROM install_fixture').get().state,'unknown');assert.equal(db.prepare('PRAGMA user_version').get().user_version,1);}finally{db?.close();}
++const vault=path.join(home,'naumi/employee-sync.sqlite.device');assert(fs.statSync(vault).size>0);const identity=path.join(home,'desktop-instance.json');assert(fs.statSync(identity).size>0);
++const q=s=>"'"+s.replaceAll("'","''")+"'";
++const ps=`$ErrorActionPreference='Stop';$paths=@(${[target,home].map(q).join(',')});$live=@(Get-CimInstance Win32_Process | Where-Object {$_.ProcessId -ne $PID} | Where-Object {$c=$_.CommandLine;$x=$_.ExecutablePath;@($paths|Where-Object {($c -and $c.Contains($_)) -or ($x -and $x.StartsWith($_,[StringComparison]::OrdinalIgnoreCase))}).Count -gt 0});if($live.Count){throw 'TEST_PROCESS_REMAINS'};Write-Output 'NSIS_PROCESSES target_and_home=stopped'; & ${q(path.join(root,'scripts/installer-environment.ps1'))} restored`;
++const result=spawnSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-Command',ps],{encoding:'utf8',windowsHide:true});assert.equal(result.status,0,result.stdout+result.stderr);assert(result.stdout.includes('INSTALL_RESTORED registry=absent'));
++const baseline=path.join(root,'runtime/installer-baseline-zip/Naumi-Legacy-Zip-0.2.0-x64.exe'),candidate=path.join(root,'runtime/naumi-desktop-release/Naumi-Setup-0.2.1-x64.exe');
++assert.equal(sha(path.join(root,'runtime/installer-baseline/Naumi-Setup-0.2.0-x64.exe')),'d297bd48bd341327bcfa15f9bf25f1834972d5c575c81df67f2a67af67953da8');
++const report={status:'PASS',acceptance:'normal-stop legacy single-enterprise Windows NSIS lifecycle, reconciled after observer timeout; not crash/in-flight or cross-workspace downgrade',reconciledAfterObserverTimeout:true,originalCommand:'node desktop/scripts/verify-nsis-installation.mjs',originalCommandExitStatus:1,reconciliationCommand:'node scripts/reconcile-desktop-installation.mjs .dsh/ni-2c0b82a4',reconciliationExitStatus:0,stages:[{stage:'clean-install',version:'0.2.0',status:'PASS'},{stage:'upgrade',version:'0.2.1',status:'PASS'},{stage:'downgrade',version:'0.2.0',status:'PASS'}],nativeExits,priorEvidence:{log:'NSIS_INSTALLATION_ATTEMPT2.log',logSHA256:sha(path.join(e,'NSIS_INSTALLATION_ATTEMPT2.log')),runner:'NSIS_ATTEMPT2_INPUT.mjs',runnerSHA256:sha(path.join(e,'NSIS_ATTEMPT2_INPUT.mjs')),method:'Persisted stage receipts and source assertions establish historical stage results/counters; current readonly checks establish eventual uninstall and retained store. Original command exit1 is not changed.',duplicateCleanupLaunch:true},installerBaselineSHA256:sha(baseline),installerCandidateSHA256:sha(candidate),installedResourcesRoot:target,payloadFormat:'zip-direct',legacyApplicationPayload:'original0.2.0, development declarations/maps only omitted',guiAndBackendStoppedBeforeChanges:true,logo:true,uninstall:true,employeeUserDataRetained:true,personaRetained:true,memoryRetained:true,deviceVaultRetained:true,deviceVaultCurrentSHA256:sha(vault),identityCurrentSHA256:sha(identity),enterpriseLoginRetained:true,enterpriseLoginEvidence:'historical real installed launch assertions; not reread cookie after uninstall',unknownFixtureRetained:true,schema:1,registrations:1,logins:1,counterEvidence:'prior runner assertions before first uninstall launcher',existingRegistryAbsentRestored:true,customShortcutsPreserved:true,realUserDataPreserved:true,realEmployeeTouched:false,developmentPath:false,observedAt:new Date().toISOString()};
++fs.writeFileSync(path.join(e,'NSIS_INSTALLATION.json'),JSON.stringify(report,null,2)+'\n');
++console.log('NSIS_RECONCILED clean_install=PASS upgrade=PASS downgrade=PASS eventual_uninstall=PASS');
++console.log('NSIS_OBSERVER original_exit=1 timeout=retained duplicate_cleanup=recorded reconciliation_exit=0');
++process.stdout.write(result.stdout);console.log('NSIS_RETAINED persona=retained memory=retained unknown_fixture=retained schema=1 vault=present historical_logins=1 historical_registrations=1');
+diff --git a/modified/scripts/reopen-desktop-installation.mjs b/modified/scripts/reopen-desktop-installation.mjs
+new file mode 100644
+index 0000000..51a77f2
+--- /dev/null
++++ b/modified/scripts/reopen-desktop-installation.mjs
+@@ -0,0 +1,3 @@
++import fs from'node:fs';import path from'node:path';import assert from'node:assert/strict';import{createHash,randomUUID}from'node:crypto';import{execFileSync}from'node:child_process';
++const e=path.resolve('evidence/desktop-installation'),manifest=JSON.parse(fs.readFileSync(path.join(e,'hashes.json'))),sha=b=>createHash('sha256').update(b).digest('hex'),q=s=>"'"+s.replaceAll("'","''")+"'",copy=path.join(e,'pack-reopen-'+randomUUID());execFileSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-Command',`Expand-Archive -LiteralPath ${q(path.join(e,'MODIFIED_FILE.zip'))} -DestinationPath ${q(copy)}`]);assert.deepEqual(JSON.parse(fs.readFileSync(path.join(copy,'hashes.json'))),manifest);for(const m of manifest){assert.equal(sha(fs.readFileSync(m.path)),m.modifiedSHA256);assert.equal(sha(fs.readFileSync(path.join(copy,'modified',m.snapshotPath))),m.modifiedSHA256);assert.equal(sha(fs.readFileSync(path.join(e,'modified',m.snapshotPath))),m.modifiedSHA256);if(m.originalSHA256){assert.equal(sha(fs.readFileSync(path.join(e,'original',m.snapshotPath))),m.originalSHA256);assert.equal(sha(fs.readFileSync(path.join(copy,'original',m.snapshotPath))),m.originalSHA256);}}
++const verification=fs.readFileSync(path.join(e,'VERIFICATION.txt'),'utf8'),patch=fs.readFileSync(path.join(e,'DIFF_FILE.patch'),'utf8'),rollback=fs.readFileSync(path.join(e,'ROLLBACK.sh'),'utf8');assert(patch.includes('selectWorkspace'));assert(rollback.startsWith('#!/usr/bin/env bash\nset -euo pipefail\n'));execFileSync('D:/DEV/Git/bin/bash.exe',['-n',path.join(e,'ROLLBACK.sh')]);for(const file of['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh'])assert(verification.includes(path.join(e,file)));for(const section of['BASELINE','MODIFIED','ROLLBACK'])assert(verification.includes(section));for(const file of['WORKSPACE_RECOVERY.json','NSIS_INSTALLATION.json','PACKAGE_CONTRACT.json','ROLLBACK_RESULT.json'])assert.equal(JSON.parse(fs.readFileSync(path.join(e,file))).status,'PASS');let index=false;if(process.argv.includes('--git-index')){for(const m of manifest)assert.equal(sha(execFileSync('git',['show',':'+m.path])),m.modifiedSHA256,'INDEX_BYTES '+m.path);assert(execFileSync('git',['ls-files','--stage','evidence/desktop-installation/ROLLBACK.sh'],{encoding:'utf8'}).startsWith('100755'));index=true;}fs.writeFileSync(path.join(e,'REOPEN.json'),JSON.stringify({status:'PASS',files:manifest.length,zipOpened:true,originalHashes:true,modifiedHashes:true,patchOpened:true,verificationOpened:true,rollbackOpened:true,rollbackSyntax:true,gitIndexHashes:index},null,2)+'\n');console.log('REOPEN files='+manifest.length+' zip=PASS snapshots=PASS patch=PASS verification=PASS rollback=PASS'+(index?' git_index=PASS executable_mode=100755':''));
+diff --git a/modified/scripts/repro-desktop-installation.mjs b/modified/scripts/repro-desktop-installation.mjs
+new file mode 100644
+index 0000000..d3f9f07
+--- /dev/null
++++ b/modified/scripts/repro-desktop-installation.mjs
+@@ -0,0 +1 @@
++import fs from'node:fs';import path from'node:path';import assert from'node:assert/strict';import{createRequire}from'node:module';const require=createRequire(import.meta.url),{connect}=require('../desktop/app/enterprise.cjs'),{verifyConnection,selectWorkspace}=require('../desktop/app/workspaces.cjs'),e=path.resolve('evidence/desktop-installation'),baseline=process.argv.includes('--baseline'),dir=path.join(e,baseline?'baseline-fixture':'modified-fixture');fs.mkdirSync(dir,{recursive:true});const origin='http://127.0.0.1:1';if(baseline){const old=fs.readFileSync(path.join(e,'original/desktop/app/main.cjs'),'utf8');assert(old.includes('connect(settings.home,origin)'));connect(dir,origin);assert(fs.existsSync(path.join(dir,'desktop-enterprise.json')));assert.throws(()=>connect(dir,'https://different.example'),/PROFILE_SWITCH_REQUIRED/);console.log('BASELINE unavailable_origin_persisted=1 connection_check=absent workspace_switch=forbidden');}else{await assert.rejects(verifyConnection(origin,async()=>{throw Error('fixture unavailable');}),/CONNECTION_UNAVAILABLE/);assert(!fs.existsSync(path.join(dir,'desktop-enterprise.json')));const first=selectWorkspace(dir,'https://one.example'),second=selectWorkspace(dir,'https://two.example');assert.notEqual(first.home,second.home);assert.equal(JSON.parse(fs.readFileSync(path.join(first.home,'desktop-enterprise.json'))).origin,'https://one.example');console.log('MODIFIED unavailable_origin_persisted=0 connection_check=PASS workspace_isolation=PASS');}
+diff --git a/modified/scripts/rollback-desktop-installation.mjs b/modified/scripts/rollback-desktop-installation.mjs
+new file mode 100644
+index 0000000..4567d7c
+--- /dev/null
++++ b/modified/scripts/rollback-desktop-installation.mjs
+@@ -0,0 +1,7 @@
++import fs from'node:fs';import path from'node:path';import assert from'node:assert/strict';import{createHash,randomUUID}from'node:crypto';import{fileURLToPath}from'node:url';import{execFileSync,spawnSync}from'node:child_process';
++const here=path.dirname(fileURLToPath(import.meta.url)),e=path.basename(here)==='desktop-installation'?here:path.resolve('evidence/desktop-installation'),root=path.resolve(e,'../..'),sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex'),manifest=JSON.parse(fs.readFileSync(path.join(e,'hashes.json')));assert.equal(process.argv[2]??'--test','--test','COPY_ONLY_ROLLBACK');const copy=path.join(e,'rollback-copy-'+randomUUID());fs.mkdirSync(copy);
++for(const dir of['plugins','tests','desktop/app','desktop/tests','desktop/scripts','desktop/runtime','desktop/vendor','scripts','services'])fs.cpSync(path.join(root,dir),path.join(copy,dir),{recursive:true});for(const file of['package.json','desktop/package.json'])fs.copyFileSync(path.join(root,file),path.join(copy,file));fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');const baseline='1cea9056dddfa091a1a6cb8f5c767db8b05adbe0';const fixtures=execFileSync('git',['ls-tree','-r','--name-only',baseline,'--','evidence/naumi-context-ui','evidence/naumi-team-panel'],{cwd:root,encoding:'utf8'}).trim().split(/\r?\n/).filter(Boolean);for(const file of fixtures){const to=path.join(copy,file);fs.mkdirSync(path.dirname(to),{recursive:true});fs.copyFileSync(path.join(root,file),to);}
++execFileSync(process.execPath,['--input-type=module','-e',`import{EmployeeStore}from'./plugins/naumi-enterprise/employee-store.js';import{createRequire}from'node:module';const require=createRequire(import.meta.url),{selectWorkspace}=require('./desktop/app/workspaces.cjs'),a=selectWorkspace('retained-user','https://a.example');selectWorkspace('retained-user','https://b.example');const s=new EmployeeStore(a.home+'/employee.sqlite');s.updateProfile('copy',{expectedRevision:0,operationId:'profile',patch:{persona:'retained persona'}});s.createMemory('copy',{operationId:'memory',kind:'fact',text:'retained memory'});s.close();`],{cwd:copy});
++let restored=0,removed=0;for(const m of manifest){assert.equal(sha(path.join(root,m.path)),m.modifiedSHA256);const to=path.join(copy,m.path);fs.mkdirSync(path.dirname(to),{recursive:true});if(!fs.existsSync(to))fs.copyFileSync(path.join(root,m.path),to);assert.equal(sha(to),m.modifiedSHA256);if(m.originalSHA256){const from=path.join(e,'original',m.snapshotPath);assert.equal(sha(from),m.originalSHA256);fs.copyFileSync(from,to);restored++;}else{fs.unlinkSync(to);removed++;}}
++const tests=execFileSync('git',['ls-tree','-r','--name-only',baseline,'--','tests','desktop/tests'],{cwd:root,encoding:'utf8'}).trim().split(/\r?\n/).filter(p=>/\.test\.(mjs|cjs)$/.test(p));const result=spawnSync(process.execPath,['--test',...tests],{cwd:copy,encoding:'utf8',maxBuffer:12e6});fs.writeFileSync(path.join(e,'ROLLBACK_TESTS.log'),result.stdout+result.stderr);assert.equal(result.status,0,result.stdout+result.stderr);assert.match(result.stdout,/tests 315/);
++const behavior=spawnSync(process.execPath,['--input-type=module','-e',`import fs from'node:fs';import assert from'node:assert/strict';import{createRequire}from'node:module';import{EmployeeStore}from'./plugins/naumi-enterprise/employee-store.js';const require=createRequire(import.meta.url),{connect,readConnection}=require('./desktop/app/enterprise.cjs');fs.mkdirSync('bad-address');connect('bad-address','http://127.0.0.1:1');assert.equal(readConnection('bad-address').origin,'http://127.0.0.1:1');assert(!fs.existsSync('desktop/app/workspaces.cjs'));assert(fs.existsSync('retained-user/desktop-workspaces.json'));const s=new EmployeeStore('retained-user/harness/employee.sqlite');assert.equal(s.profile('copy').persona,'retained persona');assert.equal(s.allMemories('copy')[0].text,'retained memory');assert.equal(s.db.prepare('PRAGMA user_version').get().user_version,1);s.close();console.log('ROLLBACK_BEHAVIOR connection_precheck=absent workspace_selector=absent persona=retained memory=retained schema=1');`],{cwd:copy,encoding:'utf8'});assert.equal(behavior.status,0,behavior.stdout+behavior.stderr);fs.writeFileSync(path.join(e,'ROLLBACK_BEHAVIOR.log'),behavior.stdout+behavior.stderr);for(const m of manifest){assert.equal(sha(path.join(root,m.path)),m.modifiedSHA256);const to=path.join(copy,m.path);if(m.originalSHA256)assert.equal(sha(to),m.originalSHA256);else assert(!fs.existsSync(to));}fs.writeFileSync(path.join(e,'ROLLBACK_RESULT.json'),JSON.stringify({status:'PASS',restored,removed,baselineTests:315,copy,scope:'source-copy rollback only; legacy single-enterprise default home readable; new workspace index retained but ignored by original client; no general installed/schema downgrade claim',source:'modified retained',liveDataTouched:false},null,2)+'\n');console.log('ROLLBACK_COPY restored='+restored+' removed='+removed+' baseline_tests=315 hashes=PASS');process.stdout.write(behavior.stdout);console.log('ROLLBACK modified_source=retained real_user_data=untouched');
+diff --git a/modified/scripts/verify-desktop-installation-package.mjs b/modified/scripts/verify-desktop-installation-package.mjs
+new file mode 100644
+index 0000000..2ad7b8a
+--- /dev/null
++++ b/modified/scripts/verify-desktop-installation-package.mjs
+@@ -0,0 +1,14 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync} from 'node:child_process';import {createRequire} from 'node:module';
++import {auditPackage} from './audit-enterprise-package.mjs';import {verifyStagedImports,scanRuntimeInventory} from '../desktop/scripts/prepare-runtime.mjs';
++const root=process.cwd(),e=path.join(root,'evidence/desktop-installation'),temp=path.join(e,'pack-'+randomUUID()),require=createRequire(path.join(root,'desktop/package.json')),asar=require('@electron/asar'),sha=b=>createHash('sha256').update(b).digest('hex');fs.mkdirSync(temp);
++const packed=JSON.parse(execFileSync(process.execPath,[path.join(path.dirname(process.execPath),'node_modules/npm/bin/npm-cli.js'),'pack','--ignore-scripts','--json','--pack-destination',temp],{cwd:path.join(root,'plugins/naumi-enterprise'),encoding:'utf8',maxBuffer:2e6}))[0];
++const closure=auditPackage(path.join(root,'plugins/naumi-enterprise'),{packedFiles:packed.files.map(f=>f.path),checkInstalled:true});const entries=execFileSync('tar.exe',['-tf',path.join(temp,packed.filename)],{encoding:'utf8'}).trim().split(/\r?\n/);assert(entries.includes('package/desktop-enterprise.js'));
++const resources=path.join(root,'runtime/naumi-desktop-release/win-unpacked/resources'),asarFiles=['main.cjs','backend.cjs','profile.cjs','enterprise.cjs','tools.cjs','preload.cjs','connect.html','connect.css','connect.js','workspaces.cjs','guests.cjs','startup.html','startup.js'];
++for(const p of asarFiles)assert.equal(sha(asar.extractFile(path.join(resources,'app.asar'),'app/'+p)),sha(fs.readFileSync(path.join(root,'desktop/app',p))),'ASAR_SOURCE_MISMATCH '+p);
++const backend=path.join(resources,'backend'),m=JSON.parse(fs.readFileSync(path.join(backend,'runtime-manifest.json'))),inventory=JSON.parse(fs.readFileSync(path.join(backend,'runtime-files.json')));assert.equal(m.inventorySHA256,sha(fs.readFileSync(path.join(backend,'runtime-files.json'))));assert.deepEqual(m.desktop,{profileVersion:1,identityProtocol:2});assert.equal(m.version,'0.2.1');assert.equal(m.nodeSHA256,sha(fs.readFileSync(path.join(backend,'node.exe'))));
++for(const file of inventory)assert.equal(sha(fs.readFileSync(path.join(backend,file.path))),file.sha256,'RESOURCE_INVENTORY_MISMATCH '+file.path);scanRuntimeInventory(inventory);
++const pluginFiles=['host.js','desktop-identity.js','desktop-enterprise.js','employee-sync.js','employee-sync-http.js','employee-device-vault.js','employee-capabilities.js','package.json'];
++for(const p of pluginFiles)for(const prefix of ['plugins/naumi-enterprise/','node_modules/@naumi/dsh-enterprise/'])assert.equal(sha(fs.readFileSync(path.join(backend,prefix+p))),sha(fs.readFileSync(path.join(root,'plugins/naumi-enterprise',p))),'RESOURCE_SOURCE_MISMATCH '+p);
++assert(verifyStagedImports(backend).includes('no_ancestor_dependencies=1'));
++fs.writeFileSync(path.join(e,'PACKAGE_CONTRACT.json'),JSON.stringify({status:'PASS',formalNpmFiles:closure.files,enterpriseTransportIncluded:true,npmIntegrity:packed.integrity,asarSourceModules:asarFiles.length,asarHashesMatch:true,resourceCriticalCopies:pluginFiles.length*2,resourceHashesMatch:true,inventoryFiles:inventory.length,inventoryHashesMatch:true,profileVersion:1,identityProtocol:2,bundledNode:m.node,bundledNodeHashMatch:true,ancestorDependencyFallback:false,privateProfileCopied:false},null,2)+'\n');
++console.log('PACKAGE_CONTRACT npm_files='+closure.files+' asar_sources='+asarFiles.length+' resource_sources='+pluginFiles.length*2+' inventory='+inventory.length+' hashes=PASS identity_protocol=2');console.log('PACKAGED_IMPORT no_ancestor_dependencies=1 node_hash=PASS private_profile_copied=0');
+diff --git a/modified/scripts/write-desktop-installation-verification.mjs b/modified/scripts/write-desktop-installation-verification.mjs
+new file mode 100644
+index 0000000..082ae3e
+--- /dev/null
++++ b/modified/scripts/write-desktop-installation-verification.mjs
+@@ -0,0 +1,64 @@
++import fs from'node:fs';import path from'node:path';import assert from'node:assert/strict';const e=path.resolve('evidence/desktop-installation'),read=f=>fs.readFileSync(path.join(e,f),'utf8'),pack=JSON.parse(read('PACKAGE.json'));for(const [file,count]of[['BASELINE_TESTS.log',315],['MODIFIED_TESTS.log',333],['ROLLBACK_TESTS.log',315]]){assert.match(read(file),new RegExp('tests '+count));assert.match(read(file),/fail 0/);}for(const file of['WORKSPACE_RECOVERY.json','NSIS_INSTALLATION.json','PACKAGE_CONTRACT.json','ROLLBACK_RESULT.json'])assert.equal(JSON.parse(read(file)).status,'PASS');
++const report=`Naumi M5.4 - recoverable connection, isolated enterprise workspaces and NSIS normal-stop lifecycle
++Branch: ${pack.branch}
++Baseline commit: ${pack.baselineCommit}
++Overall goal: active; no full release, crash/in-flight install, general schema or cross-workspace old-client downgrade claim.
++Changed fields/branches:
++${pack.changedFields.map(x=>'- '+x).join('\n')}
++
++Four artifacts:
++${['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh'].map(f=>path.join(e,f)).join('\n')}
++Original/modified SHA256: hashes.json (${pack.files} delivery files; ${pack.originalFiles} original snapshots, ${pack.newFiles} new files; unchanged baseline helper files also carried). No real employee credentials are input to source packaging.
++
++BASELINE
++Workdir: E:\\Workspace\\naumi-bot-lifecycle-fix at ${pack.baselineCommit}, before changes.
++Command: node --test tests/*.test.mjs desktop/tests/*.test.cjs
++Input: original source/tests. Literal output/result: tests 315; pass 315; fail 0. Exit status: 0.
++Command: node scripts/repro-desktop-installation.mjs --baseline
++Input: original direct connect path and controlled unavailable origin.
++Literal output/result: ${read('BASELINE_REPRO.log').trim()}
++Exit status: 0 (prior persisted wrong address/no precheck reproduced).
++Command: node node_modules/electron-builder/cli.js --prepackaged ../runtime/naumi-desktop-release/win-unpacked --win nsis --x64
++Workdir: desktop. Input: original verified 0.2.0 unpacked app and original config. Result: real baseline NSIS installer built, Exit status: 0. Baseline binary preserved under runtime/installer-baseline.
++
++MODIFIED
++Command: node --test tests/*.test.mjs desktop/tests/*.test.cjs
++Input: modified source and 18 new workspace/production-package/NSIS observer tests; original frontend equivalence permits exactly one declared desktop-only connection action.
++Literal output/result: tests 333; pass 333; fail 0. Exit status: 0.
++Command: node scripts/repro-desktop-installation.mjs
++Literal output/result: ${read('MODIFIED_REPRO.log').trim()}
++Exit status: 0.
++Command: Get-Content evidence/desktop-installation/STAGE_INPUT.mjs -Raw | node --input-type=module
++Input: baseline full inventory hash gate; two exact client.js copies updated; full inventory regenerated; manifest version0.2.1. Literal output/result:
++${read('STAGE.log').trim()}
++Exit status: 0.
++Command: node node_modules/electron-builder/cli.js --win --x64
++Workdir: desktop. Result: real 0.2.1 unpacked and NSIS artifacts built. Exit status: 0. No code signing certificate configured; no verified-publisher claim.
++Command: node scripts/verify-desktop-installation-package.mjs
++Literal output/result:
++${read('PACKAGE_CONTRACT.log').trim()}
++Exit status: 0.
++Command: node desktop/scripts/verify-desktop-workspaces.mjs
++Input: isolated test userData; unavailable/HTML/stalled and two controlled enterprise origins; real hidden Electron; real SQLite and Chromium cookies; no development PATH.
++Literal output/result:
++${read('WORKSPACE_RECOVERY.log').trim()}
++Exit status: 0.
++Command: ${read('NSIS_FINAL_COMMAND.txt').trim()}
++Input: real per-user product GUID/shortcuts, owned short .dsh application directory, separate test employee userData; original0.2.0 application payload rewrapped as ZIP control after only development artifacts were omitted, and candidate0.2.1 ZIP installer; normal shutdown observed before each replacement. No claim that the original7z wrapper passed.
++Original7z note: 5-minute observer timed out while PID55212 remained live. It was revalidated by path/CPU/file progression and never restarted on observation timeout. That process later ended but the observer returned null exitCode, retained as UNKNOWN in NSIS_BASELINE_EXIT.json. Its created registration/standard shortcuts were uninstalled and existing environment restoration was verified. It is not counted as a successful native-exit test. The final ZIP runner pins a native SafeHandle and uses WaitForSingleObject/GetExitCodeProcess; the log must carry explicit native zero receipts.
++Literal output/result:
++${read('NSIS_INSTALLATION.log').trim()}
++Exit status: 0 for the independent readonly reconciliation command. Original ZIP lifecycle command (node desktop/scripts/verify-nsis-installation.mjs) exited 1 on uninstall observation timeout, preserved verbatim in NSIS_INSTALLATION_ATTEMPT2.log with NSIS_ATTEMPT2_INPUT.mjs. It emitted successful install/upgrade/downgrade receipts before the timeout; the final uninstall state was verified independently, not inferred from launcher exit. A duplicate cleanup launcher was recorded, not hidden. The revised observer has 4 regression tests, a 300-second observation window, no duplicate retry after timeout, and durable stage checkpoints; the complete installed chain was not rerun with the revised observer. Original7z observer failure remains separately in NSIS_INSTALLATION_ATTEMPT1.log. New real registry and standard shortcuts removed by uninstall; existing custom shortcuts and real APPDATA metadata unchanged. Controlled employee persona/memory/schema1/device vault/login and explicit UNKNOWN sample retained.
++
++ROLLBACK
++Command: $env:NAUMI_NODE='D:/DEV/NodeJS/node.exe'; & 'D:/DEV/Git/bin/bash.exe' evidence/desktop-installation/ROLLBACK.sh --test
++Input: separate source copy; hash-guarded original bytes and removal of new files only in that copy; real EmployeeStore seed retained.
++Literal output/result:
++${read('ROLLBACK.log').trim()}
++Exit status: 0.
++Restored behavior/status: original direct connection (no precheck), original absence of workspace selector, original315 tests PASS. Persona/memory/schema1 retained. New index is retained but ignored by the original client; this is explicitly not a cross-workspace installed downgrade guarantee. Modified working-tree files remain changed; real user data untouched.
++
++Observed test corrections: hidden Playwright page.screenshot stalled; Electron native capturePage(stayHidden/stayAwake) produced the inspected PNG instead. Awaiting renderer IPC that deliberately navigates destroyed the old evaluation context; the test now awaits the target page navigation explicitly. No functional pass is inferred from those failed attempts. The first readonly reconciliation process filter matched its own PowerShell command; its failure remains in NSIS_RECONCILIATION_ATTEMPT1.log. The filter now excludes its own PID. Actual NSIS process liveness/exit are separate from a controller observation timeout; null is UNKNOWN, never zero. Final ZIP wrappers and all installed retained-resource hashes are separately verified. Long install/file-count evidence is in INSTALL_FOOTPRINT.json and NSIS_PROGRESS.jsonl; no short install-time claim.
++
++Remaining gates: authenticated installer quiesce for orphan worker/running tasks/handles and failed-update recovery; cross-workspace downgrade compatibility; new business-schema migration/downgrade; install-performance optimization; real clean employee machine, remote HTTPS/account/model/supplier/price/budget/business acceptance; signing/dependency review. Overall goal remains active.
++`;fs.writeFileSync(path.join(e,'VERIFICATION.txt'),report);console.log('VERIFICATION written=PASS baseline=315 modified=333 rollback=315 overall_goal=active');
+diff --git a/original/tests/naumi-context-ui.test.mjs b/modified/tests/naumi-context-ui.test.mjs
+index 7467af8..1e96cc9 100644
+--- a/original/tests/naumi-context-ui.test.mjs
++++ b/modified/tests/naumi-context-ui.test.mjs
+@@ -41,9 +41,11 @@ test('native leaf relocation preserves exact injected actions, store, locale and
+ test('parent/child slot owners cannot accidentally be relocated as leaves',()=>{
+  assert.throws(()=>options({options:{},children:{child:{}}},'parent'),/Only leaf/);
+ });
+-test('all preexisting enterprise front-end code is byte-equivalent apart from one UI install call',()=>{
++test('all preexisting enterprise front-end code is byte-equivalent apart from declared UI install and desktop-only connection action',()=>{
++ const desktopAction=",globalThis.naumiDesktop?.connectionSettings&&h('button',{className:'naumi-btn',onClick:()=>globalThis.naumiDesktop.connectionSettings()},'连接设置')";
++ assert.equal(source.split(desktopAction).length,2);
+  const start=source.indexOf('window.__ModuleLoader__.load');
+- const restored=source.slice(start).split('\n').filter(line=>!line.includes("void import('/naumi/assets/browser-client.js')")).join('\n').replace("    installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);\n",'');
++ const restored=source.slice(start).replace(desktopAction,'').split('\n').filter(line=>!line.includes("void import('/naumi/assets/browser-client.js')")).join('\n').replace("    installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);\n",'');
+  assert.equal(restored.replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'));
+ });
+ test('team presentation has no direct credential, model, permission or persistence writes',()=>{

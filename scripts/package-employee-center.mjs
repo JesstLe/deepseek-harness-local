@@ -1,0 +1,9 @@
+import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {createHash} from 'node:crypto';import {spawnSync} from 'node:child_process';
+const e=path.resolve('evidence/employee-center'),root=path.resolve('plugins/naumi-enterprise');
+const files=['client.js','host.js','employees.js','employee-store.js','package.json','employee-work.js','employee-work-store.js','assets/employee-center.js','assets/employee-center-model.js','assets/employee-center.css'];
+const hash=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+const manifest=files.map(file=>({path:file,originalSHA256:fs.existsSync(path.join(e,'original',file))?hash(path.join(e,'original',file)):null,modifiedSHA256:hash(path.join(root,file))}));fs.writeFileSync(path.join(e,'hashes.json'),JSON.stringify(manifest,null,2)+'\n');
+const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'employee-center-diff-'));
+try{for(const side of ['before','after'])fs.mkdirSync(path.join(tmp,side,'plugins/naumi-enterprise/assets'),{recursive:true});for(const m of manifest){const relative='plugins/naumi-enterprise/'+m.path;fs.copyFileSync(path.join(root,m.path),path.join(tmp,'after',relative));if(m.originalSHA256)fs.copyFileSync(path.join(e,'original',m.path),path.join(tmp,'before',relative));}
+  const result=spawnSync('git',['diff','--no-index','--binary','--','before','after'],{cwd:tmp,encoding:'utf8'});if(result.status!==1)throw Error('DIFF_FAILED');const output=path.join(e,'DIFF_FILE.patch');fs.writeFileSync(output,result.stdout.replaceAll('a/before/','a/').replaceAll('b/after/','b/').replaceAll('a/after/','a/'));if(spawnSync('git',['apply','--check',output],{cwd:path.join(tmp,'before')}).status!==0)throw Error('DIFF_APPLY_FAILED');console.log('PACKAGE files=10 diff_apply=PASS hashes=preserved');
+}finally{if(!path.resolve(tmp).startsWith(path.resolve(os.tmpdir())+path.sep))throw Error('BAD_TEMP_PATH');fs.rmSync(tmp,{recursive:true,force:true});}

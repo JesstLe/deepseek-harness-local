@@ -1,0 +1,412 @@
+diff --git a/.gitattributes b/.gitattributes
+index dc28d16..6622c51 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -46,3 +46,10 @@ plugins/naumi-ui-layout/UPSTREAM.json text eol=lf
+ /evidence/naumi-ui/DIFF_FILE.patch -text whitespace=-blank-at-eol
+ /evidence/naumi-context-ui/DIFF_FILE.patch -text whitespace=-blank-at-eol
+ /evidence/naumi-context-ui/original/** -text whitespace=cr-at-eol
++/evidence/bot-lifecycle/** -text whitespace=cr-at-eol
++/evidence/bot-lifecycle/DIFF_FILE.patch -text whitespace=-blank-at-eol
++/tests/naumi-bot-runtime.test.mjs text eol=lf
++/tests/helpers/bot-runtime.mjs text eol=lf
++/scripts/*bot-lifecycle* text eol=lf
++/scripts/check-bot-runtime.mjs text eol=lf
++/docs/implementation/BOT_CREATE_LIFECYCLE_FIX.md text eol=lf
+diff --git a/docs/implementation/BOT_CREATE_LIFECYCLE_FIX.md b/docs/implementation/BOT_CREATE_LIFECYCLE_FIX.md
+new file mode 100644
+index 0000000..de58529
+--- /dev/null
++++ b/docs/implementation/BOT_CREATE_LIFECYCLE_FIX.md
+@@ -0,0 +1,45 @@
++# Bot 创建失败与生命周期修复
++
++## 现场证据（2026-11-16）
++
++- 本次只处理 Bot 创建故障，不合入暂停中的资源区样式修改。
++- 实际运行插件与团队面板工作树 `7ec7fe9` 的 `bots.js` SHA256 相同。
++- 真实会话第一步已成功调用 `bot_directory` 和 `team_profile_get`，工具安装正常。
++- 首次 `bot_create` 距 turn/start 约 7.1 秒，模型已选择名称与职责；工具在 4ms 后返回 `cannot get property "agentPresets" without inject`。
++- 第二次调用发生同样错误。后续转入源码/命令探索，总计 33 次工具调用，整轮约 309 秒。
++- 所以本次确证根因不是模型没拿到工具，不是浏览器渲染，也不是登记文件 IO 缓慢，而是 Cordis 依赖声明缺失。
++- 旧测试直接用普通 JS 对象当 ctx，没有覆盖真实 Cordis service getter 的注入约束。
++
++## 实现
++
++1. `installBots` 显式注入 `agentPresets`；`bot_create` 从该服务读取当前 Session 的实际 preset，不改模型或权限。
++2. 同一已绑定 Session 使用相同 name/kind/purpose/cwd/preset 再次创建时，返回原 Bot，不重复落盘、不重复通知、不递增 revision。
++3. 不同参数不会悄悄改已有 Bot；归档对象不会被重试复活。名字、职责和归档变更仍走原来的 CAS update。
++4. 已取消的工具调用在读取 preset/写盘前结束。
++5. 工具描述与系统约定明确：这是已有产品操作，直接调用；保存成功即结束身份创建；失败核对目录一次后报告。不把缺少的外部账号、工具配置或团队成员声称为已就绪。
++6. `/naumi/bots` 响应增加 `X-Naumi-Bots-Contract: 2`，用于确认服务确实加载本轮代码。目录 schema version 仍为 1，不迁移数据。
++
++## 验证设计
++
++- 使用真正的 Cordis Context，host-services 与 enterprise 插件放在 sibling fibers，确保未注入的服务访问会真实报错；不是绕过权限检查的裸对象测试。
++- Host adapters 使用临时文件与隔离 Agent，不调用模型、不创建用户目录 Bot。
++- 覆盖已存在/晚创建 Agent 的工具安装、preset 为 null、并发重复调用、持久化后重启、输入冲突、归档保护、写盘失败恢复、预先取消和模块卸载。
++- 执行 Bot / Team / enterprise 模块测试；单独采样 25 次工具创建耗时。该耗时仅含本地生命周期操作，不等于线上模型端到端生成耗时。
++- 旧文件备份、差异、修改副本、精确命令和日志见 `evidence/bot-lifecycle/`。回滚只在另一个副本上测试，修改后的交付文件保留。
++
++## 产品契约
++
++可复用身份、会话关联、持久化、重命名、归档应由产品服务完成；模型负责理解需求与命名/职责，不需要开发源码。简单身份创建以数秒内完成为体验目标，模型响应仍需单独测量。
++
++当前工具保存的是身份与职责，不是一个包含外部账号开通、技能安装、权限授权和实际成员启动的完整 provisioning 管线。若后续增加成员编排，应独立设计 initializing/ready/failed 状态、幂等请求和可恢复阶段，不能把 active 字段当成所有依赖已就绪的证明。
++
++## 发布记录
++
++精确验证与本地加载结果由 `evidence/bot-lifecycle/VERIFICATION.txt` 记录。源码从团队面板提交派生独立修复分支；发布只更新运行插件的 `bots.js`，不使用完整 sync 覆盖其他模块，不自动重跑用户先前失败的会话。安装包未在本轮重建。
++
++- 模块测试：62/62 通过。
++- 25 次本地工具调用：p50 2.870ms，p95 5.324ms，最大 6.955ms；没有调用模型。这些数据不是用户真实会话的端到端耗时承诺。
++- 发布前后 `/api/session/list` 都返回 53 条会话、0 条运行中；目录保持 0 个 Bot，没有替用户重放失败请求。
++- 服务已重新启动且 `/naumi/bots` 返回 contract=2 / HTTP 200；运行插件共 36 个文件，对比只改了 `bots.js`。
++- 对运行路径里的新模块再次执行真实 Cordis 注入/持久化/幂等验证通过。
++- 回滚在单独副本恢复了原 SHA256 和原依赖报错；当前运行模块与 MODIFIED_FILE.js 均保留修复。
+diff --git a/plugins/naumi-enterprise/bots.js b/plugins/naumi-enterprise/bots.js
+index 1b4bf92..3e22355 100644
+--- a/plugins/naumi-enterprise/bots.js
++++ b/plugins/naumi-enterprise/bots.js
+@@ -41,7 +41,15 @@ export class BotDirectory {
+     const fields=z.object({name,kind:z.enum(['agent','team']),purpose:z.string().trim().min(1).max(4000)}).strict().parse(input);
+     if(!cwd||!path.isAbsolute(cwd))fail('BOT_WORKSPACE_REQUIRED');
+     return this.transact(next=>{
+-      if(next.bots.some(b=>b.sessionIds.includes(sessionId)))fail('BOT_SESSION_ALREADY_BOUND');
++      const existing=next.bots.find(b=>b.sessionIds.includes(sessionId));
++      if(existing){
++        if(existing.status==='archived')fail('BOT_ARCHIVED');
++        // A lost tool reply/retry must return the durable identity, not create a second Bot.
++        if(Object.entries(fields).every(([key,value])=>existing[key]===value)
++          &&path.resolve(cwd).toLocaleLowerCase()===path.resolve(existing.cwd).toLocaleLowerCase()
++          &&(agentPreset??undefined)===existing.agentPreset)return {bot:existing,unchanged:true};
++        fail('BOT_SESSION_ALREADY_BOUND');
++      }
+       if(next.bots.some(b=>b.status==='active'&&b.name.toLocaleLowerCase()===fields.name.toLocaleLowerCase()))fail('BOT_NAME_EXISTS');
+       const time=this.now(),bot=botSchema.parse({id:'bot-'+this.uuid(),...fields,status:'active',revision:1,cwd,...(agentPreset?{agentPreset}:{}),homeSessionId:sessionId,sessionIds:[sessionId],createdAt:time,updatedAt:time});next.bots.push(bot);return {bot};
+     });
+@@ -77,21 +85,21 @@ export function createBotTools(ctx,directory){
+   const output={schema:{type:'json'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]};
+   return [
+     defineTool({name:'bot_directory',description:'Read the local owner\'s persistent Bot directory and this task\'s Bot. A Bot is a reusable agent or team identity across task Sessions, not a conversation title.',parameters:{},output,execute:(_args,exec)=>{const m=membership(exec);return {...directory.list(),currentBotId:directory.forSession(m.root.id)?.id??null};}}),
+-    defineTool({name:'bot_create',description:'Create a persistent Bot for this root task when the user asks to establish a reusable agent or team. The Lead autonomously chooses its name, kind and purpose from the real work, without fixed employee templates. Do not create Bots for every ordinary conversation or temporary teammate.',parameters:{name:{type:'string',required:true},kind:{type:'string',enum:['agent','team'],required:true},purpose:{type:'string',required:true,description:'The reusable responsibility agreed with the user, not claims of unavailable skills or permissions.'}},output,execute:(args,exec)=>{const root=lead(exec);return directory.create({sessionId:root.id,cwd:root.session.header.cwd,agentPreset:ctx.agentPresets?.presetForSession(root.session)??undefined},args);}}),
++    defineTool({name:'bot_create',description:'Create and persist a reusable Bot immediately from the user request. The Lead autonomously chooses its name, kind and purpose; no source search, shell commands, implementation task or fixed employee templates are needed. Identical retries for the same task return the same Bot ID. Success saves identity and binds this task; it does not provision external accounts or start business operations. Do not create Bots for ordinary conversations or temporary teammates.',parameters:{name:{type:'string',required:true},kind:{type:'string',enum:['agent','team'],required:true},purpose:{type:'string',required:true,description:'The reusable responsibility agreed with the user, not claims of unavailable skills or permissions.'}},output,execute:(args,exec)=>{const root=lead(exec);exec.signal?.throwIfAborted();return directory.create({sessionId:root.id,cwd:root.session.header.cwd,agentPreset:ctx.agentPresets.presetForSession(root.session)??undefined},args);}}),
+     defineTool({name:'bot_update',description:'Update this task\'s persistent Bot name, responsibility or lifecycle. Lead only; use the Bot revision from bot_directory. Archiving hides the directory entry and prevents new task bindings; it never stops or deletes existing Sessions.',parameters:{expectedRevision:{type:'integer',required:true},name:{type:'string'},purpose:{type:'string'},status:{type:'string',enum:['active','archived']}},output,execute:(args,exec)=>directory.update(lead(exec).id,args)}),
+     defineTool({name:'bot_use',description:'Associate this root task with an existing active Bot at the user\'s request. Use bot_directory first. This task must use the Bot\'s working directory and must not already belong to another Bot. No model, permissions or task contents are changed.',parameters:{botId:{type:'string',required:true},expectedRevision:{type:'integer',required:true}},output,execute:(args,exec)=>{const root=lead(exec);return directory.bind(args.botId,root.id,args.expectedRevision,root.session.header.cwd);}}),
+   ];
+ }
+ 
+ export function installBots(ctx,{directory}={}){
+-  return ctx.inject(['agents','agentTeams','sessions','sessionPersistence','tools','systemPrompt'],scope=>{
++  return ctx.inject(['agents','agentTeams','agentPresets','sessions','sessionPersistence','tools','systemPrompt'],scope=>{
+     const store=directory??new BotDirectory(path.join(process.env.DSH_HOME??path.join(os.homedir(),'.dsh'),'naumi','bots.json'));
+     const installed=new Map(),streams=new Set();
+     const install=agent=>{
+       if(installed.has(agent)||!scope.agentTeams.tryMembership(agent))return;const disposers=[];
+       try{
+         for(const tool of createBotTools(scope,store))disposers.push(agent.ctx.tools.register(tool));
+-        disposers.push(agent.ctx.systemPrompt.section({name:'naumi:bots',order:agent.ctx.systemPrompt.getSectionOrder('TEAM_POLICY')+2,text:'Naumi has Thread and Bot navigation modes over the same Session engine. Only establish a persistent Bot when the user requests a reusable agent/team; use bot_create and choose its name and responsibilities yourself from that request. Never promote every temporary teammate or ordinary chat into a Bot. Use bot_directory / bot_update / bot_use to manage the real directory. The name is not a model tool address. Starting a new task for an existing Bot creates another Session linked to the same Bot ID. Do not claim cross-session memory beyond the Bot purpose and the actually available linked resources/history.'}));
++        disposers.push(agent.ctx.systemPrompt.section({name:'naumi:bots',order:agent.ctx.systemPrompt.getSectionOrder('TEAM_POLICY')+2,text:'Naumi has Thread and Bot navigation modes over the same Session engine. Only establish a persistent Bot when the user requests a reusable agent/team; use bot_create directly and choose its name and responsibilities yourself from that request. Creating a Bot is an existing product operation, not a software development task: do not search source code, run shell commands or edit internal files to create it. If creation fails, check bot_directory once for a saved identity, report the actual failure and stop this creation attempt; do not improvise a file-based replacement. A successful bot_create completes identity creation; report it concisely and wait for the user task, without additional setup interviews or claiming that external integrations were provisioned. Never promote every temporary teammate or ordinary chat into a Bot. Use bot_directory / bot_update / bot_use to manage the real directory. The name is not a model tool address. Starting a new task for an existing Bot creates another Session linked to the same Bot ID. Do not claim cross-session memory beyond the Bot purpose and the actually available linked resources/history.'}));
+         disposers.push(agent.ctx.systemPrompt.context({name:'naumi:bot-identity',order:agent.ctx.systemPrompt.getContextOrder('TEAM_IDENTITY')+1,required:true,text:()=>{try{const m=scope.agentTeams.membership(agent),bot=store.forSession(m.root.id);return bot?`Persistent Naumi Bot: ${JSON.stringify({id:bot.id,name:bot.name,kind:bot.kind,purpose:bot.purpose,status:bot.status})}\nThis is the identity for this task; preserve its stable ID across tasks. Use bot_update for name/purpose changes, not a conversation-title rename.`:'';}catch{return '';}}}));
+         installed.set(agent,()=>{for(const dispose of disposers.reverse())dispose();});
+       }catch(error){for(const dispose of disposers.reverse())dispose();throw error;}
+@@ -100,6 +108,7 @@ export function installBots(ctx,{directory}={}){
+     for(const agent of scope.agents.list())install(agent);
+     const admit=(req,res)=>{
+       res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');
++      res.setHeader('X-Naumi-Bots-Contract','2');
+       const admission=scope.connection.admit(req);if('rejection'in admission){res.writeHead(admission.rejection).end();return false;}
+       if(admission.peer.principal.kind!=='owner'){res.writeHead(403).end();return false;}return true;
+     };
+diff --git a/scripts/check-bot-runtime.mjs b/scripts/check-bot-runtime.mjs
+new file mode 100644
+index 0000000..cfd20bc
+--- /dev/null
++++ b/scripts/check-bot-runtime.mjs
+@@ -0,0 +1,27 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import assert from 'node:assert/strict';
++
++// Read-only application probe. Never prints or saves launch tokens, cookies or task contents.
++const root=path.resolve(process.argv[2]??'E:/Workspace/deepseek-harness-local');
++const expectedContract=process.argv[3],base='http://127.0.0.1:3080';
++const logs=['server.out.log','server.err.log'].map(p=>fs.readFileSync(path.join(root,'logs',p),'utf8')).join('\n');
++const launch=[...logs.matchAll(/http:\/\/127\.0\.0\.1:3080\/?\?token=[A-Za-z0-9_~.%-]+/g)].at(-1)?.[0];
++assert(launch,'launch URL missing');
++const exchange=await fetch(launch,{redirect:'manual',signal:AbortSignal.timeout(5000)});
++assert.equal(exchange.status,303);
++const cookie=exchange.headers.getSetCookie().map(x=>x.split(';')[0]).join('; ');
++assert(cookie,'owner cookie missing');
++const sessionsResponse=await fetch(base+'/api/session/list',{method:'POST',headers:{cookie,'Content-Type':'application/json'},
++  body:JSON.stringify({type:'client-request',rpcId:'bot-lifecycle-read-only',method:'session/list',payload:{args:{_request:{}}}}),signal:AbortSignal.timeout(10000)});
++assert.equal(sessionsResponse.status,200);
++const sessions=(await sessionsResponse.json()).result;assert(sessions.ok,'session listing failed');
++assert(Array.isArray(sessions.value.items),'session listing invalid');
++const running=sessions.value.items.filter(s=>s.running===true).length;
++const response=await fetch(base+'/naumi/bots',{headers:{cookie},signal:AbortSignal.timeout(5000)});
++assert.equal(response.status,200);const catalog=await response.json();
++assert.equal(catalog.version,1);assert(Array.isArray(catalog.bots));
++const contract=response.headers.get('x-naumi-bots-contract');
++if(expectedContract)assert.equal(contract,expectedContract,'runtime still uses previous module');
++console.log(`RUNTIME sessions=${sessions.value.items.length} running=${running} bots=${catalog.bots.length} revision=${catalog.revision} http=200 contract=${contract??'legacy'}`);
++if(running!==0)process.exitCode=2;
+diff --git a/scripts/deploy-bot-lifecycle.ps1 b/scripts/deploy-bot-lifecycle.ps1
+new file mode 100644
+index 0000000..e05646f
+--- /dev/null
++++ b/scripts/deploy-bot-lifecycle.ps1
+@@ -0,0 +1,25 @@
++param([string]$RuntimeRoot='E:\Workspace\deepseek-harness-local')
++$ErrorActionPreference='Stop'
++$sourceRoot=Split-Path -Parent $PSScriptRoot
++$runtime=(Resolve-Path -LiteralPath $RuntimeRoot).Path
++$target=Join-Path $runtime '.dsh/profiles/web/node_modules/@naumi/dsh-enterprise/bots.js'
++$resolved=(Resolve-Path -LiteralPath $target).Path
++if(!$resolved.StartsWith($runtime+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw 'TARGET_ESCAPE'}
++$evidence=Join-Path $sourceRoot 'evidence/bot-lifecycle'
++$manifest=Get-Content -Raw -LiteralPath (Join-Path $evidence 'hashes.json') | ConvertFrom-Json
++$modified=Join-Path $sourceRoot 'plugins/naumi-enterprise/bots.js'
++if((Get-FileHash -LiteralPath $modified).Hash.ToLowerInvariant() -ne $manifest.modifiedSHA256){throw 'SOURCE_HASH_MISMATCH'}
++$current=(Get-FileHash -LiteralPath $target).Hash.ToLowerInvariant()
++if($current -ne $manifest.originalSHA256 -and $current -ne $manifest.modifiedSHA256){throw 'RUNTIME_HAS_OTHER_CHANGES'}
++& node (Join-Path $PSScriptRoot 'check-bot-runtime.mjs') $runtime
++if($LASTEXITCODE -ne 0){throw 'RUNTIME_NOT_IDLE_OR_UNVERIFIED'}
++if($current -ne $manifest.modifiedSHA256){
++  Copy-Item -LiteralPath $target -Destination (Join-Path $evidence 'original/runtime-bots.js')
++  & (Join-Path $runtime 'Stop-DeepSeek.ps1')
++  Copy-Item -LiteralPath $modified -Destination $target
++  & (Join-Path $runtime 'Start-DeepSeek.ps1')
++}
++& node (Join-Path $PSScriptRoot 'check-bot-runtime.mjs') $runtime '2'
++if($LASTEXITCODE -ne 0){throw 'RUNTIME_POSTCHECK_FAILED'}
++if((Get-FileHash -LiteralPath $target).Hash.ToLowerInvariant() -ne $manifest.modifiedSHA256){throw 'DEPLOY_HASH_MISMATCH'}
++Write-Output 'DEPLOY module=bots.js contract=2 hash=PASS other_modules=UNCHANGED'
+diff --git a/scripts/measure-bot-lifecycle.mjs b/scripts/measure-bot-lifecycle.mjs
+new file mode 100644
+index 0000000..62414d6
+--- /dev/null
++++ b/scripts/measure-bot-lifecycle.mjs
+@@ -0,0 +1,19 @@
++import fs from 'node:fs';
++import * as module from '../plugins/naumi-enterprise/bots.js';
++import {botRuntime} from '../tests/helpers/bot-runtime.mjs';
++
++const durations=[];
++for(let i=0;i<25;i++){
++  const f=await botRuntime(module);
++  try{
++    const start=performance.now();
++    await f.invoke('bot_create',{name:'性能验证 Bot',kind:'agent',purpose:'仅验证本地身份保存，不启动模型或业务任务'});
++    durations.push(performance.now()-start);
++  }finally{await f.dispose();}
++}
++durations.sort((a,b)=>a-b);
++const result={tier:'real Cordis container with fixture host adapters and real disk; no model call',
++  samples:durations.length,p50Ms:+durations[12].toFixed(3),p95Ms:+durations[23].toFixed(3),maxMs:+durations[24].toFixed(3),
++  modelCalls:0,liveBotWrites:0,targetMs:3000,pass:durations[24]<3000};
++fs.writeFileSync('evidence/bot-lifecycle/latency.json',JSON.stringify(result,null,2)+'\n');
++console.log(JSON.stringify(result));if(!result.pass)process.exitCode=1;
+diff --git a/scripts/verify-bot-lifecycle.mjs b/scripts/verify-bot-lifecycle.mjs
+new file mode 100644
+index 0000000..c4d7442
+--- /dev/null
++++ b/scripts/verify-bot-lifecycle.mjs
+@@ -0,0 +1,26 @@
++import assert from 'node:assert/strict';
++import path from 'node:path';
++import {pathToFileURL} from 'node:url';
++import {botRuntime} from '../tests/helpers/bot-runtime.mjs';
++
++const [filename='plugins/naumi-enterprise/bots.js',mode='modified']=process.argv.slice(2);
++const module=await import(pathToFileURL(path.resolve(filename)).href);
++const f=await botRuntime(module);
++const input={name:'运营助手',kind:'agent',purpose:'运营规划与复盘'};
++try{
++  if(mode==='baseline'||mode==='rollback'){
++    await assert.rejects(Promise.resolve().then(()=>f.invoke('bot_create',input)),/cannot get property "agentPresets" without inject/);
++    assert.equal(f.directory.list().bots.length,0);
++    console.log(`${mode.toUpperCase()} reproduced=1 bots=0 error=cannot get property "agentPresets" without inject`);
++  }else{
++    const start=performance.now();
++    const bot=await f.invoke('bot_create',input);
++    assert.equal(bot.agentPreset,'standard');assert.equal(f.directory.list().bots.length,1);
++    const again=await f.invoke('bot_create',input);
++    assert.equal(bot.id,again.id);assert.equal(again.revision,1);
++    const reopened=new module.BotDirectory(path.join(f.dir,'bots.json'));
++    assert.deepEqual(reopened.list(),f.directory.list());await reopened.close();
++    assert(performance.now()-start<3000,'local product operation exceeds 3s');
++    console.log('MODIFIED created=1 preset=standard retry=same-id revision=1 persistence=PASS local-under-3s=PASS');
++  }
++}finally{await f.dispose();}
+diff --git a/tests/helpers/bot-runtime.mjs b/tests/helpers/bot-runtime.mjs
+new file mode 100644
+index 0000000..9e20200
+--- /dev/null
++++ b/tests/helpers/bot-runtime.mjs
+@@ -0,0 +1,44 @@
++import fs from 'node:fs';
++import os from 'node:os';
++import path from 'node:path';
++import {Context} from '@deepseek-ai/cordis';
++
++/** Real Cordis injection boundary; only external host services are fixture adapters. */
++export async function botRuntime(module,{preset='standard',lateAgent=false,failWrite=false}={}){
++  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-bot-runtime-'));
++  const directory=new module.BotDirectory(path.join(dir,'bots.json'));
++  if(failWrite)directory.write=async()=>{throw Error('fixture disk failure');};
++  const ctx=new Context(),tools=new Map(),routes=new Map(),prompts=new Map(),agents=new Map();
++  const root={id:'fixture-root',session:{header:{id:'fixture-root',cwd:dir}},ctx:{
++    tools:{register(tool){tools.set(tool.name,tool);return()=>tools.delete(tool.name);}},
++    systemPrompt:{getSectionOrder:()=>10,getContextOrder:()=>10,
++      section(value){prompts.set(value.name,value);return()=>prompts.delete(value.name);},
++      context(value){prompts.set(value.name,value);return()=>prompts.delete(value.name);}},
++  }};
++  if(!lateAgent)agents.set(root.id,root);
++  const membership=agent=>agents.get(agent.id)===agent?{root:agent,role:'lead',id:agent.id}:undefined;
++  let presetReads=0;
++  const services={
++    agents:{list:()=>[...agents.values()]},agentTeams:{tryMembership:membership,membership(agent){const m=membership(agent);if(!m)throw Error('TEAM_NOT_MEMBER');return m;}},
++    sessions:{get:id=>agents.get(id)?.session},sessionPersistence:{stat:async()=>undefined},
++    tools:{},systemPrompt:{},agentPresets:{presetForSession(session){if(session!==root.session)throw Error('WRONG_SESSION');presetReads++;return preset;}},
++    connection:{admit:()=>({peer:{principal:{kind:'owner'}}})},
++    webServer:{register(route){routes.set(route.path,route.handler);return()=>routes.delete(route.path);}},
++  };
++  const provider=await ctx.plugin({name:'fixture-host-services',apply(scope){
++    for(const [name,value] of Object.entries(services))scope.provide(name,value);
++  }});
++  // Parent matches host.js. agentPresets is deliberately NOT inherited here.
++  let child;
++  const parent=await ctx.plugin({name:'fixture-enterprise-host',inject:['webServer','connection'],apply(scope){child=module.installBots(scope,{directory});}});
++  await child;
++  if(lateAgent){agents.set(root.id,root);await ctx.serial('agent/created',{agent:root,source:'create'});}
++  const dispose=async()=>{
++    await parent.dispose();await provider.dispose();await directory.close();
++    if(!path.resolve(dir).startsWith(path.resolve(os.tmpdir())+path.sep))throw Error('BAD_FIXTURE_PATH');
++    fs.rmSync(dir,{recursive:true,force:true});
++  };
++  return {root,ctx,tools,routes,prompts,directory,dir,presetReads:()=>presetReads,dispose,
++    invoke:(name,input)=>tools.get(name).execute(input,{agent:root}),
++  };
++}
+diff --git a/tests/naumi-bot-runtime.test.mjs b/tests/naumi-bot-runtime.test.mjs
+new file mode 100644
+index 0000000..f87edf6
+--- /dev/null
++++ b/tests/naumi-bot-runtime.test.mjs
+@@ -0,0 +1,84 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import path from 'node:path';
++import * as module from '../plugins/naumi-enterprise/bots.js';
++import {botRuntime} from './helpers/bot-runtime.mjs';
++
++const input={name:'运营助手',kind:'agent',purpose:'运营规划与复盘'};
++for(const lateAgent of [false,true])test(`real Cordis dependency injection creates Bot (lateAgent=${lateAgent})`,async()=>{
++  const f=await botRuntime(module,{lateAgent});
++  try{
++    assert.equal(f.tools.size,4);
++    const bot=await f.invoke('bot_create',input);
++    assert.equal(bot.agentPreset,'standard');assert.equal(f.presetReads(),1);
++    assert.equal(bot.homeSessionId,f.root.id);assert.equal(f.directory.list().bots.length,1);
++    assert.match(f.prompts.get('naumi:bot-identity').text(),/运营助手/);
++  }finally{await f.dispose();}
++  assert.equal(f.tools.size,0);assert.equal(f.routes.size,0);
++});
++test('an unselected preset remains absent rather than inventing a default or changing model/permissions',async()=>{
++  const f=await botRuntime(module,{preset:null});
++  try{
++    const before=structuredClone(f.root.session),bot=await f.invoke('bot_create',input);
++    assert(!Object.hasOwn(bot,'agentPreset'));assert.deepEqual(f.root.session,before);
++  }finally{await f.dispose();}
++});
++test('concurrent identical retries produce one write, one event and one stable identity',async()=>{
++  const f=await botRuntime(module);
++  try{
++    let writes=0,events=0;const write=f.directory.write;
++    f.directory.write=async next=>{writes++;await write(next);};f.directory.subscribe(()=>events++);
++    const bots=await Promise.all(Array.from({length:8},()=>f.invoke('bot_create',input)));
++    assert.equal(new Set(bots.map(b=>b.id)).size,1);assert.equal(writes,1);assert.equal(events,1);
++    assert.equal(f.directory.list().revision,1);assert.equal(bots.at(-1).revision,1);
++  }finally{await f.dispose();}
++});
++test('retry after host restart returns the saved Bot and publishes no second creation',async()=>{
++  const f=await botRuntime(module);
++  try{
++    const bot=await f.invoke('bot_create',input),file=path.join(f.dir,'bots.json');
++    const before=fs.readFileSync(file,'utf8'),restored=new module.BotDirectory(file);
++    try{
++      const again=await restored.create({sessionId:f.root.id,cwd:f.dir,agentPreset:'standard'},input);
++      assert.equal(again.id,bot.id);assert.equal(fs.readFileSync(file,'utf8'),before);
++    }finally{await restored.close();}
++  }finally{await f.dispose();}
++});
++test('retry cannot rename, replace responsibility, switch preset/workspace or revive an archived Bot',async()=>{
++  const f=await botRuntime(module);
++  try{
++    await f.invoke('bot_create',input);
++    for(const patch of [{name:'另一个名字'},{kind:'team'},{purpose:'其他职责'}])await assert.rejects(f.invoke('bot_create',{...input,...patch}),/BOT_SESSION_ALREADY_BOUND/);
++    await assert.rejects(f.directory.create({sessionId:f.root.id,cwd:f.dir,agentPreset:'other'},input),/BOT_SESSION_ALREADY_BOUND/);
++    await assert.rejects(f.directory.create({sessionId:f.root.id,cwd:path.dirname(f.dir),agentPreset:'standard'},input),/BOT_SESSION_ALREADY_BOUND/);
++    await f.invoke('bot_update',{expectedRevision:1,status:'archived'});
++    await assert.rejects(f.invoke('bot_create',input),/BOT_ARCHIVED/);
++    assert.equal(f.directory.list().bots.length,1);assert.equal(f.directory.list().bots[0].status,'archived');
++  }finally{await f.dispose();}
++});
++test('failed disk persistence leaves no false ready Bot and the same request succeeds after recovery',async()=>{
++  const f=await botRuntime(module);
++  try{
++    const write=f.directory.write;f.directory.write=async()=>{throw Error('fixture disk failure');};
++    await assert.rejects(f.invoke('bot_create',input),/fixture disk failure/);
++    assert.equal(f.directory.list().bots.length,0);assert(!fs.existsSync(path.join(f.dir,'bots.json')));
++    f.directory.write=write;await f.invoke('bot_create',input);assert.equal(f.directory.list().bots.length,1);
++  }finally{await f.dispose();}
++});
++test('cancelled tool call does not create a Bot or read the selected preset',async()=>{
++  const f=await botRuntime(module);
++  try{
++    await assert.rejects(f.tools.get('bot_create').execute(input,{agent:f.root,signal:AbortSignal.abort()}),{name:'AbortError'});
++    assert.equal(f.presetReads(),0);assert.equal(f.directory.list().bots.length,0);
++  }finally{await f.dispose();}
++});
++test('creation is documented as a bounded product operation, not a source-code repair job',async()=>{
++  const f=await botRuntime(module);
++  try{
++    const policy=f.prompts.get('naumi:bots').text;
++    assert.match(policy,/bot_create directly/);assert.match(policy,/check bot_directory once/);
++    assert.match(policy,/do not search source code, run shell commands or edit internal files/);
++    assert.match(policy,/without additional setup interviews/);
++  }finally{await f.dispose();}
++});
+diff --git a/tests/naumi-bots.test.mjs b/tests/naumi-bots.test.mjs
+index 7263021..56709ba 100644
+--- a/tests/naumi-bots.test.mjs
++++ b/tests/naumi-bots.test.mjs
+@@ -11,7 +11,7 @@ import {navigationMode,botSessions,botTarget,botSelected,currentSessionId,botAct
+ function fixture(options={}){
+   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-bots-')),file=path.join(dir,'bots.json');let counter=0;
+   const store=new BotDirectory(file,{uuid:()=>String(++counter),now:()=>new Date('2026-11-16T09:00:00Z').toISOString(),...options});
+-  const root={id:'session-1',session:{header:{cwd:dir}}},member={id:'member-1'},other={id:'other'},ctx={agentTeams:{membership:agent=>agent===root?{root,id:root.id,role:'lead'}:agent===member?{root,id:root.id,role:'teammate'}:(()=>{throw Error('INVALID_AGENT');})()}};
++  const root={id:'session-1',session:{header:{cwd:dir}}},member={id:'member-1'},other={id:'other'},ctx={agentPresets:{presetForSession:()=>null},agentTeams:{membership:agent=>agent===root?{root,id:root.id,role:'lead'}:agent===member?{root,id:root.id,role:'teammate'}:(()=>{throw Error('INVALID_AGENT');})()}};
+   const cleanup=async()=>{await store.close();assert(path.resolve(dir).startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(dir,{recursive:true,force:true});};
+   const create=(name='Agent 自主选择的团队名')=>store.create({sessionId:root.id,cwd:dir},{name,kind:'team',purpose:'根据用户的实际需求整理资料与复核结果'});
+   return {dir,file,store,root,member,other,ctx,cleanup,create};
+@@ -32,7 +32,7 @@ test('parallel updates are serialized with one CAS conflict',async()=>{
+   const f=fixture();try{await f.create();const values=await Promise.allSettled([f.store.update('session-1',{name:'甲',expectedRevision:1}),f.store.update('session-1',{name:'乙',expectedRevision:1})]);assert.equal(values.filter(v=>v.status==='fulfilled').length,1);assert.match(values.find(v=>v.status==='rejected').reason.message,/BOT_CONFLICT/);}finally{await f.cleanup();}
+ });
+ test('name, purpose, kind, revision and root binding validation have no partial writes',async()=>{
+-  const f=fixture();try{assert.throws(()=>f.store.create({sessionId:'s',cwd:f.dir},{name:'',kind:'team',purpose:'task'}));assert.throws(()=>f.store.create({sessionId:'s',cwd:f.dir},{name:'Name',kind:'bad',purpose:'task'}));const bot=await f.create();await assert.rejects(f.create(),/BOT_SESSION_ALREADY_BOUND/);await assert.rejects(f.store.bind(bot.id,'new',1,path.dirname(f.dir)),/BOT_WORKSPACE_MISMATCH/);await assert.rejects(f.store.update('session-1',{expectedRevision:99,name:'New'}),/BOT_CONFLICT/);assert.equal(f.store.list().revision,1);}finally{await f.cleanup();}
++  const f=fixture();try{assert.throws(()=>f.store.create({sessionId:'s',cwd:f.dir},{name:'',kind:'team',purpose:'task'}));assert.throws(()=>f.store.create({sessionId:'s',cwd:f.dir},{name:'Name',kind:'bad',purpose:'task'}));const bot=await f.create();await assert.rejects(f.create('不同的名称'),/BOT_SESSION_ALREADY_BOUND/);await assert.rejects(f.store.bind(bot.id,'new',1,path.dirname(f.dir)),/BOT_WORKSPACE_MISMATCH/);await assert.rejects(f.store.update('session-1',{expectedRevision:99,name:'New'}),/BOT_CONFLICT/);assert.equal(f.store.list().revision,1);}finally{await f.cleanup();}
+ });
+ test('a Session cannot be stolen by another Bot; duplicate active names are rejected',async()=>{
+   const f=fixture();try{const first=await f.create();await assert.rejects(f.store.create({sessionId:'s2',cwd:f.dir},{name:first.name,kind:'agent',purpose:'task'}),/BOT_NAME_EXISTS/);const second=await f.store.create({sessionId:'s2',cwd:f.dir},{name:'另一位智能体',kind:'agent',purpose:'不同职责'});await assert.rejects(f.store.bind(first.id,'s2',1,f.dir),/BOT_SESSION_ALREADY_BOUND/);assert.equal(f.store.forSession('s2').id,second.id);}finally{await f.cleanup();}
+@@ -82,7 +82,7 @@ async function routesFixture(){
+   return {...f,scope,routes,call};
+ }
+ test('directory HTTP is owner-only and forbids undeclared writes and cross-origin binding',async()=>{
+-  const f=await routesFixture();try{assert.equal((await f.call()).status,200);assert.equal((await f.call({method:'DELETE'})).status,405);assert.equal((await f.call({method:'POST',body:{}})).status,403);assert.equal((await f.call({method:'POST',body:{},headers:{'x-naumi-bots':'1',origin:'https://foreign'}})).status,403);assert.equal((await f.call({admission:{peer:{principal:{kind:'guest'}}}})).status,403);assert.equal((await f.call({admission:{rejection:401}})).status,401);}finally{await f.cleanup();}
++  const f=await routesFixture();try{const response=await f.call();assert.equal(response.status,200);assert.equal(response.headers['X-Naumi-Bots-Contract'],'2');assert.equal((await f.call({method:'DELETE'})).status,405);assert.equal((await f.call({method:'POST',body:{}})).status,403);assert.equal((await f.call({method:'POST',body:{},headers:{'x-naumi-bots':'1',origin:'https://foreign'}})).status,403);assert.equal((await f.call({admission:{peer:{principal:{kind:'guest'}}}})).status,403);assert.equal((await f.call({admission:{rejection:401}})).status,401);}finally{await f.cleanup();}
+ });
+ test('browser can bind a real root task, but cannot rename Bots or bind subagents',async()=>{
+   const f=await routesFixture();try{const bot=await f.create(),headers={'x-naumi-bots':'1',origin:'http://127.0.0.1:3080'};

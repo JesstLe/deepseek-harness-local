@@ -12,5 +12,11 @@ contextBridge.exposeInMainWorld('naumiDesktop',{
   onBrowserIssue:listener=>subscribe('naumi:browser-issue',listener),
   onToolRequest:listener=>subscribe('naumi:browser-tool-request',listener),
   retry:()=>ipcRenderer.invoke('naumi:retry'),
+  connectEnterprise:origin=>ipcRenderer.invoke('naumi:enterprise-connect',origin),
+  loginEnterprise:()=>ipcRenderer.invoke('naumi:enterprise-login'),
+  connectionState:()=>ipcRenderer.invoke('naumi:connection-state'),
+  connectionSettings:()=>ipcRenderer.invoke('naumi:connection-settings'),
+  cancelConnection:()=>ipcRenderer.invoke('naumi:connection-cancel'),
+  resumeWorkspace:()=>ipcRenderer.invoke('naumi:connection-resume'),
   product:'Naumi'
 });

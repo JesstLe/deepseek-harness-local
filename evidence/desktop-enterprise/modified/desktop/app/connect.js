@@ -1,0 +1,3 @@
+'use strict';
+const form=document.querySelector('#connection'),button=form.querySelector('button'),error=document.querySelector('#error');
+form.addEventListener('submit',async e=>{e.preventDefault();button.disabled=true;error.textContent='';try{const result=await window.naumiDesktop.connectEnterprise(document.querySelector('#origin').value.trim());if(!result.ok)error.textContent=({ENTERPRISE_ORIGIN_INVALID:'请输入 HTTPS 企业地址',ENTERPRISE_PROFILE_SWITCH_REQUIRED:'此工作区已连接其他企业',ENTERPRISE_CONFIG_INVALID:'企业配置需要修复'})[result.error]??'连接未完成，请重试';}catch{error.textContent='连接未完成，请重试';}finally{button.disabled=false;}});

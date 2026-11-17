@@ -1,0 +1,1437 @@
+diff --git a/original/.gitattributes.snapshot b/modified/.gitattributes.snapshot
+index e611265..1d089b6 100644
+--- a/original/.gitattributes.snapshot
++++ b/modified/.gitattributes.snapshot
+@@ -125,3 +125,10 @@ plugins/naumi-ui-layout/UPSTREAM.json text eol=lf
+ /plugins/naumi-enterprise/desktop-identity.js text eol=lf
+ /scripts/*desktop-lifecycle*.mjs text eol=lf
+ /docs/implementation/DESKTOP_LIFECYCLE_M5_2.md text eol=lf
++/evidence/desktop-enterprise/** -text whitespace=cr-at-eol
++/evidence/desktop-enterprise/DIFF_FILE.patch -text whitespace=-blank-at-eol
++/evidence/desktop-enterprise/ROLLBACK.sh text eol=lf
++/plugins/naumi-enterprise/desktop-enterprise.js text eol=lf
++/scripts/*desktop-enterprise*.mjs text eol=lf
++/docs/implementation/DESKTOP_ENTERPRISE_M5_3.md text eol=lf
++/evidence/desktop-enterprise/*.log -text whitespace=cr-at-eol,-blank-at-eol
+diff --git a/original/.gitignore b/modified/.gitignore
+index 479c78e..6eb16c1 100644
+--- a/original/.gitignore
++++ b/modified/.gitignore
+@@ -12,3 +12,7 @@ evidence/employee-package/rollback-copy-*/
+ evidence/employee-package/pack-*/
+ evidence/desktop-lifecycle/rollback-copy-*/
+ evidence/desktop-lifecycle/pack-*/
++/evidence/desktop-enterprise/baseline-fixture*/
++/evidence/desktop-enterprise/modified-fixture*/
++/evidence/desktop-enterprise/rollback-copy-*/
++/evidence/desktop-enterprise/pack-*/
+diff --git a/original/desktop/app/backend.cjs b/modified/desktop/app/backend.cjs
+index fb43130..1cf924d 100644
+--- a/original/desktop/app/backend.cjs
++++ b/modified/desktop/app/backend.cjs
+@@ -34,8 +34,8 @@ async function probeIdentity(settings,{fetcher=fetch}={}){
+  try{
+   const r=await fetcher(settings.url+'/naumi/desktop-instance',{redirect:'error',headers:{'x-naumi-desktop-challenge':nonce},signal:AbortSignal.timeout(1500)});if(!r.ok)return null;
+   const reader=r.body.getReader();let bytes=0,text='';for(;;){const {done,value}=await reader.read();if(done)break;bytes+=value.length;if(bytes>4096){await reader.cancel();return null;}text+=Buffer.from(value).toString('utf8');}
+-  const v=JSON.parse(text);if(v.version!==1||v.id!==settings.identity.id||!Number.isInteger(v.pid)||v.pid<1||!/^[a-f0-9]{64}$/.test(v.bundleId)||!/^[a-f0-9]{64}$/.test(v.proof))return null;
+-  const proof=createHmac('sha256',settings.identity.key).update([nonce,v.id,v.pid,v.bundleId].join('|')).digest();
++  const v=JSON.parse(text);if(v.version!==2||v.id!==settings.identity.id||v.homeHash!==settings.identity.homeHash||v.enterpriseOrigin!==(settings.enterpriseOrigin??'')||v.port!==Number(new URL(settings.url).port)||!Number.isInteger(v.pid)||v.pid<1||!/^[a-f0-9]{64}$/.test(v.bundleId)||!/^[a-f0-9]{64}$/.test(v.proof))return null;
++  const proof=createHmac('sha256',settings.identity.key).update([2,nonce,v.id,v.pid,v.bundleId,v.homeHash,v.port,v.enterpriseOrigin].join('|')).digest();
+   return timingSafeEqual(proof,Buffer.from(v.proof,'hex'))?v:null;
+  }catch{return null;}
+ }
+@@ -52,7 +52,7 @@ async function stopInstance(settings,pid,bundleId,{timeoutMs=10000}={}){
+  if(!alive(pid))return;
+  const remote=await probeIdentity(settings);if(!remote){if(!alive(pid))return;throw Error('BACKEND_STOP_UNKNOWN');}
+  if(remote.pid!==pid||remote.bundleId!==bundleId)throw Error('BACKEND_STOP_IDENTITY_CHANGED');
+- const nonce=randomBytes(32).toString('hex'),proof=createHmac('sha256',settings.identity.key).update(['stop',nonce,settings.identity.id,pid,bundleId].join('|')).digest('hex');
++ const nonce=randomBytes(32).toString('hex'),proof=createHmac('sha256',settings.identity.key).update([2,'stop',nonce,settings.identity.id,pid,bundleId,settings.identity.homeHash,Number(new URL(settings.url).port),settings.enterpriseOrigin??''].join('|')).digest('hex');
+  try{const r=await fetch(settings.url+'/naumi/desktop-instance',{method:'POST',redirect:'error',headers:{'x-naumi-desktop-challenge':nonce,'x-naumi-desktop-stop':proof},signal:AbortSignal.timeout(2000)});if(!r.ok)throw Error('STOP');await r.arrayBuffer();}catch{if(!alive(pid))return;throw Error('BACKEND_STOP_UNKNOWN');}
+  const deadline=Date.now()+timeoutMs;while(Date.now()<deadline){if(!alive(pid))return;await delay(50);}throw Error('BACKEND_STOP_UNKNOWN');
+ }
+@@ -91,9 +91,9 @@ async function ensureBackend(settings,{fetcher=fetch,startTimeoutMs=90000,pollMs
+  const entry=path.join(settings.root,'node_modules/@deepseek-ai/dsh/lib/bin.js');if(!fs.existsSync(entry))throw Error('BACKEND_RUNTIME_MISSING');
+  fs.mkdirSync(settings.logDir,{recursive:true});
+  const target=new URL(settings.url),runId=randomUUID(),env={...process.env,PATH:path.join(settings.root,'bin')+path.delimiter+settings.root+path.delimiter+(process.env.PATH??''),DSH_HOME:settings.home,DSH_TELEMETRY_MODE:'DISABLED'};
+- delete env.ELECTRON_RUN_AS_NODE;delete env.NAUMI_DESKTOP_INSTANCE_ID;delete env.NAUMI_DESKTOP_BUNDLE_ID;
++ delete env.ELECTRON_RUN_AS_NODE;delete env.NAUMI_DESKTOP_INSTANCE_ID;delete env.NAUMI_DESKTOP_BUNDLE_ID;delete env.NAUMI_ENTERPRISE_ORIGIN;
+  const base={pid:null,port:Number(target.port),bundleId:settings.runtime?.bundleId,phase:'starting',runId};
+- if(settings.isolated){env.NAUMI_DESKTOP_INSTANCE_ID=settings.identity.id;env.NAUMI_DESKTOP_BUNDLE_ID=settings.runtime.bundleId;}
++ if(settings.isolated){env.NAUMI_DESKTOP_INSTANCE_ID=settings.identity.id;env.NAUMI_DESKTOP_BUNDLE_ID=settings.runtime.bundleId;if(settings.enterpriseOrigin)env.NAUMI_ENTERPRISE_ORIGIN=settings.enterpriseOrigin;}
+  let out,err;try{out=fs.openSync(path.join(settings.logDir,'server.out.log'),'w');err=fs.openSync(path.join(settings.logDir,'server.err.log'),'w');}catch(e){if(out!==undefined)fs.closeSync(out);throw e;}
+  let child;
+  // Windows libuv's non-detached child job dies with the GUI. Standalone workers have an
+diff --git a/modified/desktop/app/connect.css b/modified/desktop/app/connect.css
+new file mode 100644
+index 0000000..c17c2f3
+--- /dev/null
++++ b/modified/desktop/app/connect.css
+@@ -0,0 +1 @@
++:root{font:15px "Segoe UI","Microsoft YaHei",sans-serif;color:#17243a;background:#f5f7fb;color-scheme:light}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(ellipse at 50% 0%,#e8edff,transparent 65%)}main{width:min(440px,90vw);padding:40px;background:#fff;border:1px solid #e5eaf3;border-radius:22px;box-shadow:0 22px 70px #1c315610}h1{font-size:25px;letter-spacing:-.6px;margin:22px 0 30px}label{display:block;font-weight:600;margin-bottom:10px}input,button{width:100%;font:inherit;border-radius:10px}input{height:48px;border:1px solid #ccd5e4;padding:0 14px;background:#fff;color:#17243a}input:focus{outline:3px solid #e4eaff;border-color:#6479e8}button{height:47px;border:0;background:#5369d8;color:white;font-weight:600;cursor:pointer}button:hover{background:#4358c4}button:disabled{opacity:.6;cursor:wait}#error{font-size:13px;color:#c24040;min-height:20px;margin:12px 0}
+diff --git a/modified/desktop/app/connect.html b/modified/desktop/app/connect.html
+new file mode 100644
+index 0000000..8f283c3
+--- /dev/null
++++ b/modified/desktop/app/connect.html
+@@ -0,0 +1 @@
++<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'"><title>Naumi</title><link rel="stylesheet" href="connect.css"><main><img src="assets/symbol.svg" alt="Naumi" width="56" height="56"><h1>连接企业</h1><form id="connection"><label for="origin">企业地址</label><input id="origin" name="origin" type="url" placeholder="https://" autocomplete="url" required autofocus><p id="error" role="alert"></p><button type="submit">连接</button></form></main><script src="connect.js"></script></html>
+diff --git a/modified/desktop/app/connect.js b/modified/desktop/app/connect.js
+new file mode 100644
+index 0000000..a2bda8a
+--- /dev/null
++++ b/modified/desktop/app/connect.js
+@@ -0,0 +1,3 @@
++'use strict';
++const form=document.querySelector('#connection'),button=form.querySelector('button'),error=document.querySelector('#error');
++form.addEventListener('submit',async e=>{e.preventDefault();button.disabled=true;error.textContent='';try{const result=await window.naumiDesktop.connectEnterprise(document.querySelector('#origin').value.trim());if(!result.ok)error.textContent=({ENTERPRISE_ORIGIN_INVALID:'请输入 HTTPS 企业地址',ENTERPRISE_PROFILE_SWITCH_REQUIRED:'此工作区已连接其他企业',ENTERPRISE_CONFIG_INVALID:'企业配置需要修复'})[result.error]??'连接未完成，请重试';}catch{error.textContent='连接未完成，请重试';}finally{button.disabled=false;}});
+diff --git a/modified/desktop/app/enterprise.cjs b/modified/desktop/app/enterprise.cjs
+new file mode 100644
+index 0000000..ee82519
+--- /dev/null
++++ b/modified/desktop/app/enterprise.cjs
+@@ -0,0 +1,51 @@
++'use strict';
++const fs=require('node:fs'),path=require('node:path');
++const {atomic,exists}=require('./profile.cjs');
++const MAX_REQUEST=1024*1024,MAX_RESPONSE=8*1024*1024;
++function enterpriseOrigin(value){
++ try{if(typeof value!=='string'||value.length>2048||value!==value.trim())throw Error();const u=new URL(value);
++  if(u.username||u.password||u.pathname!=='/'||u.search||u.hash||u.protocol!=='https:'&&!(u.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(u.hostname)))throw Error();return u.origin;
++ }catch{throw Error('ENTERPRISE_ORIGIN_INVALID');}
++}
++function readConnection(home){
++ const file=path.join(home,'desktop-enterprise.json');if(!exists(file))return null;
++ if(!fs.lstatSync(file).isFile()||fs.lstatSync(file).isSymbolicLink())throw Error('ENTERPRISE_CONFIG_INVALID');
++ let v;try{v=JSON.parse(fs.readFileSync(file,'utf8'));}catch{throw Error('ENTERPRISE_CONFIG_INVALID');}
++ if(v.version!==1||enterpriseOrigin(v.origin)!==v.origin)throw Error('ENTERPRISE_CONFIG_INVALID');return v;
++}
++function connect(home,origin){
++ origin=enterpriseOrigin(origin);const prior=readConnection(home);
++ // Switching issuer must create/migrate an isolated profile, never reuse signed device/cache state.
++ if(prior&&prior.origin!==origin)throw Error('ENTERPRISE_PROFILE_SWITCH_REQUIRED');
++ if(!prior)atomic(path.join(home,'desktop-enterprise.json'),{version:1,origin});return {version:1,origin};
++}
++function validateRequest(input,origin){
++ if(!input||Array.isArray(input)||Object.keys(input).some(k=>!['origin','endpoint','method','body'].includes(k))||input.origin!==origin)throw Error('ENTERPRISE_REQUEST_FORBIDDEN');
++ const method=input.method??'GET';
++ if(!(input.endpoint==='/api/workspace'&&method==='GET'||input.endpoint==='/api/digital-employees'&&['GET','POST'].includes(method)))throw Error('ENTERPRISE_REQUEST_FORBIDDEN');
++ if(method==='GET'&&input.body!==undefined||method==='POST'&&(typeof input.body!=='string'||Buffer.byteLength(input.body)>MAX_REQUEST))throw Error('ENTERPRISE_BODY_INVALID');
++ if(method==='POST'){let v;try{v=JSON.parse(input.body);}catch{throw Error('ENTERPRISE_BODY_INVALID');}if(!v||typeof v!=='object'||Array.isArray(v))throw Error('ENTERPRISE_BODY_INVALID');
++  // Chromium may retransmit a request on transport failure. Every command must retain the
++  // caller's durable UUID for the enterprise transaction/receipt deduplication authority.
++  if(typeof v.operationId!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v.operationId))throw Error('ENTERPRISE_OPERATION_ID_REQUIRED');
++ }
++ return {endpoint:input.endpoint,method,body:input.body};
++}
++class EnterpriseSession{
++ constructor({origin,session}){this.origin=enterpriseOrigin(origin);this.session=session;this.running=0;}
++ descriptor(){return {protocolVersion:1,origin:this.origin};}
++ async perform(input,{signal}={}){
++  const request=validateRequest(input,this.origin);if(this.running>=4)throw Error('ENTERPRISE_BUSY_NO_REPLAY');this.running++;
++  try{
++   const response=await this.session.fetch(this.origin+request.endpoint,{method:request.method,body:request.body,credentials:'include',redirect:'error',headers:{Accept:'application/json',...(request.method==='POST'?{'Content-Type':'application/json',Origin:this.origin}:{})},signal:AbortSignal.any([...(signal?[signal]:[]),AbortSignal.timeout(15000)])});
++   if(!response.headers.get('content-type')?.toLowerCase().includes('application/json'))throw Error('ENTERPRISE_RESPONSE_INVALID');
++   const reader=response.body?.getReader();if(!reader)throw Error('ENTERPRISE_RESPONSE_INVALID');let bytes=0;const chunks=[];
++   try{for(;;){const {done,value}=await reader.read();if(done)break;bytes+=value.length;if(bytes>MAX_RESPONSE)throw Error('ENTERPRISE_RESPONSE_TOO_LARGE');chunks.push(Buffer.from(value));}}finally{await reader.cancel().catch(()=>{});}
++   const body=Buffer.concat(chunks).toString('utf8');try{JSON.parse(body);}catch{throw Error('ENTERPRISE_RESPONSE_INVALID');}
++   // Only JSON and status cross the loopback bridge. No Cookie/Set-Cookie or arbitrary headers.
++   return {status:response.status,body};
++  }catch(error){throw Error(/^ENTERPRISE_[A-Z_]+$/.test(error.message)?error.message:'ENTERPRISE_UNAVAILABLE_NO_REPLAY');}
++  finally{this.running--;}
++ }
++}
++module.exports={enterpriseOrigin,readConnection,connect,validateRequest,EnterpriseSession,MAX_REQUEST,MAX_RESPONSE};
+diff --git a/original/desktop/app/main.cjs b/modified/desktop/app/main.cjs
+index f7054da..e29ee17 100644
+--- a/original/desktop/app/main.cjs
++++ b/modified/desktop/app/main.cjs
+@@ -1,7 +1,8 @@
+ 'use strict';
+ const path=require('node:path');
+ const fs=require('node:fs');
+-const {app,BrowserWindow,ipcMain,Menu,nativeTheme,shell}=require('electron');
++const {app,BrowserWindow,ipcMain,Menu,nativeTheme,shell,session}=require('electron');
++const {readConnection,connect,EnterpriseSession}=require('./enterprise.cjs');
+ const {Guests}=require('./guests.cjs');
+ const {startBridge}=require('./tools.cjs');
+ const {localSettings,ensureBackend,stopBackend,createQuitGate}=require('./backend.cjs');
+@@ -9,7 +10,7 @@ app.setName('Naumi');app.setAppUserModelId('com.naumi.desktop');
+ if(process.env.NAUMI_USER_DATA)app.setPath('userData',path.resolve(process.env.NAUMI_USER_DATA));
+ if(process.env.NAUMI_TEST_HIDDEN==='1'){app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');app.commandLine.appendSwitch('disable-renderer-backgrounding');}
+ const locked=app.requestSingleInstanceLock();
+-let window,primarySession,guests,bridge,backend,settings,booting=false;
++let window,primarySession,guests,bridge,backend,settings,enterprise,login,loginAfterBoot=false,booting=false,closing=false;
+ if(!locked){app.quit();}else{
+ app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.show();window.focus();}});
+ app.whenReady().then(async()=>{
+@@ -17,14 +18,16 @@ app.whenReady().then(async()=>{
+  const icon=path.join(__dirname,'assets/naumi.ico');
+  window=new BrowserWindow({width:1460,height:930,minWidth:1000,minHeight:640,show:false,title:'Naumi',backgroundColor:'#f7f9fc',icon,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webviewTag:true,partition:'persist:naumi-workbench',spellcheck:false,backgroundThrottling:false}});
+  primarySession=window.webContents.session;
++ window.on('close',()=>{closing=true;});
+  window.on('page-title-updated',e=>{e.preventDefault();window.setTitle('Naumi');});
+  window.webContents.on('will-navigate',(event,url)=>{if(settings&&new URL(url).origin!==settings.url)event.preventDefault();});
+  window.webContents.setWindowOpenHandler(({url})=>{
+   try{const u=new URL(url);if(!['http:','https:'].includes(u.protocol))return {action:'deny'};
+-   if(u.origin==='http://127.0.0.1:3112'&&u.pathname.startsWith('/login')){
++   if(settings?.isolated&&u.origin===settings.enterpriseOrigin&&u.pathname==='/login'){openEnterpriseLogin();
++   }else if(!settings?.isolated&&u.origin==='http://127.0.0.1:3112'&&u.pathname.startsWith('/login')){
+     const login=new BrowserWindow({parent:window,width:1040,height:780,title:'Naumi · 登录',icon,backgroundColor:'#fff',webPreferences:{session:window.webContents.session,sandbox:true,contextIsolation:true,nodeIntegration:false}});
+     login.webContents.setWindowOpenHandler(()=>({action:'deny'}));login.webContents.on('will-navigate',(e,next)=>{if(new URL(next).origin!==u.origin)e.preventDefault();});void login.loadURL(url);
+-    login.on('closed',()=>{if(!window.isDestroyed())window.webContents.reload();});
++    login.on('closed',()=>{if(!closing&&!window.isDestroyed())window.webContents.reload();});
+    }else void shell.openExternal(u.href);
+   }catch{}return {action:'deny'};
+  });
+@@ -34,28 +37,50 @@ app.whenReady().then(async()=>{
+  ipcMain.handle('naumi:browser-release',(e,lease)=>{trusted(e);return guests.release(e.sender,lease);});
+  ipcMain.handle('naumi:browser-bind',(e,value)=>{trusted(e);return guests.bind(e.sender,value);});
+  ipcMain.handle('naumi:retry',e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');void boot();});
++ ipcMain.handle('naumi:enterprise-connect',(e,origin)=>{
++  if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame||new URL(e.senderFrame.url).protocol!=='file:'||new URL(e.senderFrame.url).pathname!==new URL(require('node:url').pathToFileURL(path.join(__dirname,'connect.html')).href).pathname||!settings?.isolated)throw Error('INVALID_DESKTOP_SENDER');
++  try{connect(settings.home,origin);loginAfterBoot=true;void boot();return {ok:true};}catch(error){return {ok:false,error:/^ENTERPRISE_[A-Z_]+$/.test(error.message)?error.message:'ENTERPRISE_CONFIG_INVALID'};}
++ });
++ ipcMain.handle('naumi:enterprise-login',e=>{trusted(e);openEnterpriseLogin();return {ok:true};});
+  await showStartup();
+  if(process.env.NAUMI_TEST_HIDDEN!=='1')window.show();
+  await boot();
+- if(process.env.NAUMI_TEST==='1')globalThis.__naumiTest={window,guests,bridge,settings,backend};
+ }).catch(error=>{console.error('NAUMI_DESKTOP_START_FAILED',error.message);app.quit();});
+-const quitGate=createQuitGate({shutdown:async()=>{try{await guests?.flush();await primarySession?.cookies.flushStore();}finally{await bridge?.close();await stopBackend(backend);}},onReady:()=>app.quit(),onError:()=>app.exit(1)});
+-app.on('before-quit',event=>quitGate.beforeQuit(event));
++const quitGate=createQuitGate({shutdown:async()=>{try{if(login&&!login.isDestroyed()){login.webContents.stop();login.destroy();}await guests?.flush();await primarySession?.cookies.flushStore();await enterprise?.session.cookies.flushStore();}finally{await bridge?.close();await stopBackend(backend);}},onReady:()=>app.quit(),onError:()=>app.exit(1)});
++app.on('before-quit',event=>{closing=true;quitGate.beforeQuit(event);});
+ app.on('window-all-closed',()=>app.quit());
+ }
+ async function showStartup(error=''){
+- if(!window||window.isDestroyed())return;
++ if(closing||!window||window.isDestroyed())return;
+  await window.loadFile(path.join(__dirname,'startup.html'),{query:error?{error}:{}});
+ }
+ async function boot(){
+- if(booting)return;booting=true;
++ if(booting||closing)return;booting=true;
+  try{
+   settings??=localSettings(app);
++  if(settings.isolated){
++   let connection=readConnection(settings.home);
++   if(process.env.NAUMI_ENTERPRISE_ORIGIN)connection=connect(settings.home,process.env.NAUMI_ENTERPRISE_ORIGIN);
++   if(!connection){await window.loadFile(path.join(__dirname,'connect.html'));return;}
++   settings.enterpriseOrigin=connection.origin;
++   enterprise??=new EnterpriseSession({origin:connection.origin,session:session.fromPartition('persist:naumi-enterprise-'+require('node:crypto').createHash('sha256').update(connection.origin).digest('hex'))});
++  }
+   const nextBackend=await ensureBackend(settings);
+   backend=backend?.owned&&!nextBackend.owned&&backend.child.exitCode===null&&backend.child.signalCode===null?{...nextBackend,owned:true,child:backend.child}:nextBackend;
+   if(!guests){guests=new Guests({hostURL:settings.url,account:'local',timeout:process.env.NAUMI_TEST==='1'?Number(process.env.NAUMI_TEST_TIMEOUT??30000):30000});guests.attach(window);}
+-  if(!bridge)bridge=await startBridge({home:settings.home,guests,window});
++  if(!bridge)bridge=await startBridge({home:settings.home,guests,window,enterprise});
+   await window.loadURL(backend.launchURL);
++  if(loginAfterBoot){loginAfterBoot=false;openEnterpriseLogin();}
+  }catch(error){await showStartup(error.message);}
+- finally{booting=false;}
++ finally{booting=false;if(process.env.NAUMI_TEST==='1')globalThis.__naumiTest={window,guests,bridge,settings,backend,enterprise,get login(){return login;}};}
++}
++function openEnterpriseLogin(){
++ if(closing||!enterprise||!settings?.enterpriseOrigin)return;
++ if(login&&!login.isDestroyed()){if(process.env.NAUMI_TEST_HIDDEN!=='1')login.focus();return;}
++ login=new BrowserWindow({parent:window,width:1040,height:780,show:process.env.NAUMI_TEST_HIDDEN!=='1',title:'Naumi · 登录',icon:path.join(__dirname,'assets/naumi.ico'),backgroundColor:'#fff',webPreferences:{session:enterprise.session,sandbox:true,contextIsolation:true,nodeIntegration:false}});
++ const origin=settings.enterpriseOrigin,allowed=url=>{try{return new URL(url).origin===origin;}catch{return false;}};
++ login.webContents.setWindowOpenHandler(()=>({action:'deny'}));
++ for(const event of ['will-navigate','will-redirect'])login.webContents.on(event,(e,url)=>{if(!allowed(url))e.preventDefault();});
++ void login.loadURL(origin+'/login').catch(()=>{});
++ login.on('closed',()=>{login=null;if(!closing&&window&&!window.isDestroyed()&&new URL(window.webContents.getURL()).origin===settings.url)window.webContents.reload();});
+ }
+diff --git a/original/desktop/app/preload.cjs b/modified/desktop/app/preload.cjs
+index 9aedf4d..81a29a5 100644
+--- a/original/desktop/app/preload.cjs
++++ b/modified/desktop/app/preload.cjs
+@@ -12,5 +12,7 @@ contextBridge.exposeInMainWorld('naumiDesktop',{
+   onBrowserIssue:listener=>subscribe('naumi:browser-issue',listener),
+   onToolRequest:listener=>subscribe('naumi:browser-tool-request',listener),
+   retry:()=>ipcRenderer.invoke('naumi:retry'),
++  connectEnterprise:origin=>ipcRenderer.invoke('naumi:enterprise-connect',origin),
++  loginEnterprise:()=>ipcRenderer.invoke('naumi:enterprise-login'),
+   product:'Naumi'
+ });
+diff --git a/original/desktop/app/profile.cjs b/modified/desktop/app/profile.cjs
+index edfdeb6..02e2d03 100644
+--- a/original/desktop/app/profile.cjs
++++ b/modified/desktop/app/profile.cjs
+@@ -4,16 +4,26 @@ const samePath=(a,b)=>path.resolve(a).toLowerCase()===path.resolve(b).toLowerCas
+ const exists=p=>{try{fs.lstatSync(p);return true;}catch(e){if(e.code==='ENOENT')return false;throw e;}};
+ function regular(p){if(exists(p)&&(!fs.lstatSync(p).isFile()||fs.lstatSync(p).isSymbolicLink()))throw Error('PROFILE_METADATA_INVALID');}
+ function read(p){regular(p);try{return JSON.parse(fs.readFileSync(p,'utf8'));}catch{throw Error('PROFILE_METADATA_INVALID');}}
+-function atomic(p,value){regular(p);const temp=p+'.'+randomUUID()+'.tmp';try{const fd=fs.openSync(temp,'wx',0o600);try{fs.writeFileSync(fd,JSON.stringify(value,null,2)+'\n');fs.fsyncSync(fd);}finally{fs.closeSync(fd);}fs.renameSync(temp,p);}finally{if(exists(temp))fs.unlinkSync(temp);}}
++function replaceMetadata(from,to){
++ // Windows scanners/readers can temporarily deny delete sharing. Keep the fsynced candidate
++ // intact and retry only the atomic rename; never delete the prior authoritative receipt.
++ for(let attempt=0;;attempt++){try{fs.renameSync(from,to);return;}catch(error){if(process.platform!=='win32'||!['EPERM','EBUSY','EACCES'].includes(error.code)||attempt>=7)throw error;Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,Math.min(10*2**attempt,200));}}
++}
++function atomic(p,value){regular(p);const temp=p+'.'+randomUUID()+'.tmp';try{const fd=fs.openSync(temp,'wx',0o600);try{fs.writeFileSync(fd,JSON.stringify(value,null,2)+'\n');fs.fsyncSync(fd);}finally{fs.closeSync(fd);}replaceMetadata(temp,p);}finally{if(exists(temp))fs.unlinkSync(temp);}}
+ function directory(p){if(exists(p)&&(!fs.lstatSync(p).isDirectory()||fs.lstatSync(p).isSymbolicLink()))throw Error('PROFILE_DIRECTORY_UNMANAGED');fs.mkdirSync(p,{recursive:true});}
+ function identity(home){
+  directory(home);const file=path.join(home,'desktop-instance.json');
+  if(!exists(file))atomic(file,{version:1,id:randomUUID(),key:randomBytes(32).toString('hex')});
+- const value=read(file);if(value.version!==1||!/^[0-9a-f-]{36}$/.test(value.id)||!/^[0-9a-f]{64}$/.test(value.key))throw Error('PROFILE_IDENTITY_INVALID');return value;
++ const value=read(file);if(value.version!==1||!/^[0-9a-f-]{36}$/.test(value.id)||!/^[0-9a-f]{64}$/.test(value.key))throw Error('PROFILE_IDENTITY_INVALID');
++ const homeHash=homeBinding(home);
++ if(value.homeHash!==undefined&&value.homeHash!==homeHash)throw Error('PROFILE_HOME_RELOCATION_REQUIRES_MIGRATION');
++ // Additive v1 metadata migration. Preserve the original UUID/key and every employee record.
++ if(value.homeHash===undefined){value.homeHash=homeHash;atomic(file,value);}return value;
+ }
++function homeBinding(home){let canonical=fs.realpathSync.native(home);if(process.platform==='win32')canonical=canonical.toLowerCase();return createHash('sha256').update('naumi-home-v1\0'+canonical).digest('hex');}
+ function runtimeReference(root){
+  root=path.resolve(root);const manifest=read(path.join(root,'runtime-manifest.json'));
+- if(manifest.product!=='Naumi'||manifest.schemaVersion!==2||manifest.desktop?.profileVersion!==1||manifest.desktop?.identityProtocol!==1||!/^[a-f0-9]{64}$/.test(manifest.inventorySHA256))throw Error('RUNTIME_DESKTOP_CONTRACT_UNSUPPORTED');
++ if(manifest.product!=='Naumi'||manifest.schemaVersion!==2||manifest.desktop?.profileVersion!==1||manifest.desktop?.identityProtocol!==2||!/^[a-f0-9]{64}$/.test(manifest.inventorySHA256))throw Error('RUNTIME_DESKTOP_CONTRACT_UNSUPPORTED');
+  if(createHash('sha256').update(fs.readFileSync(path.join(root,'runtime-files.json'))).digest('hex')!==manifest.inventorySHA256)throw Error('RUNTIME_INVENTORY_INVALID');
+  if(createHash('sha256').update(fs.readFileSync(path.join(root,'node.exe'))).digest('hex')!==manifest.nodeSHA256)throw Error('RUNTIME_NODE_INVALID');
+  if(!fs.statSync(path.join(root,'node_modules')).isDirectory())throw Error('RUNTIME_DEPENDENCIES_MISSING');
+@@ -66,4 +76,4 @@ function runtimeReceipt(home,id){
+  const file=path.join(home,'desktop-backend.json');if(!exists(file))return null;const r=read(file);
+  if(r.version!==1||r.ownerId!==id||!Number.isInteger(r.port)||r.port<1||r.port>65535||!['starting','ready'].includes(r.phase)||!(r.pid===null&&r.phase==='starting'||Number.isInteger(r.pid)&&r.pid>0)||!/^[a-f0-9]{64}$/.test(r.bundleId)||!/^[a-f0-9-]{36}$/.test(r.runId))throw Error('PROFILE_BACKEND_RECEIPT_INVALID');return r;
+ }
+-module.exports={identity,runtimeReference,prepareProfile,recoverProfile,runtimeReceipt,atomic,samePath,exists,profileState};
++module.exports={identity,homeBinding,runtimeReference,prepareProfile,recoverProfile,runtimeReceipt,atomic,samePath,exists,profileState};
+diff --git a/original/desktop/app/tools.cjs b/modified/desktop/app/tools.cjs
+index 8713c97..9b783e1 100644
+--- a/original/desktop/app/tools.cjs
++++ b/modified/desktop/app/tools.cjs
+@@ -54,7 +54,7 @@ class BrowserTools {
+   return info(entry);
+  }
+ }
+-async function startBridge({home,guests,window}){
++async function startBridge({home,guests,window,enterprise}){
+  const token=randomBytes(32).toString('hex'),runtime=new BrowserTools(guests,window);
+  const file=path.join(home,'naumi-desktop-bridge.json');
+  const server=http.createServer(async(req,res)=>{
+@@ -63,12 +63,19 @@ async function startBridge({home,guests,window}){
+   const received=Buffer.from(req.headers.authorization??''),expected=Buffer.from('Bearer '+token);
+   if(req.headers.origin||received.length!==expected.length||!timingSafeEqual(received,expected)){send(403,{error:'NATIVE_BROWSER_AUTH_REQUIRED'});return;}
+   if(req.method==='GET'&&req.url==='/health'){send(200,{ok:true,protocolVersion:1,pid:process.pid,engine:'chromium'});return;}
++  if(req.method==='POST'&&req.url==='/enterprise/request'){
++   if(!enterprise){send(503,{error:'ENTERPRISE_SESSION_NOT_CONFIGURED'});return;}
++   const controller=new AbortController(),abort=()=>{if(!res.writableEnded)controller.abort();};res.on('close',abort);
++   try{let bytes=0;const chunks=[];for await(const data of req){bytes+=data.length;if(bytes>2*1024*1024+4096){send(413,{error:'ENTERPRISE_BODY_TOO_LARGE'});return;}chunks.push(data);}const input=JSON.parse(Buffer.concat(chunks).toString('utf8'));send(200,{ok:true,data:await enterprise.perform(input,{signal:controller.signal})});}
++   catch(error){send(502,{ok:false,error:/^ENTERPRISE_[A-Z_]+$/.test(error.message)?error.message:'ENTERPRISE_REQUEST_INVALID'});}
++   finally{res.off('close',abort);}return;
++  }
+   if(req.method!=='POST'||req.url!=='/op'){send(404,{error:'NOT_FOUND'});return;}
+   try{let body='',bytes=0;for await(const data of req){bytes+=data.length;if(bytes>65536){send(413,{error:'BODY_TOO_LARGE'});return;}body+=data.toString();}const {sessionId,input}=JSON.parse(body);send(200,{ok:true,data:await runtime.perform(sessionId,input)});}
+   catch(error){send(400,{ok:false,error:/^[A-Z_0-9]{3,80}$/.test(error.message)?error.message:'NATIVE_BROWSER_OPERATION_FAILED_NO_REPLAY'});}
+  });
+  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
+- fs.mkdirSync(home,{recursive:true});fs.writeFileSync(file,JSON.stringify({version:1,port:server.address().port,token,pid:process.pid}),{mode:0o600});
++ fs.mkdirSync(home,{recursive:true});fs.writeFileSync(file,JSON.stringify({version:1,port:server.address().port,token,pid:process.pid,...(enterprise?{enterprise:enterprise.descriptor()}:{})}),{mode:0o600});
+  return {runtime,close:async()=>{server.closeAllConnections();await new Promise(r=>server.close(r));try{if(JSON.parse(fs.readFileSync(file,'utf8')).token===token)fs.unlinkSync(file);}catch{}}};
+ }
+ module.exports={BrowserTools,startBridge,snapshotScript};
+diff --git a/original/desktop/scripts/prepare-runtime.mjs b/modified/desktop/scripts/prepare-runtime.mjs
+index 4e6715d..c0e90fb 100644
+--- a/original/desktop/scripts/prepare-runtime.mjs
++++ b/modified/desktop/scripts/prepare-runtime.mjs
+@@ -18,7 +18,7 @@ export function runtimeInventory(target){
+   walk(target);return files;
+ }
+ export function scanRuntimeInventory(files){
+-  const forbidden=/(?:^|\/)(?:\.env(?:\..*)?|\.credentials[^/]*|cookies(?:\.sqlite)?|login data|local state|web data|employee[^/]*\.sqlite(?:-wal|-shm)?|sessions|logs|\.git|\.dsh|browser-profiles|naumi-desktop-bridge\.json|backend-link\.json|desktop-(?:instance|profile|profile-journal|backend)\.json|device-private-key[^/]*|.*\.(?:pem|pfx|key))$/i;
++  const forbidden=/(?:^|\/)(?:\.env(?:\..*)?|\.credentials[^/]*|cookies(?:\.sqlite)?|login data|local state|web data|employee[^/]*\.sqlite(?:-wal|-shm)?|sessions|logs|\.git|\.dsh|browser-profiles|naumi-desktop-bridge\.json|backend-link\.json|desktop-(?:instance|profile|profile-journal|backend|enterprise)\.json|device-private-key[^/]*|.*\.(?:pem|pfx|key))$/i;
+   // SDK source directories named sessions are code, not a copied employee session store.
+   for(const file of files)if(forbidden.test(file.path)||/^(?:sessions|logs|browser-profiles)\//i.test(file.path)||/(?:^|\/)(?:\.git|\.dsh|browser-profiles)\//i.test(file.path))throw Error('RUNTIME_PRIVATE_FILE '+file.path);
+   return {files:files.length,forbiddenPaths:0};
+@@ -47,7 +47,7 @@ export async function prepareRuntime({root=project,target=path.join(root,'runtim
+     verifyStagedImports(staged);
+     const inventory=runtimeInventory(staged),scan=scanRuntimeInventory(inventory);
+     fs.writeFileSync(path.join(staged,'runtime-files.json'),JSON.stringify(inventory,null,2)+'\n');
+-    const manifest={product:'Naumi',schemaVersion:2,desktop:{profileVersion:1,identityProtocol:1},version:JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json'))).version,node:process.versions.node,harness:'0.2.2-rc.1',agentDesktop:'1.3.1',dingtalk,personalCredentials:false,browserProfiles:false,bootstrap:'offline',nodeSHA256:sha(path.join(staged,'node.exe')),inventorySHA256:sha(path.join(staged,'runtime-files.json')),closure,scan};
++    const manifest={product:'Naumi',schemaVersion:2,desktop:{profileVersion:1,identityProtocol:2},version:JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json'))).version,node:process.versions.node,harness:'0.2.2-rc.1',agentDesktop:'1.3.1',dingtalk,personalCredentials:false,browserProfiles:false,bootstrap:'offline',nodeSHA256:sha(path.join(staged,'node.exe')),inventorySHA256:sha(path.join(staged,'runtime-files.json')),closure,scan};
+     fs.writeFileSync(path.join(staged,'runtime-manifest.json'),JSON.stringify(manifest,null,2)+'\n');
+     // Publish only after import/closure/content checks. Preserve the preceding bundle for rollback.
+     let previous=null;if(fs.existsSync(target)){previous=target+'.previous-'+randomUUID();fs.renameSync(target,previous);}
+diff --git a/modified/desktop/scripts/verify-desktop-enterprise.mjs b/modified/desktop/scripts/verify-desktop-enterprise.mjs
+new file mode 100644
+index 0000000..7dfdfef
+--- /dev/null
++++ b/modified/desktop/scripts/verify-desktop-enterprise.mjs
+@@ -0,0 +1,68 @@
++import {_electron as electron} from '../node_modules/playwright/index.mjs';
++import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import assert from 'node:assert/strict';import {fileURLToPath} from 'node:url';import {generateKeyPairSync,createHash,sign,verify,randomUUID} from 'node:crypto';
++const root=fileURLToPath(new URL('../..',import.meta.url)),e=path.join(root,'evidence/desktop-enterprise'),exe=path.join(root,'runtime/naumi-desktop-release/win-unpacked/Naumi.exe'),base=path.join(root,'.dsh/desktop-enterprise-'+Date.now());fs.mkdirSync(e,{recursive:true});
++const canonical=v=>JSON.stringify(v,(_k,x)=>x&&typeof x==='object'&&!Array.isArray(x)?Object.fromEntries(Object.entries(x).sort(([a],[b])=>a.localeCompare(b))):x);
++const keys=generateKeyPairSync('ed25519'),publicKey=keys.publicKey.export({type:'spki',format:'pem'}).toString(),tenantId=randomUUID(),memberId=randomUUID();
++let origin,expired=false,denied=false,networkFailure=false,writes=0,wireWrites=0,registrations=0,forbiddenCookies=0;const receipts=new Map(),attempts=[];
++const auth=q=>!expired&&(q.headers.cookie??'').split(';').some(v=>v.trim()==='design_ops_session='+'t'.repeat(32));
++const fixture=http.createServer(async(q,r)=>{
++ const send=(status,body)=>{r.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'}).end(JSON.stringify(body));};
++ if((q.headers.cookie??'').split(';').some(v=>v.trim()&&!v.trim().startsWith('design_ops_session=')))forbiddenCookies++;
++ if(q.url==='/login'&&q.method==='GET'){r.setHeader('Content-Type','text/html; charset=utf-8');r.end('<!doctype html><title>Enterprise Fixture Login</title><h1>企业测试登录</h1><form method="post" action="/login"><button>登录测试企业</button></form><a href="https://example.invalid/blocked">外部跳转</a>');return;}
++ if(q.url==='/login'&&q.method==='POST'){r.writeHead(303,{'Set-Cookie':'design_ops_session='+'t'.repeat(32)+'; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600',Location:'/workbench'}).end();return;}
++ if(q.url==='/workbench'){r.setHeader('Content-Type','text/html; charset=utf-8');r.end('<title>Enterprise Fixture</title><h1>测试员工</h1>');return;}
++ if(!auth(q)){send(401,{code:'UNAUTHENTICATED'});return;}
++ if(denied){send(403,{code:'FORBIDDEN'});return;}
++ if(q.url==='/api/workspace'){send(200,{actor:{id:memberId,tenantId,tenantName:'测试企业',name:'测试员工',roles:['designer']},tasks:[{id:'fixture-task',title:'企业登录桥验收',status:'in_progress'}],members:[],projects:[],products:[],requests:[],deliverables:[],submissions:[]});return;}
++ if(q.url==='/api/digital-employees'&&q.method==='GET'){send(200,{actor:{id:memberId,tenantId},employees:[],devices:[],projects:[],sharedMemories:[]});return;}
++ if(q.url==='/api/digital-employees'&&q.method==='POST'){
++  let text='';for await(const b of q)text+=b.toString();const command=JSON.parse(text);
++  if(q.headers.origin!==origin){send(403,{code:'ORIGIN_MISMATCH'});return;}
++  if(command.action==='device.register'){
++   const valid=verify(null,Buffer.from(canonical({v:1,aud:'naumi-enrollment',deviceId:command.deviceId,publicKey:command.publicKey,operationId:command.operationId})),command.publicKey,Buffer.from(command.proof,'base64url'));if(!valid){send(403,{code:'PROOF_INVALID'});return;}registrations++;
++   const claims={v:1,aud:'naumi-desktop',iss:origin,tenantId,memberId,deviceId:command.deviceId,keyHash:createHash('sha256').update(Buffer.from(command.publicKey.replace(/-----[^-]+-----|\s/g,''),'base64')).digest('hex'),issuedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+3600000).toISOString(),authEpoch:1,bindings:[],projectIds:[],capabilities:[]};
++   const payload=Buffer.from(JSON.stringify(claims)).toString('base64url'),authorization={kid:'fixture-key',payload,signature:sign(null,Buffer.from(payload),keys.privateKey).toString('base64url')};send(200,{result:{authorization,serverPublicKey:publicKey,keyId:'fixture-key',tenantId,memberId}});return;
++  }
++  wireWrites++;attempts.push({id:command.operationId,hash:createHash('sha256').update(text).digest('hex')});if(!receipts.has(command.operationId)){writes++;receipts.set(command.operationId,{hash:attempts.at(-1).hash,result:{accepted:true}});}const receipt=receipts.get(command.operationId);if(receipt.hash!==attempts.at(-1).hash){send(409,{code:'IDEMPOTENCY_CONFLICT'});return;}if(networkFailure){q.socket.destroy();return;}send(200,{result:receipt.result});return;
++ }
++ send(404,{code:'NOT_FOUND'});
++});
++await new Promise(r=>fixture.listen(0,'127.0.0.1',r));origin='http://127.0.0.1:'+fixture.address().port;
++const handles=new Set(),pause=ms=>new Promise(r=>setTimeout(r,ms));
++async function waitFor(fn,timeout=15000){const deadline=Date.now()+timeout;while(Date.now()<deadline){const value=await fn();if(value)return value;await pause(50);}throw Error('DESKTOP_ENTERPRISE_WAIT_TIMEOUT');}
++async function launch(name,{configured=false}={}){
++ const env={...process.env,NAUMI_USER_DATA:path.join(base,name),NAUMI_TEST:'1',NAUMI_TEST_HIDDEN:'1',NAUMI_HOST_URL:origin};for(const key of ['NAUMI_ROOT','NAUMI_DSH_HOME','NAUMI_NODE','NAUMI_ENTERPRISE_ORIGIN','ELECTRON_RUN_AS_NODE','NAUMI_DESKTOP_INSTANCE_ID','NAUMI_DESKTOP_BUNDLE_ID'])delete env[key];if(configured)env.NAUMI_ENTERPRISE_ORIGIN=origin;env.PATH=process.env.SystemRoot+'\\System32;'+process.env.SystemRoot;
++ const app=await electron.launch({executablePath:exe,args:[],env,timeout:90000});handles.add(app);const page=await app.firstWindow();return {app,page,launcher:app.process()};
++}
++async function ready(value){await value.page.waitForURL(/^http:\/\/127\.0\.0\.1:/,{timeout:120000});await value.page.getByRole('button',{name:'工作台',exact:true}).first().waitFor();value.info=await waitFor(()=>value.app.evaluate(()=>{const t=globalThis.__naumiTest;return t?.backend?{pid:process.pid,home:t.settings.home,url:t.settings.url,origin:t.settings.enterpriseOrigin}:null;}));value.backendPid=JSON.parse(fs.readFileSync(path.join(value.info.home,'desktop-backend.json'))).pid;return value;}
++async function request(value,url,body){return value.page.evaluate(async({url,body})=>{const response=await fetch(url,{credentials:'same-origin',...(body?{method:'POST',headers:{'Content-Type':'application/json','x-naumi-employee-sync':'1'},body:JSON.stringify(body)}:{})});return {status:response.status,body:await response.json()};},{url,body});}
++async function close(value){let timer;try{await Promise.race([value.app.close(),new Promise((_r,reject)=>{timer=setTimeout(()=>reject(Error('DESKTOP_QUIT_TIMEOUT')),20000);})]);}finally{clearTimeout(timer);}handles.delete(value.app);assert.equal(value.launcher.exitCode,0);for(const pid of[value.info.pid,value.backendPid])await waitFor(()=>{try{process.kill(pid,0);return false;}catch{return true;}},5000);}
++let a,b,restarted;
++try{
++ a=await launch('employee A');await a.page.waitForURL('**/connect.html');await a.page.getByRole('heading',{name:'连接企业'}).waitFor();await a.page.screenshot({path:path.join(e,'first-connection.png')});
++ assert.equal(fs.existsSync(path.join(base,'employee A/harness/desktop-backend.json')),false);
++ await a.page.getByLabel('企业地址').fill('http://enterprise.example');await a.page.getByRole('button',{name:'连接',exact:true}).click();await a.page.getByRole('alert').filter({hasText:'请输入 HTTPS 企业地址'}).waitFor();
++ await a.page.getByLabel('企业地址').fill(origin);await a.page.getByRole('button',{name:'连接',exact:true}).click();await ready(a);
++ console.log('STEP first_connection=ready');const login=await waitFor(()=>a.app.windows().find(p=>p.url()===origin+'/login'));assert.equal(await login.evaluate(()=>typeof window.naumiDesktop),'undefined');
++ await login.getByRole('heading',{name:'企业测试登录'}).waitFor({timeout:15000});
++ assert.equal((await request(a,'/naumi/workspace')).status,401);
++ await login.getByRole('button',{name:'登录测试企业'}).click();await login.waitForURL(origin+'/workbench');await a.app.evaluate(()=>globalThis.__naumiTest.login.close());await ready(a);console.log('STEP login=authenticated');
++ const workspace=await request(a,'/naumi/workspace');assert.equal(workspace.status,200);assert.equal(workspace.body.tasks[0].title,'企业登录桥验收');
++ assert.equal((await request(a,'/naumi/employee-sync?view=catalog')).status,200);
++ const cookieCounts=await a.app.evaluate(async()=>{const t=globalThis.__naumiTest;return {enterprise:(await t.enterprise.session.cookies.get({name:'design_ops_session'})).length,renderer:(await t.window.webContents.session.cookies.get({name:'design_ops_session'})).length};});assert.deepEqual(cookieCounts,{enterprise:1,renderer:0});
++ assert.equal(await a.page.evaluate(()=>window.naumiDesktop.connectEnterprise('https://another.example').then(()=>false,()=>true)),true);
++ const initial=await request(a,'/naumi/employee-sync');assert.equal(initial.body.registered,false);assert.equal(initial.body.enabled,false);assert.equal(registrations,0);
++ console.log('STEP workspace=200 session_isolated=1');const enrolled=await request(a,'/naumi/employee-sync',{action:'enroll',name:'Fixture employee desktop'});assert.equal(enrolled.status,200,JSON.stringify(enrolled.body));assert.equal(enrolled.body.registered,true);assert.equal(enrolled.body.enabled,false);assert.equal(registrations,1);
++ const managed=await request(a,'/naumi/employee-sync',{action:'manage',command:{action:'fixture.write',operationId:randomUUID()}});assert.equal(managed.status,200);assert.equal(managed.body.accepted,true);
++ denied=true;assert.equal((await request(a,'/naumi/workspace')).status,403);assert.equal((await request(a,'/naumi/employee-sync',{action:'manage',command:{action:'fixture.write',operationId:randomUUID()}})).status,403);denied=false;
++ const before=writes,wireBefore=wireWrites,unknownCommand={action:'fixture.write',operationId:randomUUID()};networkFailure=true;assert.equal((await request(a,'/naumi/employee-sync',{action:'manage',command:unknownCommand})).status,503);assert.equal(writes,before+1);const wireAttempts=wireWrites-wireBefore;assert(wireAttempts>=1);const uncertain=attempts.filter(x=>x.id===unknownCommand.operationId);assert.equal(uncertain.length,wireAttempts);assert.equal(new Set(uncertain.map(x=>x.hash)).size,1);networkFailure=false;assert.equal((await request(a,'/naumi/employee-sync',{action:'manage',command:unknownCommand})).status,200);assert.equal(writes,before+1);
++ expired=true;assert.equal((await request(a,'/naumi/workspace')).status,401);assert.equal((await request(a,'/naumi/employee-sync?view=catalog')).status,401);expired=false;
++ b=await launch('employee B',{configured:true});await ready(b);assert.equal((await request(b,'/naumi/workspace')).status,401);assert.equal((await request(b,'/naumi/employee-sync')).body.registered,false);
++ const countsB=await b.app.evaluate(async()=>{const t=globalThis.__naumiTest;return (await t.enterprise.session.cookies.get({name:'design_ops_session'})).length;});assert.equal(countsB,0);
++ await close(a);a=null;restarted=await launch('employee A');await ready(restarted);assert.equal((await request(restarted,'/naumi/workspace')).status,200);assert.equal((await request(restarted,'/naumi/employee-sync')).body.registered,true);assert.equal((await request(restarted,'/naumi/employee-sync')).body.enabled,false);assert.equal(registrations,1);assert.equal(forbiddenCookies,0);
++ await close(restarted);restarted=null;await b.page.evaluate(()=>window.naumiDesktop.loginEnterprise());const blockedLogin=await waitFor(()=>b.app.windows().find(p=>p.url()===origin+'/login'));await blockedLogin.getByRole('link',{name:'外部跳转'}).click({noWaitAfter:true});await pause(100);assert.equal(new URL(blockedLogin.url()).origin,origin);await b.app.evaluate(()=>globalThis.__naumiTest.login.webContents.stop());await close(b);b=null;
++ fs.writeFileSync(path.join(e,'DESKTOP_ENTERPRISE.json'),JSON.stringify({status:'PASS',acceptance:'unpacked Electron and controlled enterprise fixture, not real employee/remote TLS/NSIS acceptance',profiles:2,firstConnectionUI:true,plainRemoteHttpRejected:true,loginPopupConfined:true,loginPreloadAbsent:true,workspace:true,catalog:true,explicitEnrollment:true,enrollmentProofVerified:true,dpapiVaultWithCleanPATH:true,automaticEnrollment:false,privateUpload:false,managerRbac:true,expiredSession401:true,applicationMutationReplays:0,mutationWireAttempts:wireAttempts,duplicateMutationEffects:0,unknownReceiptReconciled:true,cookiesCopiedToRenderer:false,crossProfileCookieLeak:false,persistentSessionAfterRestart:true,deviceRegistrationRetained:true,normalQuitWithLogin:true,authenticatedBackendStop:true,realEmployeeTouched:false},null,2)+'\n');
++ console.log('DESKTOP_ENTERPRISE profiles=2 first_connection=PASS login=PASS workspace=200 catalog=200 enrollment=explicit proof=verified');
++ console.log('DESKTOP_SESSION renderer_cookie=0 cross_profile_leak=0 restart=retained expired=401 rbac=403 application_replay=0 duplicate_effect=0 unknown_reconcile=PASS quit_with_login=PASS wire_attempts='+wireAttempts+'');
++ console.log('DESKTOP_ENROLLMENT development_path=0 dpapi=PASS auto_enrollment=0 private_upload=0 real_employee=untouched');
++}catch(error){console.log('DESKTOP_ENTERPRISE_FAILURE '+error.message);for(const app of handles){for(const p of app.windows()){try{console.log('FAILURE_PAGE '+p.url().replace(/\?.*/,''));console.log((await p.locator('body').innerText({timeout:3000})).slice(0,900));}catch{}}}throw error;}finally{for(const app of handles)await Promise.race([app.close().catch(()=>{}),pause(15000)]);fixture.closeAllConnections();await new Promise(r=>fixture.close(r));}
+diff --git a/original/desktop/scripts/verify-desktop-lifecycle.mjs b/modified/desktop/scripts/verify-desktop-lifecycle.mjs
+index 9d26f62..91750e8 100644
+--- a/original/desktop/scripts/verify-desktop-lifecycle.mjs
++++ b/modified/desktop/scripts/verify-desktop-lifecycle.mjs
+@@ -1,21 +1,21 @@
+ import {_electron as electron} from '../node_modules/playwright/index.mjs';
+ import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import assert from 'node:assert/strict';import {createRequire} from 'node:module';import {fileURLToPath} from 'node:url';import {DatabaseSync} from 'node:sqlite';
+ import {EmployeeStore} from '../../plugins/naumi-enterprise/employee-store.js';
+-const root=fileURLToPath(new URL('../..',import.meta.url)),e=path.join(root,'evidence/desktop-lifecycle'),exe=path.join(root,'runtime/naumi-desktop-release/win-unpacked/Naumi.exe'),require=createRequire(import.meta.url),{probeIdentity}=require('../app/backend.cjs');
++const root=fileURLToPath(new URL('../..',import.meta.url)),e=path.resolve(process.env.NAUMI_LIFECYCLE_EVIDENCE??path.join(root,'evidence/desktop-lifecycle')),exe=path.join(root,'runtime/naumi-desktop-release/win-unpacked/Naumi.exe'),require=createRequire(import.meta.url),{probeIdentity}=require('../app/backend.cjs');
+ const base=path.join(root,'.dsh/desktop-lifecycle-'+Date.now()),userA=path.join(base,'employee A'),userB=path.join(base,'employee B');fs.mkdirSync(e,{recursive:true});
+ let foreignPosts=0;const logo=fs.readFileSync(path.join(root,'plugins/naumi-enterprise/assets/symbol.svg'));
+ const fixture=http.createServer((q,r)=>{if(q.method==='POST')foreignPosts++;if(q.url==='/page'){r.setHeader('X-Frame-Options','DENY');r.setHeader('Content-Type','text/html');r.end('<title>Naumi Lifecycle Fixture</title><h1>Naumi</h1><input aria-label="Lifecycle input">');}else{r.setHeader('Content-Type','image/svg+xml');r.end(logo);}});await new Promise(r=>fixture.listen(0,'127.0.0.1',r));const preferred='http://127.0.0.1:'+fixture.address().port;
+ const alive=pid=>{try{process.kill(pid,0);return true;}catch{return false;}};
+ const handles=new Set();
+ async function launch(userData){
+- const env={...process.env,NAUMI_USER_DATA:userData,NAUMI_HOST_URL:preferred,NAUMI_TEST:'1',NAUMI_TEST_HIDDEN:'1'};
++ const env={...process.env,NAUMI_USER_DATA:userData,NAUMI_HOST_URL:preferred,NAUMI_ENTERPRISE_ORIGIN:preferred,NAUMI_TEST:'1',NAUMI_TEST_HIDDEN:'1'};
+  for(const key of ['NAUMI_ROOT','NAUMI_DSH_HOME','NAUMI_NODE','ELECTRON_RUN_AS_NODE','NAUMI_DESKTOP_INSTANCE_ID','NAUMI_DESKTOP_BUNDLE_ID'])delete env[key];
+  env.PATH=process.env.SystemRoot+'\\System32;'+process.env.SystemRoot;
+  const app=await electron.launch({executablePath:exe,args:[],env,timeout:90000});handles.add(app);const page=await app.firstWindow();page.on('pageerror',error=>console.log('DESKTOP_PAGE_ERROR '+error.message));page.on('console',message=>{if(message.type()==='error')console.log('DESKTOP_CONSOLE '+message.text().replace(/token=[^&\s]+/g,'token=REDACTED'));});
+  await Promise.race([page.waitForURL(/^http:\/\/127\.0\.0\.1:/,{timeout:120000}),page.waitForURL('**/startup.html?error=**',{timeout:120000}).then(()=>{throw Error('LIFECYCLE_STARTUP '+new URL(page.url()).searchParams.get('error'));})]);
+  await page.getByRole('button',{name:'工作台',exact:true}).first().waitFor();
+  const deadline=Date.now()+15000;let info;
+- while(Date.now()<deadline){info=await app.evaluate(()=>{const t=globalThis.__naumiTest;if(!t)return null;return {shellPid:process.pid,home:t.settings.home,workspace:t.settings.workspace,url:t.settings.url,id:t.settings.identity.id,bundleId:t.settings.runtime.bundleId,verified:t.backend.instanceVerified,owned:t.backend.owned,reattached:t.backend.reattached??false};});if(info)break;await new Promise(r=>setTimeout(r,40));}
++ while(Date.now()<deadline){info=await app.evaluate(()=>{const t=globalThis.__naumiTest;if(!t)return null;return {shellPid:process.pid,home:t.settings.home,workspace:t.settings.workspace,url:t.settings.url,enterpriseOrigin:t.settings.enterpriseOrigin,id:t.settings.identity.id,bundleId:t.settings.runtime.bundleId,verified:t.backend.instanceVerified,owned:t.backend.owned,reattached:t.backend.reattached??false};});if(info)break;await new Promise(r=>setTimeout(r,40));}
+  assert(info?.verified&&info.owned);assert.equal(info.workspace,path.join(info.home,'workspace'));fs.accessSync(info.workspace,fs.constants.W_OK);assert.notEqual(info.url,preferred);const receipt=JSON.parse(fs.readFileSync(path.join(info.home,'desktop-backend.json')));return {app,page,info,pid:receipt.pid};
+ }
+ async function waitGone(pid){const deadline=Date.now()+10000;while(Date.now()<deadline){if(!alive(pid))return;await new Promise(r=>setTimeout(r,40));}throw Error('PROCESS_EXIT_TIMEOUT');}
+diff --git a/original/desktop/scripts/verify-staged-runtime.cjs b/modified/desktop/scripts/verify-staged-runtime.cjs
+index 56bac34..d3af15f 100644
+--- a/original/desktop/scripts/verify-staged-runtime.cjs
++++ b/modified/desktop/scripts/verify-staged-runtime.cjs
+@@ -3,7 +3,7 @@ const fs=require('node:fs'),path=require('node:path'),{createHash}=require('node
+ const sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+ function verifyStagedRuntime(root=path.resolve(__dirname,'../..')){
+  const target=path.join(root,'runtime/desktop-backend'),manifest=JSON.parse(fs.readFileSync(path.join(target,'runtime-manifest.json'))),inventory=path.join(target,'runtime-files.json');
+- if(manifest.schemaVersion!==2||manifest.desktop?.profileVersion!==1||manifest.desktop?.identityProtocol!==1||manifest.dingtalk?.version!=='1.0.68'||manifest.inventorySHA256!==sha(inventory))throw Error('STAGED_MANIFEST_INVALID');
++ if(manifest.schemaVersion!==2||manifest.desktop?.profileVersion!==1||manifest.desktop?.identityProtocol!==2||manifest.dingtalk?.version!=='1.0.68'||manifest.inventorySHA256!==sha(inventory))throw Error('STAGED_MANIFEST_INVALID');
+  if(manifest.version!==JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json'))).version)throw Error('STAGED_VERSION_STALE');
+  const files=JSON.parse(fs.readFileSync(inventory)),expected=new Set(['runtime-manifest.json','runtime-files.json']);
+  for(const item of files){
+diff --git a/original/desktop/tests/backend.test.cjs b/modified/desktop/tests/backend.test.cjs
+index ef66a92..dcfe2ad 100644
+--- a/original/desktop/tests/backend.test.cjs
++++ b/modified/desktop/tests/backend.test.cjs
+@@ -10,7 +10,7 @@ function fixture(){
+  function bundle(name,{bootstrapDelayMs=0}={}){
+   const root=path.join(dir,name),files=JSON.stringify({fixture:name}),exe='fixture-executable';
+   write(name+'/node_modules/.keep','');write(name+'/runtime-files.json',files);write(name+'/node.exe',exe);
+-  write(name+'/runtime-manifest.json',{product:'Naumi',schemaVersion:2,desktop:{profileVersion:1,identityProtocol:1},version:name,inventorySHA256:sha(files),nodeSHA256:sha(exe)});
++  write(name+'/runtime-manifest.json',{product:'Naumi',schemaVersion:2,desktop:{profileVersion:1,identityProtocol:2},version:name,inventorySHA256:sha(files),nodeSHA256:sha(exe)});
+   for(const [n,t]of [['profile.json','{"name":"fresh-profile"}'],['profile.yml','fresh-profile'],['home.yml','fresh-home']])write(name+'/defaults/'+n,t);
+   write(name+'/plugins/naumi-enterprise/assets/symbol.svg','fixture-naumi-logo');
+   const program=`const http=require('http'),fs=require('fs'),path=require('path');void(async()=>{const {desktopIdentityHandler}=await import(${JSON.stringify(identityModule)});const home=process.env.DSH_HOME,id=JSON.parse(fs.readFileSync(path.join(home,'desktop-instance.json'))),handler=desktopIdentityHandler({...id,bundleId:process.env.NAUMI_DESKTOP_BUNDLE_ID}),port=Number(process.argv[process.argv.indexOf('--port')+1]);const server=http.createServer((q,r)=>{if(q.url==='/naumi/desktop-instance')handler(q,r);else r.end('fixture-naumi-logo');});server.on('error',e=>{console.error(e.code);process.exit(1);});server.listen(port,'127.0.0.1',()=>setTimeout(()=>console.log('http://127.0.0.1:'+port+'/?token=fixture-token'),${bootstrapDelayMs}));})();`;
+@@ -42,7 +42,7 @@ test('standalone first-use workspace uses the original registry transaction and
+ });
+ test('a matching Logo on another service never attaches a clean employee profile; its port and process stay intact',async()=>{const f=fixture();let foreign,backend;try{foreign=await listen((_q,r)=>r.end('fixture-naumi-logo'));const a=f.bundle('a'),s=f.settings('employee',a,foreign.port);backend=await ensureBackend(s,options);assert.equal(backend.owned,true);assert.equal(backend.instanceVerified,true);assert.notEqual(new URL(s.url).port,String(foreign.port));assert.equal((await probeIdentity(s)).pid,backend.child.pid);assert.equal(await (await fetch('http://127.0.0.1:'+foreign.port)).text(),'fixture-naumi-logo');}finally{await stopBackend(backend);await foreign?.close();f.close();}});
+ test('listener/identity readiness is not bootstrap readiness; delayed owner URL is awaited before navigation',async()=>{const f=fixture();let backend;try{const a=f.bundle('a',{bootstrapDelayMs:250}),s=f.settings('employee',a);backend=await ensureBackend(s,options);assert.equal(new URL(backend.launchURL).searchParams.get('token'),'fixture-token');assert.equal(runtimeReceipt(s.home,s.identity.id).phase,'ready');}finally{await stopBackend(backend);f.close();}});
+-test('graceful stop requires a profile/pid/bundle-bound proof and invokes only the proven process callback',async()=>{const f=fixture();let server;try{const {desktopIdentityHandler}=await import(identityModule),a=f.bundle('a'),s=f.settings('employee',a);let stops=0;const handler=desktopIdentityHandler({...s.identity,bundleId:a.bundleId,pid:123,onStop:()=>stops++});server=await listen((req,res)=>{const end=res.end;res.end=function(body){return end.call(this,body);};handler(req,res);});const nonce='c'.repeat(64),url='http://127.0.0.1:'+server.port;for(const invalid of ['0'.repeat(64),createHmac('sha256',s.identity.key).update(['stop',nonce,s.identity.id,456,a.bundleId].join('|')).digest('hex')])assert.equal((await fetch(url,{method:'POST',headers:{'x-naumi-desktop-challenge':nonce,'x-naumi-desktop-stop':invalid}})).status,403);assert.equal(stops,0);const proof=createHmac('sha256',s.identity.key).update(['stop',nonce,s.identity.id,123,a.bundleId].join('|')).digest('hex');assert.equal((await fetch(url,{method:'POST',headers:{'x-naumi-desktop-challenge':nonce,'x-naumi-desktop-stop':proof}})).status,200);await new Promise(r=>setImmediate(r));assert.equal(stops,1);}finally{await server?.close();f.close();}});
++test('graceful stop requires a profile/pid/bundle-bound proof and invokes only the proven process callback',async()=>{const f=fixture();let server;try{const {desktopIdentityHandler}=await import(identityModule),a=f.bundle('a'),s=f.settings('employee',a);let stops=0;const handler=desktopIdentityHandler({...s.identity,bundleId:a.bundleId,pid:123,onStop:()=>stops++});server=await listen((req,res)=>{const end=res.end;res.end=function(body){return end.call(this,body);};handler(req,res);});const nonce='c'.repeat(64),url='http://127.0.0.1:'+server.port;for(const invalid of ['0'.repeat(64),createHmac('sha256',s.identity.key).update(['stop',nonce,s.identity.id,456,a.bundleId].join('|')).digest('hex')])assert.equal((await fetch(url,{method:'POST',headers:{'x-naumi-desktop-challenge':nonce,'x-naumi-desktop-stop':invalid}})).status,403);assert.equal(stops,0);const proof=createHmac('sha256',s.identity.key).update([2,'stop',nonce,s.identity.id,123,a.bundleId,s.identity.homeHash,server.port,''].join('|')).digest('hex');assert.equal((await fetch(url,{method:'POST',headers:{'x-naumi-desktop-challenge':nonce,'x-naumi-desktop-stop':proof}})).status,200);await new Promise(r=>setImmediate(r));assert.equal(stops,1);}finally{await server?.close();f.close();}});
+ test('a live owned process is reattached only with proof, then restart keeps identity and existing data',async()=>{const f=fixture();let first,second;try{const a=f.bundle('a'),s=f.settings('employee',a);first=await ensureBackend(s,options);const attached=await ensureBackend(s,options);assert.equal(attached.owned,true);assert.equal(attached.reattached,true);assert.equal(attached.instanceVerified,true);assert.equal(attached.launchURL,first.launchURL);assert.equal((await probeIdentity(s)).pid,first.child.pid);f.write('employee/retained.txt','data');await stopBackend(attached);await stopBackend(first);const id=s.identity.id;second=await ensureBackend(s,options);assert.equal(s.identity.id,id);assert.equal(fs.readFileSync(s.home+'/retained.txt','utf8'),'data');assert.notEqual(first.child.pid,second.child.pid);}finally{await stopBackend(first);await stopBackend(second);f.close();}});
+ test('parallel clean profiles survive a real preferred-port bind race without sharing a backend',async()=>{const f=fixture();let one,two;const reservation=await listen((_q,r)=>r.end());const port=reservation.port;await reservation.close();try{const a=f.bundle('a'),s=f.settings('one',a,port),t=f.settings('two',a,port);[one,two]=await Promise.all([ensureBackend(s,options),ensureBackend(t,options)]);assert.notEqual(s.url,t.url);assert.notEqual((await probeIdentity(s)).id,(await probeIdentity(t)).id);assert.notEqual(one.child.pid,two.child.pid);}finally{await stopBackend(one);await stopBackend(two);f.close();}});
+ test('upgrade refuses to move a live old-bundle profile, then upgrades after an observed stop',async()=>{const f=fixture();let old,newer;try{const a=f.bundle('a'),b=f.bundle('b'),s=f.settings('employee',a);old=await ensureBackend(s,options);await assert.rejects(ensureBackend({...s,root:b.root,runtime:b},options),/UPGRADE_REQUIRES_STOP/);assert.equal(path.resolve(mount(s)),a.nodeModules);assert.equal((await probeIdentity(s)).pid,old.child.pid);await stopBackend(old);newer=await ensureBackend({...s,root:b.root,runtime:b},options);assert.equal(path.resolve(mount(s)),b.nodeModules);}finally{await stopBackend(old);await stopBackend(newer);f.close();}});
+@@ -55,3 +55,23 @@ test('legacy data with an unproven legacy process is not duplicated or reset',as
+ test('packaged settings use persisted instance/port but explicit linked development mode remains unchanged',()=>{const f=fixture();try{const runtime=f.bundle('resources/backend'),app={isPackaged:true,getPath:()=>f.dir+'/user-data'},s=localSettings(app,{resourcesPath:f.dir+'/resources',environment:{}});assert(s.isolated);assert.equal(s.runtime.bundleId,runtime.bundleId);assert.equal(fs.existsSync(s.home+'/profiles/web/node_modules'),false);f.write('linked/config/local.json',{host:'127.0.0.1',port:3090,home:f.dir+'/dev-home'});const linked=localSettings(app,{environment:{NAUMI_ROOT:f.dir+'/linked',NAUMI_TEST:'1'}});assert.equal(linked.isolated,false);assert.equal(linked.url,'http://127.0.0.1:3090');assert.equal(linked.home,f.dir+'/dev-home');}finally{f.close();}});
+ test('standalone URL and login token lookup stay on the exact loopback port',()=>{for(const bad of ['https://127.0.0.1:3080','http://localhost:3080','http://example.com:3080','http://u:p@127.0.0.1:3080','http://127.0.0.1:3080/path','http://127.0.0.1:3080/?token=x'])assert.throws(()=>localURL(bad),/INVALID_LOCAL_BACKEND/);const f=fixture();try{f.write('logs/server.out.log','http://127.0.0.1:3080/?token=other\nhttp://127.0.0.1:3081/?token=correct');assert.equal(launchFromLog({logDir:f.dir+'/logs',url:'http://127.0.0.1:3081'}),'http://127.0.0.1:3081/?token=correct');}finally{f.close();}});
+ test('repeated quit requests cannot bypass pending async worker shutdown or start it twice',async()=>{let release,calls=0,ready=0,prevented=0;const pending=new Promise(r=>release=r),gate=createQuitGate({shutdown:async()=>{calls++;await pending;},onReady:()=>ready++,onError:()=>assert.fail('unexpected shutdown error')}),event={preventDefault:()=>prevented++};gate.beforeQuit(event);gate.beforeQuit(event);await Promise.resolve();assert.equal(calls,1);assert.equal(prevented,2);assert.equal(ready,0);assert.equal(gate.phase,'stopping');release();await gate.settled();assert.equal(ready,1);gate.beforeQuit(event);assert.equal(prevented,2);assert.equal(gate.phase,'ready');});
++
++test('protocol2 listener proof rejects a forwarding relay even when it passes the real response unchanged',async()=>{
++ const f=fixture();let actual,relay;try{const {desktopIdentityHandler}=await import(identityModule),a=f.bundle('a'),s=f.settings('employee',a);actual=await listen(desktopIdentityHandler({...s.identity,bundleId:a.bundleId}));const actualURL='http://127.0.0.1:'+actual.port;relay=await listen(async(q,r)=>{const upstream=await fetch(actualURL+'/naumi/desktop-instance',{headers:q.headers});r.writeHead(upstream.status,{'content-type':'application/json'}).end(await upstream.text());});s.url=actualURL;assert.equal((await probeIdentity(s)).port,actual.port);assert.equal(await probeIdentity({...s,url:'http://127.0.0.1:'+relay.port}),null);const nonce='a'.repeat(64),response=await fetch(actualURL,{headers:{'x-naumi-desktop-challenge':nonce,Host:'127.0.0.1:'+relay.port,'X-Forwarded-Port':String(relay.port)}});assert.equal((await response.json()).port,actual.port);}finally{await relay?.close();await actual?.close();f.close();}
++});
++test('protocol2 stop proof is bound to the real listener and cannot be relayed from another port',async()=>{
++ const f=fixture();let server;try{const {desktopIdentityHandler}=await import(identityModule),a=f.bundle('a'),s=f.settings('employee',a);let stopped=0;server=await listen(desktopIdentityHandler({...s.identity,bundleId:a.bundleId,pid:123,onStop:()=>stopped++}));const nonce='f'.repeat(64),proof=createHmac('sha256',s.identity.key).update([2,'stop',nonce,s.identity.id,123,a.bundleId,s.identity.homeHash,server.port+1,''].join('|')).digest('hex');assert.equal((await fetch('http://127.0.0.1:'+server.port,{method:'POST',headers:{'x-naumi-desktop-challenge':nonce,'x-naumi-desktop-stop':proof}})).status,403);assert.equal(stopped,0);}finally{await server?.close();f.close();}
++});
++test('home binding migrates old metadata without rotating the original UUID/key and refuses copied/moved homes',()=>{
++ const f=fixture();try{const legacy={version:1,id:randomUUID(),key:'c'.repeat(64)};f.write('legacy/desktop-instance.json',legacy);f.write('legacy/persona.txt','retained');const id=identity(f.dir+'/legacy');assert.equal(id.id,legacy.id);assert.equal(id.key,legacy.key);assert.match(id.homeHash,/^[a-f0-9]{64}$/);fs.cpSync(f.dir+'/legacy',f.dir+'/clone',{recursive:true});const original=fs.readFileSync(f.dir+'/clone/desktop-instance.json');assert.throws(()=>identity(f.dir+'/clone'),/RELOCATION_REQUIRES_MIGRATION/);assert.deepEqual(fs.readFileSync(f.dir+'/clone/desktop-instance.json'),original);assert.equal(fs.readFileSync(f.dir+'/clone/persona.txt','utf8'),'retained');assert.deepEqual(identity(f.dir+'/legacy'),id);}finally{f.close();}
++});
++test('protocol2 refuses a copied legacy UUID/key when the actual worker home or enterprise issuer differs',async()=>{
++ const f=fixture();let server;try{const {desktopIdentityHandler}=await import(identityModule),a=f.bundle('a'),s=f.settings('employee',a),clone=f.settings('clone',a);server=await listen(desktopIdentityHandler({...s.identity,bundleId:a.bundleId,enterpriseOrigin:'https://enterprise.example'}));s.url='http://127.0.0.1:'+server.port;s.enterpriseOrigin='https://enterprise.example';assert(await probeIdentity(s));assert.equal(await probeIdentity({...s,identity:{...s.identity,homeHash:clone.identity.homeHash}}),null);assert.equal(await probeIdentity({...s,enterpriseOrigin:'https://other.example'}),null);}finally{await server?.close();f.close();}
++});
++test('legacy v1 worker proofs are rejected, never accepted as protocol2 through compatibility guessing',async()=>{
++ const f=fixture();let server;try{const a=f.bundle('a'),s=f.settings('employee',a);server=await listen((req,res)=>{const nonce=req.headers['x-naumi-desktop-challenge'],v={version:1,id:s.identity.id,pid:process.pid,bundleId:a.bundleId};v.proof=createHmac('sha256',s.identity.key).update([nonce,v.id,v.pid,v.bundleId].join('|')).digest('hex');res.end(JSON.stringify(v));});s.url='http://127.0.0.1:'+server.port;atomic(s.home+'/desktop-backend.json',{version:1,ownerId:s.identity.id,port:server.port,pid:process.pid,bundleId:a.bundleId,phase:'ready',runId:randomUUID()});assert.equal(await probeIdentity(s),null);await assert.rejects(ensureBackend(s,options),/BACKEND_UNREACHABLE/);assert.equal((await fetch(s.url,{headers:{'x-naumi-desktop-challenge':'a'.repeat(64)}})).status,200);}finally{await server?.close();f.close();}
++});
++
++test('atomic metadata rename survives a real Windows reader without deleting the authoritative receipt',async()=>{
++ const f=fixture();let child;try{const file=f.write('receipt.json',{version:1,value:'prior'}),program=`$f=[IO.File]::Open('${file.replaceAll("'","''")}',[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read);[Console]::WriteLine('LOCKED');[Console]::Out.Flush();Start-Sleep -Milliseconds 300;$f.Dispose();`,shell=path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe');child=spawn(shell,['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(program,'utf16le').toString('base64')],{windowsHide:true,stdio:['ignore','pipe','pipe']});const exited=new Promise(r=>child.once('close',r));await new Promise((resolve,reject)=>{let seen='';const timer=setTimeout(()=>reject(Error('FIXTURE_LOCK_TIMEOUT')),5000);child.stdout.on('data',b=>{seen+=b.toString();if(seen.includes('LOCKED')){clearTimeout(timer);resolve();}});child.once('error',reject);});atomic(file,{version:1,value:'next'});assert.equal(await exited,0);assert.deepEqual(JSON.parse(fs.readFileSync(file)),{version:1,value:'next'});assert(!fs.readdirSync(f.dir).some(p=>p.endsWith('.tmp')));}finally{if(child?.exitCode===null&&child?.signalCode===null)child.kill();f.close();}
++});
+diff --git a/modified/desktop/tests/enterprise.test.cjs b/modified/desktop/tests/enterprise.test.cjs
+new file mode 100644
+index 0000000..b4417b2
+--- /dev/null
++++ b/modified/desktop/tests/enterprise.test.cjs
+@@ -0,0 +1,67 @@
++const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),http=require('node:http');
++const {pathToFileURL}=require('node:url'),{randomUUID}=require('node:crypto');
++const {enterpriseOrigin,readConnection,connect,EnterpriseSession,validateRequest,MAX_REQUEST,MAX_RESPONSE}=require('../app/enterprise.cjs');
++const {startBridge}=require('../app/tools.cjs');
++const temp=()=>fs.mkdtempSync(path.join(os.tmpdir(),'naumi-enterprise-'));
++const remove=p=>{assert(p.startsWith(os.tmpdir()+path.sep));fs.rmSync(p,{recursive:true,force:true});};
++const origin='https://enterprise.example';
++const input=(method='GET',body)=>({origin,endpoint:'/api/digital-employees',method,...(body===undefined?{}:{body:JSON.stringify(method==='POST'&&body&&!Array.isArray(body)?{operationId:randomUUID(),...body}:body)})});
++async function transport(home,options={}){const {DesktopEnterpriseTransport}=await import(pathToFileURL(path.resolve('plugins/naumi-enterprise/desktop-enterprise.js')));return new DesktopEnterpriseTransport({origin,home,standalone:true,...options});}
++
++test('enterprise origins require TLS except loopback and reject credentials, paths, queries and fragments',()=>{
++ assert.equal(enterpriseOrigin('https://EXAMPLE.COM/'),'https://example.com');assert.equal(enterpriseOrigin('http://127.0.0.1:3112'),'http://127.0.0.1:3112');
++ for(const value of ['http://enterprise.example','https://a/b','https://u:p@a','https://a/?x=1','https://a/#x','file:///a',' https://a',null])assert.throws(()=>enterpriseOrigin(value),/ORIGIN_INVALID/);
++});
++test('enterprise config persists nonsecret origin and refuses issuer switching without changing bytes',()=>{
++ const dir=temp();try{assert.equal(readConnection(dir),null);connect(dir,origin);const before=fs.readFileSync(dir+'/desktop-enterprise.json');assert.deepEqual(connect(dir,origin),{version:1,origin});assert.throws(()=>connect(dir,'https://another.example'),/PROFILE_SWITCH_REQUIRED/);assert.deepEqual(fs.readFileSync(dir+'/desktop-enterprise.json'),before);assert.equal(readConnection(dir).origin,origin);fs.writeFileSync(dir+'/desktop-enterprise.json','{"version":99}');assert.throws(()=>readConnection(dir),/CONFIG_INVALID/);}finally{remove(dir);}
++});
++test('enterprise session exposes only the two fixed APIs and rejects supplied headers or arbitrary URLs',()=>{
++ assert.deepEqual(validateRequest(input(),origin),{endpoint:'/api/digital-employees',method:'GET',body:undefined});
++ for(const value of [{...input(),origin:'https://other.example'},{...input(),endpoint:'/api/digital-employees/device'},{...input(),endpoint:'/api/workspace?x=1'},{...input(),endpoint:'https://evil.example/api/workspace'},{...input(),endpoint:'/api/%77orkspace'},{...input(),endpoint:'/api/digital-employees/../workspace'},{...input(),method:'DELETE'},{...input(),headers:{cookie:'not-forwarded'}},{...input(),body:'{}'},{...input('POST',{}),body:'{}'},input('POST',[])])assert.throws(()=>validateRequest(value,origin),/FORBIDDEN|BODY_INVALID|OPERATION_ID_REQUIRED/);
++ assert.throws(()=>validateRequest({...input('POST',{}),body:'a'.repeat(MAX_REQUEST+1)},origin),/BODY_INVALID/);
++});
++test('enterprise session uses Chromium credentials without exporting headers or accepting caller cookies',async()=>{
++ let seen;const enterprise=new EnterpriseSession({origin,session:{fetch:async(url,options)=>{seen={url,options};return Response.json({employees:[]},{headers:{'set-cookie':'private; HttpOnly'}});}}});
++ const result=await enterprise.perform(input('POST',{action:'employee.create'}));assert.deepEqual(result,{status:200,body:'{"employees":[]}'});assert.equal(seen.url,origin+'/api/digital-employees');assert.equal(seen.options.credentials,'include');assert.equal(seen.options.redirect,'error');assert.equal(seen.options.headers.Origin,origin);assert(!('cookie'in seen.options.headers));assert(!JSON.stringify(result).includes('private'));
++});
++test('enterprise session preserves expired-login and RBAC status with no automatic replay',async()=>{
++ for(const status of [401,403]){let calls=0;const enterprise=new EnterpriseSession({origin,session:{fetch:async()=>{calls++;return Response.json({code:status===401?'UNAUTHENTICATED':'FORBIDDEN'},{status});}}});assert.equal((await enterprise.perform(input())).status,status);assert.equal(calls,1);}
++});
++test('redirect/network errors never disclose remote details or automatically repeat a mutation',async()=>{
++ let calls=0;const enterprise=new EnterpriseSession({origin,session:{fetch:async()=>{calls++;throw Error('private session data');}}});await assert.rejects(enterprise.perform(input('POST',{action:'once'})),/^Error: ENTERPRISE_UNAVAILABLE_NO_REPLAY$/);assert.equal(calls,1);
++});
++test('enterprise response has bounded bytes and valid JSON content type before publication',async()=>{
++ for(const response of [new Response('not json',{headers:{'content-type':'application/json'}}),new Response('<html>login</html>'),Response.json({x:'a'.repeat(MAX_RESPONSE)})]){const enterprise=new EnterpriseSession({origin,session:{fetch:async()=>response}});await assert.rejects(enterprise.perform(input()),/RESPONSE_INVALID|RESPONSE_TOO_LARGE/);}
++});
++test('enterprise in-flight admission rejects rather than queues or replays a fifth mutation',async()=>{
++ let release,calls=0;const pending=new Promise(r=>release=r),enterprise=new EnterpriseSession({origin,session:{fetch:async()=>{calls++;await pending;return Response.json({});}}});const flights=Array.from({length:4},()=>enterprise.perform(input()));await assert.rejects(enterprise.perform(input('POST',{})),/BUSY_NO_REPLAY/);assert.equal(calls,4);release();await Promise.all(flights);assert.equal(enterprise.running,0);
++});
++test('enterprise session propagates an already aborted caller and still clears admission',async()=>{
++ const controller=new AbortController();controller.abort();const enterprise=new EnterpriseSession({origin,session:{fetch:async(_url,options)=>{options.signal.throwIfAborted();}}});await assert.rejects(enterprise.perform(input(),{signal:controller.signal}),/UNAVAILABLE_NO_REPLAY/);assert.equal(enterprise.running,0);
++});
++test('loopback enterprise bridge requires its private bearer, rejects browser Origin, and keeps native health unchanged',async()=>{
++ const dir=temp();let bridge;try{const enterprise=new EnterpriseSession({origin,session:{fetch:async()=>Response.json({employees:[]})}});bridge=await startBridge({home:dir,guests:{},window:{},enterprise});const d=JSON.parse(fs.readFileSync(dir+'/naumi-desktop-bridge.json')),url='http://127.0.0.1:'+d.port;
++ for(const headers of [{},{Authorization:'Bearer '+d.token,Origin:origin}])assert.equal((await fetch(url+'/enterprise/request',{method:'POST',headers,body:JSON.stringify(input())})).status,403);
++ assert.deepEqual(await(await fetch(url+'/health',{headers:{Authorization:'Bearer '+d.token}})).json(),{ok:true,protocolVersion:1,pid:process.pid,engine:'chromium'});
++ const t=await transport(dir);const response=await t.fetch('/api/digital-employees',{headers:{cookie:'never-forward-this'}});assert.equal(response.status,200);assert.deepEqual(await response.json(),{employees:[]});assert.throws(()=>(new (t.constructor)({origin:'https://other.example',home:dir,standalone:true})).descriptor(),/BRIDGE_INVALID/);
++ }finally{await bridge?.close();assert(!fs.existsSync(dir+'/naumi-desktop-bridge.json'));remove(dir);}
++});
++test('desktop transport excludes device APIs and has no cookie fallback when GUI is disconnected',async()=>{
++ const dir=temp();let bridge,calls=0;try{bridge=await startBridge({home:dir,guests:{},window:{},enterprise:new EnterpriseSession({origin,session:{fetch:async()=>{calls++;return Response.json({});}}})});const t=await transport(dir);await assert.rejects(t.fetch('/api/digital-employees/device'),/REQUEST_FORBIDDEN/);assert.equal(calls,0);await bridge.close();bridge=null;await assert.rejects(t.fetch('/api/workspace',{headers:{cookie:'not-reused'}}),/LOGIN_REQUIRED/);assert.equal(calls,0);}finally{await bridge?.close();remove(dir);}
++});
++test('EmployeeSync bridges catalog/manager but signed device requests stay on the original transport',async()=>{
++ const dir=temp();let sync;try{const {EmployeeSync}=await import(pathToFileURL(path.resolve('plugins/naumi-enterprise/employee-sync.js')));const seen=[];sync=new EmployeeSync({file:dir+'/sync.sqlite',origin,store:{},directory:{},fetch:async(url)=>{seen.push(['device',url]);return Response.json({});},sessionRequest:async(url)=>{seen.push(['session',url]);return Response.json({result:{ok:true}});}});await sync.catalog('');assert.deepEqual(await sync.manager({action:'test'},''),{ok:true});await sync.http('/api/digital-employees/device');assert.deepEqual(seen.map(x=>x[0]),['session','session','device']);assert.equal(sync.status().registered,false);assert.equal(sync.status().enabled,false);}finally{await sync?.close();remove(dir);}
++});
++test('EmployeeSync reports expired enterprise session as login required, not a failed device authorization',async()=>{
++ const dir=temp();let sync;try{const {EmployeeSync}=await import(pathToFileURL(path.resolve('plugins/naumi-enterprise/employee-sync.js')));sync=new EmployeeSync({file:dir+'/sync.sqlite',origin,store:{},directory:{},sessionRequest:async()=>Response.json({code:'UNAUTHENTICATED'},{status:401})});await assert.rejects(sync.catalog(''),e=>e.message==='COLLABORATION_LOGIN_REQUIRED'&&e.status===401);assert.equal(sync.get('revoked'),null);}finally{await sync?.close();remove(dir);}
++});
++test('capability observation refreshes once when GUI bridge appears or changes PID without waiting a minute',async()=>{
++ const {EmployeeCapabilities}=await import(pathToFileURL(path.resolve('plugins/naumi-enterprise/employee-capabilities.js')));let descriptor=null,probes=0;const c=new EmployeeCapabilities({ctx:{tools:{definitions:()=>[]}},desktop:()=>null,dingtalk:async()=>({}),browser:{descriptor:()=>descriptor,health:async()=>{probes++;return {connected:!!descriptor};},dispose:async()=>{}}});try{await c.refresh();c.read('bot');await c.flight;const before=probes;descriptor={pid:1,port:1234};c.read('bot');await c.flight;assert.equal(probes,before+1);c.read('bot');assert.equal(probes,before+1);descriptor={pid:2,port:1234};c.read('bot');await c.flight;assert.equal(probes,before+2);}finally{await c.close();}
++});
++
++test('DPAPI enrollment vault works with a clean employee PATH and reopens the encrypted device key',async()=>{
++ const dir=temp();try{const {spawnSync}=require('node:child_process'),moduleURL=pathToFileURL(path.resolve('plugins/naumi-enterprise/employee-device-vault.js')).href;const program=`import assert from 'node:assert/strict';import {EmployeeDeviceVault} from ${JSON.stringify(moduleURL)};const file=${JSON.stringify(dir+'/device.vault')},v=new EmployeeDeviceVault(file),first=v.open(),again=new EmployeeDeviceVault(file).open();assert.equal(first.publicKey,again.publicKey);assert.equal(first.privateKey,again.privateKey);assert.equal(v.unseal(v.seal({retained:true})).retained,true);console.log('DEVICE_VAULT encrypted=1 reopened=1 development_path=0');`;const child=spawnSync(process.execPath,['--input-type=module','-e',program],{encoding:'utf8',env:{SystemRoot:process.env.SystemRoot,PATH:process.env.SystemRoot+'\\System32'}});assert.equal(child.status,0,child.stderr);assert.equal(child.stdout.trim(),'DEVICE_VAULT encrypted=1 reopened=1 development_path=0');assert(!fs.readFileSync(dir+'/device.vault','utf8').includes('PRIVATE KEY'));}finally{remove(dir);}
++});
++test('runtime inventory excludes saved enterprise configuration as employee-private install state',async()=>{
++ const {scanRuntimeInventory}=await import(pathToFileURL(path.resolve('desktop/scripts/prepare-runtime.mjs')));assert.throws(()=>scanRuntimeInventory([{path:'home/desktop-enterprise.json'}]),/RUNTIME_PRIVATE_FILE/);
++});
+diff --git a/modified/docs/implementation/DESKTOP_ENTERPRISE_M5_3.md b/modified/docs/implementation/DESKTOP_ENTERPRISE_M5_3.md
+new file mode 100644
+index 0000000..f2398bd
+--- /dev/null
++++ b/modified/docs/implementation/DESKTOP_ENTERPRISE_M5_3.md
+@@ -0,0 +1,76 @@
++# M5.3 企业首次连接与桌面登录桥
++
++日期：2026-11-17。完整目标 active。本模块不替换实际3080服务，不使用真实员工或供应商凭证。
++
++## 模块目标
++
++员工桌面从开发机地址中解耦：首次填写企业地址、在企业窗口正常登录、本地工作台读取该账号被授权的任务/员工目录，以及经明确操作登记设备。Cookie始终由Electron企业session持有；本地后端使用有限业务请求桥。原设备签名、组织RBAC、离线授权、运行门和私人上传确认继续权威。
++
++## 接口与归属设计
++
++### 实例协议2
++
++- `/naumi/desktop-instance` 保留路径，响应version升级2。
++- HMAC输入为 `2|nonce|id|pid|bundleId|homeHash|port|enterpriseOrigin`；停止输入在2之后增加`stop`。
++- `port`来自实际`req.socket.localPort`，不读取Host或X-Forwarded-Port；client与连接的准确URL端口比对，不能通过relay证明另一端口归属。
++- `homeHash`来自规范化realpath（Windows大小写归一）。`desktop-instance.json`保留version1/UUID/key，原地增加homeHash；不改员工SQLite或device key。
++- 已绑定home被复制或移动：报 `PROFILE_HOME_RELOCATION_REQUIRES_MIGRATION`，不自动轮换身份、删除回执、杀旧worker或启动第二个实例。
++- 遗留无homeHash文件：只补充当前目录绑定。即使手工克隆旧文件，协议2会核对worker实际home，不因UUID/key相同误附着。
++- 活的协议1worker不作降级兼容、不自动停止。员工须先正常退出旧程序再升级；存活但不被协议2证明的回执仍阻止重复启动。
++- runtime manifest仍schema2/profileVersion1，identityProtocol=2。旧runtime不被新客户端猜测接受。副本回滚恢复协议1，不代表已安装程序或数据库降级已验收。
++
++### 首次连接
++
++- 浅色独立`connect.html`，仅Logo、企业地址、连接操作和必要错误。
++- 默认standalone无固定本机企业地址；首次保存 `home/desktop-enterprise.json` `{version:1,origin}`。未配置时不启动后端。
++- HTTPS允许；HTTP仅loopback用于本地部署/测试。拒绝user/password、path、query、fragment。
++- `NAUMI_ENTERPRISE_ORIGIN`可作为受管部署输入，仍经过同一验证并落入本profile配置。
++- 同profile同origin幂等；变更issuer报 `ENTERPRISE_PROFILE_SWITCH_REQUIRED`。企业切换/搬迁需要独立profile或后续显式迁移流程，不复用旧设备授权、共享缓存或私人队列。
++- 仅connect.html主frame可提交配置IPC；工作台只能申请打开固定企业登录，不提供任意IPC或Cookie查询。
++
++### 企业session请求桥
++
++- 每个Electron userData、每个企业origin独立持久partition。与本地工作台primarySession、原生浏览器partition分开。
++- 登录窗口使用该企业session，没有preload/Node，限制主文档导航和redirect到企业origin，正常关闭登录窗口后刷新工作台；应用退出时先停止/销毁登录窗口并禁止reload/boot重新导航，避免关机过程中重新加载已停止的后端。真实E2E包括带登录窗口退出和观察GUI实际PID结束。
++- Electron `session.fetch` 使用自身登录Cookie。没有读取/序列化Cookie、没有把Set-Cookie交给本地renderer/backend。
++- 原私有Bearer loopback bridge新增 `/enterprise/request`，仍拒绝Origin请求。旧 `/health` 字段与浏览器 `/op` contract不变。
++- 请求只接受origin、endpoint、method、body。固定允许：GET `/api/workspace`，GET/POST `/api/digital-employees`。不允许query、URL、编码绕过、任意headers或`/device`。
++- POST是带operationId UUID的JSON object，最多1MiB；bridge JSON包体最多2MiB+4096；响应JSON最多8MiB；超时15秒；最多4个在途请求，超额直接拒绝。
++- 禁止redirect；只返回JSON正文和HTTP status，没有上游headers。401/403保持登录/权限语义，应用层不自动重试mutation；Chromium网络层可能重传，因此POST必须带调用方原始operationId UUID，复用企业端digital_request_receipts事务去重。超时/断网仍保持未知结果，用同一operationId核对，不创建新ID重做。
++- `EmployeeSync`只把catalog/manager/enroll/bind登录会话请求交给bridge。原`/device`签名通信直接到企业服务；不代理设备签名或改RBAC。
++- standalone始终使用所属企业session，不拿localhost里碰巧出现的业务cookie回退。普通web/显式linked开发模式仍走原业务Cookie适配器。
++- 首次bridge创建/GUI重启时，能力清单在读取时检测descriptor PID/port变化并触发刷新，不等待一分钟轮询。
++
++### 干净员工环境发现
++
++首次真实fixture登记使用原DPAPI vault。原代码依赖PATH发现powershell.exe，在纯系统PATH下失败；现从SystemRoot下WindowsPowerShell的固定绝对路径启动。不增加开发环境依赖，也不落明文device私钥。
++
++原桌面双profile实测还复现Windows短暂文件共享占用：回执的renameSync报EPERM。现在仅对Windows EPERM/EBUSY/EACCES做最多7次有界退避，保留已fsync候选和原权威回执，不先删除目标文件。真实独立PowerShell进程持有FileShare.Read锁后释放的回归覆盖该handoff。
++
++## 验收矩阵
++
++| 项目 | 证据 | 退出边界 |
++| --- | --- | --- |
++| 原293项回归 | BASELINE_TESTS.log | 基线 |
++| relay/克隆home | BASELINE_REPRO.log、MODIFIED_REPRO.log | 原缺陷复现与修复 |
++| 固定接口、body/response/admission、cookie不导出、401/403、不重试 | MODIFIED_TESTS.log | 模块 |
++| 显式首次连接、企业登录、workspace/catalog、登记proof/DPAPI、权限/过期/重启、双员工隔离 | DESKTOP_ENTERPRISE.json、DESKTOP_ENTERPRISE.log | 独立unpacked Electron + controlled fixture |
++| 原生浏览器/父进程强杀接回/私有数据保留 | DESKTOP_LIFECYCLE.log | 原桌面E2E继续通过 |
++| 正式npm包、ASAR/resource hash、完整inventory/打包Node/无祖先回落 | PACKAGE_CONTRACT.json | 候选产物 |
++| 原字节恢复、原293项、协议1行为/数据保留 | ROLLBACK_RESULT.json、VERIFICATION.txt | 副本回滚，实际新版保留 |
++
++## 本轮不冒充完成的门槛
++
++- 远程真实HTTPS企业与本人账号首次授权、真实设备绑定/模型策略和真实供应商使用。
++- 真实NSIS安装/升级/卸载、已安装版本迁移/回退、业务schema迁移与Windows数据库文件handoff。
++- 首次地址填错/服务器不可达时的连接修复UI，以及显式企业切换/员工目录搬迁的产品化迁移向导。当前已持久化origin不在原profile内静默改换；安装发布前补齐可回到连接设置的失败恢复路径，且保留设备/授权/缓存隔离约束。
++- 签名证书、依赖问题审查与干净员工机实际业务验收。
++
++## 可复用接续提示
++
++```text
++接续 Naumi M5：先核对GOAL_TRACKER、本文和desktop-enterprise/VERIFICATION。
++保留浅色Naumi UI、左侧导航、原模型选择、原生浏览器、企业session与设备签名分工。
++新员工不继承开发者凭证；不自动登记、上传、启用AI；不以fixture或unpacked代替实际安装/远程员工验收。
++下一模块推进NSIS真实安装与已安装版本/业务数据升级回退，保护现有安装和员工userData；完整模块后集中测试、记录并选择性提交。
++```
+diff --git a/original/docs/implementation/EMPLOYEE_PACKAGING_M5.md b/modified/docs/implementation/EMPLOYEE_PACKAGING_M5.md
+index 58b59f1..250188d 100644
+--- a/original/docs/implementation/EMPLOYEE_PACKAGING_M5.md
++++ b/modified/docs/implementation/EMPLOYEE_PACKAGING_M5.md
+@@ -64,3 +64,7 @@
+ 293项集中回归、268项副本原行为、72文件正式插件包、3个ASAR关键模块及6份resource源码hash一致性通过。真实unpacked桌面双profile/同Logo不误附着/动态端口、独立工作区、原生浏览器cookie持久化与跨profile不泄漏、正常重启、实际Electron主进程硬杀后原backend PID接回、接回后认证停机通过。原人物设定/记忆/schema1和UNKNOWN样例保留。处理了首用工作区隐式Documents依赖、引导URL就绪竞态、Windows非detached job、退出重入与Host压缩层丢弃end回调等真机问题。
+ 
+ 源码和故障矩阵详见 `DESKTOP_LIFECYCLE_M5_2.md`；证据 `evidence/desktop-lifecycle/VERIFICATION.txt`。实际3080未替换，员工/设备/上传/AI规则未自动操作。依赖链接回退不是已安装程序跨schema降级；远程企业session桥/首次连接、NSIS安装升级卸载、业务数据迁移/版本回退、签名与供应链、真实员工与模型验收仍继续，完整目标active。
++
++## M5.3 企业首次连接与归属
++
++新增首次企业origin配置、独立Electron企业session与有限业务请求桥；Cookie不拷贝到localhost，原设备签名/同步/运行门保留。实例协议2绑定listener port/homeHash/企业origin，拒绝relay和隐式home克隆，保留旧identity UUID/key。修复干净PATH下DPAPI shell发现和Windows回执短暂占用。315项本地回归通过；正式npm包73文件、候选产物/双profile登录/原生浏览器与故障恢复/副本回滚最终证据统一见evidence/desktop-enterprise/VERIFICATION.txt与DESKTOP_ENTERPRISE_M5_3.md。下一NSIS真实安装、已安装版本/业务数据迁移回退、签名/依赖和真实员工业务验收；完整目标active。
+diff --git a/original/docs/prd/GOAL_TRACKER.md b/modified/docs/prd/GOAL_TRACKER.md
+index a057e2a..75afd16 100644
+--- a/original/docs/prd/GOAL_TRACKER.md
++++ b/modified/docs/prd/GOAL_TRACKER.md
+@@ -42,3 +42,9 @@ owner确认的run_agent规则、原子持久队列、原AgentLoop/Native工具
+ 独立实例HMAC/持久回执/端口竞争处理、真实引导URL就绪、私有默认工作区注册、受管junction事务/4阶段硬退出恢复、Windows独立worker及认证退出/重入门已实现。293项回归、268项副本恢复、正式npm包72文件、打包ASAR/resource源码一致性通过；真实双profile/native浏览器、正常重启、Electron主进程SIGKILL后原worker PID接回、正常退出及persona/memory/schema1保留通过。详见DESKTOP_LIFECYCLE_M5_2.md及evidence/desktop-lifecycle/VERIFICATION.txt。
+ 
+ 下一M5.3：远程企业首次连接/session桥、endpoint/home归属边界与首次能力刷新；再业务数据/安装版本迁移回退、NSIS实际安装升级卸载、签名/依赖审查和真实员工/供应商使用。当前实际3080仍原服务，本增量不自动注册或启用员工。总目标active。
++
++## M5.3 企业首次连接/session桥增量
++
++实例协议2绑定真实监听端口、规范home和企业origin；identity v1增量补homeHash并保留UUID/key，克隆/搬迁拒绝隐式复用。standalone新增浅色首次连接页与持久企业origin配置、独立企业session登录窗口和固定业务API桥；不复制Cookie到renderer/backend。catalog/manager/enroll/bind复用该桥，原设备签名通道/RBAC/私人同步确认不变。首次GUI桥出现时刷新能力；DPAPI采用绝对系统PowerShell；Windows回执原子rename加入有界handoff重试。315项集中回归通过，正式npm包73文件；最终桌面/产物/副本回滚结果见evidence/desktop-enterprise/VERIFICATION.txt，详见DESKTOP_ENTERPRISE_M5_3.md。
++
++下一M5.4：首次连接错误地址/不可达的修复UI、NSIS真实安装/升级/卸载、已安装版本/业务schema迁移回退与Windows数据handoff；再签名/依赖、真实HTTPS企业/员工登记绑定/供应商与业务验收。企业切换/目录搬迁需要显式迁移流程，不隐式继承旧issuer/设备/cache。整体目标active。
+diff --git a/original/docs/prd/NAUMI_DIGITAL_EMPLOYEE_PRD.md b/modified/docs/prd/NAUMI_DIGITAL_EMPLOYEE_PRD.md
+index b183ada..1b40d3d 100644
+--- a/original/docs/prd/NAUMI_DIGITAL_EMPLOYEE_PRD.md
++++ b/modified/docs/prd/NAUMI_DIGITAL_EMPLOYEE_PRD.md
+@@ -355,3 +355,11 @@ HBT-003/004、CAP-001、BUD-001、LOC-004/005/006、EMP-002/003 扩展；独立
+ - profileVersion1/identityProtocol1、私有工作区first-use事务、受管依赖journal/4阶段硬退出恢复、既有配置/真实SQLite/浏览器数据保留、实际bootstrap回执再导航、Windows worker独立生命周期、认证停机与退出重入门已验收。
+ - 293模块、268副本基线、正式npm72文件/ASAR3模块/resource6份源码一致性、真实双桌面profile/原生浏览器/正常重启/主进程硬杀原PID接回/实际退出通过；UNKNOWN数据为明确样例，真实模型与执行账本的强杀证据仍见M4，不混淆层级。
+ - 证据evidence/desktop-lifecycle/VERIFICATION.txt，细粒度INS-01~16见DESKTOP_LIFECYCLE_M5_2.md。未退出项：远程企业首次连接/归属边界、业务schema与安装版本迁移/回退、NSIS真实安装链、签名与依赖、真实员工/模型使用。总目标active。
++
++## M5.3 首次企业连接与桌面会话桥增量（2026-11-17）
++
++- 桌面实例协议2把HMAC绑定实际listener port、规范homeHash和企业origin；身份metadata保留v1 UUID/key，旧活worker拒绝自动降级附着，复制/搬迁home不隐式换身份或删除数据。
++- 员工首次连接页配置HTTPS企业origin（本机loopback可HTTP），同profile禁止隐式跨企业切换。企业登录使用独立持久session；有限Bearer loopback桥只允许workspace GET、digital-employees GET/POST，不导出Cookie/Set-Cookie，不代理设备签名API。
++- 组织/设备登记的proof、签名离线授权、企业RBAC和原设备通道继续权威；首次连接不会自动登记或上传私人记忆。企业会话过期、权限拒绝、未知网络结果不由应用自动回放mutation；POST携带原始operationId，原企业事务回执去重覆盖Chromium可能的网络重传，并以同一UUID核对未知结果。
++- CAP-001：GUI桥出现/重启触发能力刷新；干净系统PATH下DPAPI改用固定绝对系统PowerShell。Windows回执rename短暂占用有界重试并保留原权威文件。
++- 315项集中模块回归通过。独立双profile Electron、候选正式包/hash、原生浏览器/主进程硬杀接回及副本回滚最终结果按evidence/desktop-enterprise/VERIFICATION.txt记录。真实远程HTTPS员工授权、模型/供应商业务、NSIS安装/升级/卸载、业务schema/已安装版本回退及签名审查仍分别验收，不以本地fixture替代。
+diff --git a/modified/plugins/naumi-enterprise/desktop-enterprise.js b/modified/plugins/naumi-enterprise/desktop-enterprise.js
+new file mode 100644
+index 0000000..e2a267a
+--- /dev/null
++++ b/modified/plugins/naumi-enterprise/desktop-enterprise.js
+@@ -0,0 +1,29 @@
++import fs from 'node:fs';
++import path from 'node:path';
++
++/** A finite session API, not a cookie exporter or general HTTP proxy. */
++export class DesktopEnterpriseTransport{
++ constructor({origin,home=process.env.DSH_HOME,standalone=!!process.env.NAUMI_DESKTOP_INSTANCE_ID,fetch:request=globalThis.fetch}={}){Object.assign(this,{origin,home,standalone,request});}
++ descriptor(){
++  if(!this.standalone||!this.home)return null;const file=path.join(this.home,'naumi-desktop-bridge.json');
++  try{const stat=fs.lstatSync(file);if(!stat.isFile()||stat.isSymbolicLink())throw Error();const d=JSON.parse(fs.readFileSync(file,'utf8'));
++   if(d.version!==1||!Number.isInteger(d.port)||d.port<1||d.port>65535||!Number.isInteger(d.pid)||d.pid<1||!/^[a-f0-9]{64}$/.test(d.token)||d.enterprise?.protocolVersion!==1||d.enterprise.origin!==this.origin)throw Error();return d;
++  }catch(e){if(e.code==='ENOENT')return null;throw Error('ENTERPRISE_BRIDGE_INVALID');}
++ }
++ available(){return !!this.descriptor();}
++ async fetch(endpoint,options={}){
++  const d=this.descriptor();if(!d)throw Error('COLLABORATION_LOGIN_REQUIRED');
++  if(!(endpoint==='/api/workspace'&&(options.method??'GET')==='GET'||endpoint==='/api/digital-employees'&&['GET','POST'].includes(options.method??'GET')))throw Error('ENTERPRISE_REQUEST_FORBIDDEN');
++  let response;try{response=await this.request(`http://127.0.0.1:${d.port}/enterprise/request`,{method:'POST',headers:{Authorization:'Bearer '+d.token,'Content-Type':'application/json'},body:JSON.stringify({origin:this.origin,endpoint,method:options.method??'GET',...(options.body===undefined?{}:{body:options.body})}),redirect:'error',signal:AbortSignal.any([...(options.signal?[options.signal]:[]),AbortSignal.timeout(18000)])});}catch{throw Error('ENTERPRISE_UNAVAILABLE_NO_REPLAY');}
++  const text=await response.text();if(text.length>9*1024*1024)throw Error('ENTERPRISE_RESPONSE_TOO_LARGE');let result;try{result=JSON.parse(text);}catch{throw Error('ENTERPRISE_RESPONSE_INVALID');}
++  if(!response.ok||!result.ok)throw Error(/^ENTERPRISE_[A-Z_]+$/.test(result.error)?result.error:'ENTERPRISE_UNAVAILABLE_NO_REPLAY');
++  if(!Number.isInteger(result.data?.status)||result.data.status<200||result.data.status>599||typeof result.data.body!=='string')throw Error('ENTERPRISE_RESPONSE_INVALID');
++  return new Response(result.data.body,{status:result.data.status,headers:{'Content-Type':'application/json'}});
++ }
++}
++export function desktopCollaborationOrigin(fallback,env=process.env){
++ if(!env.NAUMI_DESKTOP_INSTANCE_ID)return fallback;
++ const config=JSON.parse(fs.readFileSync(path.join(env.DSH_HOME,'desktop-enterprise.json'),'utf8'));
++ if(config.version!==1||config.origin!==env.NAUMI_ENTERPRISE_ORIGIN)throw Error('ENTERPRISE_CONFIG_INVALID');
++ const u=new URL(config.origin);if(u.origin!==config.origin||u.username||u.password||u.protocol!=='https:'&&!(u.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(u.hostname)))throw Error('ENTERPRISE_CONFIG_INVALID');return u.origin;
++}
+diff --git a/original/plugins/naumi-enterprise/desktop-identity.js b/modified/plugins/naumi-enterprise/desktop-identity.js
+index 3f2168f..777820f 100644
+--- a/original/plugins/naumi-enterprise/desktop-identity.js
++++ b/modified/plugins/naumi-enterprise/desktop-identity.js
+@@ -1,23 +1,25 @@
+ import fs from 'node:fs';
+ import path from 'node:path';
+-import {createHmac,timingSafeEqual} from 'node:crypto';
++import {createHash,createHmac,timingSafeEqual} from 'node:crypto';
+ 
+-export function desktopIdentityHandler({id,key,bundleId,pid=process.pid,onStop=()=>{if(!process.emit('SIGTERM'))process.exit(0);}}){
+-  if(!/^[0-9a-f-]{36}$/.test(id)||!/^[a-f0-9]{64}$/.test(key)||!/^[a-f0-9]{64}$/.test(bundleId))throw Error('DESKTOP_IDENTITY_INVALID');
++export function desktopIdentityHandler({id,key,bundleId,homeHash,enterpriseOrigin='',pid=process.pid,onStop=()=>{if(!process.emit('SIGTERM'))process.exit(0);}}){
++  if(!/^[0-9a-f-]{36}$/.test(id)||!/^[a-f0-9]{64}$/.test(key)||!/^[a-f0-9]{64}$/.test(bundleId)||!/^[a-f0-9]{64}$/.test(homeHash))throw Error('DESKTOP_IDENTITY_INVALID');
+   return (req,res)=>{
+     res.setHeader('Cache-Control','no-store');res.setHeader('Content-Type','application/json');res.setHeader('X-Content-Type-Options','nosniff');
+     if(!['GET','POST'].includes(req.method)){res.setHeader('Allow','GET, POST');res.writeHead(405).end();return;}
+     const nonce=req.headers['x-naumi-desktop-challenge'];
+     if(req.headers.origin||typeof nonce!=='string'||!/^[a-f0-9]{64}$/.test(nonce)){res.writeHead(403).end();return;}
++    // The actual listener, never Host/X-Forwarded-* supplied by a requester or relay.
++    const port=req.socket?.localPort;if(!Number.isInteger(port)||port<1||port>65535){res.writeHead(403).end();return;}
+     if(req.method==='POST'){
+-      const value=req.headers['x-naumi-desktop-stop'],expected=createHmac('sha256',key).update(['stop',nonce,id,pid,bundleId].join('|')).digest();
++      const value=req.headers['x-naumi-desktop-stop'],expected=createHmac('sha256',key).update([2,'stop',nonce,id,pid,bundleId,homeHash,port,enterpriseOrigin].join('|')).digest();
+       if(typeof value!=='string'||!/^[a-f0-9]{64}$/.test(value)||!timingSafeEqual(expected,Buffer.from(value,'hex'))){res.writeHead(403).end();return;}
+       // Host compression wraps end(chunk, encoding) and can discard its callback.
+       // finish belongs to the underlying response and survives those wrappers.
+-      res.once('finish',()=>setImmediate(onStop));res.setHeader('Connection','close');res.writeHead(200).end(JSON.stringify({version:1,stopping:true}));return;
++      res.once('finish',()=>setImmediate(onStop));res.setHeader('Connection','close');res.writeHead(200).end(JSON.stringify({version:2,stopping:true}));return;
+     }
+-    const proof=createHmac('sha256',key).update([nonce,id,pid,bundleId].join('|')).digest('hex');
+-    res.writeHead(200).end(JSON.stringify({version:1,id,pid,bundleId,proof}));
++    const proof=createHmac('sha256',key).update([2,nonce,id,pid,bundleId,homeHash,port,enterpriseOrigin].join('|')).digest('hex');
++    res.writeHead(200).end(JSON.stringify({version:2,id,pid,bundleId,homeHash,port,enterpriseOrigin,proof}));
+   };
+ }
+ export function installDesktopIdentity(ctx,env=process.env){
+@@ -26,8 +28,10 @@ export function installDesktopIdentity(ctx,env=process.env){
+   const file=path.join(env.DSH_HOME,'desktop-instance.json');
+   if(fs.lstatSync(file).isSymbolicLink())throw Error('DESKTOP_IDENTITY_INVALID');
+   const identity=JSON.parse(fs.readFileSync(file,'utf8'));
+-  if(identity.version!==1||identity.id!==env.NAUMI_DESKTOP_INSTANCE_ID)throw Error('DESKTOP_IDENTITY_INVALID');
+-  const handler=desktopIdentityHandler({...identity,bundleId:env.NAUMI_DESKTOP_BUNDLE_ID});
++  let canonical=fs.realpathSync.native(env.DSH_HOME);if(process.platform==='win32')canonical=canonical.toLowerCase();
++  const homeHash=createHash('sha256').update('naumi-home-v1\0'+canonical).digest('hex');
++  if(identity.version!==1||identity.id!==env.NAUMI_DESKTOP_INSTANCE_ID||identity.homeHash!==homeHash)throw Error('DESKTOP_IDENTITY_INVALID');
++  const handler=desktopIdentityHandler({...identity,bundleId:env.NAUMI_DESKTOP_BUNDLE_ID,enterpriseOrigin:env.NAUMI_ENTERPRISE_ORIGIN??''});
+   ctx.effect(()=>ctx.webServer.register({kind:'exact',path:'/naumi/desktop-instance',handler}));
+   // Use the registry's first-use transaction, not OS Documents discovery or a shared global folder.
+   // Existing registries/history and deliberate default-workspace deletions remain authoritative.
+diff --git a/original/plugins/naumi-enterprise/employee-capabilities.js b/modified/plugins/naumi-enterprise/employee-capabilities.js
+index 1316f05..bd172c2 100644
+--- a/original/plugins/naumi-enterprise/employee-capabilities.js
++++ b/modified/plugins/naumi-enterprise/employee-capabilities.js
+@@ -25,6 +25,9 @@ export class EmployeeCapabilities{
+     save('enterprise',{installed:!!this.sync,connected:null,reasonCode:this.sync?'ENTERPRISE_CONNECTIVITY_NOT_PROBED':'ENTERPRISE_NOT_CONFIGURED'});
+   }
+   read(botId){
++    // Backend starts before the GUI bridge. Refresh immediately when the descriptor arrives/restarts.
++    let stamp=null;try{const d=this.browser.descriptor?.();stamp=d?`${d.pid}:${d.port}`:null;}catch{}
++    if(stamp!==this.bridgeStamp){this.bridgeStamp=stamp;void this.refresh().catch(()=>{});}
+     const records=[...this.values.values()].map(v=>({...v,stale:this.clock()-Date.parse(v.lastChecked)>v.staleAfterMs}));
+     const enterprise=records.find(r=>r.id==='enterprise');
+     if(enterprise&&this.sync){
+diff --git a/original/plugins/naumi-enterprise/employee-device-vault.js b/modified/plugins/naumi-enterprise/employee-device-vault.js
+index 325ead1..b7501e2 100644
+--- a/original/plugins/naumi-enterprise/employee-device-vault.js
++++ b/modified/plugins/naumi-enterprise/employee-device-vault.js
+@@ -27,6 +27,7 @@ export class EmployeeDeviceVault {
+ function dpapi(value,decode){
+   if(process.platform!=='win32')throw Error('EMP_OS_VAULT_REQUIRED');
+   const program=`Add-Type -AssemblyName System.Security; $s=[Console]::In.ReadToEnd(); $b=${decode?'[Convert]::FromBase64String($s)':'[Text.Encoding]::UTF8.GetBytes($s)'}; $r=[Security.Cryptography.ProtectedData]::${decode?'Unprotect':'Protect'}($b,[Text.Encoding]::UTF8.GetBytes('Naumi.employee.device.v1'),[Security.Cryptography.DataProtectionScope]::CurrentUser); [Console]::Out.Write(${decode?'[Text.Encoding]::UTF8.GetString($r)':'[Convert]::ToBase64String($r)'})`;
+-  const result=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(program,'utf16le').toString('base64')],{input:value,encoding:'utf8',windowsHide:true,timeout:15000,maxBuffer:2*1024*1024});
++  const shell=path.join(process.env.SystemRoot??'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe');
++  const result=spawnSync(shell,['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(program,'utf16le').toString('base64')],{input:value,encoding:'utf8',windowsHide:true,timeout:15000,maxBuffer:2*1024*1024});
+   if(result.status!==0||!result.stdout)throw Error('EMP_OS_VAULT_UNAVAILABLE');return result.stdout.trim();
+ }
+diff --git a/original/plugins/naumi-enterprise/employee-sync-http.js b/modified/plugins/naumi-enterprise/employee-sync-http.js
+index 1cc20e3..1004f14 100644
+--- a/original/plugins/naumi-enterprise/employee-sync-http.js
++++ b/modified/plugins/naumi-enterprise/employee-sync-http.js
+@@ -3,6 +3,7 @@ import {z} from 'zod';
+ import {EmployeeSync} from './employee-sync.js';
+ import {businessCookie} from './domain.js';
+ import {EmployeeEnterpriseWork,enterpriseWorkCommand} from './employee-enterprise-work.js';
++import {DesktopEnterpriseTransport} from './desktop-enterprise.js';
+ 
+ const command=z.discriminatedUnion('action',[
+   z.object({action:z.literal('enroll'),name:z.string().trim().min(1).max(100)}).strict(),
+@@ -17,7 +18,8 @@ const command=z.discriminatedUnion('action',[
+ ]);
+ export function installEmployeeSync(scope,directory,data,{origin,sync:provided}={}){
+   if(!origin&&!provided)return null;
+-  const sync=provided??new EmployeeSync({file:path.join(path.dirname(directory.file),'employee-sync.sqlite'),store:data,directory,origin});
++  const transport=new DesktopEnterpriseTransport({origin});
++  const sync=provided??new EmployeeSync({file:path.join(path.dirname(directory.file),'employee-sync.sqlite'),store:data,directory,origin,...(transport.standalone?{sessionRequest:(url,options)=>{const u=new URL(url);if(u.origin!==origin)throw Error('ENTERPRISE_REQUEST_FORBIDDEN');return transport.fetch(u.pathname,options);}}:{})});
+   sync.enterpriseWork=new EmployeeEnterpriseWork(sync);
+   scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/employee-sync',handler:async(req,res)=>{
+     res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Type','application/json; charset=utf-8');
+@@ -27,7 +29,7 @@ export function installEmployeeSync(scope,directory,data,{origin,sync:provided}=
+     try{
+       const q=new URL(req.url,'http://localhost').searchParams;
+       if(req.method==='GET'){
+-        if(q.get('view')==='catalog'){const cookie=businessCookie(req.headers.cookie);if(!cookie){send(401,{error:'COLLABORATION_LOGIN_REQUIRED'});return;}send(200,await sync.catalog(cookie));}
++        if(q.get('view')==='catalog'){const cookie=businessCookie(req.headers.cookie);if(!cookie&&!transport.standalone){send(401,{error:'COLLABORATION_LOGIN_REQUIRED'});return;}send(200,await sync.catalog(cookie));}
+         else if(q.get('view')==='shared')send(200,sync.sharedMemories());
+         else if(q.get('view')==='operations')send(200,sync.enterpriseWork.operations(z.string().min(1).max(200).parse(q.get('botId'))));
+         else send(200,sync.status());return;
+@@ -37,7 +39,7 @@ export function installEmployeeSync(scope,directory,data,{origin,sync:provided}=
+       const chunks=[];let size=0;for await(const c of req){size+=c.length;if(size>30*1024*1024){send(413,{error:'EMP_REQUEST_TOO_LARGE'});return;}chunks.push(c);}
+       let p;try{p=command.parse(JSON.parse(Buffer.concat(chunks).toString('utf8')));}catch{send(400,{error:'EMP_INVALID_REQUEST'});return;}
+       const cookie=businessCookie(req.headers.cookie);
+-      if(['enroll','bind','manage'].includes(p.action)&&!cookie){send(401,{error:'COLLABORATION_LOGIN_REQUIRED'});return;}
++      if(['enroll','bind','manage'].includes(p.action)&&!cookie&&!transport.standalone){send(401,{error:'COLLABORATION_LOGIN_REQUIRED'});return;}
+       let result;
+       if(p.action==='enroll')result=await sync.enroll(cookie,p.name);
+       if(p.action==='bind')result=await sync.bind(p.botId,p.employeeId,cookie);
+@@ -49,7 +51,7 @@ export function installEmployeeSync(scope,directory,data,{origin,sync:provided}=
+       if(p.action==='business_retry')result=await sync.enterpriseWork.retry(p.botId,p.operationId);
+       if(p.action==='execution_acquire'){const binding=await sync.enterpriseWork.binding(p.botId);result=await sync.enterpriseWork.leases.ensure(p.botId,binding.employeeId,p.taskId);}
+       send(200,result);
+-    }catch(e){const code=/^[A-Z_]+$/.test(e.message)?e.message:'EMP_CONTROL_UNAVAILABLE';send(/CONFLICT|REVISION|REPLAY/.test(code)?409:/REQUIRED|REVOKED|FORBIDDEN|APPROVAL/.test(code)?403:/UNAVAILABLE/.test(code)?503:400,{error:code});}
++    }catch(e){const code=/^[A-Z_]+$/.test(e.message)?e.message:'EMP_CONTROL_UNAVAILABLE';send(e.status===401?401:/UNAVAILABLE|NO_REPLAY|BRIDGE/.test(code)?503:/CONFLICT|REVISION|REPLAY/.test(code)?409:/REQUIRED|REVOKED|FORBIDDEN|APPROVAL/.test(code)?403:400,{error:code});}
+   }}));
+   sync.start();return sync;
+ }
+diff --git a/original/plugins/naumi-enterprise/employee-sync.js b/modified/plugins/naumi-enterprise/employee-sync.js
+index 380b896..b73d1f8 100644
+--- a/original/plugins/naumi-enterprise/employee-sync.js
++++ b/modified/plugins/naumi-enterprise/employee-sync.js
+@@ -1,176 +1,177 @@
+-import fs from 'node:fs';
+-import path from 'node:path';
+-import {DatabaseSync} from 'node:sqlite';
+-import {createHash,randomUUID,sign,verify,createPublicKey} from 'node:crypto';
+-import {EmployeeDeviceVault} from './employee-device-vault.js';
+-import {assertPublicText,PROFILE_FIELDS} from './employee-store.js';
+-
+-const canonical=v=>JSON.stringify(v,(_k,x)=>x&&typeof x==='object'&&!Array.isArray(x)?Object.fromEntries(Object.entries(x).sort(([a],[b])=>a.localeCompare(b))):x);
+-const hash=v=>createHash('sha256').update(canonical(v)).digest('hex');
+-const fail=code=>{throw Error(code);};
+-const payload=(value,kind)=>Object.fromEntries((kind==='profile'?[...PROFILE_FIELDS,'autoLearning','lockedFields']:['kind','text','status','pinned','expiresAt','proposedProfile','mergedFrom','mergedInto','importSource']).map(k=>[k,value[k]]));
+-const keyHash=pem=>createHash('sha256').update(createPublicKey(pem).export({type:'spki',format:'der'})).digest('hex');
+-export function verifyEmployeeAuthorization(packet,{publicKey,kid,issuer,deviceId,tenantId,key,now=Date.now(),highWater=0}={}){
+-  if(!packet||packet.kid!==kid||typeof packet.payload!=='string'||packet.payload.length>1000000)fail('EMP_AUTH_SIGNATURE_INVALID');
+-  try{if(!verify(null,Buffer.from(packet.payload),publicKey,Buffer.from(packet.signature,'base64url')))fail('EMP_AUTH_SIGNATURE_INVALID');}catch{fail('EMP_AUTH_SIGNATURE_INVALID');}
+-  let c;try{c=JSON.parse(Buffer.from(packet.payload,'base64url').toString('utf8'));}catch{fail('EMP_AUTH_INVALID');}
+-  if(c.v!==1||c.aud!=='naumi-desktop'||c.iss!==issuer||c.tenantId!==tenantId||c.deviceId!==deviceId||c.keyHash!==keyHash(key))fail('EMP_AUTH_BINDING_INVALID');
+-  if(!Array.isArray(c.bindings)||!Array.isArray(c.projectIds)||!Array.isArray(c.capabilities)||!Number.isInteger(c.authEpoch)||c.authEpoch<1)fail('EMP_AUTH_INVALID');
+-  const issued=Date.parse(c.issuedAt),expires=Date.parse(c.expiresAt);
+-  if(!Number.isFinite(issued)||!Number.isFinite(expires)||expires<=issued||expires-issued>86400000||now<issued-300000)fail('EMP_AUTH_INVALID');
+-  if(now<highWater-60000)fail('EMP_AUTH_CLOCK_ROLLBACK');
+-  if(now>=expires)fail('EMP_AUTH_EXPIRED');return c;
+-}
+-
+-export class EmployeeSync {
+-  constructor({file,store,directory,origin,vault,fetch:request=globalThis.fetch,clock=()=>Date.now()}){
+-    this.store=store;this.directory=directory;this.origin=new URL(origin).origin;this.request=request;this.clock=clock;
+-    const u=new URL(origin);if(u.username||u.password||u.pathname!=='/'||u.search||u.hash||u.protocol!=='https:'&&!(u.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(u.hostname)))fail('EMP_SYNC_ORIGIN_INVALID');
+-    fs.mkdirSync(path.dirname(file),{recursive:true});this.vault=vault??new EmployeeDeviceVault(file+'.device');this.db=new DatabaseSync(file);
+-    if(![0,1].includes(this.db.prepare('PRAGMA user_version').get().user_version)){this.db.close();fail('EMP_SYNC_SCHEMA_UNSUPPORTED');}
+-    this.db.exec(`PRAGMA journal_mode=WAL;PRAGMA busy_timeout=5000;
+-      CREATE TABLE IF NOT EXISTS config(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+-      CREATE TABLE IF NOT EXISTS revisions(bot_id TEXT,aggregate_id TEXT,remote_revision INTEGER NOT NULL,local_revision INTEGER NOT NULL,payload_hash TEXT NOT NULL,PRIMARY KEY(bot_id,aggregate_id));
+-      CREATE TABLE IF NOT EXISTS outbox(event_id TEXT PRIMARY KEY,bot_id TEXT,aggregate_id TEXT,local_revision INTEGER NOT NULL,status TEXT NOT NULL,encrypted TEXT NOT NULL);
+-      CREATE UNIQUE INDEX IF NOT EXISTS one_pending ON outbox(bot_id,aggregate_id) WHERE status='pending';
+-      CREATE TABLE IF NOT EXISTS conflicts(id TEXT PRIMARY KEY,bot_id TEXT,aggregate_id TEXT,encrypted TEXT NOT NULL);
+-      CREATE TABLE IF NOT EXISTS shared_cache(id TEXT PRIMARY KEY,scope TEXT NOT NULL,project_id TEXT,encrypted TEXT NOT NULL);
+-      PRAGMA user_version=1;
+-    `);
+-    this.deviceId=this.get('deviceId')??randomUUID();this.set('deviceId',this.deviceId);this.lastError=null;this.closed=false;
+-  }
+-  get(k){const r=this.db.prepare('SELECT value FROM config WHERE key=?').get(k);return r?JSON.parse(r.value):null;}
+-  set(k,v){this.db.prepare('INSERT INTO config VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(k,JSON.stringify(v));}
+-  registration(){return this.get('registration');}
+-  status(){const r=this.registration();let claims=null,error=this.lastError;
+-    if(r)try{claims=this.offlineClaims();}catch(e){error=e.message;}
+-    const dirty=claims?.bindings.some(b=>[this.store.profile(b.localBotId),...this.store.allMemories(b.localBotId)].some(v=>{const cp=this.checkpoint(b.localBotId,v.id);return v.revision>0&&cp?.local_revision!==v.revision&&cp?.payload_hash!==hash(payload(v,v.id==='profile'?'profile':'memory'));}));
+-    return {version:1,deviceId:this.deviceId,registered:!!r,origin:this.origin,tenantId:r?.tenantId??null,memberId:r?.memberId??null,enabled:!!this.get('enabled'),syncState:!r?'local_only':!this.get('enabled')?'paused':error?'attention':this.db.prepare('SELECT count(*) AS n FROM conflicts').get().n?'conflict':this.db.prepare("SELECT count(*) AS n FROM outbox WHERE status='pending'").get().n||dirty?'pending':this.get('lastSyncedAt')?'synced':'pending',
+-      bindings:claims?.bindings??[],authorization:claims?{expiresAt:claims.expiresAt,capabilities:claims.capabilities}:null,lastSyncedAt:this.get('lastSyncedAt'),error,
+-      pending:this.db.prepare("SELECT count(*) AS n FROM outbox WHERE status='pending'").get().n,
+-      conflicts:this.db.prepare('SELECT * FROM conflicts').all().map(x=>({id:x.id,botId:x.bot_id,aggregateId:x.aggregate_id,...this.vault.unseal(x.encrypted)}))};
+-  }
+-  offlineClaims(){
+-    const r=this.registration();if(!r)fail('EMP_DEVICE_NOT_REGISTERED');if(this.get('revoked'))fail('EMP_DEVICE_REVOKED');
+-    const now=this.clock(),highWater=this.get('highWater')??0;
+-    const claims=verifyEmployeeAuthorization(this.get('authorization'),{publicKey:r.serverPublicKey,kid:r.keyId,issuer:this.origin,deviceId:this.deviceId,tenantId:r.tenantId,key:this.vault.open().publicKey,now,highWater});
+-    if(claims.authEpoch<(this.get('authEpoch')??0))fail('EMP_AUTH_EPOCH_ROLLBACK');
+-    this.set('highWater',Math.max(now,highWater));return claims;
+-  }
+-  async manager(action,cookie){
+-    const result=await this.http('/api/digital-employees',{method:'POST',headers:{cookie,'Content-Type':'application/json'},body:JSON.stringify(action)});
+-    return result.result;
+-  }
+-  async http(endpoint,options={}){
+-    const r=await this.request(this.origin+endpoint,{...options,redirect:'error',signal:AbortSignal.any([...(options.signal?[options.signal]:[]),AbortSignal.timeout(15000)])});
+-    const text=await r.text();if(text.length>8*1024*1024)fail('EMP_SYNC_RESPONSE_TOO_LARGE');let value;try{value=JSON.parse(text);}catch{fail('EMP_SYNC_RESPONSE_INVALID');}
+-    if(!r.ok){const code=value.code??'EMP_SYNC_UNAVAILABLE';if(['DEVICE_REVOKED','MEMBER_INACTIVE','TENANT_INACTIVE','ACCESS_PENDING','DEVICE_REENROLLMENT_REQUIRED'].includes(code)){this.set('revoked',true);this.db.exec('DELETE FROM shared_cache');}const error=Error(code);error.status=r.status;throw error;}
+-    return value;
+-  }
+-  async enroll(cookie,name){
+-    if(this.registration())fail('EMP_DEVICE_ALREADY_REGISTERED');
+-    const keys=this.vault.open(),operationId=this.get('enrollmentOperation')??randomUUID();this.set('enrollmentOperation',operationId);
+-    const proof=sign(null,Buffer.from(canonical({v:1,aud:'naumi-enrollment',deviceId:this.deviceId,publicKey:keys.publicKey,operationId})),keys.privateKey).toString('base64url');
+-    const r=await this.manager({action:'device.register',operationId,deviceId:this.deviceId,name,publicKey:keys.publicKey,proof},cookie);
+-    // Trusted configured TLS/loopback enrollment only; pin server key and issuer once.
+-    const claims=verifyEmployeeAuthorization(r.authorization,{publicKey:r.serverPublicKey,kid:r.keyId,issuer:this.origin,deviceId:this.deviceId,tenantId:r.tenantId,key:keys.publicKey,now:this.clock()});
+-    this.set('registration',{tenantId:r.tenantId,memberId:r.memberId,keyId:r.keyId,serverPublicKey:r.serverPublicKey});this.accept(r,claims);return this.status();
+-  }
+-  accept(response,alreadyVerified){
+-    const r=this.registration(),claims=alreadyVerified??verifyEmployeeAuthorization(response.authorization,{publicKey:r.serverPublicKey,kid:r.keyId,issuer:this.origin,deviceId:this.deviceId,tenantId:r.tenantId,key:this.vault.open().publicKey,now:this.clock(),highWater:this.get('highWater')??0});
+-    if(claims.authEpoch<(this.get('authEpoch')??0))fail('EMP_AUTH_EPOCH_ROLLBACK');
+-    this.set('authorization',response.authorization);this.set('authEpoch',claims.authEpoch);this.set('revoked',false);this.set('highWater',Math.max(this.clock(),this.get('highWater')??0));
+-    // Do not retain resource caches after project/employee access disappears.
+-    const projects=new Set(claims.projectIds),bots=new Set(claims.bindings.map(b=>b.localBotId));
+-    for(const row of this.db.prepare('SELECT id,scope,project_id FROM shared_cache').all())if(row.scope==='project'&&!projects.has(row.project_id))this.db.prepare('DELETE FROM shared_cache WHERE id=?').run(row.id);
+-    for(const row of this.db.prepare('SELECT id,bot_id FROM conflicts').all())if(!bots.has(row.bot_id))this.db.prepare('DELETE FROM conflicts WHERE id=?').run(row.id);
+-    return claims;
+-  }
+-  async device(body,{signal}={}){
+-    const r=this.registration();if(!r)fail('EMP_DEVICE_NOT_REGISTERED');
+-    const p={v:1,aud:'naumi-device-api',tenantId:r.tenantId,deviceId:this.deviceId,nonce:randomUUID(),issuedAt:new Date(this.clock()).toISOString(),body};
+-    const signature=sign(null,Buffer.from(canonical(p)),this.vault.open().privateKey).toString('base64url');
+-    const response=await this.http('/api/digital-employees/device',{method:'POST',headers:{'Content-Type':'application/json','x-naumi-device-signature':signature},body:canonical(p),signal});
+-    this.accept(response);return response;
+-  }
+-  async catalog(cookie){return this.http('/api/digital-employees',{headers:{cookie}});}
+-  async bind(botId,employeeId,cookie){this.bot(botId);const r=await this.manager({action:'device.bind',operationId:randomUUID(),deviceId:this.deviceId,employeeId,localBotId:botId},cookie);this.accept(r);return this.status();}
+-  localBot(id){return this.directory.list().bots.find(b=>b.id===id);}
+-  bot(id){const b=this.localBot(id);if(!b||b.status!=='active')fail('EMP_BOT_NOT_FOUND');return b;}
+-  checkpoint(botId,id){return this.db.prepare('SELECT * FROM revisions WHERE bot_id=? AND aggregate_id=?').get(botId,id);}
+-  mark(botId,id,remote,local,value){this.db.prepare('INSERT INTO revisions VALUES(?,?,?,?,?) ON CONFLICT(bot_id,aggregate_id) DO UPDATE SET remote_revision=excluded.remote_revision,local_revision=excluded.local_revision,payload_hash=excluded.payload_hash').run(botId,id,remote,local,hash(value));}
+-  conflict(botId,id,detail){const key=botId+'/'+id;this.db.prepare('INSERT INTO conflicts VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET encrypted=excluded.encrypted').run(key,botId,id,this.vault.seal(detail));}
+-  queue(claims){
+-    for(const binding of claims.bindings){const botId=binding.localBotId;if(!this.localBot(botId)||this.localBot(botId).status!=='active')continue;
+-      for(const value of [this.store.profile(botId),...this.store.allMemories(botId)]){
+-        if(value.revision===0)continue;const kind=value.id==='profile'?'profile':'memory',p=payload(value,kind),checkpoint=this.checkpoint(botId,value.id);
+-        if(checkpoint?.local_revision===value.revision||this.db.prepare('SELECT 1 FROM conflicts WHERE bot_id=? AND aggregate_id=?').get(botId,value.id)||this.db.prepare("SELECT 1 FROM outbox WHERE bot_id=? AND aggregate_id=? AND status='pending'").get(botId,value.id))continue;
+-        const event={eventId:randomUUID(),employeeId:binding.employeeId,aggregateId:value.id,kind,baseRevision:checkpoint?.remote_revision??0,payload:p,deleted:p.status==='deleted',source:value.source??{kind:'owner',note:'Explicitly enabled private synchronization'},occurredAt:new Date(this.clock()).toISOString()};
+-        assertPublicText(JSON.stringify(event.payload));this.db.prepare('INSERT INTO outbox VALUES(?,?,?,?,?,?)').run(event.eventId,botId,value.id,value.revision,'pending',this.vault.seal(event));
+-      }
+-    }
+-  }
+-  importRecord(binding,remote){
+-    const botId=binding.localBotId,id=remote.aggregate_id??remote.aggregateId,kind=remote.kind,revision=remote.revision,p=remote.payload;
+-    if(!this.localBot(botId))return;
+-    const current=id==='profile'?this.store.profile(botId):this.store.entity(botId,id),cp=this.checkpoint(botId,id);
+-    if(cp&&revision<=cp.remote_revision)return;
+-    const pending=this.db.prepare("SELECT * FROM outbox WHERE bot_id=? AND aggregate_id=? AND status='pending'").get(botId,id);
+-    if(pending&&hash(this.vault.unseal(pending.encrypted).payload)===hash(p)){this.mark(botId,id,revision,pending.local_revision,p);this.db.prepare('DELETE FROM outbox WHERE event_id=?').run(pending.event_id);return;}
+-    if(current&&hash(payload(current,kind))===hash(p)){this.mark(botId,id,revision,current.revision,p);return;}
+-    if(current?.revision&&(cp?.local_revision??0)!==current.revision){this.conflict(botId,id,{revision,remote:{kind,payload:p,deleted:remote.deleted,source:remote.source},local:payload(current,kind),reason:'concurrent_update'});return;}
+-    try{
+-      const value=this.applyRemote(botId,id,kind,p,revision,remote.source);this.mark(botId,id,revision,value.revision,p);
+-    }catch(e){this.conflict(botId,id,{revision,remote:{kind,payload:p,deleted:remote.deleted,source:remote.source},local:current?payload(current,kind):null,reason:e.message});}
+-  }
+-  applyRemote(botId,id,kind,p,revision,source){
+-    assertPublicText(JSON.stringify(p));const current=id==='profile'?this.store.profile(botId):this.store.entity(botId,id);
+-    // Locks retain their meaning even when a remote manager edits the profile.
+-    if(kind==='profile'&&current.lockedFields.some(k=>current[k]!==p[k]))fail('EMP_FIELD_LOCKED');
+-    if(current?.status==='deleted'&&p.status!=='deleted')fail('EMP_MEMORY_DELETED');
+-    return this.store.mutate(botId,`sync:${this.registration().tenantId}:${id}:${revision}`,'remote_sync',{kind,p,revision},{kind:'owner',note:'Verified enterprise device sync'},()=>this.store.put({...current,...p,id,botId,revision:(current?.revision??0)+1,updatedAt:this.store.now(),...(kind==='memory'?{createdAt:current?.createdAt??this.store.now(),source:source??{kind:'owner',note:'Verified enterprise device sync'}}:{})},kind,'remote_sync',{kind:'owner',note:'Verified enterprise device sync'}));
+-  }
+-  async sync(){
+-    if(this.flight)return this.flight;if(this.closed)fail('EMP_SYNC_CLOSED');
+-    this.flight=this.run().catch(e=>{this.lastError=/^[A-Z_]+$/.test(e.message)?e.message:'EMP_CONTROL_UNAVAILABLE';throw Error(this.lastError);}).finally(()=>{this.flight=null;});return this.flight;
+-  }
+-  async run(){
+-    if(!this.get('enabled'))fail('EMP_SYNC_NOT_ENABLED');
+-    // Always refresh authority before any upload after reconnect. Offline expiry does not erase local records.
+-    await this.device({action:'authorize'});let claims=this.offlineClaims();
+-    let after='',snapshotComplete=false;for(let page=0;page<1000;page++){
+-      const response=await this.device({action:'snapshot',after,limit:100});claims=this.offlineClaims();
+-      for(const r of response.records){const b=claims.bindings.find(b=>b.employeeId===r.employee_id);if(b)this.importRecord(b,r);}
+-      if(!response.hasMore){snapshotComplete=true;break;}if(response.after===after)fail('EMP_SYNC_CURSOR_INVALID');after=response.after;
+-    }
+-    if(!snapshotComplete)fail('EMP_SYNC_PAGE_LIMIT');
+-    if(!this.get('enabled'))fail('EMP_SYNC_NOT_ENABLED');
+-    this.queue(claims);
+-    const pending=this.db.prepare("SELECT * FROM outbox WHERE status='pending' ORDER BY rowid LIMIT 100").all();
+-    // New grants cannot silently expand already queued private data to another employee.
+-    const authorized=pending.filter(row=>{const e=this.vault.unseal(row.encrypted);return claims.bindings.some(b=>b.localBotId===row.bot_id&&b.employeeId===e.employeeId);});
+-    if(authorized.length){const response=await this.device({action:'push',events:authorized.map(r=>this.vault.unseal(r.encrypted))});
+-      for(const row of authorized){const result=response.results.find(r=>r.eventId===row.event_id);if(!result)fail('EMP_SYNC_ACK_MISSING');
+-        if(result.status==='applied'){const e=this.vault.unseal(row.encrypted);this.mark(row.bot_id,row.aggregate_id,result.revision,row.local_revision,e.payload);this.db.prepare('DELETE FROM outbox WHERE event_id=?').run(row.event_id);}
+-        else if(result.status==='conflict'){this.conflict(row.bot_id,row.aggregate_id,result);this.db.prepare("UPDATE outbox SET status='conflict' WHERE event_id=?").run(row.event_id);}
+-        else fail('EMP_SYNC_ACK_INVALID');
+-      }
+-    }
+-    // Stage complete snapshot, then atomically replace cache; partial fetch never masquerades as a complete catalog.
+-    const shared=[];let sharedComplete=false;after='';for(let page=0;page<1000;page++){const r=await this.device({action:'shared',after,limit:100});shared.push(...r.items);if(!r.hasMore){sharedComplete=true;break;}if(r.after===after)fail('EMP_SYNC_CURSOR_INVALID');after=r.after;}
+-    if(!sharedComplete)fail('EMP_SYNC_PAGE_LIMIT');
+-    this.db.exec('BEGIN IMMEDIATE');try{this.db.exec('DELETE FROM shared_cache');for(const r of shared)this.db.prepare('INSERT INTO shared_cache VALUES(?,?,?,?)').run(r.id,r.scope,r.project_id,this.vault.seal(r));this.db.exec('COMMIT');}catch(e){this.db.exec('ROLLBACK');throw e;}
+-    this.set('lastSyncedAt',new Date(this.clock()).toISOString());this.lastError=null;return this.status();
+-  }
+-  resolve(id,choice){const row=this.db.prepare('SELECT * FROM conflicts WHERE id=?').get(id);if(!row)fail('EMP_SYNC_CONFLICT_NOT_FOUND');
+-    const c=this.vault.unseal(row.encrypted),binding=this.offlineClaims().bindings.find(b=>b.localBotId===row.bot_id);if(!binding)fail('EMP_DEVICE_BINDING_REQUIRED');
+-    if(choice==='remote'){if(!c.remote)fail('EMP_SYNC_REMOTE_EMPTY');const v=this.applyRemote(row.bot_id,row.aggregate_id,c.remote.kind,c.remote.payload,c.revision,c.remote.source);this.mark(row.bot_id,row.aggregate_id,c.revision,v.revision,c.remote.payload);}
+-    else if(choice==='local'){if(c.remote?.deleted)fail('EMP_MEMORY_DELETED');const value=row.aggregate_id==='profile'?this.store.profile(row.bot_id):this.store.entity(row.bot_id,row.aggregate_id);this.mark(row.bot_id,row.aggregate_id,c.revision,-1,payload(value,row.aggregate_id==='profile'?'profile':'memory'));}
+-    else fail('EMP_SYNC_INVALID_RESOLUTION');
+-    this.db.prepare('DELETE FROM conflicts WHERE id=?').run(id);this.db.prepare('DELETE FROM outbox WHERE bot_id=? AND aggregate_id=?').run(row.bot_id,row.aggregate_id);return this.status();
+-  }
+-  sharedMemories(){this.offlineClaims();return this.db.prepare('SELECT encrypted FROM shared_cache').all().map(r=>this.vault.unseal(r.encrypted)).filter(r=>!r.deleted&&r.payload.status==='active'&&(!r.payload.expiresAt||Date.parse(r.payload.expiresAt)>this.clock()));}
+-  setEnabled(enabled){this.set('enabled',enabled);return this.status();}
+-  start(){let delay=30000;const tick=async()=>{if(this.closed)return;try{if(this.get('enabled'))await this.sync();delay=30000;}catch{delay=Math.min(delay*2,300000);}finally{if(!this.closed){this.timer=setTimeout(tick,delay+Math.floor(Math.random()*3000));this.timer.unref?.();}}};this.timer=setTimeout(tick,30000);this.timer.unref?.();}
+-  async close(){this.closed=true;clearTimeout(this.timer);await this.enterpriseWork?.close();await this.flight?.catch(()=>{});this.db.close();}
+-}
++import fs from 'node:fs';
++import path from 'node:path';
++import {DatabaseSync} from 'node:sqlite';
++import {createHash,randomUUID,sign,verify,createPublicKey} from 'node:crypto';
++import {EmployeeDeviceVault} from './employee-device-vault.js';
++import {assertPublicText,PROFILE_FIELDS} from './employee-store.js';
++
++const canonical=v=>JSON.stringify(v,(_k,x)=>x&&typeof x==='object'&&!Array.isArray(x)?Object.fromEntries(Object.entries(x).sort(([a],[b])=>a.localeCompare(b))):x);
++const hash=v=>createHash('sha256').update(canonical(v)).digest('hex');
++const fail=code=>{throw Error(code);};
++const payload=(value,kind)=>Object.fromEntries((kind==='profile'?[...PROFILE_FIELDS,'autoLearning','lockedFields']:['kind','text','status','pinned','expiresAt','proposedProfile','mergedFrom','mergedInto','importSource']).map(k=>[k,value[k]]));
++const keyHash=pem=>createHash('sha256').update(createPublicKey(pem).export({type:'spki',format:'der'})).digest('hex');
++export function verifyEmployeeAuthorization(packet,{publicKey,kid,issuer,deviceId,tenantId,key,now=Date.now(),highWater=0}={}){
++  if(!packet||packet.kid!==kid||typeof packet.payload!=='string'||packet.payload.length>1000000)fail('EMP_AUTH_SIGNATURE_INVALID');
++  try{if(!verify(null,Buffer.from(packet.payload),publicKey,Buffer.from(packet.signature,'base64url')))fail('EMP_AUTH_SIGNATURE_INVALID');}catch{fail('EMP_AUTH_SIGNATURE_INVALID');}
++  let c;try{c=JSON.parse(Buffer.from(packet.payload,'base64url').toString('utf8'));}catch{fail('EMP_AUTH_INVALID');}
++  if(c.v!==1||c.aud!=='naumi-desktop'||c.iss!==issuer||c.tenantId!==tenantId||c.deviceId!==deviceId||c.keyHash!==keyHash(key))fail('EMP_AUTH_BINDING_INVALID');
++  if(!Array.isArray(c.bindings)||!Array.isArray(c.projectIds)||!Array.isArray(c.capabilities)||!Number.isInteger(c.authEpoch)||c.authEpoch<1)fail('EMP_AUTH_INVALID');
++  const issued=Date.parse(c.issuedAt),expires=Date.parse(c.expiresAt);
++  if(!Number.isFinite(issued)||!Number.isFinite(expires)||expires<=issued||expires-issued>86400000||now<issued-300000)fail('EMP_AUTH_INVALID');
++  if(now<highWater-60000)fail('EMP_AUTH_CLOCK_ROLLBACK');
++  if(now>=expires)fail('EMP_AUTH_EXPIRED');return c;
++}
++
++export class EmployeeSync {
++  constructor({file,store,directory,origin,vault,fetch:request=globalThis.fetch,sessionRequest,clock=()=>Date.now()}){
++    this.store=store;this.directory=directory;this.origin=new URL(origin).origin;this.request=request;this.sessionRequest=sessionRequest;this.clock=clock;
++    const u=new URL(origin);if(u.username||u.password||u.pathname!=='/'||u.search||u.hash||u.protocol!=='https:'&&!(u.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(u.hostname)))fail('EMP_SYNC_ORIGIN_INVALID');
++    fs.mkdirSync(path.dirname(file),{recursive:true});this.vault=vault??new EmployeeDeviceVault(file+'.device');this.db=new DatabaseSync(file);
++    if(![0,1].includes(this.db.prepare('PRAGMA user_version').get().user_version)){this.db.close();fail('EMP_SYNC_SCHEMA_UNSUPPORTED');}
++    this.db.exec(`PRAGMA journal_mode=WAL;PRAGMA busy_timeout=5000;
++      CREATE TABLE IF NOT EXISTS config(key TEXT PRIMARY KEY,value TEXT NOT NULL);
++      CREATE TABLE IF NOT EXISTS revisions(bot_id TEXT,aggregate_id TEXT,remote_revision INTEGER NOT NULL,local_revision INTEGER NOT NULL,payload_hash TEXT NOT NULL,PRIMARY KEY(bot_id,aggregate_id));
++      CREATE TABLE IF NOT EXISTS outbox(event_id TEXT PRIMARY KEY,bot_id TEXT,aggregate_id TEXT,local_revision INTEGER NOT NULL,status TEXT NOT NULL,encrypted TEXT NOT NULL);
++      CREATE UNIQUE INDEX IF NOT EXISTS one_pending ON outbox(bot_id,aggregate_id) WHERE status='pending';
++      CREATE TABLE IF NOT EXISTS conflicts(id TEXT PRIMARY KEY,bot_id TEXT,aggregate_id TEXT,encrypted TEXT NOT NULL);
++      CREATE TABLE IF NOT EXISTS shared_cache(id TEXT PRIMARY KEY,scope TEXT NOT NULL,project_id TEXT,encrypted TEXT NOT NULL);
++      PRAGMA user_version=1;
++    `);
++    this.deviceId=this.get('deviceId')??randomUUID();this.set('deviceId',this.deviceId);this.lastError=null;this.closed=false;
++  }
++  get(k){const r=this.db.prepare('SELECT value FROM config WHERE key=?').get(k);return r?JSON.parse(r.value):null;}
++  set(k,v){this.db.prepare('INSERT INTO config VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(k,JSON.stringify(v));}
++  registration(){return this.get('registration');}
++  status(){const r=this.registration();let claims=null,error=this.lastError;
++    if(r)try{claims=this.offlineClaims();}catch(e){error=e.message;}
++    const dirty=claims?.bindings.some(b=>[this.store.profile(b.localBotId),...this.store.allMemories(b.localBotId)].some(v=>{const cp=this.checkpoint(b.localBotId,v.id);return v.revision>0&&cp?.local_revision!==v.revision&&cp?.payload_hash!==hash(payload(v,v.id==='profile'?'profile':'memory'));}));
++    return {version:1,deviceId:this.deviceId,registered:!!r,origin:this.origin,tenantId:r?.tenantId??null,memberId:r?.memberId??null,enabled:!!this.get('enabled'),syncState:!r?'local_only':!this.get('enabled')?'paused':error?'attention':this.db.prepare('SELECT count(*) AS n FROM conflicts').get().n?'conflict':this.db.prepare("SELECT count(*) AS n FROM outbox WHERE status='pending'").get().n||dirty?'pending':this.get('lastSyncedAt')?'synced':'pending',
++      bindings:claims?.bindings??[],authorization:claims?{expiresAt:claims.expiresAt,capabilities:claims.capabilities}:null,lastSyncedAt:this.get('lastSyncedAt'),error,
++      pending:this.db.prepare("SELECT count(*) AS n FROM outbox WHERE status='pending'").get().n,
++      conflicts:this.db.prepare('SELECT * FROM conflicts').all().map(x=>({id:x.id,botId:x.bot_id,aggregateId:x.aggregate_id,...this.vault.unseal(x.encrypted)}))};
++  }
++  offlineClaims(){
++    const r=this.registration();if(!r)fail('EMP_DEVICE_NOT_REGISTERED');if(this.get('revoked'))fail('EMP_DEVICE_REVOKED');
++    const now=this.clock(),highWater=this.get('highWater')??0;
++    const claims=verifyEmployeeAuthorization(this.get('authorization'),{publicKey:r.serverPublicKey,kid:r.keyId,issuer:this.origin,deviceId:this.deviceId,tenantId:r.tenantId,key:this.vault.open().publicKey,now,highWater});
++    if(claims.authEpoch<(this.get('authEpoch')??0))fail('EMP_AUTH_EPOCH_ROLLBACK');
++    this.set('highWater',Math.max(now,highWater));return claims;
++  }
++  async manager(action,cookie){
++    const result=await this.http('/api/digital-employees',{method:'POST',headers:{cookie,'Content-Type':'application/json'},body:JSON.stringify(action)},true);
++    return result.result;
++  }
++  async http(endpoint,options={},session=false){
++    const request=session&&this.sessionRequest?this.sessionRequest:this.request;
++    const r=await request(this.origin+endpoint,{...options,redirect:'error',signal:AbortSignal.any([...(options.signal?[options.signal]:[]),AbortSignal.timeout(15000)])});
++    const text=await r.text();if(text.length>8*1024*1024)fail('EMP_SYNC_RESPONSE_TOO_LARGE');let value;try{value=JSON.parse(text);}catch{fail('EMP_SYNC_RESPONSE_INVALID');}
++    if(!r.ok){const code=session&&r.status===401?'COLLABORATION_LOGIN_REQUIRED':value.code??'EMP_SYNC_UNAVAILABLE';if(['DEVICE_REVOKED','MEMBER_INACTIVE','TENANT_INACTIVE','ACCESS_PENDING','DEVICE_REENROLLMENT_REQUIRED'].includes(code)){this.set('revoked',true);this.db.exec('DELETE FROM shared_cache');}const error=Error(code);error.status=r.status;throw error;}
++    return value;
++  }
++  async enroll(cookie,name){
++    if(this.registration())fail('EMP_DEVICE_ALREADY_REGISTERED');
++    const keys=this.vault.open(),operationId=this.get('enrollmentOperation')??randomUUID();this.set('enrollmentOperation',operationId);
++    const proof=sign(null,Buffer.from(canonical({v:1,aud:'naumi-enrollment',deviceId:this.deviceId,publicKey:keys.publicKey,operationId})),keys.privateKey).toString('base64url');
++    const r=await this.manager({action:'device.register',operationId,deviceId:this.deviceId,name,publicKey:keys.publicKey,proof},cookie);
++    // Trusted configured TLS/loopback enrollment only; pin server key and issuer once.
++    const claims=verifyEmployeeAuthorization(r.authorization,{publicKey:r.serverPublicKey,kid:r.keyId,issuer:this.origin,deviceId:this.deviceId,tenantId:r.tenantId,key:keys.publicKey,now:this.clock()});
++    this.set('registration',{tenantId:r.tenantId,memberId:r.memberId,keyId:r.keyId,serverPublicKey:r.serverPublicKey});this.accept(r,claims);return this.status();
++  }
++  accept(response,alreadyVerified){
++    const r=this.registration(),claims=alreadyVerified??verifyEmployeeAuthorization(response.authorization,{publicKey:r.serverPublicKey,kid:r.keyId,issuer:this.origin,deviceId:this.deviceId,tenantId:r.tenantId,key:this.vault.open().publicKey,now:this.clock(),highWater:this.get('highWater')??0});
++    if(claims.authEpoch<(this.get('authEpoch')??0))fail('EMP_AUTH_EPOCH_ROLLBACK');
++    this.set('authorization',response.authorization);this.set('authEpoch',claims.authEpoch);this.set('revoked',false);this.set('highWater',Math.max(this.clock(),this.get('highWater')??0));
++    // Do not retain resource caches after project/employee access disappears.
++    const projects=new Set(claims.projectIds),bots=new Set(claims.bindings.map(b=>b.localBotId));
++    for(const row of this.db.prepare('SELECT id,scope,project_id FROM shared_cache').all())if(row.scope==='project'&&!projects.has(row.project_id))this.db.prepare('DELETE FROM shared_cache WHERE id=?').run(row.id);
++    for(const row of this.db.prepare('SELECT id,bot_id FROM conflicts').all())if(!bots.has(row.bot_id))this.db.prepare('DELETE FROM conflicts WHERE id=?').run(row.id);
++    return claims;
++  }
++  async device(body,{signal}={}){
++    const r=this.registration();if(!r)fail('EMP_DEVICE_NOT_REGISTERED');
++    const p={v:1,aud:'naumi-device-api',tenantId:r.tenantId,deviceId:this.deviceId,nonce:randomUUID(),issuedAt:new Date(this.clock()).toISOString(),body};
++    const signature=sign(null,Buffer.from(canonical(p)),this.vault.open().privateKey).toString('base64url');
++    const response=await this.http('/api/digital-employees/device',{method:'POST',headers:{'Content-Type':'application/json','x-naumi-device-signature':signature},body:canonical(p),signal});
++    this.accept(response);return response;
++  }
++  async catalog(cookie){return this.http('/api/digital-employees',{headers:{cookie}},true);}
++  async bind(botId,employeeId,cookie){this.bot(botId);const r=await this.manager({action:'device.bind',operationId:randomUUID(),deviceId:this.deviceId,employeeId,localBotId:botId},cookie);this.accept(r);return this.status();}
++  localBot(id){return this.directory.list().bots.find(b=>b.id===id);}
++  bot(id){const b=this.localBot(id);if(!b||b.status!=='active')fail('EMP_BOT_NOT_FOUND');return b;}
++  checkpoint(botId,id){return this.db.prepare('SELECT * FROM revisions WHERE bot_id=? AND aggregate_id=?').get(botId,id);}
++  mark(botId,id,remote,local,value){this.db.prepare('INSERT INTO revisions VALUES(?,?,?,?,?) ON CONFLICT(bot_id,aggregate_id) DO UPDATE SET remote_revision=excluded.remote_revision,local_revision=excluded.local_revision,payload_hash=excluded.payload_hash').run(botId,id,remote,local,hash(value));}
++  conflict(botId,id,detail){const key=botId+'/'+id;this.db.prepare('INSERT INTO conflicts VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET encrypted=excluded.encrypted').run(key,botId,id,this.vault.seal(detail));}
++  queue(claims){
++    for(const binding of claims.bindings){const botId=binding.localBotId;if(!this.localBot(botId)||this.localBot(botId).status!=='active')continue;
++      for(const value of [this.store.profile(botId),...this.store.allMemories(botId)]){
++        if(value.revision===0)continue;const kind=value.id==='profile'?'profile':'memory',p=payload(value,kind),checkpoint=this.checkpoint(botId,value.id);
++        if(checkpoint?.local_revision===value.revision||this.db.prepare('SELECT 1 FROM conflicts WHERE bot_id=? AND aggregate_id=?').get(botId,value.id)||this.db.prepare("SELECT 1 FROM outbox WHERE bot_id=? AND aggregate_id=? AND status='pending'").get(botId,value.id))continue;
++        const event={eventId:randomUUID(),employeeId:binding.employeeId,aggregateId:value.id,kind,baseRevision:checkpoint?.remote_revision??0,payload:p,deleted:p.status==='deleted',source:value.source??{kind:'owner',note:'Explicitly enabled private synchronization'},occurredAt:new Date(this.clock()).toISOString()};
++        assertPublicText(JSON.stringify(event.payload));this.db.prepare('INSERT INTO outbox VALUES(?,?,?,?,?,?)').run(event.eventId,botId,value.id,value.revision,'pending',this.vault.seal(event));
++      }
++    }
++  }
++  importRecord(binding,remote){
++    const botId=binding.localBotId,id=remote.aggregate_id??remote.aggregateId,kind=remote.kind,revision=remote.revision,p=remote.payload;
++    if(!this.localBot(botId))return;
++    const current=id==='profile'?this.store.profile(botId):this.store.entity(botId,id),cp=this.checkpoint(botId,id);
++    if(cp&&revision<=cp.remote_revision)return;
++    const pending=this.db.prepare("SELECT * FROM outbox WHERE bot_id=? AND aggregate_id=? AND status='pending'").get(botId,id);
++    if(pending&&hash(this.vault.unseal(pending.encrypted).payload)===hash(p)){this.mark(botId,id,revision,pending.local_revision,p);this.db.prepare('DELETE FROM outbox WHERE event_id=?').run(pending.event_id);return;}
++    if(current&&hash(payload(current,kind))===hash(p)){this.mark(botId,id,revision,current.revision,p);return;}
++    if(current?.revision&&(cp?.local_revision??0)!==current.revision){this.conflict(botId,id,{revision,remote:{kind,payload:p,deleted:remote.deleted,source:remote.source},local:payload(current,kind),reason:'concurrent_update'});return;}
++    try{
++      const value=this.applyRemote(botId,id,kind,p,revision,remote.source);this.mark(botId,id,revision,value.revision,p);
++    }catch(e){this.conflict(botId,id,{revision,remote:{kind,payload:p,deleted:remote.deleted,source:remote.source},local:current?payload(current,kind):null,reason:e.message});}
++  }
++  applyRemote(botId,id,kind,p,revision,source){
++    assertPublicText(JSON.stringify(p));const current=id==='profile'?this.store.profile(botId):this.store.entity(botId,id);
++    // Locks retain their meaning even when a remote manager edits the profile.
++    if(kind==='profile'&&current.lockedFields.some(k=>current[k]!==p[k]))fail('EMP_FIELD_LOCKED');
++    if(current?.status==='deleted'&&p.status!=='deleted')fail('EMP_MEMORY_DELETED');
++    return this.store.mutate(botId,`sync:${this.registration().tenantId}:${id}:${revision}`,'remote_sync',{kind,p,revision},{kind:'owner',note:'Verified enterprise device sync'},()=>this.store.put({...current,...p,id,botId,revision:(current?.revision??0)+1,updatedAt:this.store.now(),...(kind==='memory'?{createdAt:current?.createdAt??this.store.now(),source:source??{kind:'owner',note:'Verified enterprise device sync'}}:{})},kind,'remote_sync',{kind:'owner',note:'Verified enterprise device sync'}));
++  }
++  async sync(){
++    if(this.flight)return this.flight;if(this.closed)fail('EMP_SYNC_CLOSED');
++    this.flight=this.run().catch(e=>{this.lastError=/^[A-Z_]+$/.test(e.message)?e.message:'EMP_CONTROL_UNAVAILABLE';throw Error(this.lastError);}).finally(()=>{this.flight=null;});return this.flight;
++  }
++  async run(){
++    if(!this.get('enabled'))fail('EMP_SYNC_NOT_ENABLED');
++    // Always refresh authority before any upload after reconnect. Offline expiry does not erase local records.
++    await this.device({action:'authorize'});let claims=this.offlineClaims();
++    let after='',snapshotComplete=false;for(let page=0;page<1000;page++){
++      const response=await this.device({action:'snapshot',after,limit:100});claims=this.offlineClaims();
++      for(const r of response.records){const b=claims.bindings.find(b=>b.employeeId===r.employee_id);if(b)this.importRecord(b,r);}
++      if(!response.hasMore){snapshotComplete=true;break;}if(response.after===after)fail('EMP_SYNC_CURSOR_INVALID');after=response.after;
++    }
++    if(!snapshotComplete)fail('EMP_SYNC_PAGE_LIMIT');
++    if(!this.get('enabled'))fail('EMP_SYNC_NOT_ENABLED');
++    this.queue(claims);
++    const pending=this.db.prepare("SELECT * FROM outbox WHERE status='pending' ORDER BY rowid LIMIT 100").all();
++    // New grants cannot silently expand already queued private data to another employee.
++    const authorized=pending.filter(row=>{const e=this.vault.unseal(row.encrypted);return claims.bindings.some(b=>b.localBotId===row.bot_id&&b.employeeId===e.employeeId);});
++    if(authorized.length){const response=await this.device({action:'push',events:authorized.map(r=>this.vault.unseal(r.encrypted))});
++      for(const row of authorized){const result=response.results.find(r=>r.eventId===row.event_id);if(!result)fail('EMP_SYNC_ACK_MISSING');
++        if(result.status==='applied'){const e=this.vault.unseal(row.encrypted);this.mark(row.bot_id,row.aggregate_id,result.revision,row.local_revision,e.payload);this.db.prepare('DELETE FROM outbox WHERE event_id=?').run(row.event_id);}
++        else if(result.status==='conflict'){this.conflict(row.bot_id,row.aggregate_id,result);this.db.prepare("UPDATE outbox SET status='conflict' WHERE event_id=?").run(row.event_id);}
++        else fail('EMP_SYNC_ACK_INVALID');
++      }
++    }
++    // Stage complete snapshot, then atomically replace cache; partial fetch never masquerades as a complete catalog.
++    const shared=[];let sharedComplete=false;after='';for(let page=0;page<1000;page++){const r=await this.device({action:'shared',after,limit:100});shared.push(...r.items);if(!r.hasMore){sharedComplete=true;break;}if(r.after===after)fail('EMP_SYNC_CURSOR_INVALID');after=r.after;}
++    if(!sharedComplete)fail('EMP_SYNC_PAGE_LIMIT');
++    this.db.exec('BEGIN IMMEDIATE');try{this.db.exec('DELETE FROM shared_cache');for(const r of shared)this.db.prepare('INSERT INTO shared_cache VALUES(?,?,?,?)').run(r.id,r.scope,r.project_id,this.vault.seal(r));this.db.exec('COMMIT');}catch(e){this.db.exec('ROLLBACK');throw e;}
++    this.set('lastSyncedAt',new Date(this.clock()).toISOString());this.lastError=null;return this.status();
++  }
++  resolve(id,choice){const row=this.db.prepare('SELECT * FROM conflicts WHERE id=?').get(id);if(!row)fail('EMP_SYNC_CONFLICT_NOT_FOUND');
++    const c=this.vault.unseal(row.encrypted),binding=this.offlineClaims().bindings.find(b=>b.localBotId===row.bot_id);if(!binding)fail('EMP_DEVICE_BINDING_REQUIRED');
++    if(choice==='remote'){if(!c.remote)fail('EMP_SYNC_REMOTE_EMPTY');const v=this.applyRemote(row.bot_id,row.aggregate_id,c.remote.kind,c.remote.payload,c.revision,c.remote.source);this.mark(row.bot_id,row.aggregate_id,c.revision,v.revision,c.remote.payload);}
++    else if(choice==='local'){if(c.remote?.deleted)fail('EMP_MEMORY_DELETED');const value=row.aggregate_id==='profile'?this.store.profile(row.bot_id):this.store.entity(row.bot_id,row.aggregate_id);this.mark(row.bot_id,row.aggregate_id,c.revision,-1,payload(value,row.aggregate_id==='profile'?'profile':'memory'));}
++    else fail('EMP_SYNC_INVALID_RESOLUTION');
++    this.db.prepare('DELETE FROM conflicts WHERE id=?').run(id);this.db.prepare('DELETE FROM outbox WHERE bot_id=? AND aggregate_id=?').run(row.bot_id,row.aggregate_id);return this.status();
++  }
++  sharedMemories(){this.offlineClaims();return this.db.prepare('SELECT encrypted FROM shared_cache').all().map(r=>this.vault.unseal(r.encrypted)).filter(r=>!r.deleted&&r.payload.status==='active'&&(!r.payload.expiresAt||Date.parse(r.payload.expiresAt)>this.clock()));}
++  setEnabled(enabled){this.set('enabled',enabled);return this.status();}
++  start(){let delay=30000;const tick=async()=>{if(this.closed)return;try{if(this.get('enabled'))await this.sync();delay=30000;}catch{delay=Math.min(delay*2,300000);}finally{if(!this.closed){this.timer=setTimeout(tick,delay+Math.floor(Math.random()*3000));this.timer.unref?.();}}};this.timer=setTimeout(tick,30000);this.timer.unref?.();}
++  async close(){this.closed=true;clearTimeout(this.timer);await this.enterpriseWork?.close();await this.flight?.catch(()=>{});this.db.close();}
++}
+diff --git a/original/plugins/naumi-enterprise/host.js b/modified/plugins/naumi-enterprise/host.js
+index 02c3659..5099892 100644
+--- a/original/plugins/naumi-enterprise/host.js
++++ b/modified/plugins/naumi-enterprise/host.js
+@@ -7,6 +7,7 @@ import {installTeamProfile} from './team-profile.js';
+ import {installBots} from './bots.js';
+ import {installDingTalk} from './dingtalk.js';
+ import {installDesktopIdentity} from './desktop-identity.js';
++import {desktopCollaborationOrigin,DesktopEnterpriseTransport} from './desktop-enterprise.js';
+ export const inject=['webServer','connection'];
+ /** Supported plugin routes, index branding and an authenticated read-only business adapter. */
+ export function apply(ctx,config) {
+@@ -15,8 +16,9 @@ export function apply(ctx,config) {
+   installEgoBrowser(ctx);
+   installDingTalk(ctx);
+   installTeamProfile(ctx);
+-  installBots(ctx,{collaborationOrigin:config.collaborationOrigin});
+-  const collaborationOrigin=validateOrigin(config.collaborationOrigin);
++  const collaborationOrigin=validateOrigin(desktopCollaborationOrigin(config.collaborationOrigin));
++  const enterpriseTransport=new DesktopEnterpriseTransport({origin:collaborationOrigin});
++  installBots(ctx,{collaborationOrigin});
+   const designOrigin=validateOrigin(config.designOrigin);
+   const assets=new Map([['employee-enterprise-work.js','text/javascript; charset=utf-8'],['employee-memory-maintenance.js','text/javascript; charset=utf-8'],['employee-sync-panel.js','text/javascript; charset=utf-8'],['employee-center.js','text/javascript; charset=utf-8'],['employee-center-model.js','text/javascript; charset=utf-8'],['employee-center.css','text/css; charset=utf-8'],['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml'],['browser-client.js','text/javascript; charset=utf-8'],['browser-native-client.js','text/javascript; charset=utf-8'],['browser-native.css','text/css; charset=utf-8'],['browser-scheduler.js','text/javascript; charset=utf-8'],['browser.css','text/css; charset=utf-8'],['team-panel.css','text/css; charset=utf-8'],['team-panel.js','text/javascript; charset=utf-8'],['team-panel-model.js','text/javascript; charset=utf-8'],['bot-sidebar.js','text/javascript; charset=utf-8'],['bot-sidebar-model.js','text/javascript; charset=utf-8'],['bot-sidebar.css','text/css; charset=utf-8']]);
+   assets.set('employee-runtime-panel.js','text/javascript; charset=utf-8');
+@@ -36,11 +38,12 @@ export function apply(ctx,config) {
+     if(admission.peer.principal.kind!=='owner'){respond(403,{error:'HARNESS_OWNER_REQUIRED'});return;}
+     if(req.method!=='GET'){res.setHeader('Allow','GET');respond(405,{error:'READ_ONLY'});return;}
+     const cookie=businessCookie(req.headers.cookie);
+-    if(!cookie){respond(401,{error:'COLLABORATION_LOGIN_REQUIRED',loginUrl:collaborationOrigin+'/login'});return;}
++    if(!cookie&&!enterpriseTransport.standalone){respond(401,{error:'COLLABORATION_LOGIN_REQUIRED',loginUrl:collaborationOrigin+'/login'});return;}
+     const controller=new AbortController();
+     const onClose=()=>{if(!res.writableEnded)controller.abort();};res.on('close',onClose);
+     try {
+-      const upstream=await fetch(collaborationOrigin+'/api/workspace',{redirect:'manual',headers:{cookie,accept:'application/json'},signal:AbortSignal.any([controller.signal,AbortSignal.timeout(12000)])});
++      const options={redirect:'manual',headers:{cookie,accept:'application/json'},signal:AbortSignal.any([controller.signal,AbortSignal.timeout(12000)])};
++      const upstream=enterpriseTransport.standalone?await enterpriseTransport.fetch('/api/workspace',options):await fetch(collaborationOrigin+'/api/workspace',options);
+       if(!upstream.ok){respond([401,403].includes(upstream.status)?upstream.status:502,{error:upstream.status===401?'COLLABORATION_LOGIN_REQUIRED':upstream.status===403?'COLLABORATION_ACCESS_PENDING':'COLLABORATION_UNAVAILABLE',loginUrl:collaborationOrigin+'/login'});return;}
+       const data=projectWorkspace(await upstream.json());respond(200,data);
+     } catch(error){if(!res.destroyed)respond(502,{error:error?.name==='TimeoutError'?'COLLABORATION_TIMEOUT':'COLLABORATION_UNAVAILABLE'});}
+diff --git a/original/plugins/naumi-enterprise/package.json b/modified/plugins/naumi-enterprise/package.json
+index 108400a..45b5569 100644
+--- a/original/plugins/naumi-enterprise/package.json
++++ b/modified/plugins/naumi-enterprise/package.json
+@@ -53,7 +53,8 @@
+     "employee-runtime-gate.js",
+     "employee-runtime-policy.js",
+     "dingtalk-skills",
+-    "desktop-identity.js"
++    "desktop-identity.js",
++    "desktop-enterprise.js"
+   ],
+   "dsh": {
+     "bundle": {
+diff --git a/modified/scripts/package-desktop-enterprise.mjs b/modified/scripts/package-desktop-enterprise.mjs
+new file mode 100644
+index 0000000..11c2ae6
+--- /dev/null
++++ b/modified/scripts/package-desktop-enterprise.mjs
+@@ -0,0 +1,8 @@
++import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';
++const e=path.resolve('evidence/desktop-enterprise'),sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
++const files=['.gitignore','.gitattributes','desktop/app/backend.cjs','desktop/app/profile.cjs','desktop/app/main.cjs','desktop/app/tools.cjs','desktop/app/preload.cjs','desktop/app/enterprise.cjs','desktop/app/connect.html','desktop/app/connect.css','desktop/app/connect.js','desktop/scripts/prepare-runtime.mjs','desktop/scripts/verify-staged-runtime.cjs','desktop/tests/backend.test.cjs','desktop/tests/enterprise.test.cjs','desktop/scripts/verify-desktop-lifecycle.mjs','desktop/scripts/verify-desktop-enterprise.mjs','plugins/naumi-enterprise/desktop-identity.js','plugins/naumi-enterprise/desktop-enterprise.js','plugins/naumi-enterprise/host.js','plugins/naumi-enterprise/employee-sync.js','plugins/naumi-enterprise/employee-sync-http.js','plugins/naumi-enterprise/employee-capabilities.js','plugins/naumi-enterprise/employee-device-vault.js','plugins/naumi-enterprise/package.json','docs/prd/GOAL_TRACKER.md','docs/prd/NAUMI_DIGITAL_EMPLOYEE_PRD.md','docs/implementation/EMPLOYEE_PACKAGING_M5.md','docs/implementation/DESKTOP_ENTERPRISE_M5_3.md','scripts/repro-desktop-enterprise.mjs','scripts/verify-desktop-enterprise-package.mjs','scripts/package-desktop-enterprise.mjs','scripts/rollback-desktop-enterprise.mjs','scripts/reopen-desktop-enterprise.mjs','scripts/write-desktop-enterprise-verification.mjs'];
++const manifest=[];for(const file of files){const snapshotPath=file==='.gitattributes'?file+'.snapshot':file,original=path.join(e,'original',snapshotPath),modified=path.join(e,'modified',snapshotPath);fs.mkdirSync(path.dirname(modified),{recursive:true});fs.copyFileSync(file,modified);manifest.push({path:file,snapshotPath,originalSHA256:fs.existsSync(original)?sha(original):null,modifiedSHA256:sha(modified)});}fs.writeFileSync(path.join(e,'hashes.json'),JSON.stringify(manifest,null,2)+'\n');
++const diff=spawnSync('git',['-c','core.autocrlf=false','diff','--binary','--no-index','--','original','modified'],{cwd:e,encoding:'utf8',maxBuffer:10e6});if(![0,1].includes(diff.status))throw Error(diff.stderr);fs.writeFileSync(path.join(e,'DIFF_FILE.patch'),diff.stdout);
++fs.copyFileSync('scripts/rollback-desktop-enterprise.mjs',path.join(e,'rollback-desktop-enterprise.mjs'));fs.writeFileSync(path.join(e,'ROLLBACK.sh'),'#!/usr/bin/env bash\nset -euo pipefail\nHERE="$(cd -- "$(dirname -- "$0")" && pwd)"\nexec "${NAUMI_NODE:-node}" "$HERE/rollback-desktop-enterprise.mjs" "${1:---test}"\n',{mode:0o755});
++const q=s=>"'"+s.replaceAll("'","''")+"'";execFileSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-Command',`Compress-Archive -Path ${['original','modified','hashes.json'].map(p=>q(path.join(e,p))).join(',')} -DestinationPath ${q(path.join(e,'MODIFIED_FILE.zip'))} -Force`]);
++fs.writeFileSync(path.join(e,'PACKAGE.json'),JSON.stringify({branch:'fix/naumi-bot-lifecycle-20261116',baselineCommit:'abea53bcbe40dfbea978712e93a28200d4fbe0c5',changedFields:['identityProtocol=2; HMAC actual listener port, homeHash and enterpriseOrigin','additive v1 identity home binding; no implicit clone/move','desktop-enterprise.json version1 and confined enterprise session IPC','fixed /enterprise/request APIs; no cookie export; stable operation UUID and server receipt deduplication','session-only catalog/manager; signed device transport unchanged','absolute system DPAPI shell; initial bridge capability refresh','bounded Windows receipt atomic rename handoff; prior record never deleted','quit destroys login popup before flushing and blocks reload/bootstrap during teardown'],files:files.length,originalFiles:manifest.filter(f=>f.originalSHA256).length,newFiles:manifest.filter(f=>!f.originalSHA256).length,zipSHA256:sha(path.join(e,'MODIFIED_FILE.zip')),liveDeployment:false,acceptance:'module and unpacked desktop controlled fixture; installed version/schema and real employee not claimed'},null,2)+'\n');console.log('PACKAGE desktop_enterprise_files='+files.length+' zip=PASS rollback=copy_only');
+diff --git a/modified/scripts/reopen-desktop-enterprise.mjs b/modified/scripts/reopen-desktop-enterprise.mjs
+new file mode 100644
+index 0000000..0e9504b
+--- /dev/null
++++ b/modified/scripts/reopen-desktop-enterprise.mjs
+@@ -0,0 +1,7 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync} from 'node:child_process';
++const e=path.resolve('evidence/desktop-enterprise'),manifest=JSON.parse(fs.readFileSync(path.join(e,'hashes.json'))),sha=b=>createHash('sha256').update(b).digest('hex'),q=s=>"'"+s.replaceAll("'","''")+"'",copy=path.join(e,'pack-reopen-'+randomUUID());execFileSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-Command',`Expand-Archive -LiteralPath ${q(path.join(e,'MODIFIED_FILE.zip'))} -DestinationPath ${q(copy)}`]);
++assert.deepEqual(JSON.parse(fs.readFileSync(path.join(copy,'hashes.json'))),manifest);for(const m of manifest){assert.equal(sha(fs.readFileSync(m.path)),m.modifiedSHA256);assert.equal(sha(fs.readFileSync(path.join(e,'modified',m.snapshotPath))),m.modifiedSHA256);assert.equal(sha(fs.readFileSync(path.join(copy,'modified',m.snapshotPath))),m.modifiedSHA256);if(m.originalSHA256){assert.equal(sha(fs.readFileSync(path.join(e,'original',m.snapshotPath))),m.originalSHA256);assert.equal(sha(fs.readFileSync(path.join(copy,'original',m.snapshotPath))),m.originalSHA256);}}
++const verification=fs.readFileSync(path.join(e,'VERIFICATION.txt'),'utf8'),patch=fs.readFileSync(path.join(e,'DIFF_FILE.patch'),'utf8'),rollback=fs.readFileSync(path.join(e,'ROLLBACK.sh'),'utf8');assert.match(patch,/identityProtocol/);assert.match(patch,/enterprise\/request/);assert(rollback.startsWith('#!/usr/bin/env bash\nset -euo pipefail\n'));execFileSync('D:/DEV/Git/bin/bash.exe',['-n',path.join(e,'ROLLBACK.sh')]);for(const file of ['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh'])assert(verification.includes(path.join(e,file)));
++for(const section of ['BASELINE','MODIFIED','ROLLBACK'])assert(verification.includes(section));const checks=['DESKTOP_ENTERPRISE.json','PACKAGE_CONTRACT.json','ROLLBACK_RESULT.json','lifecycle/DESKTOP_LIFECYCLE.json'];for(const file of checks)assert.equal(JSON.parse(fs.readFileSync(path.join(e,file))).status,'PASS');
++let index=false;if(process.argv.includes('--git-index')){for(const m of manifest)assert.equal(sha(execFileSync('git',['show',':'+m.path])),m.modifiedSHA256,'INDEX_BYTES '+m.path);const mode=execFileSync('git',['ls-files','--stage','--','evidence/desktop-enterprise/ROLLBACK.sh'],{encoding:'utf8'});assert(mode.startsWith('100755'));index=true;}
++fs.writeFileSync(path.join(e,'REOPEN.json'),JSON.stringify({status:'PASS',files:manifest.length,zipOpened:true,originalHashes:true,modifiedHashes:true,patchOpened:true,verificationOpened:true,rollbackOpened:true,rollbackSyntax:true,gitIndexHashes:index},null,2)+'\n');console.log('REOPEN files='+manifest.length+' zip=PASS snapshots=PASS patch=PASS verification=PASS rollback=PASS'+(index?' git_index=PASS executable_mode=100755':''));
+diff --git a/modified/scripts/repro-desktop-enterprise.mjs b/modified/scripts/repro-desktop-enterprise.mjs
+new file mode 100644
+index 0000000..056f773
+--- /dev/null
++++ b/modified/scripts/repro-desktop-enterprise.mjs
+@@ -0,0 +1,5 @@
++import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import {createRequire} from 'node:module';import {pathToFileURL} from 'node:url';import assert from 'node:assert/strict';
++const old=process.argv.includes('--baseline'),root=process.cwd(),source=old?path.join(root,'evidence/desktop-enterprise/original'):root,e=path.join(root,'evidence/desktop-enterprise'),require=createRequire(import.meta.url),{probeIdentity}=require(path.join(source,'desktop/app/backend.cjs')),{identity}=require(path.join(source,'desktop/app/profile.cjs')),{desktopIdentityHandler}=await import(pathToFileURL(path.join(source,'plugins/naumi-enterprise/desktop-identity.js')));
++const home=path.join(e,old?'baseline-fixture':'modified-fixture');fs.mkdirSync(home,{recursive:true});let actual,relay;
++const listen=handler=>new Promise(r=>{const s=http.createServer(handler);s.listen(0,'127.0.0.1',()=>r(s));});
++try{const id=identity(home);actual=await listen(desktopIdentityHandler({...id,bundleId:'a'.repeat(64)}));const actualURL='http://127.0.0.1:'+actual.address().port;relay=await listen(async(q,r)=>{const upstream=await fetch(actualURL,{headers:q.headers});r.writeHead(upstream.status).end(await upstream.text());});const accepted=!!await probeIdentity({url:'http://127.0.0.1:'+relay.address().port,identity:id});assert.equal(accepted,old);const clone=home+'-clone';fs.mkdirSync(clone,{recursive:true});fs.copyFileSync(home+'/desktop-instance.json',clone+'/desktop-instance.json');let cloneRejected=false;try{identity(clone);}catch(error){assert.match(error.message,/RELOCATION_REQUIRES_MIGRATION/);cloneRejected=true;}assert.equal(cloneRejected,!old);console.log(`${old?'BASELINE':'MODIFIED'} relay_accepted=${Number(accepted)} cloned_home_rejected=${Number(cloneRejected)} original_identity=retained`);}finally{for(const s of [relay,actual]){s?.closeAllConnections();if(s)await new Promise(r=>s.close(r));}}
+diff --git a/modified/scripts/rollback-desktop-enterprise.mjs b/modified/scripts/rollback-desktop-enterprise.mjs
+new file mode 100644
+index 0000000..3e75223
+--- /dev/null
++++ b/modified/scripts/rollback-desktop-enterprise.mjs
+@@ -0,0 +1,13 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {fileURLToPath} from 'node:url';import {execFileSync,spawnSync} from 'node:child_process';
++const here=path.dirname(fileURLToPath(import.meta.url)),e=path.basename(here)==='desktop-enterprise'?here:path.resolve('evidence/desktop-enterprise'),root=path.resolve(e,'../..'),sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex'),manifest=JSON.parse(fs.readFileSync(path.join(e,'hashes.json')));
++assert.equal(process.argv[2]??'--test','--test','COPY_ONLY_ROLLBACK');const copy=path.join(e,'rollback-copy-'+randomUUID());fs.mkdirSync(copy);
++for(const dir of ['plugins','tests','desktop/app','desktop/tests','desktop/scripts','desktop/runtime','desktop/vendor','scripts','services'])fs.cpSync(path.join(root,dir),path.join(copy,dir),{recursive:true});for(const file of ['package.json','desktop/package.json'])fs.copyFileSync(path.join(root,file),path.join(copy,file));fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');
++const baseline='abea53bcbe40dfbea978712e93a28200d4fbe0c5',fixtures=execFileSync('git',['ls-tree','-r','--name-only',baseline,'--','evidence/naumi-context-ui','evidence/naumi-team-panel'],{cwd:root,encoding:'utf8'}).trim().split(/\r?\n/).filter(Boolean);for(const file of fixtures){const to=path.join(copy,file);fs.mkdirSync(path.dirname(to),{recursive:true});fs.copyFileSync(path.join(root,file),to);}
++// Seed with the new version, then reopen through the original modules after source restoration.
++const seed=`import {EmployeeStore}from'./plugins/naumi-enterprise/employee-store.js';import{createRequire}from'node:module';const require=createRequire(import.meta.url),{identity}=require('./desktop/app/profile.cjs');identity('retained-home');const s=new EmployeeStore('retained-home/employees.sqlite');s.updateProfile('copy',{expectedRevision:0,operationId:'persona',patch:{persona:'retained persona'}});s.createMemory('copy',{operationId:'memory',kind:'fact',text:'retained memory'});s.close();`;execFileSync(process.execPath,['--input-type=module','-e',seed],{cwd:copy});
++let restored=0,removed=0;for(const m of manifest){assert.equal(sha(path.join(root,m.path)),m.modifiedSHA256);const to=path.join(copy,m.path);fs.mkdirSync(path.dirname(to),{recursive:true});if(!fs.existsSync(to))fs.copyFileSync(path.join(root,m.path),to);assert.equal(sha(to),m.modifiedSHA256);if(m.originalSHA256){const from=path.join(e,'original',m.snapshotPath);assert.equal(sha(from),m.originalSHA256);fs.copyFileSync(from,to);restored++;}else{fs.unlinkSync(to);removed++;}}
++const tests=execFileSync('git',['ls-tree','-r','--name-only',baseline,'--','tests','desktop/tests'],{cwd:root,encoding:'utf8'}).trim().split(/\r?\n/).filter(p=>/\.test\.(mjs|cjs)$/.test(p));const result=spawnSync(process.execPath,['--test',...tests],{cwd:copy,encoding:'utf8',maxBuffer:12e6});fs.writeFileSync(path.join(e,'ROLLBACK_TESTS.log'),result.stdout+result.stderr);assert.equal(result.status,0,result.stdout+result.stderr);assert.match(result.stdout,/tests 293/);
++const behavior=spawnSync(process.execPath,['--input-type=module','-e',`import assert from'node:assert/strict';import fs from'node:fs';import http from'node:http';import{createRequire}from'node:module';import{EmployeeStore}from'./plugins/naumi-enterprise/employee-store.js';import{desktopIdentityHandler}from'./plugins/naumi-enterprise/desktop-identity.js';const require=createRequire(import.meta.url),{identity}=require('./desktop/app/profile.cjs'),{probeIdentity}=require('./desktop/app/backend.cjs'),id=identity('retained-home');assert(id.homeHash);fs.mkdirSync('cloned-home');fs.copyFileSync('retained-home/desktop-instance.json','cloned-home/desktop-instance.json');assert.deepEqual(identity('cloned-home'),id);const s=http.createServer(desktopIdentityHandler({...id,bundleId:'a'.repeat(64)}));await new Promise(r=>s.listen(0,'127.0.0.1',r));const relay=http.createServer(async(q,r)=>{const u=await fetch('http://127.0.0.1:'+s.address().port,{headers:q.headers});r.end(await u.text());});await new Promise(r=>relay.listen(0,'127.0.0.1',r));try{const remote=await probeIdentity({url:'http://127.0.0.1:'+relay.address().port,identity:id});assert.equal(remote.version,1);const db=new EmployeeStore('retained-home/employees.sqlite');assert.equal(db.profile('copy').persona,'retained persona');assert.equal(db.allMemories('copy')[0].text,'retained memory');assert.equal(db.db.prepare('PRAGMA user_version').get().user_version,1);db.close();console.log('ROLLBACK_BEHAVIOR protocol=1 relay_acceptance=restored identity=retained persona=retained memory=retained schema=1');}finally{for(const server of[relay,s]){server.closeAllConnections();await new Promise(r=>server.close(r));}}`],{cwd:copy,encoding:'utf8'});assert.equal(behavior.status,0,behavior.stdout+behavior.stderr);fs.writeFileSync(path.join(e,'ROLLBACK_BEHAVIOR.log'),behavior.stdout+behavior.stderr);
++for(const m of manifest){assert.equal(sha(path.join(root,m.path)),m.modifiedSHA256);const to=path.join(copy,m.path);if(m.originalSHA256)assert.equal(sha(to),m.originalSHA256);else assert(!fs.existsSync(to));}
++fs.writeFileSync(path.join(e,'ROLLBACK_RESULT.json'),JSON.stringify({status:'PASS',restored,removed,baselineTests:293,copy,source:'modified retained',data:'persona/memory/schema1 and additive identity preserved',liveDataTouched:false,scope:'source-module copy only, not installed app/schema downgrade'},null,2)+'\n');
++console.log('ROLLBACK_COPY restored='+restored+' removed='+removed+' baseline_tests=293 hashes=PASS');process.stdout.write(behavior.stdout);console.log('ROLLBACK modified_source=retained active_profile=untouched');
+diff --git a/modified/scripts/verify-desktop-enterprise-package.mjs b/modified/scripts/verify-desktop-enterprise-package.mjs
+new file mode 100644
+index 0000000..278d130
+--- /dev/null
++++ b/modified/scripts/verify-desktop-enterprise-package.mjs
+@@ -0,0 +1,14 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync} from 'node:child_process';import {createRequire} from 'node:module';
++import {auditPackage} from './audit-enterprise-package.mjs';import {verifyStagedImports,scanRuntimeInventory} from '../desktop/scripts/prepare-runtime.mjs';
++const root=process.cwd(),e=path.join(root,'evidence/desktop-enterprise'),temp=path.join(e,'pack-'+randomUUID()),require=createRequire(path.join(root,'desktop/package.json')),asar=require('@electron/asar'),sha=b=>createHash('sha256').update(b).digest('hex');fs.mkdirSync(temp);
++const packed=JSON.parse(execFileSync(process.execPath,[path.join(path.dirname(process.execPath),'node_modules/npm/bin/npm-cli.js'),'pack','--ignore-scripts','--json','--pack-destination',temp],{cwd:path.join(root,'plugins/naumi-enterprise'),encoding:'utf8',maxBuffer:2e6}))[0];
++const closure=auditPackage(path.join(root,'plugins/naumi-enterprise'),{packedFiles:packed.files.map(f=>f.path),checkInstalled:true});const entries=execFileSync('tar.exe',['-tf',path.join(temp,packed.filename)],{encoding:'utf8'}).trim().split(/\r?\n/);assert(entries.includes('package/desktop-enterprise.js'));
++const resources=path.join(root,'runtime/naumi-desktop-release/win-unpacked/resources'),asarFiles=['main.cjs','backend.cjs','profile.cjs','enterprise.cjs','tools.cjs','preload.cjs','connect.html','connect.css','connect.js'];
++for(const p of asarFiles)assert.equal(sha(asar.extractFile(path.join(resources,'app.asar'),'app/'+p)),sha(fs.readFileSync(path.join(root,'desktop/app',p))),'ASAR_SOURCE_MISMATCH '+p);
++const backend=path.join(resources,'backend'),m=JSON.parse(fs.readFileSync(path.join(backend,'runtime-manifest.json'))),inventory=JSON.parse(fs.readFileSync(path.join(backend,'runtime-files.json')));assert.equal(m.inventorySHA256,sha(fs.readFileSync(path.join(backend,'runtime-files.json'))));assert.deepEqual(m.desktop,{profileVersion:1,identityProtocol:2});assert.equal(m.nodeSHA256,sha(fs.readFileSync(path.join(backend,'node.exe'))));
++for(const file of inventory)assert.equal(sha(fs.readFileSync(path.join(backend,file.path))),file.sha256,'RESOURCE_INVENTORY_MISMATCH '+file.path);scanRuntimeInventory(inventory);
++const pluginFiles=['host.js','desktop-identity.js','desktop-enterprise.js','employee-sync.js','employee-sync-http.js','employee-device-vault.js','employee-capabilities.js','package.json'];
++for(const p of pluginFiles)for(const prefix of ['plugins/naumi-enterprise/','node_modules/@naumi/dsh-enterprise/'])assert.equal(sha(fs.readFileSync(path.join(backend,prefix+p))),sha(fs.readFileSync(path.join(root,'plugins/naumi-enterprise',p))),'RESOURCE_SOURCE_MISMATCH '+p);
++assert(verifyStagedImports(backend).includes('no_ancestor_dependencies=1'));
++fs.writeFileSync(path.join(e,'PACKAGE_CONTRACT.json'),JSON.stringify({status:'PASS',formalNpmFiles:closure.files,enterpriseTransportIncluded:true,npmIntegrity:packed.integrity,asarSourceModules:asarFiles.length,asarHashesMatch:true,resourceCriticalCopies:pluginFiles.length*2,resourceHashesMatch:true,inventoryFiles:inventory.length,inventoryHashesMatch:true,profileVersion:1,identityProtocol:2,bundledNode:m.node,bundledNodeHashMatch:true,ancestorDependencyFallback:false,privateProfileCopied:false},null,2)+'\n');
++console.log('PACKAGE_CONTRACT npm_files='+closure.files+' asar_sources='+asarFiles.length+' resource_sources='+pluginFiles.length*2+' inventory='+inventory.length+' hashes=PASS identity_protocol=2');console.log('PACKAGED_IMPORT no_ancestor_dependencies=1 node_hash=PASS private_profile_copied=0');
+diff --git a/modified/scripts/write-desktop-enterprise-verification.mjs b/modified/scripts/write-desktop-enterprise-verification.mjs
+new file mode 100644
+index 0000000..815d3cb
+--- /dev/null
++++ b/modified/scripts/write-desktop-enterprise-verification.mjs
+@@ -0,0 +1,72 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';
++const e=path.resolve('evidence/desktop-enterprise'),text=file=>fs.readFileSync(path.join(e,file),'utf8'),pack=JSON.parse(text('PACKAGE.json')),rollback=JSON.parse(text('ROLLBACK_RESULT.json'));
++for(const [file,count]of [['BASELINE_TESTS.log',293],['MODIFIED_TESTS.log',315],['ROLLBACK_TESTS.log',293]]){assert.match(text(file),new RegExp('tests '+count));assert.match(text(file),/fail 0/);}
++for(const file of ['DESKTOP_ENTERPRISE.json','PACKAGE_CONTRACT.json','lifecycle/DESKTOP_LIFECYCLE.json'])assert.equal(JSON.parse(text(file)).status,'PASS');assert.equal(rollback.status,'PASS');
++const result=`Naumi M5.3 - enterprise first connection/session bridge and instance protocol2
++Branch: ${pack.branch}
++Baseline commit: ${pack.baselineCommit}
++Status: module + unpacked Electron controlled fixture PASS; overall goal active.
++Changed fields/branches:
++${pack.changedFields.map(v=>'- '+v).join('\n')}
++
++Four artifacts:
++${['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh'].map(f=>path.join(e,f)).join('\n')}
++Original/modified hashes: hashes.json (${pack.files} files; originals ${pack.originalFiles}, new ${pack.newFiles}); additive identity migration keeps original UUID/key.
++
++BASELINE
++Workdir: E:\\Workspace\\naumi-bot-lifecycle-fix before modifications at ${pack.baselineCommit}
++Command: node --test tests/*.test.mjs desktop/tests/*.test.cjs
++Input: original source and original test suite; no live employee data.
++Literal output/result: tests 293; pass 293; fail 0. Exit status: 0.
++Command: node scripts/repro-desktop-enterprise.mjs --baseline
++Input: original desktop identity/profile/backend modules; controlled real loopback listener + forwarding relay + cloned identity fixture.
++Literal output/result: ${text('BASELINE_REPRO.log').trim()}
++Exit status: 0 (old missing endpoint/home binding reproduced).
++
++MODIFIED
++Command: node --test tests/*.test.mjs desktop/tests/*.test.cjs
++Input: changed source; original tests + 22 new tests, including real relay, home/issuer binding, finite session bridge, request/response/admission, expired/RBAC/application-no-replay/stable operation UUID and DPAPI clean PATH.
++Literal output/result: tests 315; pass 315; fail 0. Exit status: 0.
++Command: node scripts/repro-desktop-enterprise.mjs
++Literal output/result: ${text('MODIFIED_REPRO.log').trim()}
++Exit status: 0.
++Command: $env:NAUMI_DINGTALK_ARCHIVE=(Resolve-Path evidence/employee-package/research/dingtalk-workspace-cli-1.0.68.tgz).Path; node desktop/scripts/prepare-runtime.mjs
++Input: pinned official CLI archive, source plugins and runtime dependencies, no employee state.
++Literal output/result: ${text('STAGE.log').trim().split(/\r?\n/).at(-1)}
++Exit status: 0.
++Command: node node_modules/electron-builder/cli.js --win --x64 --dir
++Workdir: E:\\Workspace\\naumi-bot-lifecycle-fix\\desktop
++Result: unpacked Naumi.exe/resources/app.asar built. Exit status: 0. No signing certificate configured; no signed/NSIS acceptance claimed.
++Command: node scripts/verify-desktop-enterprise-package.mjs
++Literal output/result:
++${text('PACKAGE_CONTRACT.log').trim()}
++Exit status: 0.
++Command: node desktop/scripts/verify-desktop-enterprise.mjs
++Input: two isolated test userData directories; clean system PATH; controlled enterprise fixture; real Electron login HttpOnly cookie; explicit fixture registration with Ed25519 proof/signature and DPAPI.
++Literal output/result:
++${text('DESKTOP_ENTERPRISE.log').trim()}
++Exit status: 0.
++Command: $env:NAUMI_LIFECYCLE_EVIDENCE='E:/Workspace/naumi-bot-lifecycle-fix/evidence/desktop-enterprise/lifecycle'; node desktop/scripts/verify-desktop-lifecycle.mjs
++Input: original dual-profile/native-browser/crash-recovery scenario with protocol2 and configured fixture origin. Windows metadata reader handoff has bounded atomic-rename retry.
++Literal output/result:
++${text('DESKTOP_LIFECYCLE.log').trim()}
++Exit status: 0.
++
++ROLLBACK
++Command: $env:NAUMI_NODE='D:/DEV/NodeJS/node.exe'; & 'D:/DEV/Git/bin/bash.exe' evidence/desktop-enterprise/ROLLBACK.sh --test
++Input: a separate copy; hash-guarded original bytes restore; new-source files removed only in the copy; new-version identity/EmployeeStore seed retained.
++Literal output/result:
++${text('ROLLBACK.log').trim()}
++Exit status: 0.
++Restored behavior/status: original protocol1 proof, prior relay/clone behavior, original293 tests PASS, UUID/key/persona/memory/schema1 retained. Actual modified files remain changed and active employee profiles are untouched. This is source-copy rollback, not installed-version or business-schema downgrade.
++
++Actual-service read-only probe:
++Command: node scripts/check-bot-runtime.mjs E:/Workspace/deepseek-harness-local 2
++Literal output/result: RUNTIME sessions=62 running=0 bots=3 revision=10 http=200 contract=2
++Exit status: 0. Actual3080 source/service not replaced by this module.
++
++Observed test corrections: ATTEMPT1/2 enterprise fixture omitted UTF-8 charset; ATTEMPT3 navigation was correctly prevented and Playwright click had to use noWaitAfter. Enterprise ATTEMPT4 kept Playwright pending-navigation bookkeeping after a correctly blocked external link; that check is now last with explicit test teardown. ATTEMPT5 exposed native Chromium wire retransmission on dropped connections; POST now requires the original operationId and the fixture matches the actual enterprise transaction-receipt dedup authority. The test measures wire attempts separately from effects and explicitly reconciles the UNKNOWN operation with the same UUID. Enterprise ATTEMPT6 completed login/data/dedup/restart/isolation but stalled on quitting with a login window; that attempt was explicitly aborted, not PASS. The owned test backend was already stopped. Main now closes the login popup before flush and suppresses teardown reload/bootstrap; final E2E checks actual GUI PID exit. Enterprise ATTEMPT7 used Playwright.process() after its handle was disposed; the launcher reference is now captured before close and the GUI/backend PIDs are independently observed. Lifecycle ATTEMPT1 exposed real Windows EPERM receipt rename; production profile.cjs now retries only the fsynced atomic rename for a bounded interval, with a real FileShare.Read lock regression test. These earlier attempts are not recorded as passes.
++
++Remaining overall gates: real remote HTTPS employee onboarding/binding/model policy, real supplier/account/price/budget use, enterprise/home migration UX, business schema/installed version downgrade, NSIS clean install/upgrade/uninstall, signing/dependency review and employee business acceptance. Overall goal remains active.
++`;
++fs.writeFileSync(path.join(e,'VERIFICATION.txt'),result);console.log('VERIFICATION written=PASS baseline=293 modified=315 rollback=293 overall_goal=active');

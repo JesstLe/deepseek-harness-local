@@ -1,0 +1,393 @@
+diff --git a/original/plugins/naumi-enterprise/assets/employee-activity-panel.js b/modified/plugins/naumi-enterprise/assets/employee-activity-panel.js
+index a7131b6..a66efb4 100644
+--- a/original/plugins/naumi-enterprise/assets/employee-activity-panel.js
++++ b/modified/plugins/naumi-enterprise/assets/employee-activity-panel.js
+@@ -1,5 +1,5 @@
+ const states={working:'执行中',waiting_user:'等待用户',waiting_dependency:'等待依赖',model_unavailable:'模型不可达',blocked:'受阻',fault:'执行异常',idle:'空闲',unknown:'执行器待核验'};
+-const errors={ACT_CONFLICT:'规则已更新，请刷新',ACT_ACTION_LIMIT:'已达到规则执行上限',EMP_SECRET_PATTERN:'内容含凭证格式，请移除',WORK_GOAL_NOT_FOUND:'目标已变化，请重新选择',ACT_INVALID_REQUEST:'请检查规则字段',ACT_AUTH_REQUIRED:'请重新登录工作空间'};
++const errors={ACT_CONFLICT:'规则已更新，请刷新',ACT_ACTION_LIMIT:'已达到规则执行上限',EMP_SECRET_PATTERN:'内容含凭证格式，请移除',WORK_GOAL_NOT_FOUND:'目标已变化，请重新选择',ACT_INVALID_REQUEST:'请检查规则字段',ACT_AUTH_REQUIRED:'请重新登录工作空间',ACT_AI_NOT_CONFIGURED:'请先配置企业模型与执行准入',ACT_AI_MANAGED_SESSION_REQUIRED:'请选择此员工已绑定的受管会话',ACT_AI_MODEL_SELECTION_CHANGED:'请在原模型位置选择批准的企业模型',ACT_AI_CONFLICT:'执行记录已更新，请刷新',ACT_AI_EXECUTOR_UNRESOLVED:'请先核对原执行器',ACT_AI_MODEL_UNRESOLVED:'请先核对模型请求',ACT_AI_REVIEW_REQUIRED:'此记录需要核对',ACT_AI_NOT_UNKNOWN:'此记录没有待核对结果'};
+ const clock=value=>value?new Date(value).toLocaleString('zh-CN',{hour12:false}):'—';
+ const minutes=value=>{const [h,m]=value.split(':').map(Number);return h*60+m;};
+ const hhmm=v=>String(Math.floor(v/60)).padStart(2,'0')+':'+String(v%60).padStart(2,'0');
+@@ -8,29 +8,29 @@ export function createEmployeeActivityPanel(React,{fetcher=(...args)=>fetch(...a
+   const input=(label,props)=>h('label',{className:'emp-field'},h('span',null,label),h('input',props));
+   const select=(label,value,onChange,options)=>h('label',{className:'emp-field'},h('span',null,label),h('select',{'aria-label':label,value,onChange:e=>onChange(e.target.value)},options.map(([value,label])=>h('option',{key:value,value},label))));
+   const badge=(text,tone='')=>h('span',{className:'emp-badge '+tone},text);
+-  function RuleForm({rule,onSave,onCancel,busy,goals}){
+-    const c=rule?.config,[f,set]=useState({title:c?.title??'',trigger:c?.trigger.kind??'every',seconds:c?.trigger.seconds??3600,at:c?.trigger.at?new Date(Date.parse(c.trigger.at)-new Date(c.trigger.at).getTimezoneOffset()*60000).toISOString().slice(0,16):'',goalId:c?.trigger.goalId??'',action:c?.action.kind??'notify',text:c?.action.text??'',goalTitle:c?.action.title??'',description:c?.action.description??'',criteria:c?.action.criteria?.join('\n')??'',timeZone:c?.workWindow.timeZone??Intl.DateTimeFormat().resolvedOptions().timeZone,days:c?.workWindow.days??[1,2,3,4,5],start:hhmm(c?.workWindow.startMinute??540),end:hhmm(c?.workWindow.endMinute??1080),cooldown:c?.cooldownSeconds??3600,maxActions:c?.maxActions??20});
++  function RuleForm({rule,onSave,onCancel,busy,goals,targets=[]}){
++    const c=rule?.config,[f,set]=useState({title:c?.title??'',trigger:c?.trigger.kind??'every',seconds:c?.trigger.seconds??3600,at:c?.trigger.at?new Date(Date.parse(c.trigger.at)-new Date(c.trigger.at).getTimezoneOffset()*60000).toISOString().slice(0,16):'',goalId:c?.trigger.goalId??'',action:c?.action.kind??'notify',text:c?.action.text??'',goalTitle:c?.action.title??'',description:c?.action.description??'',criteria:c?.action.criteria?.join('\n')??'',timeZone:c?.workWindow.timeZone??Intl.DateTimeFormat().resolvedOptions().timeZone,days:c?.workWindow.days??[1,2,3,4,5],start:hhmm(c?.workWindow.startMinute??540),end:hhmm(c?.workWindow.endMinute??1080),cooldown:c?.cooldownSeconds??3600,maxActions:c?.maxActions??20,sessionId:c?.action.sessionId??targets[0]?.sessionId??'',aiGoalId:c?.action.goalId??goals[0]?.id??'',model:c?.action.model??targets[0]?.selection?.model??'',prompt:c?.action.prompt??'',maxModelRequests:c?.action.maxModelRequests??4,maxSeconds:c?.action.maxSeconds??300});
+     const field=(key,props={})=>({value:f[key],onChange:e=>set({...f,[key]:e.target.value}),disabled:busy,...props});
+-    return h('form',{className:'emp-rule-form',onSubmit:e=>{e.preventDefault();onSave({title:f.title,trigger:f.trigger==='every'?{kind:'every',seconds:Number(f.seconds)}:f.trigger==='at'?{kind:'at',at:new Date(f.at).toISOString()}:{kind:'goal_due',goalId:f.goalId||null},action:f.action==='notify'?{kind:'notify',text:f.text}:{kind:'queue_goal',title:f.goalTitle,description:f.description,criteria:f.criteria.split('\n').map(s=>s.trim()).filter(Boolean)},workWindow:{timeZone:f.timeZone,days:f.days,startMinute:minutes(f.start),endMinute:minutes(f.end)},cooldownSeconds:Number(f.cooldown),maxActions:Number(f.maxActions)});}},
++    return h('form',{className:'emp-rule-form',onSubmit:e=>{e.preventDefault();onSave({title:f.title,trigger:f.trigger==='every'?{kind:'every',seconds:Number(f.seconds)}:f.trigger==='at'?{kind:'at',at:new Date(f.at).toISOString()}:{kind:'goal_due',goalId:f.goalId||null},action:f.action==='run_agent'?{kind:'run_agent',sessionId:f.sessionId,taskId:targets.find(t=>t.sessionId===f.sessionId)?.taskId??c?.action.taskId,goalId:f.aiGoalId,model:f.model,prompt:f.prompt,maxModelRequests:Number(f.maxModelRequests),maxSeconds:Number(f.maxSeconds)}:f.action==='notify'?{kind:'notify',text:f.text}:{kind:'queue_goal',title:f.goalTitle,description:f.description,criteria:f.criteria.split('\n').map(s=>s.trim()).filter(Boolean)},workWindow:{timeZone:f.timeZone,days:f.days,startMinute:minutes(f.start),endMinute:minutes(f.end)},cooldownSeconds:Number(f.cooldown),maxActions:Number(f.maxActions)});}},
+       input('规则名称',field('title',{required:true,maxLength:120})),
+       h('div',{className:'emp-two-fields'},select('触发方式',f.trigger,v=>set({...f,trigger:v}),[['every','固定间隔'],['at','指定时间'],['goal_due','目标到期']]),f.trigger==='every'?input('间隔（秒）',field('seconds',{type:'number',min:60,max:2592000,required:true})):f.trigger==='at'?input('触发时间',field('at',{type:'datetime-local',required:true})):select('目标范围',f.goalId,v=>set({...f,goalId:v}),[['','本员工全部目标'],...goals.map(g=>[g.id,g.title])])),
+-      select('行动',f.action,v=>set({...f,action:v}),[['notify','本地通知'],['queue_goal','加入工作队列']]),
+-      f.action==='notify'?input('通知内容',field('text',{required:true,maxLength:1000})):h(React.Fragment,null,input('新目标名称',field('goalTitle',{required:true,maxLength:120})),input('工作说明',field('description',{maxLength:4000})),h('label',{className:'emp-field'},h('span',null,'验收条件（每行一项）'),h('textarea',field('criteria',{required:true,maxLength:10000,rows:3})))),
++      select('行动',f.action,v=>set({...f,action:v}),[['notify','本地通知'],['queue_goal','加入工作队列'],['run_agent','AI 执行']]),
++      f.action==='run_agent'?h(React.Fragment,null,select('执行会话',f.sessionId,v=>set({...f,sessionId:v,model:targets.find(t=>t.sessionId===v)?.selection?.model??''}),[['','请选择'],...targets.map(t=>[t.sessionId,t.sessionId+' · '+t.taskId.slice(0,8)])]),select('工作目标',f.aiGoalId,v=>set({...f,aiGoalId:v}),[['','请选择'],...goals.filter(g=>['planned','in_progress'].includes(g.status)).map(g=>[g.id,g.title])]),h('div',{className:'emp-ai-model'},h('span',null,'批准模型'),h('code',null,'naumi-enterprise / ',f.model||'未选择')),h('label',{className:'emp-field'},h('span',null,'执行指令'),h('textarea',field('prompt',{required:true,maxLength:4000,rows:3}))),h('div',{className:'emp-two-fields'},input('单次模型请求上限',field('maxModelRequests',{type:'number',min:1,max:20,required:true})),input('单次执行秒数',field('maxSeconds',{type:'number',min:10,max:3600,required:true})))):f.action==='notify'?input('通知内容',field('text',{required:true,maxLength:1000})):h(React.Fragment,null,input('新目标名称',field('goalTitle',{required:true,maxLength:120})),input('工作说明',field('description',{maxLength:4000})),h('label',{className:'emp-field'},h('span',null,'验收条件（每行一项）'),h('textarea',field('criteria',{required:true,maxLength:10000,rows:3})))),
+       h('div',{className:'emp-two-fields'},input('工作时区',field('timeZone',{required:true,maxLength:100})),h('fieldset',{className:'emp-weekdays'},h('legend',null,'工作日'),['一','二','三','四','五','六','日'].map((day,i)=>h('label',{key:day},h('input',{type:'checkbox',checked:f.days.includes(i+1),disabled:busy,onChange:e=>set({...f,days:e.target.checked?[...f.days,i+1]:f.days.filter(d=>d!==i+1)})}),day)))),
+       h('div',{className:'emp-two-fields'},input('开始',field('start',{type:'time',required:true})),input('结束',field('end',{type:'text',inputMode:'numeric',pattern:'([01][0-9]|2[0-3]):[0-5][0-9]|24:00',required:true}))),
+       h('div',{className:'emp-two-fields'},input('冷却（秒）',field('cooldown',{type:'number',min:60,max:2592000,required:true})),input('累计行动上限',field('maxActions',{type:'number',min:1,max:1000,required:true}))),
+-      h('footer',{className:'emp-form-footer'},h('button',{type:'button',disabled:busy,onClick:onCancel},'取消'),h('button',{type:'submit',className:'primary',disabled:busy||!f.days.length||minutes(f.start)>=minutes(f.end)},'保存为停用规则')));
++      h('footer',{className:'emp-form-footer'},h('button',{type:'button',disabled:busy,onClick:onCancel},'取消'),h('button',{type:'submit',className:'primary',disabled:busy||!f.days.length||minutes(f.start)>=minutes(f.end)||f.action==='run_agent'&&(!f.sessionId||!f.aiGoalId||!f.model)},'保存为停用规则')));
+   }
+   return function ActivityPanel({botId,writeable=true,goals=[]}){
+-    const [data,setData]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[edit,setEdit]=useState(null),[refresh,setRefresh]=useState(0);
++    const [data,setData]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[edit,setEdit]=useState(null),[refresh,setRefresh]=useState(0),[review,setReview]=useState(null),[reviewReason,setReviewReason]=useState(''),[confirmed,setConfirmed]=useState(false);
+     const current=useRef(botId),flight=useRef(false),pending=useRef(new Map());current.current=botId;
+     async function request(body,signal){
+       const r=await fetcher('/naumi/employee-activity'+(body?'':'?'+new URLSearchParams({botId})),{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',headers:body?{'Content-Type':'application/json','x-naumi-employee-activity':'1'}:{},...(body?{body:JSON.stringify({botId,...body})}:{}),signal:signal??AbortSignal.timeout(15000)});
+       let value;try{value=await r.json();}catch{throw Error('ACT_INVALID_RESPONSE');}if(!r.ok){const e=Error(r.status===401?'ACT_AUTH_REQUIRED':value.error??'ACT_REQUEST_FAILED');e.status=r.status;throw e;}return value;
+     }
+-    useEffect(()=>{setData(null);setEdit(null);setError('');},[botId]);
++    useEffect(()=>{setData(null);setEdit(null);setReview(null);setError('');},[botId]);
+     useEffect(()=>{const c=new AbortController();let running=false;const load=async()=>{if(running)return;running=true;try{const value=await request(null,c.signal);if(!c.signal.aborted){setData(value);setError('');}}catch(e){if(!c.signal.aborted)setError(errors[e.message]??'连接暂不可用');}finally{running=false;}};void load();const timer=setInterval(load,30000);return()=>{c.abort();clearInterval(timer);};},[botId,refresh]);
+-    async function command(body){if(flight.current||!writeable)return;flight.current=true;setBusy(true);const id=botId,key=JSON.stringify([id,body]);let operationId=pending.current.get(key);if(!operationId){operationId=crypto.randomUUID();pending.current.set(key,operationId);}try{await request({...body,operationId});pending.current.delete(key);if(current.current===id){setEdit(null);setRefresh(v=>v+1);}}catch(e){if(e.status&&e.status<500)pending.current.delete(key);if(current.current===id)setError(errors[e.message]??e.message);}finally{flight.current=false;if(current.current===id)setBusy(false);}}
++    async function command(body){if(flight.current||!writeable)return;flight.current=true;setBusy(true);const id=botId,key=JSON.stringify([id,body]);let operationId=pending.current.get(key);if(!operationId){operationId=crypto.randomUUID();pending.current.set(key,operationId);}try{await request({...body,operationId});pending.current.delete(key);if(current.current===id){setEdit(null);setRefresh(v=>v+1);}return true;}catch(e){if(e.status&&e.status<500)pending.current.delete(key);if(current.current===id)setError(errors[e.message]??e.message);return false;}finally{flight.current=false;if(current.current===id)setBusy(false);}}
+     const yes=value=>badge(value===true?'是':value===false?'否':'未核验',value===true?'green':value===false?'amber':'');
+     return h('div',{className:'emp-activity','data-employee-activity':true},
+       h('div',{className:'emp-section-heading'},h('h2',null,'运行与能力'),h('button',{type:'button',disabled:busy,onClick:()=>setRefresh(v=>v+1)},'刷新运行状态')),
+@@ -40,10 +40,12 @@ export function createEmployeeActivityPanel(React,{fetcher=(...args)=>fetch(...a
+         data.observation.sessions.length>0&&h('section',{className:'emp-activity-sessions'},data.observation.sessions.map(s=>h('article',{key:s.sessionId},h('div',{className:'emp-inline'},h('code',null,s.sessionId),badge(states[s.workState]??s.workState,s.workState==='fault'||s.noProgress?'amber':''),s.noProgress&&badge('待核验进展','amber')),s.report?.note&&h('p',null,s.report.note),s.report&&h('span',null,'Agent 报告 · ',clock(s.report.reportedAt)),h('time',null,'会话进展 ',clock(s.lastProgressAt))))),
+         h('div',{className:'emp-capability-scroll'},h('table',{className:'emp-capability-table'},h('thead',null,h('tr',null,['能力','已内置','已连接','已授权','健康','核验时间'].map(s=>h('th',{key:s},s)))),h('tbody',null,data.capabilities.records.map(c=>h('tr',{key:c.id,title:c.reasonCode},h('th',null,({desktop:'桌面操作',browser:'内置浏览器',dingtalk:'钉钉 CLI',enterprise:'企业数据'})[c.id]??c.id,c.stale&&badge('过期','amber')),h('td',null,yes(c.installed)),h('td',null,yes(c.connected)),h('td',null,yes(c.authorized)),h('td',null,yes(c.healthy)),h('td',null,h('time',null,clock(c.lastChecked)))))))),
+         h('div',{className:'emp-section-heading'},h('h2',null,'主动规则'),h('button',{type:'button',className:'primary',disabled:busy||!writeable,onClick:()=>setEdit({id:'new'})},'新增规则')),
+-        edit&&h(RuleForm,{key:edit.id,rule:edit.id==='new'?null:edit,goals,busy,onCancel:()=>setEdit(null),onSave:config=>command(edit.id==='new'?{action:'rule_create',config}:{action:'rule_update',ruleId:edit.id,expectedRevision:edit.revision,config})}),
+-        h('div',{className:'emp-rule-list'},data.rules.map(r=>h('article',{key:r.id},h('div',null,h('h3',null,r.config.title),h('div',{className:'emp-inline'},badge(r.enabled?'已启用':'已停用',r.enabled?'green':''),h('span',null,r.config.action.kind==='notify'?'本地通知':'加入工作队列'),h('span',null,r.actionCount,' / ',r.config.maxActions)),h('time',null,'最近执行 ',clock(r.lastActionAt))),h('div',{className:'emp-inline'},h('button',{type:'button',disabled:busy||!writeable,onClick:()=>setEdit(r)},'编辑'),h('button',{type:'button',disabled:busy||!writeable||!r.enabled&&r.actionCount>=r.config.maxActions,onClick:()=>command({action:'rule_enable',ruleId:r.id,expectedRevision:r.revision,enabled:!r.enabled})},r.enabled?'停用':'确认启用'))))),
++        edit&&h(RuleForm,{key:edit.id,rule:edit.id==='new'?null:edit,goals,targets:data.proactive?.targets??[],busy,onCancel:()=>setEdit(null),onSave:config=>command(edit.id==='new'?{action:'rule_create',config}:{action:'rule_update',ruleId:edit.id,expectedRevision:edit.revision,config})}),
++        h('div',{className:'emp-rule-list'},data.rules.map(r=>h('article',{key:r.id},h('div',null,h('h3',null,r.config.title),h('div',{className:'emp-inline'},badge(r.enabled?'已启用':'已停用',r.enabled?'green':''),h('span',null,r.config.action.kind==='notify'?'本地通知':r.config.action.kind==='run_agent'?'AI 执行':'加入工作队列'),h('span',null,r.actionCount,' / ',r.config.maxActions)),h('time',null,'最近执行 ',clock(r.lastActionAt))),h('div',{className:'emp-inline'},h('button',{type:'button',disabled:busy||!writeable,onClick:()=>setEdit(r)},'编辑'),h('button',{type:'button',disabled:busy||!writeable||!r.enabled&&r.actionCount>=r.config.maxActions,onClick:()=>command({action:'rule_enable',ruleId:r.id,expectedRevision:r.revision,enabled:!r.enabled})},r.enabled?'停用':'确认启用'))))),
++        (data.proactive?.jobs.length??0)>0&&h('section',{className:'emp-ai-jobs','data-proactive-jobs':true},h('h2',null,'主动执行'),data.proactive.jobs.map(j=>h('article',{key:j.id},h('header',{className:'emp-section-heading'},h('strong',null,j.ruleTitle??data.rules.find(r=>r.id===j.ruleId)?.config.title??'AI 工作'),badge(({queued:'已入队',waiting_session:'等待会话',waiting_permission:'等待授权',waiting_dependency:'等待依赖',waiting_budget:'等待预算',running:'执行中',stopping:'正在停止',settling:'核对回执',unknown:'结果待核对',awaiting_review:'等待审阅',failed:'执行未完成',cancelled:'已停止',expired:'已过期',reviewed_stopped:'已核对停止'})[j.state]??j.state)),h('div',{className:'emp-inline'},h('span',null,'模型请求 ',j.modelRequests,' / ',j.action.maxModelRequests),h('span',null,'交付 ',j.deliveryIds?.length??0),h('time',null,clock(j.startedAt??j.createdAt))),j.reason&&h('code',{className:'emp-ai-reason'},j.reason),h('details',null,h('summary',null,'执行回执'),h('code',null,j.id),h('code',null,j.action.sessionId),h('code',null,j.action.taskId),...(j.receipts??[]).map(r=>h('div',{key:r.requestId,className:'emp-inline'},h('code',null,r.requestId),h('span',null,r.state))),...(j.deliveryIds??[]).map(id=>h('code',{key:id},id))),h('div',{className:'emp-inline'},!['unknown','awaiting_review','failed','cancelled','expired','reviewed_stopped'].includes(j.state)&&h('button',{type:'button',disabled:busy||!writeable,onClick:()=>command({action:'ai_job_cancel',jobId:j.id,expectedRevision:j.revision})},'停止此执行'),j.state==='unknown'&&h('button',{type:'button',disabled:busy||!writeable,onClick:()=>{setReview(j);setReviewReason('');setConfirmed(false);}},'核对主动执行'))))),
++        review&&h('form',{className:'emp-ai-review',onSubmit:e=>{e.preventDefault();void command({action:'ai_job_resolve',jobId:review.id,expectedRevision:review.revision,confirmedStopped:true,reason:reviewReason}).then(ok=>{if(ok)setReview(null);});}},h('h3',null,'核对主动执行'),input('主动执行核对记录',{value:reviewReason,onChange:e=>setReviewReason(e.target.value),required:true,minLength:6,maxLength:1000,disabled:busy}),h('label',{className:'emp-lock'},h('input',{type:'checkbox',checked:confirmed,onChange:e=>setConfirmed(e.target.checked),disabled:busy}),'原执行器与模型请求已核对停止'),h('div',{className:'emp-inline'},h('button',{type:'button',onClick:()=>setReview(null),disabled:busy},'取消核对'),h('button',{type:'submit',disabled:busy||!confirmed||reviewReason.trim().length<6},'确认核对停止'))),
+         data.notifications.some(n=>!n.readAt)&&h('section',{className:'emp-activity-notifications'},h('h2',null,'通知'),data.notifications.filter(n=>!n.readAt).map(n=>h('article',{key:n.id},h('div',null,h('p',null,n.text),h('time',null,clock(n.createdAt))),h('button',{type:'button',disabled:busy||!writeable,onClick:()=>command({action:'notification_read',notificationId:n.id,expectedRevision:n.revision})},'标为已读')))),
+-        data.runs.length>0&&h('section',{className:'emp-activity-runs'},h('h2',null,'触发记录'),data.runs.map(r=>h('article',{key:r.id},h('strong',null,data.rules.find(rule=>rule.id===r.ruleId)?.config.title??'规则'),h('span',null,r.action==='notify'?'已通知':'已入队'),h('time',null,clock(r.createdAt)))))
++        data.runs.length>0&&h('section',{className:'emp-activity-runs'},h('h2',null,'触发记录'),data.runs.map(r=>h('article',{key:r.id},h('strong',null,data.rules.find(rule=>rule.id===r.ruleId)?.config.title??'规则'),h('span',null,r.action==='notify'?'已通知':r.action==='run_agent'?'AI 已入队':'已入队'),h('time',null,clock(r.createdAt)))))
+       ));
+   };
+ }
+diff --git a/original/plugins/naumi-enterprise/assets/employee-center.css b/modified/plugins/naumi-enterprise/assets/employee-center.css
+index 923a31e..ca6ec23 100644
+--- a/original/plugins/naumi-enterprise/assets/employee-center.css
++++ b/modified/plugins/naumi-enterprise/assets/employee-center.css
+@@ -32,3 +32,4 @@
+ 
+ .emp-runtime-panel{background:#fff;border:1px solid var(--emp-line);border-radius:14px;padding:18px 20px;margin-bottom:22px;color:var(--emp-ink)!important;font-size:13px!important}.emp-runtime-panel>summary{font-weight:600}.emp-runtime-body{display:grid;gap:20px;margin-top:20px}.emp-runtime-form{display:grid;gap:16px;padding:18px;border:1px solid #e5e9f3;border-radius:12px;background:#fafbfe}.emp-runtime-form>button{justify-self:start}.emp-runtime-toolset{border:1px solid var(--emp-line);border-radius:10px;padding:12px 16px;display:grid;gap:8px;max-height:240px;overflow:auto;margin:0}.emp-runtime-toolset legend{color:#6d7e97;font-size:12px}.emp-runtime-toolset label{align-items:flex-start}.emp-runtime-toolset code{overflow-wrap:anywhere}.emp-runtime-binding{display:grid;gap:10px;padding:18px;border:1px solid var(--emp-line);border-radius:12px}.emp-runtime-binding>span,.emp-runtime-binding>time{font-size:12px;color:#7f8ca2}.emp-runtime-reconcile{display:grid;gap:12px}.emp-runtime-panel select{max-width:100%}.emp-runtime-binding header{overflow-wrap:anywhere}
+ .emp-model-panel{margin:0 0 20px;border:1px solid #dce5ee;border-radius:18px;background:#fff;overflow:hidden}.emp-model-panel>summary{padding:18px 22px;cursor:pointer;font-size:14px;font-weight:650;color:#1e354b}.emp-model-body{padding:0 22px 22px;display:grid;gap:18px;min-width:0}.emp-model-body h3,.emp-model-body h4{margin:0}.emp-model-body .emp-field{min-width:0}.emp-model-facts{display:flex;flex-wrap:wrap;gap:10px 24px;color:#5a6d80;font-size:12px}.emp-model-facts code,.emp-model-requests code,.emp-model-receipt>code{overflow-wrap:anywhere;min-width:0}.emp-model-routes{display:flex;flex-wrap:wrap;gap:10px}.emp-model-routes article{display:grid;gap:8px;padding:16px;background:#f5f8fc;border-radius:13px;flex:1;min-width:160px}.emp-model-routes code{color:#52718c}.emp-model-routes span{font-size:12px;color:#63778b}.emp-model-budgets{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:14px}.emp-model-budgets article{padding:18px;background:linear-gradient(140deg,#f5f9ff,#f8fbff);border:1px solid #e4edf8;border-radius:14px;min-width:0}.emp-model-budgets article>strong{display:block;font-size:24px;letter-spacing:-.7px;color:#1d568e;margin:14px 0;overflow-wrap:anywhere}.emp-model-budgets dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px 6px;font-size:12px;margin:0}.emp-model-budgets dt{color:#6b7b8d}.emp-model-budgets dd{margin:0;text-align:right;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.emp-model-policy{border-top:1px solid #e8edf4;padding-top:18px}.emp-model-policy form{display:grid;gap:18px}.emp-model-policy-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.emp-model-policy-grid fieldset{display:grid;gap:14px;border:1px solid #e0e8f2;border-radius:12px;min-width:0;padding:18px}.emp-model-policy-grid legend{font-size:13px;font-weight:600;padding:0 5px}.emp-model-requests{display:grid;gap:10px}.emp-model-requests article{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 0;border-bottom:1px solid #edf1f7}.emp-model-requests article>code{flex:1;font-size:12px}.emp-model-receipt{display:grid;gap:15px;border:1px solid #dae5f2;background:#f9fbfe;border-radius:14px;padding:20px}.emp-model-receipt form{display:grid;gap:14px}@media(max-width:1100px){.emp-model-budgets{grid-template-columns:repeat(2,minmax(0,1fr))}.emp-model-policy-grid{grid-template-columns:1fr}}@media(max-width:600px){.emp-model-body{padding:0 14px 16px}.emp-model-budgets{grid-template-columns:1fr}.emp-model-routes article{min-width:100%}.emp-model-requests article>code{flex-basis:100%}}
++.emp-ai-model{display:flex;align-items:center;gap:16px;padding:12px 16px;border-radius:10px;background:#f3f7fd;font-size:13px}.emp-ai-model code{overflow-wrap:anywhere}.emp-ai-jobs{display:grid;gap:14px;margin:24px 0}.emp-ai-jobs>h2{margin:0}.emp-ai-jobs>article{border:1px solid #dce6f1;border-radius:16px;padding:20px;background:#fff;display:grid;gap:14px;min-width:0}.emp-ai-jobs details{display:grid;padding:10px 0;color:#5a7088;font-size:12px}.emp-ai-jobs details>code{display:block;overflow-wrap:anywhere;margin:8px 0}.emp-ai-reason{overflow-wrap:anywhere;font-size:12px;color:#87611f}.emp-ai-review{border:1px solid #dde6f2;border-radius:14px;padding:20px;display:grid;gap:16px;background:#f8fbff}
+diff --git a/original/plugins/naumi-enterprise/employee-activity-store.js b/modified/plugins/naumi-enterprise/employee-activity-store.js
+index 45dad35..4714d03 100644
+--- a/original/plugins/naumi-enterprise/employee-activity-store.js
++++ b/modified/plugins/naumi-enterprise/employee-activity-store.js
+@@ -13,6 +13,7 @@ const trigger=z.discriminatedUnion('kind',[
+ const action=z.discriminatedUnion('kind',[
+   z.object({kind:z.literal('notify'),text:z.string().trim().min(1).max(1000)}).strict(),
+   z.object({kind:z.literal('queue_goal'),title:z.string().trim().min(1).max(120),description:z.string().max(4000).default(''),criteria:z.array(z.string().trim().min(1).max(500)).min(1).max(20)}).strict(),
++  z.object({kind:z.literal('run_agent'),sessionId:id,taskId:z.string().uuid(),goalId:id,model:z.string().min(1).max(80),prompt:z.string().trim().min(1).max(4000),maxModelRequests:z.number().int().min(1).max(20),maxSeconds:z.number().int().min(10).max(3600)}).strict(),
+ ]);
+ const window=z.object({timeZone:z.string().min(1).max(100).refine(v=>{try{new Intl.DateTimeFormat('en',{timeZone:v});return true;}catch{return false;}}),days:z.array(z.number().int().min(1).max(7)).min(1).max(7).refine(v=>new Set(v).size===v.length),startMinute:z.number().int().min(0).max(1439),endMinute:z.number().int().min(1).max(1440)}).strict().refine(v=>v.startMinute<v.endMinute,'Use an explicit non-overnight work window');
+ export const ruleConfig=z.object({title:z.string().trim().min(1).max(120),trigger,action,workWindow:window,cooldownSeconds:z.number().int().min(60).max(2592000),maxActions:z.number().int().min(1).max(1000)}).strict();
+@@ -42,7 +43,7 @@ export class EmployeeActivityStore{
+       const time=this.store.now();
+       if(action==='rule_create'){
+         if(this.rules(botId).length>=100)fail('ACT_RULE_CAPACITY');this.validateScope(botId,args.config);
+-        return this.store.put({id:'rule-'+randomUUID(),botId,revision:1,config:args.config,configVersion:randomUUID(),enabled:false,approvedAt:null,actionCount:0,lastActionAt:null,nextAt:this.next(args.config,Date.parse(time)),createdAt:time,updatedAt:time},'proactive_rule',action,owner);
++        return this.store.put({id:'rule-'+randomUUID(),botId,revision:1,config:args.config,configVersion:randomUUID(),enabled:false,approvedAt:null,approvalId:null,actionCount:0,lastActionAt:null,nextAt:this.next(args.config,Date.parse(time)),createdAt:time,updatedAt:time},'proactive_rule',action,owner);
+       }
+       if(action==='notification_read'){
+         const n=this.store.entity(botId,args.notificationId);if(!n||!args.notificationId.startsWith('notification-'))fail('ACT_NOTIFICATION_NOT_FOUND');
+@@ -53,10 +54,10 @@ export class EmployeeActivityStore{
+       // Configuration changes always revoke approval. A separate owner enable is required.
+       const config=args.config??r.config,enabled=action==='rule_enable'&&args.enabled;
+       if(enabled&&r.actionCount>=config.maxActions)fail('ACT_ACTION_LIMIT');
+-      return this.store.put({...r,config,configVersion:args.config?randomUUID():r.configVersion,enabled,revision:r.revision+1,approvedAt:enabled?time:null,nextAt:this.next(config,Date.parse(time)),updatedAt:time},'proactive_rule',action,owner);
++      return this.store.put({...r,config,configVersion:args.config?randomUUID():r.configVersion,enabled,revision:r.revision+1,approvedAt:enabled?time:null,approvalId:enabled?randomUUID():null,nextAt:this.next(config,Date.parse(time)),updatedAt:time},'proactive_rule',action,owner);
+     });
+   }
+-  validateScope(botId,config){if(config.trigger.kind==='goal_due'&&config.trigger.goalId)this.work.goal(botId,config.trigger.goalId);}
++  validateScope(botId,config){if(config.trigger.kind==='goal_due'&&config.trigger.goalId)this.work.goal(botId,config.trigger.goalId);if(config.action.kind==='run_agent')this.work.goal(botId,config.action.goalId);}
+   next(config,now){return config.trigger.kind==='every'?new Date(now+config.trigger.seconds*1000).toISOString():config.trigger.kind==='at'?config.trigger.at:null;}
+   occurrence(botId,r,now){
+     const t=r.config.trigger;
+@@ -72,6 +73,7 @@ export class EmployeeActivityStore{
+     let actions=0;
+     for(const botId of botIds)for(const rule of this.rules(botId)){
+       if(!rule.enabled||!rule.approvedAt||rule.actionCount>=rule.config.maxActions||!inWorkWindow(rule.config.workWindow,now))continue;
++      if(rule.config.action.kind==='run_agent'&&this.store.entitiesOfType(botId,'proactive_ai').some(j=>j.ruleId===rule.id&&!['awaiting_review','failed','cancelled','expired','reviewed_stopped'].includes(j.state)))continue;
+       for(const o of this.occurrence(botId,rule,now)){
+         const r=this.rule(botId,rule.id);if(!r.enabled||r.revision!==rule.revision||r.actionCount>=r.config.maxActions)break;
+         if(r.lastActionAt&&now-Date.parse(r.lastActionAt)<r.config.cooldownSeconds*1000)break;
+@@ -81,8 +83,12 @@ export class EmployeeActivityStore{
+           // Re-read under BEGIN IMMEDIATE. Two processes cannot commit the same occurrence twice.
+           const live=this.rule(botId,r.id);if(live.revision!==r.revision||!live.enabled)fail('ACT_CONFLICT');
+           if(this.store.entitiesOfType(botId,'proactive_run').length>=10000)fail('ACT_RUN_CAPACITY');
+-          const time=this.store.now(),effectId=(r.config.action.kind==='notify'?'notification-':'goal-')+key([receiptId,'effect']);
++          const time=this.store.now(),effectId=(r.config.action.kind==='notify'?'notification-':r.config.action.kind==='run_agent'?'ai-job-':'goal-')+key([receiptId,'effect']);
+           if(r.config.action.kind==='notify')this.store.put({id:effectId,botId,revision:1,text:r.config.action.text,ruleId:r.id,sourceGoalId:o.goalId??null,readAt:null,createdAt:time},'notification','rule_notification',system);
++          else if(r.config.action.kind==='run_agent'){
++            if(this.store.entitiesOfType(botId,'proactive_ai').length>=10000)fail('ACT_AI_CAPACITY');
++            this.store.put({id:effectId,botId,revision:1,ruleId:r.id,ruleTitle:r.config.title,configVersion:r.configVersion,approvedAt:r.approvedAt,approvalId:r.approvalId,sourceRunId:receiptId,action:r.config.action,workWindow:r.config.workWindow,state:'queued',reason:null,modelRequestIds:[],modelRequests:0,messageId:null,turn:null,createdAt:time,updatedAt:time},'proactive_ai','ai_queued',{kind:'owner',note:'Explicitly approved AI rule; queued is not execution or business acceptance'});
++          }
+           else{
+             if(this.work.goals(botId).length>=1000)fail('WORK_CAPACITY');
+             const a=r.config.action,goal={id:effectId,botId,revision:1,title:a.title,description:a.description,criteria:a.criteria,kind:'objective',parentId:null,dependencies:[],priority:1,dueAt:null,status:'planned',sourceRuleId:r.id,sourceRunId:receiptId,createdAt:time,updatedAt:time};
+diff --git a/original/plugins/naumi-enterprise/employee-activity.js b/modified/plugins/naumi-enterprise/employee-activity.js
+index 45c88cb..e0c8a54 100644
+--- a/original/plugins/naumi-enterprise/employee-activity.js
++++ b/modified/plugins/naumi-enterprise/employee-activity.js
+@@ -4,10 +4,12 @@ import {z} from 'zod';
+ import {EmployeeActivityStore,activityCommands} from './employee-activity-store.js';
+ import {EmployeeObservation} from './employee-observation.js';
+ import {EmployeeCapabilities} from './employee-capabilities.js';
++import {installProactiveAi,aiCommands} from './employee-proactive-ai.js';
+ 
+-export function installEmployeeActivity(scope,directory,store,service,{sync,intervalMs=30000,capabilities:provided}={}){
++export function installEmployeeActivity(scope,directory,store,service,{sync,intervalMs=30000,capabilities:provided,proactiveOptions={}}={}){
+   const activity=new EmployeeActivityStore(store),observation=new EmployeeObservation({store,directory,agents:scope.agents});
+   const capabilities=provided??new EmployeeCapabilities({ctx:scope,sync,home:path.dirname(path.dirname(directory.file))});
++  const proactive=installProactiveAi(scope,directory,store,activity,sync,proactiveOptions),commandSchema=z.discriminatedUnion('action',[...activityCommands.options,...aiCommands.options]);
+   let closed=false,timer,lastCheck=0,value={sampledAt:null,error:null,clockRollback:false,actions:0};const installed=new Map();
+   const observe=(agent,state)=>{if(closed)return;try{observation.record(agent,state);}catch{scope.logger.warn('ACT_OBSERVATION_FAILED');}};
+   const install=agent=>{
+@@ -25,11 +27,11 @@ export function installEmployeeActivity(scope,directory,store,service,{sync,inte
+   for(const agent of scope.agents.list())install(agent);
+   const tick=()=>{
+     if(closed)return;
+-    try{const result=activity.tick(directory.list().bots.filter(b=>b.status==='active').map(b=>b.id));value={sampledAt:store.now(),error:null,...result};}
++    try{const result=activity.tick(directory.list().bots.filter(b=>b.status==='active').map(b=>b.id));proactive.engine.tick();value={sampledAt:store.now(),error:null,...result};}
+     catch{value={...value,error:'ACT_SCAN_FAILED'};scope.logger.warn('ACT_SCAN_FAILED');}
+     if(Date.now()-lastCheck>=60000){lastCheck=Date.now();void capabilities.refresh().catch(()=>scope.logger.warn('ACT_CAPABILITY_PROBE_FAILED'));}
+   };
+-  const read=botId=>({domain:'local-owner',scheduler:{...value,modelCalls:0,externalActions:0,stale:!value.sampledAt||Date.now()-Date.parse(value.sampledAt)>intervalMs*3},rules:activity.rules(botId),runs:activity.runs(botId),notifications:activity.notifications(botId),observation:observation.read(botId),capabilities:capabilities.read(botId)});
++  const read=botId=>({domain:'local-owner',scheduler:{...value,modelCalls:0,externalActions:0,stale:!value.sampledAt||Date.now()-Date.parse(value.sampledAt)>intervalMs*3},proactive:proactive.engine.view(botId),rules:activity.rules(botId),runs:activity.runs(botId),notifications:activity.notifications(botId),observation:observation.read(botId),capabilities:capabilities.read(botId)});
+   scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/employee-activity',handler:async(req,res)=>{
+     res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Naumi-Activity','1');
+     const admission=scope.connection.admit(req);if('rejection'in admission){res.writeHead(admission.rejection).end();return;}if(admission.peer.principal.kind!=='owner'){res.writeHead(403).end();return;}
+@@ -39,10 +41,13 @@ export function installEmployeeActivity(scope,directory,store,service,{sync,inte
+       if(req.method!=='POST'){res.setHeader('Allow','GET, POST');send(405,{error:'METHOD_NOT_ALLOWED'});return;}
+       if(req.headers['x-naumi-employee-activity']!=='1'||req.headers['sec-fetch-site']==='cross-site'||req.headers.origin&&![`http://${req.headers.host}`,`https://${req.headers.host}`].includes(req.headers.origin)){send(403,{error:'ACT_SAME_ORIGIN_REQUIRED'});return;}
+       let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>16384){send(413,{error:'ACT_REQUEST_TOO_LARGE'});return;}chunks.push(Buffer.from(chunk));}
+-      let command;try{command=activityCommands.parse(JSON.parse(Buffer.concat(chunks).toString('utf8')));}catch{send(400,{error:'ACT_INVALID_REQUEST'});return;}
+-      service.bot(command.botId,{write:true});send(200,activity.command(command));
++      let command;try{command=commandSchema.parse(JSON.parse(Buffer.concat(chunks).toString('utf8')));}catch{send(400,{error:'ACT_INVALID_REQUEST'});return;}
++      service.bot(command.botId,{write:true});
++      if(command.action.startsWith('ai_job_')){send(200,await proactive.engine.command(command));return;}
++      const config=command.config??(command.action==='rule_enable'&&command.enabled?activity.rule(command.botId,command.ruleId).config:null);if(config)proactive.engine.validate(command.botId,config);
++      const result=activity.command(command);proactive.engine.tick();send(200,result);
+     }catch(e){const code=e instanceof z.ZodError?'ACT_INVALID_REQUEST':/^(?:EMP|WORK|ACT)_[A-Z_]+$/.test(e.message)?e.message:'ACT_STORAGE_UNAVAILABLE';send(/CONFLICT/.test(code)?409:/NOT_FOUND/.test(code)?404:/REQUIRED|ARCHIVED/.test(code)?403:/UNAVAILABLE/.test(code)?503:400,{error:code});}
+   }}));
+   tick();timer=setInterval(tick,intervalMs);timer.unref?.();
+-  return {activity,observation,capabilities,read,tick,async close(){closed=true;clearInterval(timer);timer=null;for(const dispose of installed.values())dispose();installed.clear();await capabilities.close();}};
++  return {activity,proactive:proactive.engine,observation,capabilities,read,tick,async close(){closed=true;clearInterval(timer);timer=null;await proactive.close();for(const dispose of installed.values())dispose();installed.clear();await capabilities.close();}};
+ }
+diff --git a/original/plugins/naumi-enterprise/employee-models.js b/modified/plugins/naumi-enterprise/employee-models.js
+index 1c11ea3..2dfca7d 100644
+--- a/original/plugins/naumi-enterprise/employee-models.js
++++ b/modified/plugins/naumi-enterprise/employee-models.js
+@@ -53,10 +53,11 @@ export class EmployeeGatewayAdapter extends LlmAdapter{
+  async resolveModel(provider,model){const row=this.client.sync.db.prepare('SELECT encrypted FROM model_credentials').all().map(r=>this.client.sync.vault.unseal(r.encrypted)).find(v=>v.models?.some(m=>m.id===model));if(!row)fail('MODEL_ROUTE_NOT_CACHED');return transport(this.ctx,row.models,row.gateway,'metadata-only',randomUUID()).resolveModel(provider,model);}
+  async prepareCall(provider,model){return {model:await this.resolveModel(provider,model),stream:options=>this.stream(options)};}
+  async *stream(options){
+-  const agent=options.sessionId?this.ctx.agents.get(options.sessionId):null;if(!agent)fail('MODEL_SESSION_REQUIRED');const membership=this.ctx.agentTeams.tryMembership(agent),root=membership?.root??agent,managed=this.client.sync.runtimeGate?await this.client.sync.runtimeGate.context(agent):null,botId=managed?.botId??this.directory.forSession(root.id)?.id,taskId=managed?.taskId??null;if(!botId)fail('MODEL_BOT_BINDING_REQUIRED');
+-  const controller=new AbortController(),signal=AbortSignal.any([controller.signal,...options.signal?[options.signal]:[]]),id=randomUUID();let finish;const done=new Promise(resolve=>{finish=resolve;});this.client.active.set(id,{controller,done});
++  const agent=options.sessionId?this.ctx.agents.get(options.sessionId):null;if(!agent)fail('MODEL_SESSION_REQUIRED');const proactive=this.client.proactive?.entry(agent),membership=this.ctx.agentTeams.tryMembership(agent),root=membership?.root??agent,managed=this.client.sync.runtimeGate?await this.client.sync.runtimeGate.context(agent):null,botId=managed?.botId??this.directory.forSession(root.id)?.id,taskId=managed?.taskId??null;if(!botId)fail('MODEL_BOT_BINDING_REQUIRED');
++  const controller=new AbortController(),signal=AbortSignal.any([controller.signal,...options.signal?[options.signal]:[],...proactive?[proactive.controller.signal]:[]]),id=randomUUID();let finish;const done=new Promise(resolve=>{finish=resolve;});this.client.active.set(id,{controller,done,sessionId:root.id});
+   try{
+    const value=await this.client.credential(botId,taskId,{signal});if(!value.models.some(m=>m.id===options.model))fail('MODEL_ROUTE_NOT_AUTHORIZED');
++   signal.throwIfAborted();this.client.proactive?.modelStarting(agent,id,options,proactive);
+    this.client.sync.db.prepare('INSERT INTO model_requests VALUES(?,?,?,?,?,?)').run(id,botId,taskId,root.id,'pending',new Date().toISOString());let success=false;
+    try{const adapter=transport(this.ctx,value.models,value.gateway,value.token,id);for await(const chunk of adapter.stream({...options,signal})){if(chunk.type==='finish'&&['stop','tool-calls','max-tokens'].includes(chunk.reason.kind))success=true;yield chunk;}}
+    finally{this.client.sync.db.prepare('UPDATE model_requests SET state=?,updated_at=? WHERE id=?').run(success?'stream_complete':'unknown',new Date().toISOString(),id);}
+diff --git a/modified/plugins/naumi-enterprise/employee-proactive-ai.js b/modified/plugins/naumi-enterprise/employee-proactive-ai.js
+new file mode 100644
+index 0000000..1975906
+--- /dev/null
++++ b/modified/plugins/naumi-enterprise/employee-proactive-ai.js
+@@ -0,0 +1,177 @@
++import {randomUUID} from 'node:crypto';
++import {z} from 'zod';
++import {freezeMessage,LlmError,isAgentLoopRequest} from '@deepseek-ai/dsh-llm';
++import {EmployeeWorkStore} from './employee-work-store.js';
++import {inWorkWindow} from './employee-activity-store.js';
++import {assertPublicText} from './employee-store.js';
++import {createBotTaskRuntime} from './bot-task-runtime.js';
++
++const id=z.string().min(1).max(200),terminal=new Set(['awaiting_review','failed','cancelled','expired','reviewed_stopped']);
++export const aiCommands=z.discriminatedUnion('action',[
++  z.object({action:z.literal('ai_job_cancel'),botId:id,operationId:id,jobId:id,expectedRevision:z.number().int().positive()}).strict(),
++  z.object({action:z.literal('ai_job_resolve'),botId:id,operationId:id,jobId:id,expectedRevision:z.number().int().positive(),confirmedStopped:z.literal(true),reason:z.string().trim().min(6).max(1000)}).strict(),
++]);
++const actor={kind:'owner',note:'Explicitly approved proactive AI lifecycle; not business acceptance'},fail=code=>{throw Error(code);};
++const publicCode=e=>/^(?:ACT|EMP|MODEL|WORK|RUNTIME|EXECUTION)_[A-Z_]+$/.test(e?.code??e?.message??'')?e.code??e.message:'ACT_AI_CHANNEL_UNAVAILABLE';
++const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
++
++/** Durable work admission over the existing AgentLoop. Never fabricates a business completion. */
++export class EmployeeProactiveAi{
++  constructor({ctx,directory,store,activity,sync}){
++    Object.assign(this,{ctx,directory,store,activity,sync});this.work=new EmployeeWorkStore(store);
++    this.active=new Map();this.retired=new WeakMap();this.reservedSessions=new Set();this.flights=new Map();this.finishing=new Map();this.volatile=new Set();this.retryAt=new Map();this.shutdown=new AbortController();this.closed=false;
++    for(const row of this.rows().filter(j=>['starting','running','stopping','settling'].includes(j.state)))this.change(row,{state:'unknown',reason:'ACT_AI_PROCESS_INTERRUPTED'},'ai_recover');
++    if(sync?.models){if(sync.models.proactive)fail('ACT_AI_ALREADY_INSTALLED');sync.models.proactive=this;}
++  }
++  now(){return this.store.clock().getTime();}
++  rows(botId){return botId?this.store.entitiesOfType(botId,'proactive_ai'):this.store.db.prepare("SELECT json FROM entities WHERE type='proactive_ai'").all().map(r=>JSON.parse(r.json));}
++  job(botId,jobId){const j=this.store.entity(botId,jobId);if(!j||!jobId.startsWith('ai-job-'))fail('ACT_AI_JOB_NOT_FOUND');return j;}
++  change(j,patch,action){return this.store.mutate(j.botId,'ai:'+randomUUID(),action,{jobId:j.id,patch},actor,()=>{const live=this.job(j.botId,j.id);return this.store.put({...live,...patch,revision:live.revision+1,updatedAt:this.store.now()},'proactive_ai',action,actor);});}
++  configured(){return !!this.sync?.runtimeGate&&!!this.sync?.models;}
++  rootId(agent){return this.sync?.runtimeGate?.contextSync(agent)?.sessionId??agent.id;}
++  entry(agent){return this.active.get(this.rootId(agent))??this.retired.get(agent);}
++  idle(agent){return agent?.status==='idle'&&!agent.inbox.nextTurn.length&&!agent.inbox.nextStep.length;}
++  validApproval(j){const r=this.activity.rule(j.botId,j.ruleId);return r.configVersion===j.configVersion&&r.approvalId===j.approvalId&&!!r.approvalId;}
++  validate(botId,config){
++    if(config.action.kind!=='run_agent')return;
++    if(!this.configured())fail('ACT_AI_NOT_CONFIGURED');
++    const a=config.action,b=this.sync.runtimeGate.binding(a.sessionId);if(!b||b.botId!==botId||b.taskId!==a.taskId||b.state==='stopped')fail('ACT_AI_MANAGED_SESSION_REQUIRED');
++    this.sync.runtimeGate.authorization(b);this.work.goal(botId,a.goalId);
++    const selected=this.ctx.agents.get(a.sessionId)?.model.current();if(selected&&(selected.provider!=='naumi-enterprise'||selected.model!==a.model))fail('ACT_AI_MODEL_SELECTION_CHANGED');
++  }
++  check(j,agent,{running=false,selection}={}){
++    if(this.closed)return 'ACT_AI_STOPPING';if(this.volatile.has(j.action.sessionId))return 'ACT_AI_STORAGE_UNRESOLVED';
++    if(running&&j.state!=='running')return 'ACT_AI_RUN_NOT_ACTIVE';
++    if(!this.validApproval(j))return 'ACT_AI_APPROVAL_REVOKED';
++    const bot=this.directory.forSession(j.action.sessionId);if(!bot||bot.id!==j.botId||bot.status!=='active')return 'ACT_AI_BOT_CHANGED';
++    const now=this.now(),high=this.store.db.prepare('SELECT high_water_ms FROM employee_activity_clock WHERE id=1').get()?.high_water_ms??0;if(now+1000<high)return 'ACT_AI_CLOCK_ROLLBACK';
++    if(!inWorkWindow(j.workWindow,now))return 'ACT_AI_QUIET_TIME';
++    if(running&&now-Date.parse(j.startedAt)>=j.action.maxSeconds*1000)return 'ACT_AI_TIME_LIMIT';
++    const goal=this.work.goal(j.botId,j.action.goalId);if(!['planned','in_progress'].includes(goal.status))return 'ACT_AI_GOAL_NOT_ACTIVE';
++    if(goal.dependencies.some(id=>this.work.goal(j.botId,id).status!=='completed'))return 'ACT_AI_WAITING_DEPENDENCY';
++    const b=this.sync?.runtimeGate?.binding(j.action.sessionId);if(!b||b.botId!==j.botId||b.taskId!==j.action.taskId)return 'ACT_AI_MANAGED_SESSION_REQUIRED';
++    if(b.unknown||this.sync.runtimeGate.volatileUnknown.has(b.sessionId))return 'ACT_AI_EXECUTOR_UNRESOLVED';
++    const selected=selection??agent?.model.current();if(selected&&(selected.provider!=='naumi-enterprise'||selected.model!==j.action.model))return 'ACT_AI_MODEL_SELECTION_CHANGED';
++    return this.sync.runtimeGate.inference(b,{provider:'naumi-enterprise'})??null;
++  }
++  cleanInbox(agent){for(const j of this.rows().filter(j=>j.action.sessionId===agent.id&&j.messageId&&['unknown','reviewed_stopped','cancelled','failed','expired'].includes(j.state)))agent.inbox.remove(j.messageId);}
++  modelStarting(agent,requestId,options,captured){
++    const entry=captured??this.entry(agent);if(!entry)return null;entry.controller.signal.throwIfAborted();const j=this.job(entry.botId,entry.id),denial=entry.reason??this.check(j,agent,{running:true,selection:options});
++    if(denial)throw new LlmError(denial,'ACT_AI_ADMISSION_DENIED');if(j.modelRequests>=j.action.maxModelRequests)throw new LlmError('ACT_AI_REQUEST_LIMIT','ACT_AI_REQUEST_LIMIT');
++    try{this.change(j,{modelRequests:j.modelRequests+1,modelRequestIds:[...j.modelRequestIds,requestId]},'ai_model_dispatch');}
++    catch(e){this.volatile.add(j.action.sessionId);this.stop(entry,'ACT_AI_STORAGE_UNRESOLVED');throw e;}
++    return {signal:entry.controller.signal};
++  }
++  guard(exec){
++    const entry=this.entry(exec.agent);if(!entry)return;const j=this.job(entry.botId,entry.id),denial=entry.reason??this.check(j,exec.agent,{running:true});if(denial)return denial;
++    if(/^employee_enterprise_(claim|upload|submit)$/.test(exec.name)&&exec.arguments?.taskId&&exec.arguments.taskId!==j.action.taskId)return 'ACT_AI_TASK_SCOPE_CHANGED';
++    if(exec.name==='employee_delivery_create'&&exec.arguments?.goalId!==j.action.goalId)return 'ACT_AI_GOAL_SCOPE_CHANGED';
++    if(['employee_delivery_revise','employee_delivery_submit'].includes(exec.name)&&this.work.delivery(j.botId,exec.arguments?.deliveryId).goalId!==j.action.goalId)return 'ACT_AI_GOAL_SCOPE_CHANGED';
++  }
++  stop(entry,reason){
++    if(entry.reason)return;entry.reason=reason;entry.controller.abort(Error(reason));
++    try{this.change(this.job(entry.botId,entry.id),{state:'stopping',reason},'ai_stop');}catch{this.volatile.add(entry.sessionId);}
++    for(const agent of this.ctx.agents.list())if(this.rootId(agent)===entry.sessionId)agent.cancel({kind:'hook',reason},{keepInbox:true});
++    entry.agent.inbox.remove(entry.messageId);if(entry.turn===null)void this.finish(entry,{kind:'aborted'});
++  }
++  waiting(j,state,reason){if(j.state!==state||j.reason!==reason)this.change(j,{state,reason},'ai_wait');this.retryAt.set(j.id,this.now()+15000);}
++  async budget(j){
++    let value=await this.sync.models.credential(j.botId,j.action.taskId,{signal:this.shutdown.signal}),b;
++    try{b=await this.sync.models.gateway(value,'/budget',{signal:this.shutdown.signal});}catch(e){if(publicCode(e)!=='MODEL_POLICY_STALE')throw e;value=await this.sync.models.credential(j.botId,j.action.taskId,{force:true,signal:this.shutdown.signal});b=await this.sync.models.gateway(value,'/budget',{signal:this.shutdown.signal});}
++    const route=value.models.find(m=>m.id===j.action.model);if(!route)fail('MODEL_ROUTE_NOT_AUTHORIZED');
++    const cost=Number((BigInt(route.contextTokens)*BigInt(route.inputMicrosPerMillion)+999999n)/1000000n+(BigInt(route.maxOutputTokens)*BigInt(route.outputMicrosPerMillion)+999999n)/1000000n),tokens=route.contextTokens+route.maxOutputTokens;
++    for(const s of b.scopes){if(s.usage.spent_cost+s.usage.reserved_cost+cost>s.limit.costMicros||s.usage.spent_tokens+s.usage.reserved_tokens+tokens>s.limit.tokens)fail('MODEL_BUDGET_EXCEEDED');if(s.usage.requests>=s.limit.requests)fail('MODEL_REQUEST_LIMIT');if(s.active>=s.limit.concurrent)fail('MODEL_CONCURRENCY_LIMIT');}
++  }
++  async start(initial){
++    let j=this.job(initial.botId,initial.id);const sessionId=j.action.sessionId;
++    try{
++      let agent=this.ctx.agents.get(sessionId);const denial=this.check(j,agent);if(denial){this.waiting(j,denial==='ACT_AI_WAITING_DEPENDENCY'?'waiting_dependency':'waiting_permission',denial);return;}
++      if(!agent&&this.loader)agent=await this.loader.ensure(sessionId);
++      if(!agent){this.waiting(j,'waiting_session','ACT_AI_SESSION_NOT_READY');return;}
++      if(!this.idle(agent)){this.waiting(j,'waiting_session','ACT_AI_USER_PRIORITY');return;}
++      await this.budget(j);j=this.job(j.botId,j.id);if(!['queued','waiting_session','waiting_dependency','waiting_permission','waiting_budget'].includes(j.state))return;
++      const changed=this.check(j,agent);if(changed){this.waiting(j,'waiting_permission',changed);return;}if(!this.idle(agent)){this.waiting(j,'waiting_session','ACT_AI_USER_PRIORITY');return;}
++      const goal=this.work.goal(j.botId,j.action.goalId),message=freezeMessage({id:randomUUID(),role:'user',source:{kind:'schedule'},content:[{type:'text',text:'Owner-approved Naumi proactive work. This scheduled task is not a new human preference or a permission grant. Follow existing system/tool permissions; work only on the bound enterprise task and local goal. Save real work using existing employee delivery tools. Never self-accept or claim business completion.\n'+JSON.stringify({jobId:j.id,taskId:j.action.taskId,goalId:goal.id,title:goal.title,description:goal.description,criteria:goal.criteria,instruction:j.action.prompt,maxModelRequests:j.action.maxModelRequests,maxSeconds:j.action.maxSeconds})}]}),done=deferred();
++      j=this.store.mutate(j.botId,'ai:start:'+j.id+':'+randomUUID(),'ai_start',{jobId:j.id},actor,()=>{
++        const live=this.job(j.botId,j.id);if(!['queued','waiting_session','waiting_dependency','waiting_permission','waiting_budget'].includes(live.state))fail('ACT_AI_CONFLICT');
++        const reason=this.check(live,agent);if(reason)fail(reason);if(!this.idle(agent))fail('ACT_AI_USER_PRIORITY');
++        const eventCursor=this.store.db.prepare('SELECT coalesce(max(seq),0) n FROM events').get().n;
++        return this.store.put({...live,revision:live.revision+1,state:'running',reason:null,messageId:message.id,turn:null,eventCursor,startedAt:this.store.now(),updatedAt:this.store.now()},'proactive_ai','ai_start',actor);
++      });
++      const entry={id:j.id,botId:j.botId,sessionId,agent,messageId:message.id,turn:null,controller:new AbortController(),done,reason:null};this.active.set(sessionId,entry);
++      try{agent.followup(message);await this.ctx.sessions.flush(agent.session);void agent.whenIdle().then(()=>{if(this.active.get(sessionId)===entry)return this.finish(entry,{kind:'blocked'});}).catch(()=>{if(this.active.get(sessionId)===entry)return this.finish(entry,{kind:'error'});});}
++      catch(e){this.stop(entry,publicCode(e));await this.finish(entry,{kind:'error'});}
++      await done.promise;
++    }catch(e){const current=this.job(j.botId,j.id);if(!terminal.has(current.state)&&current.state!=='unknown')this.waiting(current,/BUDGET|CONCURRENCY|REQUEST_LIMIT/.test(publicCode(e))?'waiting_budget':'waiting_permission',publicCode(e));}
++  }
++  artifacts(j){
++    const ids=new Set(),artifacts=new Set();for(const row of this.store.db.prepare("SELECT json FROM events WHERE bot_id=? AND seq>? AND type='delivery'").all(j.botId,j.eventCursor??0)){
++      const e=JSON.parse(row.json);if(e.source?.kind==='agent'&&e.source.sessionId===j.action.sessionId&&e.value.goalId===j.action.goalId){ids.add(e.entityId);for(const id of e.value.artifactIds??[])artifacts.add(id);}
++    }return {deliveryIds:[...ids],artifactIds:[...artifacts]};
++  }
++  async receipts(j){if(!j.modelRequestIds.length)return [];const value=await this.sync.models.credential(j.botId,j.action.taskId,{signal:this.shutdown.signal});return Promise.all(j.modelRequestIds.map(id=>this.sync.models.gateway(value,'/receipt?id='+id,{signal:this.shutdown.signal})));}
++  finish(entry,end){
++    if(this.finishing.has(entry.id))return this.finishing.get(entry.id);entry.controller.abort(Error('ACT_AI_TURN_ENDED'));
++    for(const agent of this.ctx.agents.list())if(agent.id!==entry.sessionId&&this.rootId(agent)===entry.sessionId){this.retired.set(agent,entry);agent.cancel({kind:'hook',reason:'ACT_AI_TURN_ENDED'},{keepInbox:true});}
++    if(this.active.get(entry.sessionId)===entry)this.active.delete(entry.sessionId);
++    const flight=(async()=>{
++      let j=this.job(entry.botId,entry.id);try{
++        j=this.change(j,{state:'settling',turn:entry.turn,endKind:end.kind},'ai_settling');await this.ctx.sessions.flush(entry.agent.session);
++        let receipts=[],unresolved=false;try{receipts=await this.receipts(j);unresolved=receipts.some(r=>!['completed','rejected','charged_ceiling'].includes(r.state));}catch{unresolved=j.modelRequestIds.length>0;}
++        const b=this.sync.runtimeGate.binding(entry.sessionId);unresolved||=!!b?.unknown||this.sync.runtimeGate.volatileUnknown.has(entry.sessionId)||this.volatile.has(entry.sessionId);
++        const events=entry.agent.session.snapshotEvents(),answer=events.findLast(e=>e.type==='assistant/message'&&e.data.turn===entry.turn&&!e.data.message.toolCalls?.length),success=end.kind==='completed'&&!entry.reason&&j.modelRequests>0&&receipts.every(r=>r.state==='completed')&&!!answer;
++        const state=unresolved?'unknown':success?'awaiting_review':entry.reason&&/USER_PRIORITY|OWNER_CANCEL|APPROVAL_REVOKED|STOPPING/.test(entry.reason)?'cancelled':'failed';
++        this.change(j,{state,reason:unresolved?'ACT_AI_RESULT_UNRESOLVED':entry.reason??(success?null:publicCode(end.error??{message:'ACT_AI_TURN_'+end.kind.toUpperCase()})),...this.artifacts(j),assistantEvent:answer?{sessionId:entry.sessionId,seq:answer.seq,turn:entry.turn}:null,receipts:receipts.map(r=>({requestId:r.requestId,state:r.state,chargedCostMicros:r.chargedCostMicros})),endedAt:this.store.now()},'ai_settled');
++      }catch{this.volatile.add(entry.sessionId);try{this.change(j,{state:'unknown',reason:'ACT_AI_STORAGE_UNRESOLVED'},'ai_settle_failed');}catch{this.ctx.logger.warn('ACT_AI_STORAGE_UNRESOLVED');}}
++    })().finally(()=>{entry.done.resolve();this.finishing.delete(entry.id);});this.finishing.set(entry.id,flight);return flight;
++  }
++  tick(){
++    if(this.closed)return;for(const entry of this.active.values()){const j=this.job(entry.botId,entry.id),denial=this.check(j,entry.agent,{running:true});if(denial)this.stop(entry,denial);}
++    if(!this.configured())return;
++    for(const j of this.rows().sort((a,b)=>a.createdAt.localeCompare(b.createdAt))){
++      if(terminal.has(j.state)||['unknown','running','stopping','settling'].includes(j.state))continue;
++      if(!this.validApproval(j)){this.change(j,{state:'cancelled',reason:'ACT_AI_APPROVAL_REVOKED'},'ai_cancel_stale');continue;}
++      if(this.now()-Date.parse(j.createdAt)>86400000){this.change(j,{state:'expired',reason:'ACT_AI_QUEUE_EXPIRED'},'ai_expire');continue;}
++      if(this.flights.size>=4||this.reservedSessions.has(j.action.sessionId)||this.active.has(j.action.sessionId)||this.volatile.has(j.action.sessionId)||(this.retryAt.get(j.id)??0)>this.now())continue;
++      if(this.rows().some(other=>other.id!==j.id&&other.action.sessionId===j.action.sessionId&&['unknown','running','stopping','settling'].includes(other.state)))continue;
++      this.reservedSessions.add(j.action.sessionId);const flight=this.start(j).catch(()=>this.ctx.logger.warn('ACT_AI_CONSUMER_FAILED')).finally(()=>{this.flights.delete(j.id);this.reservedSessions.delete(j.action.sessionId);});this.flights.set(j.id,flight);
++    }
++  }
++  async command(raw){
++    const p=aiCommands.parse(raw);if(this.store.db.prepare('SELECT 1 FROM operations WHERE bot_id=? AND operation_id=?').get(p.botId,p.operationId))return this.store.mutate(p.botId,p.operationId,p.action,p,actor,()=>fail('ACT_AI_IDEMPOTENCY_INVARIANT'));
++    const j=this.job(p.botId,p.jobId);if(j.revision!==p.expectedRevision)fail('ACT_AI_CONFLICT');
++    if(p.action==='ai_job_resolve'){
++      assertPublicText(p.reason);if(j.state!=='unknown')fail('ACT_AI_NOT_UNKNOWN');if(this.active.has(j.action.sessionId))fail('ACT_AI_SESSION_BUSY');
++      const b=this.sync.runtimeGate.binding(j.action.sessionId);if(b?.unknown||this.sync.runtimeGate.volatileUnknown.has(j.action.sessionId))fail('ACT_AI_EXECUTOR_UNRESOLVED');
++      const receipts=await this.receipts(j);if(receipts.some(r=>!['completed','rejected','charged_ceiling'].includes(r.state)))fail('ACT_AI_MODEL_UNRESOLVED');
++    }else if(terminal.has(j.state)||j.state==='unknown')fail('ACT_AI_REVIEW_REQUIRED');
++    const result=this.store.mutate(j.botId,p.operationId,p.action,p,actor,()=>{const live=this.job(j.botId,j.id);if(live.revision!==p.expectedRevision)fail('ACT_AI_CONFLICT');return this.store.put({...live,revision:live.revision+1,state:p.action==='ai_job_resolve'?'reviewed_stopped':this.active.has(j.action.sessionId)?'stopping':'cancelled',reason:p.action==='ai_job_resolve'?p.reason:'ACT_AI_OWNER_CANCEL',updatedAt:this.store.now()},'proactive_ai',p.action,actor);});
++    if(p.action==='ai_job_resolve')this.volatile.delete(j.action.sessionId);else{const entry=this.active.get(j.action.sessionId);if(entry?.id===j.id)this.stop(entry,'ACT_AI_OWNER_CANCEL');}return result;
++  }
++  view(botId){return {configured:this.configured(),jobs:this.rows(botId).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,50),targets:this.sync?.runtimeGate?.bindings(botId).filter(b=>b.state!=='stopped').map(b=>({sessionId:b.sessionId,taskId:b.taskId,state:b.state,selection:this.ctx.agents.get(b.sessionId)?.model.current()??null}))??[]};}
++  async close(){this.closed=true;this.shutdown.abort(Error('ACT_AI_STOPPING'));for(const e of this.active.values())this.stop(e,'ACT_AI_STOPPING');await Promise.allSettled([...this.flights.values(),...this.finishing.values()]);await this.loader?.close();if(this.sync?.models?.proactive===this)delete this.sync.models.proactive;}
++}
++
++export function installProactiveAi(scope,directory,store,activity,sync,{intervalMs=1000}={}){
++  const engine=new EmployeeProactiveAi({ctx:scope,directory,store,activity,sync});
++  if(engine.configured()&&typeof scope.tools.guard!=='function')fail('ACT_AI_TOOL_GUARD_REQUIRED');
++  const guard=engine.configured()?scope.tools.guard(exec=>engine.guard(exec)):()=>{};
++  const loaderHost=scope.inject(['agentPresets','agents','agentTeams','agentDefaultModel','sessions','sessionPersistence'],ctx=>{engine.loader=createBotTaskRuntime(ctx);});
++  scope.on('agent/created',({agent})=>engine.cleanInbox(agent));for(const agent of scope.agents.list())engine.cleanInbox(agent);
++  scope.on('agent/inbox/inserted',({agent,message})=>{
++    const e=engine.entry(agent);if(!e||e.reason||message.id===e.messageId||message.source?.kind!=='user')return;
++    engine.stop(e,'ACT_AI_USER_PRIORITY');
++    // send() captures its wake classification BEFORE insertion callbacks. Requeue this exact
++    // pending human identity after cancellation so the driver's public after-abort wake latches.
++    // Never manufacture a replacement prompt or clear another user's pending work.
++    const pending=[...agent.inbox.nextTurn,...agent.inbox.nextStep].find(m=>m.id===message.id);
++    if(pending&&agent.inbox.remove(pending.id))agent.followup(pending);
++  });
++  scope.on('agent/inbox/claimed',({agent,message,turn})=>{const e=engine.entry(agent);if(e&&agent.id===e.sessionId&&message.id===e.messageId){e.turn=turn;try{engine.change(engine.job(e.botId,e.id),{turn},'ai_turn_claimed');}catch{engine.volatile.add(e.sessionId);engine.stop(e,'ACT_AI_STORAGE_UNRESOLVED');}}});
++  scope.on('session/event',(session,event)=>{const e=engine.active.get(session.id);if(e&&event.type==='turn/end'&&event.data.turn===e.turn)void engine.finish(e,event.data.reason);});
++  scope.on('agent/pre-step',async(payload,next)=>{const e=engine.entry(payload.agent);if(!e)return next();const j=engine.job(e.botId,e.id),denial=e.reason??engine.check(j,payload.agent,{running:true,selection:payload.modelSelection});if(denial||j.modelRequests>=j.action.maxModelRequests){engine.stop(e,denial??'ACT_AI_REQUEST_LIMIT');return {kind:'reject'};}const decision=await next();const after=engine.check(engine.job(e.botId,e.id),payload.agent,{running:true,selection:payload.modelSelection});if(after){engine.stop(e,after);return {kind:'reject'};}return decision;});
++  scope.on('tools/execute',async(exec,next)=>{const e=engine.entry(exec.agent);if(!e)return next();const before=exec.signal;exec.signal=AbortSignal.any([before,e.controller.signal]);try{return await next();}finally{exec.signal=before;}});
++  scope.on('llm/stream',async function*(options,next){const agent=options.sessionId?scope.agents.get(options.sessionId):null,e=agent?engine.entry(agent):null;if(!e)return yield* next();if(!isAgentLoopRequest(options))throw new LlmError('ACT_AI_AUXILIARY_MODEL_DENIED','ACT_AI_AUXILIARY_MODEL_DENIED');const check=()=>{const reason=e.reason??engine.check(engine.job(e.botId,e.id),agent,{running:true,selection:options});if(reason)throw new LlmError(reason,'ACT_AI_ADMISSION_DENIED');};check();for await(const chunk of next()){check();yield chunk;}});
++  const timer=setInterval(()=>{try{engine.tick();}catch{scope.logger.warn('ACT_AI_SCAN_FAILED');}},intervalMs);timer.unref?.();
++  return {engine,async close(){clearInterval(timer);await engine.close();guard();await loaderHost.dispose();}};
++}
+diff --git a/original/plugins/naumi-enterprise/employees.js b/modified/plugins/naumi-enterprise/employees.js
+index 95cdfde..c9b3a5c 100644
+--- a/original/plugins/naumi-enterprise/employees.js
++++ b/modified/plugins/naumi-enterprise/employees.js
+@@ -101,6 +101,6 @@ export function installEmployees(ctx,directory,{store,onReady,heartbeatOptions={
+         send(/CONFLICT/.test(code)?409:/NOT_FOUND/.test(code)?404:/REQUIRED|LOCKED|ARCHIVED|DISABLED/.test(code)?403:/STORAGE|SCHEMA/.test(code)?503:400,{error:code});}
+     }}));
+     heartbeat.start();onReady?.({service,store:data,heartbeat,activityRuntime,gateRuntime,modelsRuntime,settled:()=>Promise.all([...background])});
+-    scope.effect(()=>async()=>{heartbeat.close();await gateRuntime?.close();await modelsRuntime?.close();await activityRuntime.close();await syncRuntime?.close();await workRuntime.dispose();for(const dispose of installed.values())dispose();installed.clear();await Promise.all(background);data.close();});
++    scope.effect(()=>async()=>{heartbeat.close();await activityRuntime.close();await gateRuntime?.close();await modelsRuntime?.close();await syncRuntime?.close();await workRuntime.dispose();for(const dispose of installed.values())dispose();installed.clear();await Promise.all(background);data.close();});
+   });
+ }

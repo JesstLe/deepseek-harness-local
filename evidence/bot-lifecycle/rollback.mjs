@@ -1,0 +1,15 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {createHash} from 'node:crypto';
+const here=path.dirname(fileURLToPath(import.meta.url)),argument=process.argv[2];
+if(!argument||!path.isAbsolute(argument))throw Error('ABSOLUTE_FILE_REQUIRED');
+const target=fs.realpathSync(argument),original=path.join(here,'original','bots.js');
+if(!fs.statSync(target).isFile()||!['bots.js','MODIFIED_FILE.js'].includes(path.basename(target)))throw Error('BOT_MODULE_FILE_REQUIRED');
+const hash=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+const manifest=JSON.parse(fs.readFileSync(path.join(here,'hashes.json'),'utf8'));
+if(hash(original)!==manifest.originalSHA256)throw Error('ORIGINAL_HASH_MISMATCH');
+if(hash(target)!==manifest.modifiedSHA256)throw Error('MODIFIED_HASH_MISMATCH');
+fs.copyFileSync(original,target);
+if(hash(target)!==manifest.originalSHA256)throw Error('RESTORE_HASH_MISMATCH');
+console.log('ROLLBACK_COPY restored=1 original_hash=PASS behavior=legacy module_restart_required=1');

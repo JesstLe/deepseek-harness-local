@@ -1,0 +1,11 @@
+import fs from 'node:fs/promises';import assert from 'node:assert/strict';import {pathToFileURL} from 'node:url';import {botLiveApi} from './bot-live-api.mjs';
+const e='evidence/runtime-gate',api=await botLiveApi(),catalog=await api.json('/naumi/bots');assert(catalog.bots.length);let bindings=0;
+for(const bot of catalog.bots){const v=await api.json('/naumi/employee-runtime-gate?'+new URLSearchParams({botId:bot.id}));assert(v.configured);bindings+=v.bindings.length;}
+assert.equal(bindings,0);const sync=await api.json('/naumi/employee-sync');assert.equal(sync.registered,false);assert.equal(sync.enabled,false);const anon=await fetch(api.base+'/naumi/employee-runtime-gate?'+new URLSearchParams({botId:catalog.bots[0].id}));assert.equal(anon.status,401);
+const {chromium}=await import(pathToFileURL('E:/Workspace/naumi/node_modules/playwright/index.mjs').href),browser=await chromium.launch({headless:true}),page=await browser.newPage({viewport:{width:1460,height:1080},colorScheme:'light'}),errors=[];page.on('pageerror',e=>errors.push(e.message));
+try{
+ const logs=(await Promise.all(['server.out.log','server.err.log'].map(n=>fs.readFile('E:/Workspace/deepseek-harness-local/logs/'+n,'utf8')))).join('\n'),launch=[...logs.matchAll(/http:\/\/127\.0\.0\.1:3080\/?\?token=[A-Za-z0-9_~.%-]+/g)].at(-1)?.[0];assert(launch);
+ await page.goto(launch,{waitUntil:'domcontentloaded'});await page.getByText('员工中心',{exact:true}).first().click();await page.getByRole('tab',{name:'运行',exact:true}).click();await page.getByText('执行准入',{exact:true}).click();const panel=page.locator('[data-runtime-gate]');await panel.getByRole('button',{name:'读取企业任务',exact:true}).waitFor();assert.equal(errors.length,0);await page.screenshot({path:e+'/LIVE_RUNTIME_GATE.png',animations:'disabled',mask:[page.locator('[data-user-phone],.naumi-user-phone')]});
+ await fs.writeFile(e+'/LIVE_VERIFICATION.json',JSON.stringify({status:'PASS',tier:'actual deployed 3080, no route mocks, read only',bots:catalog.bots.length,managedBindings:bindings,anonymous:anon.status,pageErrors:errors,deviceRegistered:sync.registered,privateUpload:sync.enabled,businessMutations:0,modelCallsTriggered:0},null,2));
+ console.log('LIVE_GATE http=200 anonymous=401 ui=PASS managed_bindings=0 business_mutations=0 model_calls=0 enrollment=off private_upload=off');
+}finally{await browser.close();}

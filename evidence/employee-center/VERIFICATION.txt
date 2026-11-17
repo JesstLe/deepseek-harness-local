@@ -1,0 +1,97 @@
+Naumi digital employee M2 — 2026-11-16
+Goal: whole PRD M2-M5 remains ACTIVE. Implementation model: GPT-6.1 Sol.
+Branch: fix/naumi-bot-lifecycle-20261116; base fb9772e87f8799ad0e94817353ab8f3047328ac8.
+
+CHANGED MODULES/FIELDS
+  employee-center React main/sidebar entry; profile/learning/lock management;
+  memory status/kind/offset/expiry/source; timeline.type/cursor and version restore;
+  goal.status/criteria/priority/dueAt/parentId/dependencies/revision;
+  delivery.businessStatus/version/acceptanceCriteria/artifactIds/reviewIds/revision;
+  immutable artifact.content/sha256/bytes and review.actor/version/checkedCriteria.
+  Existing executionStatus is separate from local-owner business acceptance.
+
+FOUR ARTIFACT PATHS
+MODIFIED_FILE=E:/Workspace/naumi-bot-lifecycle-fix/evidence/employee-center/MODIFIED_FILE.zip
+DIFF_FILE=E:/Workspace/naumi-bot-lifecycle-fix/evidence/employee-center/DIFF_FILE.patch
+VERIFICATION=E:/Workspace/naumi-bot-lifecycle-fix/evidence/employee-center/VERIFICATION.txt
+ROLLBACK=E:/Workspace/naumi-bot-lifecycle-fix/evidence/employee-center/ROLLBACK.sh
+Original/modified per-file SHA256: hashes.json; originals: original/.
+All commands below use cwd E:/Workspace/naumi-bot-lifecycle-fix.
+
+BASELINE
+Command: node scripts/verify-employee-center.mjs baseline
+Input: original/client.js and original/package.json; inspect employee-center/work registration and shipping.
+Literal output:
+BASELINE employee_center=ABSENT goal_management=ABSENT business_acceptance=ABSENT
+Exit status: 0 (missing M2 capabilities reproduced).
+
+MODIFIED
+Command: node scripts/verify-employee-center.mjs modified
+Input: real SQLite/Cordis/HTTP fixture; create goal with criterion 正文可核验;
+create 第一版; submit; return with reason 补充依据; save 第二版，依据完整;
+resubmit, start review, check criterion 0, accept; verify old content remains.
+Literal output:
+MODIFIED goals=PASS immutable_versions=2 return_revise=PASS owner_acceptance=PASS
+Exit status: 0.
+
+ROLLBACK
+Command: pwsh -NoProfile -File scripts/verify-employee-center-rollback.ps1
+Input: separate modified plugin copy in evidence/employee-center/rollback-copy;
+hash-guarded ROLLBACK.sh; employee DB-data sentinel unchanged by rollback.
+Literal output:
+ROLLBACK_COPY restored=5 removed=5 hashes=PASS M1_data=preserved bot_routing=retained
+ROLLBACK employee_center=ABSENT goal_management=ABSENT business_acceptance=ABSENT
+Exit status: 0.
+Restored behavior/status: M1 employee memory/persona/heartbeat and existing Bot routing retained;
+M2 employee-center entry and goal/delivery acceptance module absent.
+Only the separate copy was rolled back. Running plugin and MODIFIED_FILE remain changed.
+No employees.sqlite, Session, task ledger, credential or business data is deleted.
+A live module rollback requires idle-service restart; it is not a database rollback.
+
+FULL MODULE/REGRESSION
+Command: node --test tests/*.test.mjs desktop/tests/*.test.cjs
+Result: tests 166; pass 166; fail 0; cancelled 0; skipped 0; exit status 0.
+Coverage includes M1, Bot/Team/enterprise/browser/desktop policies plus M2 DAG and same-Bot
+references, immutable artifacts, CAS/idempotency, review reasons/criteria, no Agent self-review,
+exact submitting Session, foreign task/artifact rejection, SQL transaction rollback,
+unknown/stale acceptance criteria, disabled learning, real HTTP/auth/origin/download checks,
+retrying lost receipts and initial React surface regression.
+
+ACTUAL INTERACTIVE UI FIXTURE
+Command: node scripts/verify-employee-center-ui.mjs
+Input: actual Harness shell with candidate UI, isolated real SQLite/HTTP service; two fixture Bots;
+profile edit/lock; memory create/pin/expiry/candidate review/delete; goal create/edit;
+draft -> submit -> review -> return -> new version -> submit -> review -> acceptance;
+download v1; goal close; profile restore diff; export; 1000/760/520px.
+Literal final output: UI_COMPLETE checks=20
+Exit status: 0. UI_VERIFICATION.json lists every check; page errors=0.
+No production employee writes, model calls or business execution were issued by this UI test.
+Snapshots were opened and inspected: employee-profile.png, employee-narrow.png;
+the actual v1 download content and employee export were reopened and validated.
+
+ACTUAL DEPLOYED UI
+Command: node scripts/verify-employee-center-live.mjs
+Input: actual local Harness, real directory, read-only independent Chromium.
+Literal output:
+LIVE_UI employee_center=PASS actual_css=PASS reload_restore=PASS work_api=200 mutations=0
+Exit status: 0. Live UI proof: LIVE_UI_VERIFICATION.json.
+This test uses no fixture routes. It verifies native panel, loaded light CSS,
+real employee roster, panel restoration after reload, HTTP 200 and work API contract=1.
+
+DEPLOYMENT
+Initial service idle check: sessions=62 running=0 bots=3 revision=10.
+Only 10 declared plugin source/assets changed; manifest guards original and modified hashes.
+No full sync or model/permission/business-login changes. Final runtime hash check records
+unrelatedChanges=[] and contract=1. Final employee installer EXE is not rebuilt yet (M5).
+
+PACKAGE
+Command: node scripts/package-employee-center.mjs
+Output: PACKAGE files=10 diff_apply=PASS hashes=preserved
+Exit status: 0. ZIP reopened with exactly 10 matching source/assets.
+ROLLBACK.sh is executable and Git mode 100755.
+
+TOTAL-GOAL REMAINDER
+M2 is local-owner employee management and text-artifact acceptance. Enterprise tenant/RBAC,
+shared memory and sync, signed offline authorization, model-gateway fault tolerance,
+distributed execution ownership and final employee installer remain M3-M5 work.
+No local acceptance is presented as an enterprise server's business approval.

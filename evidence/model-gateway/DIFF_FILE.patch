@@ -1,0 +1,605 @@
+diff --git a/modified/control/migrations/018-digital-model-policy.sql b/modified/control/migrations/018-digital-model-policy.sql
+new file mode 100644
+index 0000000..c722a2f
+--- /dev/null
++++ b/modified/control/migrations/018-digital-model-policy.sql
+@@ -0,0 +1,8 @@
++CREATE TABLE digital_model_policies (
++ tenant_id uuid PRIMARY KEY REFERENCES tenants(id), revision integer NOT NULL CHECK(revision>0),
++ policy jsonb NOT NULL, updated_by uuid NOT NULL, updated_at timestamptz NOT NULL DEFAULT now(),
++ FOREIGN KEY(tenant_id,updated_by) REFERENCES memberships(tenant_id,id)
++);
++ALTER TABLE digital_model_policies ENABLE ROW LEVEL SECURITY;
++ALTER TABLE digital_model_policies FORCE ROW LEVEL SECURITY;
++CREATE POLICY tenant_boundary ON digital_model_policies USING(tenant_id::text=current_setting('app.tenant_id',true)) WITH CHECK(tenant_id::text=current_setting('app.tenant_id',true));
+diff --git a/original/control/src/lib/digital-employee-contract.ts b/modified/control/src/lib/digital-employee-contract.ts
+index f0e30fd..0d21ad3 100644
+--- a/original/control/src/lib/digital-employee-contract.ts
++++ b/modified/control/src/lib/digital-employee-contract.ts
+@@ -4,6 +4,7 @@ import { ApiError } from './errors';
+ import { readFileSync } from 'node:fs';
+ import { workDeviceCommands,workManagerCommands } from './digital-work-contract';
+ import { executionDeviceCommands,executionManagerCommands } from './digital-execution-contract';
++import { modelDeviceCommands,modelManagerCommands } from './digital-model-contract';
+ 
+ export const canonical = (v: any): string => JSON.stringify(v, (_k, x) =>
+   x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a],[b])=>a.localeCompare(b))) : x);
+@@ -43,6 +44,7 @@ export function assertNoCredentials(v: unknown) {
+ }
+ export const syncEvent=z.object({eventId:uuid,employeeId:uuid,aggregateId:z.string().min(1).max(200),kind:z.enum(['profile','memory']),baseRevision:z.number().int().min(0),payload:z.unknown(),source,occurredAt:z.string().datetime(),deleted:z.boolean()}).strict();
+ export const deviceBody=z.discriminatedUnion('action',[
++  ...modelDeviceCommands,
+   ...executionDeviceCommands,
+   ...workDeviceCommands,
+   z.object({action:z.literal('authorize')}).strict(),
+@@ -54,6 +56,7 @@ export const deviceBody=z.discriminatedUnion('action',[
+ export const deviceEnvelope=z.object({v:z.literal(1),aud:z.literal('naumi-device-api'),tenantId:uuid,deviceId:uuid,nonce:uuid,issuedAt:z.string().datetime(),body:deviceBody}).strict();
+ const common={operationId:uuid};
+ export const managerCommand=z.discriminatedUnion('action',[
++  ...modelManagerCommands,
+   ...executionManagerCommands,
+   ...workManagerCommands,
+   z.object({action:z.literal('employee.create'),name:z.string().trim().min(1).max(100),...common}).strict(),
+diff --git a/original/control/src/lib/digital-employees.ts b/modified/control/src/lib/digital-employees.ts
+index 3d7d3fd..299f605 100644
+--- a/original/control/src/lib/digital-employees.ts
++++ b/modified/control/src/lib/digital-employees.ts
+@@ -7,6 +7,7 @@ import { canUseProject } from './domain-projects';
+ import { effectiveRoles } from './role-capabilities';
+ import { digitalTaskChoices,digitalWorkRequest,linkDigitalWork } from './digital-work';
+ import { executionDevice,executionManager } from './digital-executions';
++import {readModelPolicy,modelManager,modelDevice} from './digital-models';
+ import { assertNoCredentials, digest, edKey, keyHash, managerCommand, memoryPayload,
+   profilePayload, signatureValid, signedAuthorization, signingConfig, signingPublic, deviceEnvelope,
+   type ManagerCommand, type DeviceEnvelope, type SigningConfig } from './digital-employee-contract';
+@@ -60,7 +61,8 @@ async function authorization(c:PoolClient,a:Actor,d:Row,config:SigningConfig) {
+   const projects=(await c.query('SELECT id FROM projects WHERE tenant_id=$1 ORDER BY id',[a.tenantId])).rows;
+   const projectIds:string[]=[];
+   for(const p of projects)if(await canUseProject(c,a,p.id,false))projectIds.push(p.id);
+-  const claims={tenantId:a.tenantId,memberId:a.id,deviceId:d.id,keyHash:d.key_hash,authEpoch:d.auth_epoch,
++  const model=await readModelPolicy(c,a);
++  const claims={tenantId:a.tenantId,memberId:a.id,deviceId:d.id,keyHash:d.key_hash,authEpoch:d.auth_epoch,requireModelGateway:!!model?.enforceManaged,modelPolicyRevision:model?.revision??0,
+     issuedAt:new Date(now).toISOString(),expiresAt:new Date(now+config.offlineSeconds*1000).toISOString(),
+     capabilities:['local.read','local.draft','local.infer'],bindings:list.map(b=>({employeeId:b.employee_id,localBotId:b.local_bot_id})),projectIds};
+   return {authorization:signedAuthorization(config,claims),serverTime:new Date(now).toISOString(),
+@@ -89,10 +91,11 @@ export async function digitalCatalog(actor:Actor) {
+     const members=owner(a)?(await c.query("SELECT m.id,COALESCE(NULLIF(m.display_name,''),u.name) name,m.team_id AS \"teamId\" FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.tenant_id=$1 AND m.active ORDER BY name,m.id",[a.tenantId])).rows:[];
+     const projects=[];for(const p of (await c.query('SELECT id,name FROM projects WHERE tenant_id=$1 ORDER BY name,id',[a.tenantId])).rows)if(await canUseProject(c,a,p.id,false))projects.push(p);
+     const taskChoices=await digitalTaskChoices(c,a);
+-    return {version:1,tenantId:a.tenantId,memberId:a.id,canCreate:owner(a),employees,devices,proposals,members,projects,taskChoices};
++    return {version:1,tenantId:a.tenantId,memberId:a.id,canCreate:owner(a),employees,devices,proposals,members,projects,taskChoices,modelPolicy:await readModelPolicy(c,a)};
+   });
+ }
+ async function runManager(c:PoolClient,a:Actor,p:ManagerCommand,config:SigningConfig):Promise<any> {
++  if(p.action.startsWith('model.'))return modelManager(c,a,p,config);
+   if(p.action.startsWith('execution.'))return executionManager(c,a,p);
+   if(p.action==='work.link'){
+     await managed(c,a,p.employeeId);return linkDigitalWork(c,a,p);
+@@ -244,6 +247,7 @@ export async function digitalDeviceRequest(raw:unknown,signature:string,config:S
+       result={records:page,after:page.length?page.at(-1)!.employee_id+'/'+page.at(-1)!.aggregate_id:p.body.after,hasMore:records.length>p.body.limit};
+     }
+     if(p.body.action==='shared')result=await shared(c,a,p.body.after,p.body.limit);
++    if(p.body.action==='model.authorize')result=await modelDevice(c,a,d,p.body,auth.bindings,config);
+     if(p.body.action.startsWith('work.')||p.body.action.startsWith('execution.')){
+       const b=p.body as Extract<DeviceEnvelope['body'],{employeeId:string}>;
+       if(!auth.bindings.some(x=>x.employeeId===b.employeeId))fail('DEVICE_BINDING_REQUIRED');
+@@ -252,7 +256,7 @@ export async function digitalDeviceRequest(raw:unknown,signature:string,config:S
+     // Authorization response supplies a shared snapshot page on every call only when explicitly requested separately.
+     await c.query('UPDATE digital_devices SET last_seen_at=now() WHERE tenant_id=$1 AND id=$2',[a.tenantId,d.id]);
+     await c.query('DELETE FROM digital_device_nonces WHERE tenant_id=$1 AND device_id=$2 AND created_at<now()-interval \'10 minutes\'',[a.tenantId,d.id]);
+-    await c.query('INSERT INTO digital_device_nonces(tenant_id,device_id,nonce,request_hash,result) VALUES($1,$2,$3,$4,$5)',[a.tenantId,d.id,p.nonce,hash,result]);
++    await c.query('INSERT INTO digital_device_nonces(tenant_id,device_id,nonce,request_hash,result) VALUES($1,$2,$3,$4,$5)',[a.tenantId,d.id,p.nonce,hash,p.body.action==='model.authorize'?{modelCredentialIssued:true}:result]);
+     return {...result,...auth};
+   });}catch(error){for(const cleanup of rollback)await cleanup().catch(()=>{});throw error;}
+ }
+diff --git a/modified/control/src/lib/digital-model-contract.ts b/modified/control/src/lib/digital-model-contract.ts
+new file mode 100644
+index 0000000..89e6838
+--- /dev/null
++++ b/modified/control/src/lib/digital-model-contract.ts
+@@ -0,0 +1,9 @@
++import {z} from 'zod';
++const uuid=z.string().uuid(),limit=z.object({costMicros:z.number().int().min(0).max(1e12),tokens:z.number().int().min(0).max(1e12),requests:z.number().int().min(0).max(1e9),concurrent:z.number().int().min(1).max(64)}).strict();
++export const modelPolicy=z.object({active:z.boolean(),routes:z.array(z.string().regex(/^[a-z0-9][a-z0-9._-]{0,79}$/)).min(1).max(30).refine(v=>new Set(v).size===v.length),organization:limit,employee:limit,task:limit,maxAttempts:z.number().int().min(1).max(3),credentialSeconds:z.number().int().min(300).max(86400),enforceManaged:z.boolean(),allowFallback:z.boolean()}).strict();
++export const modelManagerCommands=[
++ z.object({action:z.literal('model.policy.sync'),operationId:uuid}).strict(),
++ z.object({action:z.literal('model.policy.set'),expectedRevision:z.number().int().nonnegative(),policy:modelPolicy,operationId:uuid}).strict(),
++ z.object({action:z.literal('model.resolve-unknown'),requestId:uuid,confirmedStopped:z.literal(true),reason:z.string().trim().min(6).max(1000),operationId:uuid}).strict(),
++] as const;
++export const modelDeviceCommands=[z.object({action:z.literal('model.authorize'),employeeId:uuid,taskId:uuid.nullable().default(null)}).strict()] as const;
+diff --git a/modified/control/src/lib/digital-models.ts b/modified/control/src/lib/digital-models.ts
+new file mode 100644
+index 0000000..9d3d03c
+--- /dev/null
++++ b/modified/control/src/lib/digital-models.ts
+@@ -0,0 +1,25 @@
++import {randomUUID} from 'node:crypto';import type {PoolClient} from 'pg';import type {Actor} from './types';import {ApiError} from './errors';import {audit,requireTask,requireRole} from './domain-core';import {modelPolicy} from './digital-model-contract';import {signedAuthorization,type SigningConfig} from './digital-employee-contract';
++type Row=Record<string,any>;
++export function gatewayUrl(){const raw=process.env.NAUMI_MODEL_GATEWAY_URL;if(!raw)throw new ApiError(503,'模型网关尚未配置','MODEL_GATEWAY_NOT_CONFIGURED');let u;try{u=new URL(raw);}catch{throw new ApiError(503,'模型网关配置格式错误','MODEL_GATEWAY_CONFIG_INVALID');}if(u.username||u.password||u.pathname!=='/'||u.search||u.hash||u.protocol!=='https:'&&!(u.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(u.hostname)))throw new ApiError(503,'模型网关配置格式错误','MODEL_GATEWAY_CONFIG_INVALID');return u.origin;}
++const token=(config:SigningConfig,claims:Row)=>{const p=signedAuthorization(config,claims);return p.kid+'.'+p.payload+'.'+p.signature;};
++export async function readModelPolicy(c:PoolClient,a:Actor){const r=(await c.query('SELECT revision,policy,updated_at FROM digital_model_policies WHERE tenant_id=$1',[a.tenantId])).rows[0];return r?{...r.policy,revision:r.revision,updatedAt:r.updated_at}:null;}
++function adminProof(a:Actor,config:SigningConfig,body:Row){const now=Date.now();return {gateway:gatewayUrl(),proof:token(config,{aud:'naumi-model-admin',gateway:gatewayUrl(),tenantId:a.tenantId,memberId:a.id,jti:randomUUID(),issuedAt:new Date(now).toISOString(),expiresAt:new Date(now+300000).toISOString(),...body})};}
++export async function modelManager(c:PoolClient,a:Actor,p:Row,config:SigningConfig){
++ requireRole(a,'owner');
++ if(p.action==='model.policy.sync'){const policy=await readModelPolicy(c,a);if(!policy)throw new ApiError(404,'模型策略尚未配置','MODEL_POLICY_NOT_FOUND');const {updatedAt,...signedPolicy}=policy;await audit(c,a,p.action,'model-policy',a.tenantId,{revision:policy.revision});return {policy:signedPolicy,...adminProof(a,config,{action:'apply-policy',policy:signedPolicy})};}
++ if(p.action==='model.policy.set'){
++  await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[a.tenantId+':model-policy']);
++  const next=modelPolicy.parse(p.policy),old=(await c.query('SELECT * FROM digital_model_policies WHERE tenant_id=$1 FOR UPDATE',[a.tenantId])).rows[0];if((old?.revision??0)!==p.expectedRevision)throw new ApiError(409,'模型策略已更新','REVISION_CONFLICT');
++  const revision=(old?.revision??0)+1;await c.query('INSERT INTO digital_model_policies(tenant_id,revision,policy,updated_by) VALUES($1,$2,$3,$4) ON CONFLICT(tenant_id) DO UPDATE SET revision=excluded.revision,policy=excluded.policy,updated_by=excluded.updated_by,updated_at=now()',[a.tenantId,revision,JSON.stringify(next),a.id]);await audit(c,a,p.action,'model-policy',a.tenantId,{revision,policy:next});
++  return {policy:{...next,revision},...adminProof(a,config,{action:'apply-policy',policy:{...next,revision}})};
++ }
++ await audit(c,a,p.action,'model-request',p.requestId,{confirmedStopped:true,reason:p.reason});return adminProof(a,config,{action:'charge-ceiling',requestId:p.requestId,confirmedStopped:true,reason:p.reason});
++}
++export async function modelDevice(c:PoolClient,a:Actor,d:Row,p:Row,bindings:Array<{employeeId:string,localBotId:string}>,config:SigningConfig){
++ const binding=bindings.find(b=>b.employeeId===p.employeeId);if(!binding)throw new ApiError(403,'设备未关联此员工','DEVICE_BINDING_REQUIRED');
++ const policy=await readModelPolicy(c,a);if(!policy||!policy.active)throw new ApiError(403,'模型预算策略未启用','MODEL_POLICY_DISABLED');
++ if(p.taskId){await requireTask(c,a,p.taskId,false);if(!(await c.query('SELECT 1 FROM digital_work_links WHERE tenant_id=$1 AND task_id=$2 AND employee_id=$3 AND active',[a.tenantId,p.taskId,p.employeeId])).rowCount)throw new ApiError(403,'任务未关联此员工','WORK_EMPLOYEE_LINK_REQUIRED');}
++ const {updatedAt,...signedPolicy}=policy,now=Date.now(),date=new Date(now),end=Date.UTC(date.getUTCFullYear(),date.getUTCMonth()+1,1),expiresAt=new Date(Math.min(now+policy.credentialSeconds*1000,end)).toISOString();
++ const claims={aud:'naumi-model-gateway',gateway:gatewayUrl(),jti:randomUUID(),tenantId:a.tenantId,memberId:a.id,deviceId:d.id,employeeId:p.employeeId,botId:binding.localBotId,taskId:p.taskId,authEpoch:d.auth_epoch,period:new Date(now).toISOString().slice(0,7),issuedAt:new Date(now).toISOString(),expiresAt,policy:signedPolicy};
++ return {model:{gateway:claims.gateway,token:token(config,claims),expiresAt,policy:signedPolicy}};
++}
+diff --git a/modified/gateway/scripts/start-model-gateway.ps1 b/modified/gateway/scripts/start-model-gateway.ps1
+new file mode 100644
+index 0000000..dad631c
+--- /dev/null
++++ b/modified/gateway/scripts/start-model-gateway.ps1
+@@ -0,0 +1,16 @@
++param([string]$RuntimeRoot='E:\Workspace\deepseek-harness-local',[string]$ConfigPath='')
++$ErrorActionPreference='Stop'
++$root=(Resolve-Path -LiteralPath $RuntimeRoot).Path
++if(!$ConfigPath){$ConfigPath=Join-Path $root '.dsh/model-gateway/config.json'}
++$config=Get-Content -Raw -LiteralPath $ConfigPath|ConvertFrom-Json
++$existing=Get-NetTCPConnection -LocalPort $config.port -State Listen -ErrorAction SilentlyContinue
++if($existing){$h=Invoke-RestMethod -Uri ($config.gateway+'/health') -TimeoutSec 5;if($h.product -ne 'naumi-model-gateway'){throw 'MODEL_PORT_CONFLICT'};Write-Output "GATEWAY ready=$($h.ready) routes=$($h.routes) existing=1";exit 0}
++$node=(Get-Command node -ErrorAction Stop).Source
++$log=Join-Path $root 'logs';New-Item -ItemType Directory -Path $log -Force|Out-Null
++$previous=$env:NAUMI_MODEL_GATEWAY_CONFIG
++try{
++ $env:NAUMI_MODEL_GATEWAY_CONFIG=(Resolve-Path -LiteralPath $ConfigPath).Path
++ $p=Start-Process -FilePath $node -ArgumentList @('services/model-gateway/main.mjs') -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput (Join-Path $log 'model-gateway.out.log') -RedirectStandardError (Join-Path $log 'model-gateway.err.log') -PassThru
++ for($i=0;$i -lt 40;$i++){Start-Sleep -Milliseconds 250;if($p.HasExited){throw 'MODEL_GATEWAY_START_FAILED'};try{$h=Invoke-RestMethod -Uri ($config.gateway+'/health') -TimeoutSec 2;if($h.product -eq 'naumi-model-gateway' -and $h.ready){Write-Output "GATEWAY ready=True routes=$($h.routes) pid=$($p.Id)";exit 0}}catch{}}
++ throw 'MODEL_GATEWAY_HEALTH_TIMEOUT'
++}finally{if($null -eq $previous){Remove-Item Env:\NAUMI_MODEL_GATEWAY_CONFIG -ErrorAction SilentlyContinue}else{$env:NAUMI_MODEL_GATEWAY_CONFIG=$previous}}
+diff --git a/modified/gateway/services/model-gateway/contract.mjs b/modified/gateway/services/model-gateway/contract.mjs
+new file mode 100644
+index 0000000..e9a256b
+--- /dev/null
++++ b/modified/gateway/services/model-gateway/contract.mjs
+@@ -0,0 +1,18 @@
++import {z} from 'zod';import {createHash,verify} from 'node:crypto';
++export const canonical=v=>JSON.stringify(v,(_k,x)=>x&&typeof x==='object'&&!Array.isArray(x)?Object.fromEntries(Object.entries(x).sort(([a],[b])=>a.localeCompare(b))):x);
++export const digest=v=>createHash('sha256').update(canonical(v)).digest('hex');
++export function fault(code,status=400){const e=Error(code);e.status=status;return e;}
++const uuid=z.string().uuid(),limit=z.object({costMicros:z.number().int().min(0).max(1e12),tokens:z.number().int().min(0).max(1e12),requests:z.number().int().min(0).max(1e9),concurrent:z.number().int().min(1).max(64)}).strict();
++export const policySchema=z.object({revision:z.number().int().positive(),active:z.boolean(),routes:z.array(z.string().regex(/^[a-z0-9][a-z0-9._-]{0,79}$/)).min(1).max(30),organization:limit,employee:limit,task:limit,maxAttempts:z.number().int().min(1).max(3),credentialSeconds:z.number().int().min(300).max(86400),enforceManaged:z.boolean(),allowFallback:z.boolean()}).strict();
++export const grantSchema=z.object({v:z.literal(1),aud:z.literal('naumi-model-gateway'),iss:z.string(),gateway:z.string().url(),jti:uuid,tenantId:uuid,memberId:uuid,deviceId:uuid,employeeId:uuid,botId:z.string().min(1).max(200),taskId:uuid.nullable(),authEpoch:z.number().int().positive(),period:z.string().regex(/^\d{4}-\d{2}$/),issuedAt:z.string().datetime(),expiresAt:z.string().datetime(),policy:policySchema}).strict();
++export function verifyGrant(token,{keys,issuer,gateway,now=Date.now()}){
++ if(typeof token!=='string'||token.length>15000)throw fault('MODEL_TOKEN_INVALID',401);const [kid,payload,signature,...rest]=token.split('.');
++ try{if(rest.length||!keys[kid]||!verify(null,Buffer.from(payload),keys[kid],Buffer.from(signature,'base64url')))throw Error();}catch{throw fault('MODEL_TOKEN_SIGNATURE_INVALID',401);}
++ let c;try{c=grantSchema.parse(JSON.parse(Buffer.from(payload,'base64url').toString()));}catch{throw fault('MODEL_TOKEN_INVALID',401);}
++ if(c.iss!==issuer||c.gateway!==gateway)throw fault('MODEL_TOKEN_AUDIENCE_INVALID',401);
++ const start=Date.parse(c.issuedAt),end=Date.parse(c.expiresAt);if(now<start-60000||now>=end||end<=start||end-start>86400000||new Date(start).toISOString().slice(0,7)!==c.period||new Date(end-1).toISOString().slice(0,7)!==c.period)throw fault('MODEL_TOKEN_EXPIRED',401);
++ if(!c.policy.active)throw fault('MODEL_POLICY_DISABLED',403);return c;
++}
++export const cost=(input,output,route)=>Number((BigInt(input)*BigInt(route.inputMicrosPerMillion)+999999n)/1000000n+(BigInt(output)*BigInt(route.outputMicrosPerMillion)+999999n)/1000000n);
++export function scopes(c){return [{kind:'organization',id:c.tenantId,limit:c.policy.organization},{kind:'employee',id:c.employeeId,limit:c.policy.employee},{kind:'bot',id:c.botId,limit:c.policy.employee},...(c.taskId?[{kind:'task',id:c.taskId,limit:c.policy.task}]:[])];}
++export const routeSchema=z.object({id:z.string().regex(/^[a-z0-9][a-z0-9._-]{0,79}$/),name:z.string().max(120),url:z.string().url(),model:z.string().min(1).max(200),keyEnv:z.string().regex(/^[A-Z][A-Z0-9_]+$/),contextTokens:z.number().int().min(128).max(2000000),maxOutputTokens:z.number().int().min(1).max(1000000),inputMicrosPerMillion:z.number().int().min(0).max(1e9),outputMicrosPerMillion:z.number().int().min(0).max(1e9),vision:z.boolean().default(false),fallbacks:z.array(z.string()).max(2).default([])}).strict();
+diff --git a/modified/gateway/services/model-gateway/ledger.mjs b/modified/gateway/services/model-gateway/ledger.mjs
+new file mode 100644
+index 0000000..f5d63bf
+--- /dev/null
++++ b/modified/gateway/services/model-gateway/ledger.mjs
+@@ -0,0 +1,62 @@
++import fs from 'node:fs';import path from 'node:path';import {DatabaseSync} from 'node:sqlite';import {canonical,digest,cost,scopes,fault} from './contract.mjs';
++/** Gateway-authoritative, single-ledger reservations. No prompt, result text or credentials are stored. */
++export class ModelLedger{
++ constructor(file,{clock=()=>Date.now()}={}){this.clock=clock;if(file!==':memory:')fs.mkdirSync(path.dirname(file),{recursive:true});this.db=new DatabaseSync(file);
++ const application=this.db.prepare('PRAGMA application_id').get().application_id,version=this.db.prepare('PRAGMA user_version').get().user_version;
++ if((application!==0&&application!==0x4e4d4731)||version>1){this.db.close();throw fault('MODEL_LEDGER_VERSION_UNSUPPORTED',503);}
++ if(application===0&&this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all().length){this.db.close();throw fault('MODEL_LEDGER_IDENTITY_INVALID',503);}
++ this.db.exec(`PRAGMA application_id=1313687345;PRAGMA user_version=1;PRAGMA busy_timeout=5000;PRAGMA journal_mode=WAL;PRAGMA synchronous=FULL;
++ CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value INTEGER NOT NULL);
++ CREATE TABLE IF NOT EXISTS policies(tenant TEXT PRIMARY KEY,revision INTEGER NOT NULL,hash TEXT NOT NULL);
++ CREATE TABLE IF NOT EXISTS epochs(tenant TEXT,device TEXT,epoch INTEGER NOT NULL,PRIMARY KEY(tenant,device));
++ CREATE TABLE IF NOT EXISTS accounts(tenant TEXT,period TEXT,kind TEXT,id TEXT,spent_cost INTEGER NOT NULL DEFAULT 0,reserved_cost INTEGER NOT NULL DEFAULT 0,spent_tokens INTEGER NOT NULL DEFAULT 0,reserved_tokens INTEGER NOT NULL DEFAULT 0,requests INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(tenant,period,kind,id));
++ CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY,tenant TEXT NOT NULL,period TEXT NOT NULL,employee TEXT NOT NULL,bot TEXT NOT NULL,device TEXT NOT NULL,task TEXT,hash TEXT NOT NULL,state TEXT NOT NULL,route TEXT NOT NULL,price TEXT NOT NULL,scope TEXT NOT NULL,reserved_cost INTEGER NOT NULL,reserved_tokens INTEGER NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,input_tokens INTEGER,output_tokens INTEGER,charged_cost INTEGER,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,error TEXT);
++ CREATE INDEX IF NOT EXISTS active_requests ON requests(tenant,period,state);
++ CREATE TABLE IF NOT EXISTS audits(seq INTEGER PRIMARY KEY AUTOINCREMENT,request_id TEXT,action TEXT NOT NULL,detail TEXT NOT NULL,at TEXT NOT NULL);`);
++ this.db.exec('CREATE TABLE IF NOT EXISTS admin_operations(jti TEXT PRIMARY KEY,hash TEXT NOT NULL,result TEXT NOT NULL)');
++ if(this.db.prepare('PRAGMA quick_check').get().quick_check!=='ok')throw fault('MODEL_LEDGER_CORRUPT',503);
++ this.transaction(()=>{for(const r of this.db.prepare("SELECT id FROM requests WHERE state IN ('reserved','dispatched')").all()){this.db.prepare("UPDATE requests SET state='unknown',error='GATEWAY_PROCESS_INTERRUPTED',updated_at=? WHERE id=?").run(this.now(),r.id);this.audit(r.id,'restart_unknown',{});}});
++ }
++ now(){return new Date(this.clock()).toISOString();}
++ transaction(fn){this.db.exec('BEGIN IMMEDIATE');try{const v=fn();this.beforeCommit?.();this.db.exec('COMMIT');return v;}catch(e){this.db.exec('ROLLBACK');throw e;}}
++ audit(id,action,detail){this.db.prepare('INSERT INTO audits(request_id,action,detail,at) VALUES(?,?,?,?)').run(id,action,canonical(detail),this.now());}
++ accept(c){
++  const now=this.clock(),high=this.db.prepare("SELECT value FROM metadata WHERE key='clock'").get()?.value??0;if(now<high-60000)throw fault('MODEL_CLOCK_ROLLBACK',403);this.db.prepare("INSERT INTO metadata VALUES('clock',?) ON CONFLICT(key) DO UPDATE SET value=max(value,excluded.value)").run(now);
++  const p=this.db.prepare('SELECT * FROM policies WHERE tenant=?').get(c.tenantId),h=digest(c.policy);
++  if(p&&(p.revision>c.policy.revision||p.revision===c.policy.revision&&p.hash!==h))throw fault('MODEL_POLICY_STALE',403);
++  this.db.prepare('INSERT INTO policies VALUES(?,?,?) ON CONFLICT(tenant) DO UPDATE SET revision=excluded.revision,hash=excluded.hash').run(c.tenantId,c.policy.revision,h);
++  const epoch=this.db.prepare('SELECT epoch FROM epochs WHERE tenant=? AND device=?').get(c.tenantId,c.deviceId)?.epoch??0;if(c.authEpoch<epoch)throw fault('MODEL_DEVICE_EPOCH_STALE',403);
++  this.db.prepare('INSERT INTO epochs VALUES(?,?,?) ON CONFLICT(tenant,device) DO UPDATE SET epoch=max(epoch,excluded.epoch)').run(c.tenantId,c.deviceId,c.authEpoch);
++ }
++ authenticate(c){return this.transaction(()=>this.accept(c));}
++ account(c,s){this.db.prepare('INSERT INTO accounts(tenant,period,kind,id) VALUES(?,?,?,?) ON CONFLICT DO NOTHING').run(c.tenantId,c.period,s.kind,s.id);return this.db.prepare('SELECT * FROM accounts WHERE tenant=? AND period=? AND kind=? AND id=?').get(c.tenantId,c.period,s.kind,s.id);}
++ active(c,s){return this.db.prepare("SELECT count(*) n FROM requests WHERE tenant=? AND state IN ('reserved','dispatched','unknown')"+(s.kind==='employee'?' AND employee=?':s.kind==='task'?' AND task=?':s.kind==='bot'?' AND bot=?':'')).get(c.tenantId,...s.kind==='organization'?[]:[s.id]).n;}
++ reserve(c,id,body,plan){this.authenticate(c);return this.transaction(()=>{
++  this.accept(c);const h=digest(body),old=this.db.prepare('SELECT * FROM requests WHERE id=?').get(id);
++  if(old){if(old.tenant!==c.tenantId||old.device!==c.deviceId||old.employee!==c.employeeId||old.bot!==c.botId||old.task!==c.taskId||old.hash!==h)throw fault('MODEL_REQUEST_ID_CONFLICT',409);throw fault(old.state==='completed'?'MODEL_REQUEST_ALREADY_COMPLETED':'MODEL_REQUEST_RESULT_UNRESOLVED',409);}
++  const reserveCost=Math.max(...plan.map(r=>cost(r.contextTokens,body.max_tokens,r))),reserveTokens=Math.max(...plan.map(r=>r.contextTokens))+body.max_tokens,list=scopes(c);
++  for(const s of list){const a=this.account(c,s);if(a.spent_cost+a.reserved_cost+reserveCost>s.limit.costMicros||a.spent_tokens+a.reserved_tokens+reserveTokens>s.limit.tokens)throw fault('MODEL_BUDGET_EXCEEDED',402);if(a.requests>=s.limit.requests)throw fault('MODEL_REQUEST_LIMIT',429);if(this.active(c,s)>=s.limit.concurrent)throw fault('MODEL_CONCURRENCY_LIMIT',429);}
++  for(const s of list)this.db.prepare('UPDATE accounts SET reserved_cost=reserved_cost+?,reserved_tokens=reserved_tokens+? WHERE tenant=? AND period=? AND kind=? AND id=?').run(reserveCost,reserveTokens,c.tenantId,c.period,s.kind,s.id);
++  const time=this.now();this.db.prepare('INSERT INTO requests(id,tenant,period,employee,bot,device,task,hash,state,route,price,scope,reserved_cost,reserved_tokens,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,c.tenantId,c.period,c.employeeId,c.botId,c.deviceId,c.taskId,h,'reserved',plan[0].id,canonical(plan.map(r=>({id:r.id,inputMicrosPerMillion:r.inputMicrosPerMillion,outputMicrosPerMillion:r.outputMicrosPerMillion,contextTokens:r.contextTokens}))),canonical(list.map(({kind,id})=>({kind,id}))),reserveCost,reserveTokens,time,time);this.audit(id,'reserve',{costMicros:reserveCost,tokens:reserveTokens});return this.request(c,id);
++ });}
++ attempt(c,id,route){return this.transaction(()=>{this.accept(c);const r=this.request(c,id);if(!['reserved','dispatched'].includes(r.state)||r.attempts>=c.policy.maxAttempts)throw fault('MODEL_ATTEMPT_LIMIT',429);for(const s of scopes(c)){const a=this.account(c,s);if(a.requests>=s.limit.requests)throw fault('MODEL_REQUEST_LIMIT',429);}
++  for(const s of scopes(c))this.db.prepare('UPDATE accounts SET requests=requests+1 WHERE tenant=? AND period=? AND kind=? AND id=?').run(c.tenantId,c.period,s.kind,s.id);
++  this.db.prepare("UPDATE requests SET state='dispatched',route=?,attempts=attempts+1,updated_at=? WHERE id=?").run(route,this.now(),id);this.audit(id,'dispatch',{route});});}
++ request(c,id){const r=this.db.prepare('SELECT * FROM requests WHERE id=? AND tenant=? AND device=? AND employee=? AND bot=?').get(id,c.tenantId,c.deviceId,c.employeeId,c.botId);if(!r||r.task!==c.taskId)throw fault('MODEL_RECEIPT_NOT_FOUND',404);return r;}
++ settle(c,id,{inputTokens=0,outputTokens=0,route,state='completed',error=null}={},inside=false){const apply=()=>{
++  const r=this.request(c,id);if(['completed','rejected','charged_ceiling'].includes(r.state))return r;
++  if(!Number.isSafeInteger(inputTokens)||!Number.isSafeInteger(outputTokens)||inputTokens<0||outputTokens<0)throw fault('MODEL_USAGE_INVALID',502);
++  const charge=state==='charged_ceiling'?r.reserved_cost:cost(inputTokens,outputTokens,route),tokens=state==='charged_ceiling'?r.reserved_tokens:inputTokens+outputTokens;
++  for(const s of JSON.parse(r.scope))this.db.prepare('UPDATE accounts SET reserved_cost=reserved_cost-?,reserved_tokens=reserved_tokens-?,spent_cost=spent_cost+?,spent_tokens=spent_tokens+? WHERE tenant=? AND period=? AND kind=? AND id=?').run(r.reserved_cost,r.reserved_tokens,charge,tokens,c.tenantId,r.period,s.kind,s.id);
++  this.db.prepare('UPDATE requests SET state=?,input_tokens=?,output_tokens=?,charged_cost=?,updated_at=?,error=? WHERE id=?').run(state,state==='charged_ceiling'?null:inputTokens,state==='charged_ceiling'?null:outputTokens,charge,this.now(),error,id);this.audit(id,'settle',{state,chargedCostMicros:charge,tokens});return this.request(c,id);
++ };return inside?apply():this.transaction(apply);}
++ unknown(c,id,code){return this.transaction(()=>{const r=this.request(c,id);if(['completed','rejected','charged_ceiling'].includes(r.state))return;this.db.prepare("UPDATE requests SET state='unknown',error=?,updated_at=? WHERE id=?").run(code,this.now(),id);this.audit(id,'unknown',{code});});}
++ receipt(c,id){const r=this.request(c,id);return {requestId:r.id,state:r.state,route:r.route,attempts:r.attempts,reservedCostMicros:r.reserved_cost,chargedCostMicros:r.charged_cost,inputTokens:r.input_tokens,outputTokens:r.output_tokens,error:r.error,createdAt:r.created_at,updatedAt:r.updated_at};}
++ summary(c){return this.transaction(()=>{this.accept(c);return {period:c.period,currency:'USD',costUnit:'microUSD',scopes:scopes(c).map(s=>({...s,usage:this.account(c,s),active:this.active(c,s)}))};});}
++ admin(p){const h=digest(p),old=this.db.prepare('SELECT * FROM admin_operations WHERE jti=?').get(p.jti);if(old){if(old.hash!==h)throw fault('MODEL_ADMIN_REPLAY_CONFLICT',409);return JSON.parse(old.result);}
++  if(p.action==='apply-policy')return this.transaction(()=>{const old=this.db.prepare('SELECT * FROM policies WHERE tenant=?').get(p.tenantId),ph=digest(p.policy);if(old&&(old.revision>p.policy.revision||old.revision===p.policy.revision&&old.hash!==ph))throw fault('MODEL_POLICY_STALE',409);this.db.prepare('INSERT INTO policies VALUES(?,?,?) ON CONFLICT(tenant) DO UPDATE SET revision=excluded.revision,hash=excluded.hash').run(p.tenantId,p.policy.revision,ph);const result={policyRevision:p.policy.revision,active:p.policy.active};this.db.prepare('INSERT INTO admin_operations VALUES(?,?,?)').run(p.jti,h,canonical(result));this.audit(null,'apply_policy',{tenant:p.tenantId,revision:p.policy.revision});return result;});
++  return this.transaction(()=>{const r=this.db.prepare('SELECT * FROM requests WHERE id=? AND tenant=?').get(p.requestId,p.tenantId);if(!r)throw fault('MODEL_RECEIPT_NOT_FOUND',404);if(r.state!=='unknown')throw fault('MODEL_RECEIPT_NOT_UNKNOWN',409);
++   const c={tenantId:r.tenant,employeeId:r.employee,deviceId:r.device,botId:r.bot,taskId:r.task},result=this.settle(c,r.id,{state:'charged_ceiling'},true),response={requestId:r.id,state:result.state};this.db.prepare('INSERT INTO admin_operations VALUES(?,?,?)').run(p.jti,h,canonical(response));this.audit(r.id,'owner_confirmed_stopped',{reason:p.reason});return response;});
++ }
++ close(){this.db.close();}
++}
+diff --git a/modified/gateway/services/model-gateway/main.mjs b/modified/gateway/services/model-gateway/main.mjs
+new file mode 100644
+index 0000000..e47cc51
+--- /dev/null
++++ b/modified/gateway/services/model-gateway/main.mjs
+@@ -0,0 +1,8 @@
++import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';import {startModelGateway} from './server.mjs';
++const configPath=process.env.NAUMI_MODEL_GATEWAY_CONFIG;if(!configPath)throw Error('MODEL_GATEWAY_CONFIG_REQUIRED');const config=JSON.parse(fs.readFileSync(configPath,'utf8'));
++const dir=path.dirname(path.resolve(config.file));fs.mkdirSync(dir,{recursive:true});const lock=path.join(dir,'gateway.lock');
++if(fs.existsSync(lock)){const old=JSON.parse(fs.readFileSync(lock));let alive=true;try{process.kill(old.pid,0);}catch(e){if(e.code==='ESRCH')alive=false;}if(alive)throw Error('MODEL_GATEWAY_ALREADY_RUNNING');fs.unlinkSync(lock);}
++fs.writeFileSync(lock,JSON.stringify({pid:process.pid,entry:fileURLToPath(import.meta.url)}),{flag:'wx',mode:0o600});
++let app;try{app=await startModelGateway(config);}catch(e){fs.unlinkSync(lock);throw e;}
++let closing=false;const close=async()=>{if(closing)return;closing=true;await app.close();try{if(JSON.parse(fs.readFileSync(lock)).pid===process.pid)fs.unlinkSync(lock);}catch{}};
++process.on('SIGTERM',()=>void close());process.on('SIGINT',()=>void close());console.log('NAUMI_MODEL_GATEWAY listening='+app.address.port+' routes='+config.routes.length+' ledger=ready');
+diff --git a/modified/gateway/services/model-gateway/server.mjs b/modified/gateway/services/model-gateway/server.mjs
+new file mode 100644
+index 0000000..898840c
+--- /dev/null
++++ b/modified/gateway/services/model-gateway/server.mjs
+@@ -0,0 +1,80 @@
++import http from 'node:http';import {once} from 'node:events';import {z} from 'zod';import {verify} from 'node:crypto';
++import {canonical,verifyGrant,routeSchema,policySchema,fault} from './contract.mjs';import {ModelLedger} from './ledger.mjs';
++const requestSchema=z.object({model:z.string().min(1).max(80),messages:z.array(z.object({role:z.enum(['system','developer','user','assistant','tool']),content:z.unknown().optional(),tool_calls:z.array(z.unknown()).optional(),tool_call_id:z.string().optional(),name:z.string().optional(),reasoning_content:z.string().optional()}).strict()).min(1).max(10000),stream:z.boolean().default(true),max_tokens:z.number().int().positive().optional(),max_completion_tokens:z.number().int().positive().optional(),temperature:z.number().min(0).max(2).optional(),top_p:z.number().min(0).max(1).optional(),tools:z.array(z.unknown()).max(200).optional(),tool_choice:z.unknown().optional(),parallel_tool_calls:z.boolean().optional(),response_format:z.unknown().optional(),reasoning_effort:z.string().max(30).optional(),stop:z.union([z.string(),z.array(z.string())]).optional(),seed:z.number().int().optional(),frequency_penalty:z.number().min(-2).max(2).optional(),presence_penalty:z.number().min(-2).max(2).optional(),stream_options:z.object({include_usage:z.boolean()}).strict().optional(),store:z.literal(false).optional()}).strict();
++async function jsonBody(req,max=8*1024*1024){const chunks=[];let n=0;for await(const b of req){n+=b.length;if(n>max)throw fault('MODEL_BODY_TOO_LARGE',413);chunks.push(b);}try{return JSON.parse(Buffer.concat(chunks).toString());}catch{throw fault('MODEL_BODY_INVALID');}}
++const usage=v=>{const u=v?.usage;if(!u||!Number.isSafeInteger(u.prompt_tokens)||!Number.isSafeInteger(u.completion_tokens)||u.prompt_tokens<0||u.completion_tokens<0)return null;return {inputTokens:u.prompt_tokens,outputTokens:u.completion_tokens};};
++export async function startModelGateway({file,issuer,gateway,keys,routes=[],environment=process.env,host='127.0.0.1',port=0,clock=()=>Date.now(),request=fetch,allowLoopbackUpstreams=false,ledger:provided}={}){
++ const catalog=new Map(routes.map(v=>{const r=routeSchema.parse(v),u=new URL(r.url);if(u.username||u.password||u.hash||u.search||u.protocol!=='https:'&&!(allowLoopbackUpstreams&&u.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(u.hostname)))throw fault('MODEL_UPSTREAM_INVALID');return [r.id,r];}));if(catalog.size!==routes.length)throw fault('MODEL_DUPLICATE_ROUTE');
++ const ledger=provided??new ModelLedger(file,{clock}),controllers=new Map();let closing=false;
++ const auth=req=>{const token=req.headers.authorization?.replace(/^Bearer /,'');const c=verifyGrant(token,{issuer,gateway,keys,now:clock()});ledger.authenticate(c);return c;};
++ const send=(res,status,v)=>{if(!res.destroyed&&!res.headersSent)res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}).end(JSON.stringify(v));};
++ const pending=new Set();const handle=async(req,res)=>{
++  res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');let claims,id,controller,started=false;
++  try{
++   if(req.headers.origin)throw fault('MODEL_BROWSER_DIRECT_DENIED',403);
++   const url=new URL(req.url,'http://localhost');
++   if(req.method==='GET'&&url.pathname==='/health'){send(res,200,{product:'naumi-model-gateway',version:1,ready:!closing,routes:catalog.size});return;}
++   if(closing)throw fault('MODEL_GATEWAY_STOPPING',503);
++   if(req.method==='POST'&&url.pathname==='/admin'){
++    const {proof}=z.object({proof:z.string().max(15000)}).strict().parse(await jsonBody(req,32768)),[kid,payload,signature,...extra]=proof.split('.');let p;
++    try{if(extra.length||!keys[kid]||!verify(null,Buffer.from(payload),keys[kid],Buffer.from(signature,'base64url')))throw Error();p=JSON.parse(Buffer.from(payload,'base64url').toString());}catch{throw fault('MODEL_ADMIN_SIGNATURE_INVALID',401);}
++    z.object({v:z.literal(1),issuedAt:z.string().datetime(),expiresAt:z.string().datetime(),memberId:z.string().uuid()}).passthrough().parse(p);if(Date.parse(p.expiresAt)<=Date.parse(p.issuedAt))throw fault('MODEL_ADMIN_INVALID',401);
++    if(p.aud!=='naumi-model-admin'||p.iss!==issuer||p.gateway!==gateway||!z.string().uuid().safeParse(p.tenantId).success||!z.string().uuid().safeParse(p.jti).success||Date.parse(p.expiresAt)<=clock()||clock()<Date.parse(p.issuedAt)-60000||Date.parse(p.expiresAt)-Date.parse(p.issuedAt)>300000)throw fault('MODEL_ADMIN_INVALID',401);
++    if(p.action==='apply-policy')p.policy=policySchema.parse(p.policy);else if(p.action==='charge-ceiling'){z.string().uuid().parse(p.requestId);if(p.confirmedStopped!==true||typeof p.reason!=='string'||p.reason.trim().length<6||p.reason.length>1000)throw fault('MODEL_STOP_CONFIRMATION_REQUIRED',403);}else throw fault('MODEL_ADMIN_ACTION_INVALID',403);
++    const result=ledger.admin(p);if(p.action==='apply-policy')for(const v of controllers.values())if(v.claims.tenantId===p.tenantId&&v.claims.policy.revision<p.policy.revision)v.controller.abort(Error('MODEL_POLICY_CHANGED'));send(res,200,result);return;
++   }
++   claims=auth(req);
++   if(req.method==='GET'&&url.pathname==='/v1/models'){send(res,200,{object:'list',data:[...catalog.values()].filter(r=>claims.policy.routes.includes(r.id)).map(r=>({id:r.id,object:'model',name:r.name,contextTokens:r.contextTokens,maxOutputTokens:r.maxOutputTokens,vision:r.vision,inputMicrosPerMillion:r.inputMicrosPerMillion,outputMicrosPerMillion:r.outputMicrosPerMillion}))});return;}
++   if(req.method==='GET'&&url.pathname==='/budget'){send(res,200,ledger.summary(claims));return;}
++   if(req.method==='GET'&&url.pathname==='/receipt'){id=z.string().uuid().parse(url.searchParams.get('id'));send(res,200,ledger.receipt(claims,id));return;}
++   if(req.method!=='POST'||url.pathname!=='/v1/chat/completions')throw fault('MODEL_ENDPOINT_NOT_FOUND',404);
++   id=z.string().uuid().parse(req.headers['x-naumi-request-id']);const body=requestSchema.parse(await jsonBody(req)),primary=catalog.get(body.model);
++   if(!primary||!claims.policy.routes.includes(primary.id))throw fault('MODEL_ROUTE_NOT_AUTHORIZED',403);
++   const cap=body.max_completion_tokens??body.max_tokens??primary.maxOutputTokens;if(cap>primary.maxOutputTokens)throw fault('MODEL_OUTPUT_LIMIT');
++   const plan=[primary];if(claims.policy.allowFallback)for(const name of primary.fallbacks){const r=catalog.get(name);if(r&&claims.policy.routes.includes(name)&&r.inputMicrosPerMillion<=primary.inputMicrosPerMillion&&r.outputMicrosPerMillion<=primary.outputMicrosPerMillion&&r.contextTokens>=primary.contextTokens&&r.maxOutputTokens>=cap&&r.vision===primary.vision)plan.push(r);}
++   plan.splice(claims.policy.maxAttempts);
++   if(!primary.vision&&body.messages.some(m=>Array.isArray(m.content)&&m.content.some(c=>c?.type!=='text')))throw fault('MODEL_IMAGE_NOT_SUPPORTED');
++   if(!body.messages.some(m=>Array.isArray(m.content)&&m.content.some(c=>c?.type==='image_url'))&&Buffer.byteLength(canonical({messages:body.messages,tools:body.tools}))+body.messages.length*32>primary.contextTokens)throw fault('MODEL_CONTEXT_LIMIT');
++   body.max_tokens=cap;delete body.max_completion_tokens;body.store=false;if(body.stream)body.stream_options={include_usage:true};
++   ledger.reserve(claims,id,body,plan);started=true;controller=new AbortController();controllers.set(id,{controller,claims});
++   const closed=()=>{if(!res.writableEnded)controller.abort(Error('MODEL_CLIENT_DISCONNECTED'));};res.on('close',closed);
++   const timeout=setTimeout(()=>controller.abort(Error('MODEL_UPSTREAM_TIMEOUT')),300000);timeout.unref?.();
++   let response,route;
++   try{
++    for(let i=0;i<plan.length;i++){
++     route=plan[i];const secret=environment[route.keyEnv];if(typeof secret!=='string'||!secret.trim())throw fault('MODEL_UPSTREAM_KEY_MISSING',503);
++     ledger.attempt(claims,id,route.id);
++     try{response=await request(route.url,{method:'POST',redirect:'error',headers:{'Content-Type':'application/json',Authorization:'Bearer '+secret.trim()},body:JSON.stringify({...body,model:route.model}),signal:controller.signal});}
++     catch(e){if(!controller.signal.aborted&&e?.cause?.code==='ECONNREFUSED'&&i+1<plan.length)continue;throw fault('MODEL_UPSTREAM_RESULT_UNKNOWN',502);}
++     if([400,401,403,404,422,429].includes(response.status)){
++      await response.body?.cancel();if([401,404,429].includes(response.status)&&i+1<plan.length)continue;
++      ledger.settle(claims,id,{route,state:'rejected',error:'MODEL_UPSTREAM_REJECTED'});throw fault('MODEL_UPSTREAM_REJECTED',response.status===429?429:502);
++     }
++     if(!response.ok){await response.body?.cancel();throw fault('MODEL_UPSTREAM_RESULT_UNKNOWN',502);}break;
++    }
++    if(!response?.ok)throw fault('MODEL_UPSTREAM_RESULT_UNKNOWN',502);
++    let measured=null,complete=false;
++    if(!body.stream){const raw=await response.text();if(raw.length>32*1024*1024)throw fault('MODEL_RESPONSE_TOO_LARGE',502);let v;try{v=JSON.parse(raw);}catch{throw fault('MODEL_RESPONSE_INVALID',502);}if(v.error)throw fault('MODEL_UPSTREAM_RESULT_UNKNOWN',502);measured=usage(v);if(!measured)throw fault('MODEL_USAGE_MISSING',502);if(measured.inputTokens>route.contextTokens||measured.outputTokens>cap)throw fault('MODEL_USAGE_OVER_CEILING',502);ledger.settle(claims,id,{...measured,route});send(res,200,v);complete=true;}
++    else{
++     if(!response.headers.get('content-type')?.includes('text/event-stream'))throw fault('MODEL_RESPONSE_INVALID',502);
++     res.writeHead(200,{'Content-Type':'text/event-stream','X-Naumi-Request-Id':id});let pending='',total=0;const decoder=new TextDecoder();
++     for await(const chunk of response.body){
++      total+=chunk.length;if(total>32*1024*1024)throw fault('MODEL_RESPONSE_TOO_LARGE',502);pending+=decoder.decode(chunk,{stream:true});if(pending.length>2*1024*1024)throw fault('MODEL_SSE_FRAME_TOO_LARGE',502);
++      const lines=pending.split('\n');pending=lines.pop();for(const line of lines){const text=line.trim();if(!text.startsWith('data:'))continue;const payload=text.slice(5).trim();if(payload==='[DONE]'){complete=true;continue;}let v;try{v=JSON.parse(payload);}catch{throw fault('MODEL_RESPONSE_INVALID',502);}if(v.error)throw fault('MODEL_UPSTREAM_RESULT_UNKNOWN',502);measured=usage(v)??measured;}
++      if(!res.write(chunk))await once(res,'drain',{signal:controller.signal});
++     }
++     if(!complete||!measured)throw fault('MODEL_USAGE_MISSING',502);if(measured.inputTokens>route.contextTokens||measured.outputTokens>cap)throw fault('MODEL_USAGE_OVER_CEILING',502);
++     ledger.settle(claims,id,{...measured,route});res.end();
++    }
++   }finally{clearTimeout(timeout);res.off('close',closed);controllers.delete(id);}
++  }catch(e){
++   const code=e instanceof z.ZodError?'MODEL_INVALID_REQUEST':/^MODEL_[A-Z_]+$/.test(e.message)?e.message:'MODEL_GATEWAY_FAILURE';
++   if(started)try{ledger.unknown(claims,id,code);}catch{}
++   if(res.headersSent){if(!res.destroyed)res.end('data: '+JSON.stringify({error:{code,message:code}})+'\n\n');}else send(res,e.status??(e instanceof z.ZodError?400:503),{error:{code,message:code},requestId:id??null});
++   controller?.abort(Error(code));
++  }
++ };
++ const server=http.createServer((req,res)=>{const work=handle(req,res).catch(()=>res.destroy());pending.add(work);void work.finally(()=>pending.delete(work));});
++ await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,host,resolve);});
++ return {server,ledger,address:server.address(),async close(){closing=true;for(const {controller} of controllers.values())controller.abort(Error('MODEL_GATEWAY_STOPPING'));server.closeAllConnections();await new Promise(r=>server.close(r));await Promise.allSettled([...pending]);if(!provided)ledger.close();}};
++}
+diff --git a/original/harness/plugins/naumi-enterprise/assets/employee-center.css b/modified/harness/plugins/naumi-enterprise/assets/employee-center.css
+index 7f5ec44..923a31e 100644
+--- a/original/harness/plugins/naumi-enterprise/assets/employee-center.css
++++ b/modified/harness/plugins/naumi-enterprise/assets/employee-center.css
+@@ -31,3 +31,4 @@
+ .emp-activity{display:grid;gap:22px}.emp-activity>.emp-section-heading{margin:0}.emp-activity-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;background:#fff;border:1px solid var(--emp-line);border-radius:14px;padding:20px}.emp-activity-summary>div{display:flex;flex-direction:column;align-items:flex-start;gap:8px}.emp-activity-summary>div>span:first-child{color:#8190a5;font-size:12px}.emp-activity time{font-size:11px;color:#8593a8}.emp-activity-sessions,.emp-activity-notifications,.emp-activity-runs{display:grid;gap:12px}.emp-activity-sessions article{background:#fff;border:1px solid var(--emp-line);border-radius:12px;padding:16px;display:grid;gap:8px}.emp-activity-sessions article>span{font-size:11px;color:#8793a8}.emp-activity-sessions p{white-space:pre-wrap;overflow-wrap:anywhere}.emp-capability-scroll{overflow:auto;background:#fff;border:1px solid var(--emp-line);border-radius:14px}.emp-capability-table{width:100%;border-collapse:collapse;text-align:left;white-space:nowrap}.emp-capability-table th,.emp-capability-table td{padding:14px 16px;border-bottom:1px solid #edf0f6;font-weight:400}.emp-capability-table thead th{color:#7b8aa1;font-size:12px;background:#fafbfe}.emp-capability-table tbody th{font-weight:600}.emp-capability-table tr:last-child>*{border-bottom:0}.emp-rule-form{background:#fff;border:1px solid #dcd4f3;padding:22px;border-radius:14px;display:grid;gap:16px}.emp-weekdays{border:1px solid var(--emp-line);border-radius:8px;padding:8px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0}.emp-weekdays legend{font-size:12px;color:#52617a}.emp-weekdays label{display:flex;gap:3px;align-items:center}.emp-rule-list{display:grid;gap:12px}.emp-rule-list article{display:flex;justify-content:space-between;align-items:center;gap:15px;padding:20px;background:#fff;border:1px solid var(--emp-line);border-radius:14px}.emp-rule-list article>div:first-child{display:grid;gap:8px;min-width:0}.emp-rule-list h3{overflow-wrap:anywhere}.emp-rule-list .emp-inline{gap:10px;font-size:12px;color:#8290a5}.emp-activity-notifications article{display:flex;gap:16px;align-items:center;justify-content:space-between;padding:16px 20px;border:1px solid #e5def5;background:#faf8ff;border-radius:12px}.emp-activity-notifications p{overflow-wrap:anywhere}.emp-activity-runs article{display:flex;gap:18px;align-items:center;padding:10px 0;border-bottom:1px solid var(--emp-line)}.emp-activity-runs strong{flex:1;font-size:12px;font-weight:500;overflow-wrap:anywhere}.emp-activity-runs article>span{font-size:12px;color:#6f8099}.emp-tabs{overflow-x:auto;flex-shrink:0}.emp-tabs button{flex:none}@media(max-width:900px){.emp-activity-summary{grid-template-columns:1fr;gap:12px}.emp-activity-summary>div{flex-direction:row;align-items:center;justify-content:space-between}.emp-rule-list article{align-items:flex-start;flex-direction:column}.emp-rule-form{padding:16px}.emp-capability-table th,.emp-capability-table td{padding:12px}.emp-activity-runs article{flex-wrap:wrap}.emp-activity-runs time{flex-basis:100%}}
+ 
+ .emp-runtime-panel{background:#fff;border:1px solid var(--emp-line);border-radius:14px;padding:18px 20px;margin-bottom:22px;color:var(--emp-ink)!important;font-size:13px!important}.emp-runtime-panel>summary{font-weight:600}.emp-runtime-body{display:grid;gap:20px;margin-top:20px}.emp-runtime-form{display:grid;gap:16px;padding:18px;border:1px solid #e5e9f3;border-radius:12px;background:#fafbfe}.emp-runtime-form>button{justify-self:start}.emp-runtime-toolset{border:1px solid var(--emp-line);border-radius:10px;padding:12px 16px;display:grid;gap:8px;max-height:240px;overflow:auto;margin:0}.emp-runtime-toolset legend{color:#6d7e97;font-size:12px}.emp-runtime-toolset label{align-items:flex-start}.emp-runtime-toolset code{overflow-wrap:anywhere}.emp-runtime-binding{display:grid;gap:10px;padding:18px;border:1px solid var(--emp-line);border-radius:12px}.emp-runtime-binding>span,.emp-runtime-binding>time{font-size:12px;color:#7f8ca2}.emp-runtime-reconcile{display:grid;gap:12px}.emp-runtime-panel select{max-width:100%}.emp-runtime-binding header{overflow-wrap:anywhere}
++.emp-model-panel{margin:0 0 20px;border:1px solid #dce5ee;border-radius:18px;background:#fff;overflow:hidden}.emp-model-panel>summary{padding:18px 22px;cursor:pointer;font-size:14px;font-weight:650;color:#1e354b}.emp-model-body{padding:0 22px 22px;display:grid;gap:18px;min-width:0}.emp-model-body h3,.emp-model-body h4{margin:0}.emp-model-body .emp-field{min-width:0}.emp-model-facts{display:flex;flex-wrap:wrap;gap:10px 24px;color:#5a6d80;font-size:12px}.emp-model-facts code,.emp-model-requests code,.emp-model-receipt>code{overflow-wrap:anywhere;min-width:0}.emp-model-routes{display:flex;flex-wrap:wrap;gap:10px}.emp-model-routes article{display:grid;gap:8px;padding:16px;background:#f5f8fc;border-radius:13px;flex:1;min-width:160px}.emp-model-routes code{color:#52718c}.emp-model-routes span{font-size:12px;color:#63778b}.emp-model-budgets{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:14px}.emp-model-budgets article{padding:18px;background:linear-gradient(140deg,#f5f9ff,#f8fbff);border:1px solid #e4edf8;border-radius:14px;min-width:0}.emp-model-budgets article>strong{display:block;font-size:24px;letter-spacing:-.7px;color:#1d568e;margin:14px 0;overflow-wrap:anywhere}.emp-model-budgets dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px 6px;font-size:12px;margin:0}.emp-model-budgets dt{color:#6b7b8d}.emp-model-budgets dd{margin:0;text-align:right;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.emp-model-policy{border-top:1px solid #e8edf4;padding-top:18px}.emp-model-policy form{display:grid;gap:18px}.emp-model-policy-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.emp-model-policy-grid fieldset{display:grid;gap:14px;border:1px solid #e0e8f2;border-radius:12px;min-width:0;padding:18px}.emp-model-policy-grid legend{font-size:13px;font-weight:600;padding:0 5px}.emp-model-requests{display:grid;gap:10px}.emp-model-requests article{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 0;border-bottom:1px solid #edf1f7}.emp-model-requests article>code{flex:1;font-size:12px}.emp-model-receipt{display:grid;gap:15px;border:1px solid #dae5f2;background:#f9fbfe;border-radius:14px;padding:20px}.emp-model-receipt form{display:grid;gap:14px}@media(max-width:1100px){.emp-model-budgets{grid-template-columns:repeat(2,minmax(0,1fr))}.emp-model-policy-grid{grid-template-columns:1fr}}@media(max-width:600px){.emp-model-body{padding:0 14px 16px}.emp-model-budgets{grid-template-columns:1fr}.emp-model-routes article{min-width:100%}.emp-model-requests article>code{flex-basis:100%}}
+diff --git a/original/harness/plugins/naumi-enterprise/assets/employee-center.js b/modified/harness/plugins/naumi-enterprise/assets/employee-center.js
+index 6958464..190f9e6 100644
+--- a/original/harness/plugins/naumi-enterprise/assets/employee-center.js
++++ b/modified/harness/plugins/naumi-enterprise/assets/employee-center.js
+@@ -1,12 +1,13 @@
+ import {createEnterpriseWorkPanel} from './employee-enterprise-work.js';
+ import {createEmployeeActivityPanel} from './employee-activity-panel.js';
+ import {createEmployeeRuntimePanel} from './employee-runtime-panel.js';
++import {createEmployeeModelPanel} from './employee-model-panel.js';
+ import {createMemoryMaintenance} from './employee-memory-maintenance.js';
+ import {createEmployeeSyncPanel} from './employee-sync-panel.js';
+ import {PROFILE_LABELS,MEMORY_LABELS,MEMORY_STATUS,GOAL_STATUS,DELIVERY_STATUS,errorLabel,profileDifference,createEmployeeClient} from './employee-center-model.js';
+ 
+ export function createEmployeeCenter(React,{client=createEmployeeClient()}={}){
+-  const h=React.createElement,{useState,useEffect,useRef}=React,SyncPanel=createEmployeeSyncPanel(React),Maintenance=createMemoryMaintenance(React),EnterpriseWork=createEnterpriseWorkPanel(React),Activity=createEmployeeActivityPanel(React),RuntimePanel=createEmployeeRuntimePanel(React);
++  const h=React.createElement,{useState,useEffect,useRef}=React,SyncPanel=createEmployeeSyncPanel(React),Maintenance=createMemoryMaintenance(React),EnterpriseWork=createEnterpriseWorkPanel(React),Activity=createEmployeeActivityPanel(React),RuntimePanel=createEmployeeRuntimePanel(React),ModelPanel=createEmployeeModelPanel(React);
+   const time=value=>value?new Date(value).toLocaleString('zh-CN',{hour12:false}):'—';
+   const localTime=value=>value?new Date(Date.parse(value)-new Date(value).getTimezoneOffset()*60000).toISOString().slice(0,16):'';
+   const textInput=(label,value,onChange,props={})=>h('label',{className:'emp-field'},h('span',null,label),h('input',{value,onChange:e=>onChange(e.target.value),...props}));
+@@ -93,7 +94,7 @@ export function createEmployeeCenter(React,{client=createEmployeeClient()}={}){
+         loading&&!data&&h('p',{className:'emp-empty',role:'status'},'读取中…'),
+         data&&selected&&h('div',{className:'emp-content',role:'tabpanel',id:'emp-panel-'+tab,'aria-labelledby':'emp-tab-'+tab},
+           tab==='enterprise'&&h(SyncPanel,{botId}),
+-          tab==='activity'&&h(React.Fragment,null,h(RuntimePanel,{key:'runtime-'+botId,botId}),h(Activity,{key:botId,botId,writeable,goals:data.work.goals})),
++          tab==='activity'&&h(React.Fragment,null,h(RuntimePanel,{key:'runtime-'+botId,botId}),h(ModelPanel,{key:'models-'+botId,botId}),h(Activity,{key:botId,botId,writeable,goals:data.work.goals})),
+           tab==='work'&&h(EnterpriseWork,{key:botId,botId,onConnect:()=>setTab('enterprise')}),
+           tab==='memories'&&h(Maintenance,{key:botId,botId,onChanged:refresh}),
+           tab==='profile'&&h(React.Fragment,null,h(Profile,{profile,busy:busy||!writeable,save:patch=>run({action:'profile_update',expectedRevision:profile.revision,patch},{close:false})}),h('div',{className:'emp-runtime-strip'},h('span',null,'执行器 ',badge(data.heartbeat.runtimeState==='healthy'&&!data.heartbeat.stale?'在线':'状态待核查',data.heartbeat.runtimeState==='healthy'?'green':'')),h('span',null,'运行会话 ',data.heartbeat.runningSessionCount??'—'),h('span',null,'最近采样 ',time(data.heartbeat.sampledAt)))),
+diff --git a/modified/harness/plugins/naumi-enterprise/assets/employee-model-panel.js b/modified/harness/plugins/naumi-enterprise/assets/employee-model-panel.js
+new file mode 100644
+index 0000000..7f64d58
+--- /dev/null
++++ b/modified/harness/plugins/naumi-enterprise/assets/employee-model-panel.js
+@@ -0,0 +1,38 @@
++const errors={EMP_DEVICE_NOT_REGISTERED:'请先在企业页登记设备',EMP_DEVICE_BINDING_REQUIRED:'请先关联企业员工',COLLABORATION_LOGIN_REQUIRED:'请先登录企业账号',MODEL_GATEWAY_NOT_CONFIGURED:'模型网关未配置',MODEL_POLICY_DISABLED:'企业模型未启用',MODEL_POLICY_NOT_FOUND:'尚未配置模型策略',MODEL_CHANNEL_UNAVAILABLE:'模型通道暂不可达',MODEL_POLICY_STALE:'策略已更新，请重新连接',MODEL_BUDGET_EXCEEDED:'预算已用尽',MODEL_CONCURRENCY_LIMIT:'并发额度已占用',MODEL_REQUEST_LIMIT:'请求额度已用尽',MODEL_RECEIPT_NOT_FOUND:'当前范围内未找到此回执',REVISION_CONFLICT:'策略已更新，请刷新后编辑',FORBIDDEN:'仅企业负责人可操作',MODEL_RECEIPT_NOT_UNKNOWN:'该回执无需核对',MODEL_GATEWAY_RESPONSE_INVALID:'网关响应异常'};
++const scopeNames={organization:'企业',employee:'员工',bot:'Bot',task:'任务'},states={pending:'流进行中',stream_complete:'流已完成',unknown:'待核对',completed:'已结算',charged_ceiling:'上界记账',rejected:'已拒绝',reserved:'已预留',dispatched:'已派发'};
++export function usdToMicros(value){if(!/^(0|[1-9]\d{0,6})(\.\d{1,6})?$/.test(value))throw Error('金额最多保留六位小数');const [whole,fraction='']=value.split('.'),n=BigInt(whole)*1000000n+BigInt(fraction.padEnd(6,'0'));if(n>1000000000000n)throw Error('金额超过上限');return Number(n);}
++export function microsToUsd(value){return (BigInt(value??0)/1000000n).toString()+'.'+(BigInt(value??0)%1000000n).toString().padStart(6,'0').replace(/0+$/,'').padEnd(2,'0');}
++export function createEmployeeModelPanel(React,{fetcher=fetch}={}){
++ const h=React.createElement,{useState,useEffect,useRef}=React;
++ return function ModelPanel({botId}){
++  const [open,setOpen]=useState(false),[status,setStatus]=useState(null),[catalog,setCatalog]=useState(null),[taskId,setTaskId]=useState(''),[budget,setBudget]=useState(null),[receipt,setReceipt]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[draft,setDraft]=useState(null),[confirm,setConfirm]=useState(false),[reason,setReason]=useState(''),[notice,setNotice]=useState('');
++  const alive=useRef(true),generation=useRef(0),flight=useRef(false),pending=useRef(new Map());
++  useEffect(()=>{alive.current=true;return()=>{alive.current=false;generation.current++;};},[]);
++  async function api(url,body){const r=await fetcher(url,{credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(25000),...(body?{method:'POST',headers:{'Content-Type':'application/json','x-naumi-models':'1','x-naumi-employee-sync':'1'},body:JSON.stringify(body)}:{})});let v;try{v=await r.json();}catch{throw Error('MODEL_CHANNEL_UNAVAILABLE');}if(!r.ok){const e=Error(v.error??v.code??'MODEL_CHANNEL_UNAVAILABLE');e.status=r.status;throw e;}return v;}
++  async function load(){const n=++generation.current;const [s,c]=await Promise.allSettled([api('/naumi/employee-models?'+new URLSearchParams({botId,...taskId?{taskId}:{}})),api('/naumi/employee-sync?view=catalog')]);if(!alive.current||n!==generation.current)return;if(s.status==='fulfilled')setStatus(s.value);if(c.status==='fulfilled')setCatalog(c.value);const problem=s.status==='rejected'?s.reason:c.status==='rejected'?c.reason:null;setError(problem?(errors[problem.message]??problem.message):'');}
++  useEffect(()=>{if(open){setStatus(null);setBudget(null);setReceipt(null);void load();}return()=>{generation.current++;};},[open,botId,taskId]);
++  async function run(fn){if(flight.current)return;flight.current=true;setBusy(true);setError('');setNotice('');try{await fn();if(alive.current)await load();}catch(e){if(alive.current)setError(errors[e.message]??e.message);}finally{flight.current=false;if(alive.current)setBusy(false);}}
++  const local=(action,extra={})=>api('/naumi/employee-models',{action,botId,taskId:taskId||null,...extra});
++  async function manage(command){const key=JSON.stringify(command);let operationId=pending.current.get(key);if(!operationId){operationId=crypto.randomUUID();pending.current.set(key,operationId);}try{const r=await api('/naumi/employee-sync',{action:'manage',command:{...command,operationId}});pending.current.delete(key);return r;}catch(e){if(e.status&&e.status<500)pending.current.delete(key);throw e;}}
++  async function apply(command){const result=await manage(command);await api('/naumi/employee-models',{action:'apply-proof',gateway:result.gateway,proof:result.proof});if(alive.current)setNotice('网关策略已同步');return result;}
++  const button=(text,onClick,props={})=>h('button',{type:'button',disabled:busy,onClick,...props},text),field=(label,value,onChange,props={})=>h('label',{className:'emp-field'},h('span',null,label),h('input',{'aria-label':label,value,onChange:e=>onChange(e.target.value),disabled:busy,...props}));
++  function edit(){const p=catalog?.modelPolicy??{active:false,routes:[],organization:{costMicros:0,tokens:0,requests:0,concurrent:1},employee:{costMicros:0,tokens:0,requests:0,concurrent:1},task:{costMicros:0,tokens:0,requests:0,concurrent:1},maxAttempts:1,credentialSeconds:3600,enforceManaged:true,allowFallback:false,revision:0};setDraft({...p,routeText:p.routes.join(', '),...Object.fromEntries(['organization','employee','task'].map(s=>[s,{...p[s],usd:microsToUsd(p[s].costMicros)}]))});}
++  async function save(){const {revision,updatedAt,routeText,...p}=draft;for(const s of ['organization','employee','task']){const {usd,...limit}=p[s];p[s]={...limit,costMicros:usdToMicros(usd)};}p.routes=routeText.split(/[,，\s]+/).filter(Boolean);await manage({action:'model.policy.set',expectedRevision:revision,policy:p});setDraft(null);await apply({action:'model.policy.sync'});}
++  const tasks=catalog?.taskChoices??[],rows=status?.requests.filter(r=>(r.taskId??null)===(taskId||null))??[];
++  return h('details',{className:'emp-model-panel',open,'data-employee-models':true,onToggle:e=>setOpen(e.currentTarget.open)},h('summary',null,'企业模型'),open&&h('div',{className:'emp-model-body'},
++   h('header',{className:'emp-section-heading'},h('h3',null,'模型通道'),h('span',{className:'emp-badge '+(status?.connected?'green':'')},status?.connected?'已连接':'未连接'),button('刷新模型状态',load)),
++   error&&h('p',{role:'alert',className:'emp-error'},error),notice&&h('p',{role:'status',className:'emp-success'},notice),
++   h('div',{className:'emp-connect-row'},h('label',{className:'emp-field'},h('span',null,'预算范围'),h('select',{'aria-label':'模型预算范围',disabled:busy,value:taskId,onChange:e=>{setTaskId(e.target.value);setDraft(null);}},h('option',{value:''},'员工本地工作'),tasks.map(t=>h('option',{key:t.id,value:t.id},t.title)))),button('连接企业模型',()=>run(async()=>{const s=await local('connect');if(alive.current)setStatus(s);}),{className:'primary'}),button('查询权威预算',()=>run(async()=>{const b=await local('budget');if(alive.current)setBudget(b);}),{disabled:busy||!status?.connected})),
++   status?.connected&&h('div',{className:'emp-model-facts'},h('code',null,status.gateway),h('time',null,new Date(status.expiresAt).toLocaleString('zh-CN',{hour12:false})),h('span',null,'策略 v',status.policy.revision)),
++   h('div',{className:'emp-model-routes'},(status?.models??[]).map(m=>h('article',{key:m.id},h('strong',null,m.name),h('code',null,m.id),h('span',null,m.contextTokens.toLocaleString(),' context'),h('span',null,m.maxOutputTokens.toLocaleString(),' output')))),
++   budget&&h('section',{'aria-label':'权威模型预算'},h('header',{className:'emp-section-heading'},h('h3',null,'月度预算'),h('span',null,budget.period,' · USD')),h('div',{className:'emp-model-budgets'},budget.scopes.map(s=>h('article',{key:s.kind},h('h4',null,scopeNames[s.kind]),h('strong',null,'$',microsToUsd(s.usage.spent_cost)),h('dl',null,...[['额度','$'+microsToUsd(s.limit.costMicros)],['预留','$'+microsToUsd(s.usage.reserved_cost)],['Token',s.usage.spent_tokens.toLocaleString()+' / '+s.limit.tokens.toLocaleString()],['请求',s.usage.requests+' / '+s.limit.requests],['并发',s.active+' / '+s.limit.concurrent]].flatMap(([k,v])=>[h('dt',{key:k+'k'},k),h('dd',{key:k+'v'},v)])))))),
++   catalog?.canCreate&&h('section',{className:'emp-model-policy'},h('header',{className:'emp-section-heading'},h('h3',null,'企业策略'),h('span',{className:'emp-badge'},catalog.modelPolicy?.active?'已启用':'未启用'),button('编辑模型策略',edit),button('同步网关策略',()=>run(()=>apply({action:'model.policy.sync'})),{disabled:busy||!catalog.modelPolicy})),
++    draft&&h('form',{onSubmit:e=>{e.preventDefault();void run(save);}},field('模型路由',draft.routeText,v=>setDraft({...draft,routeText:v}),{required:true,maxLength:2400}),h('div',{className:'emp-model-policy-grid'},['organization','employee','task'].map(s=>h('fieldset',{key:s},h('legend',null,scopeNames[s]+(s==='employee'?' / Bot':'')),field(scopeNames[s]+'预算 USD',draft[s].usd,v=>setDraft({...draft,[s]:{...draft[s],usd:v}}),{inputMode:'decimal',required:true}),...['tokens','requests','concurrent'].map(k=>field(scopeNames[s]+({tokens:'Token额度',requests:'请求额度',concurrent:'并发额度'}[k]),draft[s][k],v=>setDraft({...draft,[s]:{...draft[s],[k]:Number(v)}}),{type:'number',required:true,min:k==='concurrent'?1:0,max:k==='concurrent'?64:k==='requests'?1e9:1e12,step:1}))))),
++     h('div',{className:'emp-model-policy-grid'},field('凭证有效秒数',draft.credentialSeconds,v=>setDraft({...draft,credentialSeconds:Number(v)}),{type:'number',min:300,max:86400,required:true}),field('最多尝试路由数',draft.maxAttempts,v=>setDraft({...draft,maxAttempts:Number(v)}),{type:'number',min:1,max:3,required:true})),
++     h('div',{className:'emp-connect-row'},...[['active','启用企业模型'],['enforceManaged','受管任务强制企业通道'],['allowFallback','允许已批准备用路由']].map(([k,label])=>h('label',{key:k,className:'emp-lock'},h('input',{type:'checkbox',disabled:busy,checked:draft[k],onChange:e=>setDraft({...draft,[k]:e.target.checked})}),label))),h('div',{className:'emp-form-footer'},button('取消编辑',()=>setDraft(null)),h('button',{type:'submit',className:'primary',disabled:busy},'保存模型策略')))),
++   rows.length>0&&h('section',{className:'emp-model-requests'},h('h3',null,'请求回执'),rows.slice(0,10).map(r=>h('article',{key:r.id},h('code',null,r.id),h('span',{className:'emp-badge'},states[r.state]??r.state),button('核对回执 '+r.id.slice(0,8),()=>run(async()=>{const v=await local('receipt',{requestId:r.id});if(alive.current){setReceipt(v);setConfirm(false);setReason('');}}))))),
++   receipt&&h('section',{className:'emp-model-receipt','aria-label':'网关回执'},h('header',{className:'emp-section-heading'},h('h3',null,states[receipt.state]??receipt.state),h('code',null,receipt.route)),h('code',null,receipt.requestId),h('div',{className:'emp-model-facts'},h('span',null,'派发 ',receipt.attempts),h('span',null,'预留 $',microsToUsd(receipt.reservedCostMicros)),receipt.chargedCostMicros!==null&&h('span',null,'记账 $',microsToUsd(receipt.chargedCostMicros))),
++    receipt.state==='unknown'&&catalog?.canCreate&&h('form',{onSubmit:e=>{e.preventDefault();void run(async()=>{await apply({action:'model.resolve-unknown',requestId:receipt.requestId,confirmedStopped:true,reason});const r=await local('receipt',{requestId:receipt.requestId});if(alive.current){setReceipt(r);setBudget(await local('budget'));}});}},field('模型请求核对记录',reason,setReason,{required:true,minLength:6,maxLength:1000}),h('label',{className:'emp-lock'},h('input',{type:'checkbox',checked:confirm,disabled:busy,onChange:e=>setConfirm(e.target.checked)}),'已核实供应商原请求停止'),h('button',{type:'submit',disabled:busy||!confirm||reason.trim().length<6},'确认停止并按上界记账')))
++  ));
++ };
++}
+diff --git a/modified/harness/plugins/naumi-enterprise/employee-models.js b/modified/harness/plugins/naumi-enterprise/employee-models.js
+new file mode 100644
+index 0000000..1c11ea3
+--- /dev/null
++++ b/modified/harness/plugins/naumi-enterprise/employee-models.js
+@@ -0,0 +1,79 @@
++import {randomUUID,verify} from 'node:crypto';import {z} from 'zod';
++import {LlmAdapter,LlmError,resolveRetryPolicy,resolveImageAttachmentAccess} from '@deepseek-ai/dsh-llm';import {PiAiAdapter} from '@deepseek-ai/dsh-llm-pi-ai';
++import {createProvider,envApiKeyAuth,InMemoryCredentialStore,defaultProviderAuthContext} from '@earendil-works/pi-ai';import {openAICompletionsApi} from '@earendil-works/pi-ai/api/openai-completions.lazy';
++export const MODEL_PROVIDER='naumi-enterprise',NO_RETRY=resolveRetryPolicy({mode:'normal',maxRetries:0},'naumi-model-gateway');
++const fail=code=>{throw new LlmError(code,code);},key=(bot,task)=>bot+'/'+(task??'local');
++export class EmployeeModels{
++ constructor({ctx,sync,directory}){Object.assign(this,{ctx,sync,directory});this.flights=new Map();this.active=new Map();this.closed=false;sync.db.exec(`CREATE TABLE IF NOT EXISTS model_credentials(id TEXT PRIMARY KEY,bot_id TEXT NOT NULL,task_id TEXT,encrypted TEXT NOT NULL);CREATE TABLE IF NOT EXISTS model_requests(id TEXT PRIMARY KEY,bot_id TEXT,task_id TEXT,session_id TEXT,state TEXT NOT NULL,updated_at TEXT NOT NULL);UPDATE model_requests SET state='unknown' WHERE state='pending';`);}
++ verify(value,botId,taskId){
++  const registration=this.sync.registration(),device=this.sync.offlineClaims(),[kid,payload,signature,...extra]=value.token.split('.');let c;
++  try{if(extra.length||kid!==registration.keyId||!verify(null,Buffer.from(payload),registration.serverPublicKey,Buffer.from(signature,'base64url')))throw Error();c=JSON.parse(Buffer.from(payload,'base64url').toString());}catch{fail('MODEL_CREDENTIAL_SIGNATURE_INVALID');}
++  if(c.aud!=='naumi-model-gateway'||c.iss!==this.sync.origin||c.gateway!==value.gateway||c.tenantId!==registration.tenantId||c.memberId!==registration.memberId||c.deviceId!==this.sync.deviceId||c.botId!==botId||c.taskId!==taskId||!device.bindings.some(b=>b.localBotId===botId&&b.employeeId===c.employeeId)||c.authEpoch<device.authEpoch)fail('MODEL_CREDENTIAL_BINDING_INVALID');
++  const u=new URL(c.gateway);if(u.username||u.password||u.pathname!=='/'||u.search||u.hash||u.protocol!=='https:'&&!(u.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(u.hostname)))fail('MODEL_GATEWAY_URL_INVALID');
++  const start=Date.parse(c.issuedAt),end=Date.parse(c.expiresAt);if(!Number.isFinite(start)||!Number.isFinite(end)||end<=this.sync.clock()||end-start>86400000||this.sync.clock()<start-60000)fail('MODEL_CREDENTIAL_EXPIRED');
++  if(!c.policy?.active||!Array.isArray(c.policy.routes)||!Number.isInteger(c.policy.revision))fail('MODEL_POLICY_DISABLED');if(c.policy.revision<(device.modelPolicyRevision??0))fail('MODEL_POLICY_STALE');return c;
++ }
++ cached(botId,taskId){const r=this.sync.db.prepare('SELECT encrypted FROM model_credentials WHERE id=?').get(key(botId,taskId));return r?this.sync.vault.unseal(r.encrypted):null;}
++ async credential(botId,taskId=null,{force=false,signal}={}){
++  if(this.closed)fail('MODEL_CLIENT_CLOSED');this.sync.bot(botId);let old=this.cached(botId,taskId),oldClaims;try{if(old)oldClaims=this.verify(old,botId,taskId);}catch{old=null;}
++  if(old&&!force&&old.models?.length&&Date.parse(oldClaims.expiresAt)-this.sync.clock()>30000)return old;
++  const id=key(botId,taskId);if(this.flights.has(id))return this.flights.get(id);
++  let gotCredential=false;const flight=(async()=>{try{const claims=this.sync.offlineClaims(),binding=claims.bindings.find(b=>b.localBotId===botId);if(!binding)fail('EMP_DEVICE_BINDING_REQUIRED');
++    const response=await this.sync.device({action:'model.authorize',employeeId:binding.employeeId,taskId},{signal}),value=response.model;if(!value?.token||value.token.length>15000)fail('MODEL_CREDENTIAL_INVALID');const c=this.verify(value,botId,taskId);
++    gotCredential=true;if(oldClaims&&c.policy.revision<oldClaims.policy.revision)fail('MODEL_POLICY_ROLLBACK');
++    // Retire the old revision before catalog I/O. A failed catalog must not revive old authorization.
++    value.models=[];this.sync.db.prepare('INSERT INTO model_credentials VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET encrypted=excluded.encrypted').run(id,botId,taskId,this.sync.vault.seal(value));
++    const models=await this.gateway(value,'/v1/models',{signal}),allowed=new Set(c.policy.routes);value.models=z.array(z.object({id:z.string().max(80),name:z.string().max(120),contextTokens:z.number().int().min(128).max(2000000),maxOutputTokens:z.number().int().positive().max(1000000),vision:z.boolean(),inputMicrosPerMillion:z.number().int().nonnegative().max(1e9),outputMicrosPerMillion:z.number().int().nonnegative().max(1e9)}).passthrough()).max(30).parse(models.data).filter(m=>allowed.has(m.id));
++    this.sync.db.prepare('INSERT INTO model_credentials VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET encrypted=excluded.encrypted').run(id,botId,taskId,this.sync.vault.seal(value));this.onChange?.();return value;
++   }catch(e){if(old&&!force&&!gotCredential&&(!e.status||e.status>=500)&&!/^MODEL_CREDENTIAL_|MODEL_POLICY_/.test(e.code??'')){this.verify(old,botId,taskId);return old;}throw e;}})().finally(()=>this.flights.delete(id));this.flights.set(id,flight);return flight;
++ }
++ async gateway(value,endpoint,{signal,body}={}){const r=await fetch(value.gateway+endpoint,{method:body?'POST':'GET',redirect:'error',headers:{Authorization:'Bearer '+value.token,...body?{'Content-Type':'application/json'}:{}},signal:AbortSignal.any([...(signal?[signal]:[]),AbortSignal.timeout(20000)]),...body?{body:JSON.stringify(body)}:{}});const text=await r.text();if(text.length>2*1024*1024)fail('MODEL_GATEWAY_RESPONSE_INVALID');let result;try{result=JSON.parse(text);}catch{fail('MODEL_GATEWAY_RESPONSE_INVALID');}if(!r.ok)fail(result.error?.code??'MODEL_GATEWAY_UNAVAILABLE');return result;}
++ catalog(){const models=new Map();for(const r of this.sync.db.prepare('SELECT encrypted FROM model_credentials').all()){const v=this.sync.vault.unseal(r.encrypted);for(const m of v.models??[])models.set(m.id,m);}return [...models.values()];}
++ status(botId,taskId=null){const v=this.cached(botId,taskId);let c,error=null;try{if(v)c=this.verify(v,botId,taskId);}catch(e){error=e.code??'MODEL_CREDENTIAL_INVALID';}return {provider:MODEL_PROVIDER,connected:!!v&&!error,gateway:v?.gateway??null,expiresAt:c?.expiresAt??null,policy:c?.policy??null,error,models:v?.models??[],requests:this.sync.db.prepare('SELECT id,task_id AS taskId,session_id AS sessionId,state,updated_at AS updatedAt FROM model_requests WHERE bot_id=? ORDER BY updated_at DESC LIMIT 30').all(botId)};}
++ async applyProof(gateway,proof){
++  const registration=this.sync.registration();if(!registration)fail('EMP_DEVICE_NOT_REGISTERED');const [kid,payload,signature,...extra]=proof.split('.');let p;
++  try{if(extra.length||kid!==registration.keyId||!verify(null,Buffer.from(payload),registration.serverPublicKey,Buffer.from(signature,'base64url')))throw Error();p=JSON.parse(Buffer.from(payload,'base64url').toString());}catch{fail('MODEL_ADMIN_SIGNATURE_INVALID');}
++  if(p.aud!=='naumi-model-admin'||p.iss!==this.sync.origin||p.tenantId!==registration.tenantId||p.gateway!==gateway||Date.parse(p.expiresAt)<=this.sync.clock())fail('MODEL_ADMIN_INVALID');
++  const u=new URL(gateway);if(u.username||u.password||u.pathname!=='/'||u.search||u.hash||u.protocol!=='https:'&&!(u.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(u.hostname)))fail('MODEL_GATEWAY_URL_INVALID');
++  const r=await fetch(gateway+'/admin',{method:'POST',redirect:'error',headers:{'Content-Type':'application/json'},body:JSON.stringify({proof}),signal:AbortSignal.timeout(15000)}),v=await r.json();if(!r.ok)fail(v.error?.code??'MODEL_POLICY_SYNC_FAILED');return v;
++ }
++ async close(){this.closed=true;for(const a of this.active.values())a.controller.abort(Error('MODEL_CLIENT_CLOSED'));await Promise.allSettled([...this.flights.values(),...[...this.active.values()].map(a=>a.done)]);}
++}
++function transport(ctx,models,gateway,token,requestId){
++ const descriptors=models.map(m=>({id:m.id,provider:MODEL_PROVIDER,baseUrl:gateway+'/v1',name:m.name,api:'openai-completions',reasoning:false,input:m.vision?['text','image']:['text'],contextWindow:m.contextTokens,maxTokens:m.maxOutputTokens,cost:{input:m.inputMicrosPerMillion/1e6,output:m.outputMicrosPerMillion/1e6,cacheRead:m.inputMicrosPerMillion/1e6,cacheWrite:m.inputMicrosPerMillion/1e6}}));
++ const provider=createProvider({id:MODEL_PROVIDER,name:'Naumi 企业模型',baseUrl:gateway+'/v1',models:descriptors,auth:{apiKey:envApiKeyAuth('Naumi device model credential',[])},api:openAICompletionsApi()});
++ const profile={provider:MODEL_PROVIDER,displayName:'Naumi 企业模型',api:'openai-completions',baseURL:gateway+'/v1',streamIdleTimeoutMs:300000,maxRequestImageBytes:8*1024*1024,maxRequestImages:15,imageOffloadCountQuantum:5,requestImagePixelBudget:4194304,requestImageMaxBytes:1048576,retryPolicy:NO_RETRY,piProvider:provider,modelErrors:new Map(),configuredMaxTokens:new Map(models.map(m=>[m.id,m.maxOutputTokens]))};
++ return new PiAiAdapter({profiles:()=>new Map([[MODEL_PROVIDER,profile]]),resolveApiKey:async()=>token,auth:{credentials:new InMemoryCredentialStore(),authContext:defaultProviderAuthContext()},prepareHeaders:(_request,headers)=>{headers.set('X-Naumi-Request-Id',requestId);return headers;},resolveAttachments:()=>ctx.get('attachments'),resolveImageAccess:(attachments,ref)=>resolveImageAttachmentAccess(attachments,p=>ctx.get('fs')?.processPathFromHostPath(p),ref)});
++}
++export class EmployeeGatewayAdapter extends LlmAdapter{
++ constructor({ctx,client,directory}){super();Object.assign(this,{ctx,client,directory});}
++ providerInfo(){return {id:MODEL_PROVIDER,name:'Naumi 企业模型'};}
++ providerRetryPolicy(){return NO_RETRY;}
++ async listModels(){const models=this.client.catalog();if(!models.length)return [];const v=this.client.sync.db.prepare('SELECT encrypted FROM model_credentials LIMIT 1').get(),gateway=this.client.sync.vault.unseal(v.encrypted).gateway;return transport(this.ctx,models,gateway,'metadata-only',randomUUID()).listModels(MODEL_PROVIDER);}
++ async resolveModel(provider,model){const row=this.client.sync.db.prepare('SELECT encrypted FROM model_credentials').all().map(r=>this.client.sync.vault.unseal(r.encrypted)).find(v=>v.models?.some(m=>m.id===model));if(!row)fail('MODEL_ROUTE_NOT_CACHED');return transport(this.ctx,row.models,row.gateway,'metadata-only',randomUUID()).resolveModel(provider,model);}
++ async prepareCall(provider,model){return {model:await this.resolveModel(provider,model),stream:options=>this.stream(options)};}
++ async *stream(options){
++  const agent=options.sessionId?this.ctx.agents.get(options.sessionId):null;if(!agent)fail('MODEL_SESSION_REQUIRED');const membership=this.ctx.agentTeams.tryMembership(agent),root=membership?.root??agent,managed=this.client.sync.runtimeGate?await this.client.sync.runtimeGate.context(agent):null,botId=managed?.botId??this.directory.forSession(root.id)?.id,taskId=managed?.taskId??null;if(!botId)fail('MODEL_BOT_BINDING_REQUIRED');
++  const controller=new AbortController(),signal=AbortSignal.any([controller.signal,...options.signal?[options.signal]:[]]),id=randomUUID();let finish;const done=new Promise(resolve=>{finish=resolve;});this.client.active.set(id,{controller,done});
++  try{
++   const value=await this.client.credential(botId,taskId,{signal});if(!value.models.some(m=>m.id===options.model))fail('MODEL_ROUTE_NOT_AUTHORIZED');
++   this.client.sync.db.prepare('INSERT INTO model_requests VALUES(?,?,?,?,?,?)').run(id,botId,taskId,root.id,'pending',new Date().toISOString());let success=false;
++   try{const adapter=transport(this.ctx,value.models,value.gateway,value.token,id);for await(const chunk of adapter.stream({...options,signal})){if(chunk.type==='finish'&&['stop','tool-calls','max-tokens'].includes(chunk.reason.kind))success=true;yield chunk;}}
++   finally{this.client.sync.db.prepare('UPDATE model_requests SET state=?,updated_at=? WHERE id=?').run(success?'stream_complete':'unknown',new Date().toISOString(),id);}
++  }catch(e){throw new LlmError(/^MODEL_[A-Z_]+$/.test(e.code??e.message)?e.code??e.message:'MODEL_CHANNEL_UNAVAILABLE','MODEL_CHANNEL_UNAVAILABLE');}
++  finally{this.client.active.delete(id);finish();}
++ }
++}
++export function installEmployeeModels(scope,directory,{sync}={}){
++ if(!sync)return null;const client=new EmployeeModels({ctx:scope,sync,directory});sync.models=client;
++ const host=scope.inject(['llm','agents','agentTeams'],ctx=>{const adapter=new EmployeeGatewayAdapter({ctx,client,directory}),registration=ctx.llm.registerAdapter([MODEL_PROVIDER],adapter);client.onChange=()=>ctx.emit('llm/adapters-updated');ctx.effect(()=>()=>{client.onChange=null;registration();});});
++ scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/employee-models',handler:async(req,res)=>{
++  const a=scope.connection.admit(req);if('rejection'in a){res.writeHead(a.rejection).end();return;}if(a.peer.principal.kind!=='owner'){res.writeHead(403).end();return;}res.setHeader('Cache-Control','no-store');const send=(code,v)=>{if(!res.destroyed)res.writeHead(code,{'Content-Type':'application/json'}).end(JSON.stringify(v));};
++  try{const q=new URL(req.url,'http://localhost').searchParams;if(req.method==='GET'){const botId=z.string().min(1).max(200).parse(q.get('botId')),taskId=q.get('taskId')??null;sync.bot(botId);send(200,client.status(botId,taskId));return;}
++   if(req.method!=='POST'){send(405,{error:'METHOD_NOT_ALLOWED'});return;}if(req.headers['x-naumi-models']!=='1'||req.headers.origin&&![`http://${req.headers.host}`,`https://${req.headers.host}`].includes(req.headers.origin)){send(403,{error:'MODEL_SAME_ORIGIN_REQUIRED'});return;}
++   let text='',n=0;for await(const b of req){n+=b.length;if(n>32768){send(413,{error:'MODEL_BODY_TOO_LARGE'});return;}text+=b;}let p;try{p=z.union([z.object({action:z.literal('apply-proof'),gateway:z.string().url(),proof:z.string().max(15000)}).strict(),z.object({action:z.enum(['connect','budget','receipt']),botId:z.string().min(1).max(200),taskId:z.string().uuid().nullable().default(null),requestId:z.string().uuid().optional()}).strict()]).parse(JSON.parse(text));}catch{send(400,{error:'MODEL_INVALID_REQUEST'});return;}
++   if(p.action==='apply-proof'){send(200,await client.applyProof(p.gateway,p.proof));return;}
++   const value=await client.credential(p.botId,p.taskId,{force:p.action==='connect'});send(200,p.action==='connect'?client.status(p.botId,p.taskId):await client.gateway(value,p.action==='budget'?'/budget':'/receipt?id='+z.string().uuid().parse(p.requestId)));
++  }catch(e){const code=/^(?:MODEL|EMP)_[A-Z_]+$/.test(e.code??e.message)?e.code??e.message:'MODEL_CHANNEL_UNAVAILABLE';send(/REQUIRED|NOT_REGISTERED|DISABLED/.test(code)?403:/CONFLICT/.test(code)?409:503,{error:code});}
++ }}));return {client,async close(){await client.close();await host.dispose();if(sync.models===client)delete sync.models;}};
++}
+diff --git a/original/harness/plugins/naumi-enterprise/employee-runtime-gate.js b/modified/harness/plugins/naumi-enterprise/employee-runtime-gate.js
+index b07c2f9..e2fca0e 100644
+--- a/original/harness/plugins/naumi-enterprise/employee-runtime-gate.js
++++ b/modified/harness/plugins/naumi-enterprise/employee-runtime-gate.js
+@@ -78,7 +78,7 @@ export class EmployeeRuntimeGate{
+       return {mode:'waiting_authority',reason:unresolved?'RUNTIME_RESULT_UNRESOLVED':'RUNTIME_LEASE_UNAVAILABLE'};
+     }catch(e){return {mode:'waiting_authority',reason:publicError(e)};}
+   }
+-  inference(b){const m=this.mode(b);return ['unmanaged','online','local_only'].includes(m.mode)?null:m.reason;}
++  inference(b,selection){const m=this.mode(b);if(!['unmanaged','online','local_only'].includes(m.mode))return m.reason;if(b&&this.sync.offlineClaims().requireModelGateway&&selection?.provider!=='naumi-enterprise')return 'RUNTIME_MODEL_GATEWAY_REQUIRED';return null;}
+   deny(exec){
+     try{
+       const b=this.contextSync(exec.agent);if(!b)return;
+@@ -174,8 +174,8 @@ export class EmployeeRuntimeGate{
+       const b=this.binding(run.rootSessionId),m=this.mode(b);
+       if(m.mode!=='online'){run.controller.abort(Error('RUNTIME_TOOL_PERMIT_LOST'));try{this.unknown(b,'RUNTIME_TOOL_PERMIT_LOST',run.id);}catch{this.ctx.logger?.warn('RUNTIME_UNKNOWN_STORAGE_FAILED');}}
+     }
+-    for(const {agent} of this.models.values()){
+-      const b=this.contextSync(agent),reason=this.inference(b);if(reason)agent.cancel({kind:'hook',reason},{keepInbox:true});
++    for(const {agent,provider} of this.models.values()){
++      const b=this.contextSync(agent),reason=this.inference(b,{provider});if(reason)agent.cancel({kind:'hook',reason},{keepInbox:true});
+     }
+     for(const row of this.store.db.prepare("SELECT json FROM entities WHERE type='managed_session' AND json_extract(json,'$.unknown') IS NOT NULL").all()){
+       const b=JSON.parse(row.json);if(!b.unknown||b.unknown.remoteReportedAt||this.remoteReports.has(b.sessionId)||this.clock()-(this.lastReport.get(b.sessionId)??0)<5000)continue;
+@@ -208,14 +208,14 @@ export function installEmployeeRuntimeGate(scope,directory,store,{sync,intervalM
+   scope.on('agent/created',async({agent})=>{if(await gate.context(agent))gate.mountNative(agent);});
+   scope.on('agent/disposed',({agent})=>{gate.nativeExecutors.get(agent)?.();gate.nativeExecutors.delete(agent);});
+   gate.initialization=Promise.allSettled(scope.agents.list().map(async agent=>{if(await gate.context(agent))gate.mountNative(agent);}));
+-  scope.on('agent/pre-step',async(payload,next)=>{payload.signal.throwIfAborted();const b=await gate.context(payload.agent);if(gate.inference(b))return {kind:'reject'};const decision=await next();payload.signal.throwIfAborted();return gate.inference(gate.contextSync(payload.agent))?{kind:'reject'}:decision;});
++  scope.on('agent/pre-step',async(payload,next)=>{payload.signal.throwIfAborted();const b=await gate.context(payload.agent);if(gate.inference(b,payload.modelSelection))return {kind:'reject'};const decision=await next();payload.signal.throwIfAborted();return gate.inference(gate.contextSync(payload.agent),payload.modelSelection)?{kind:'reject'}:decision;});
+   scope.on('tools/pre-execute',async(exec,next)=>{exec.signal.throwIfAborted();await gate.context(exec.agent);const reason=gate.deny(exec);return reason?{kind:'deny',reason}:next();});
+   scope.on('tools/execute',(exec,next)=>gate.execute(exec,next));
+   scope.on('llm/stream',async function*(options,next){
+-    const agent=options.sessionId?scope.agents.get(options.sessionId):null,b=agent?await gate.context(agent):options.sessionId?gate.binding(options.sessionId):null,reason=gate.inference(b);
++    const agent=options.sessionId?scope.agents.get(options.sessionId):null,b=agent?await gate.context(agent):options.sessionId?gate.binding(options.sessionId):null,reason=gate.inference(b,options);
+     if(reason)throw new LlmError(reason,'RUNTIME_ADMISSION_DENIED');
+-    const token=randomUUID();if(b&&agent&&isAgentLoopRequest(options))gate.models.set(token,{agent});
+-    try{for await(const chunk of next()){const reason=gate.inference(agent?gate.contextSync(agent):b?gate.binding(b.sessionId):null);if(reason)throw new LlmError(reason,'RUNTIME_ADMISSION_DENIED');yield chunk;}}finally{gate.models.delete(token);}
++    const token=randomUUID();if(b&&agent&&isAgentLoopRequest(options))gate.models.set(token,{agent,provider:options.provider});
++    try{for await(const chunk of next()){const reason=gate.inference(agent?gate.contextSync(agent):b?gate.binding(b.sessionId):null,options);if(reason)throw new LlmError(reason,'RUNTIME_ADMISSION_DENIED');yield chunk;}}finally{gate.models.delete(token);}
+   });
+   scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/employee-runtime-gate',handler:async(req,res)=>{
+     res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');const a=scope.connection.admit(req);if('rejection'in a){res.writeHead(a.rejection).end();return;}if(a.peer.principal.kind!=='owner'){res.writeHead(403).end();return;}
+diff --git a/original/harness/plugins/naumi-enterprise/employees.js b/modified/harness/plugins/naumi-enterprise/employees.js
+index e54c955..95cdfde 100644
+--- a/original/harness/plugins/naumi-enterprise/employees.js
++++ b/modified/harness/plugins/naumi-enterprise/employees.js
+@@ -9,6 +9,7 @@ import {EmployeeMemoryMaintenance,maintenanceCommands} from './employee-memory-m
+ import {createEnterpriseWorkTools} from './employee-enterprise-work.js';
+ import {installEmployeeActivity} from './employee-activity.js';
+ import {installEmployeeRuntimeGate} from './employee-runtime-gate.js';
++import {installEmployeeModels} from './employee-models.js';
+ 
+ export function createEmployeeTools(service,{sync}={}){
+   const output={schema:{type:'json'},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]};
+@@ -43,6 +44,7 @@ export function installEmployees(ctx,directory,{store,onReady,heartbeatOptions={
+     const workRuntime=installEmployeeWork(scope,directory,data);
+     const syncRuntime=installEmployeeSync(scope,directory,data,{origin:collaborationOrigin,sync});
+     const gateRuntime=installEmployeeRuntimeGate(scope,directory,data,{sync:syncRuntime});
++    const modelsRuntime=installEmployeeModels(scope,directory,{sync:syncRuntime});
+     const service=new EmployeeService(scope,directory,data),maintenance=new EmployeeMemoryMaintenance(data),installed=new Map();
+     const activityRuntime=installEmployeeActivity(scope,directory,data,service,{...activityOptions,sync:syncRuntime});
+     const heartbeat=new EmployeeHeartbeat({agents:scope.agents,directory,store:data,...heartbeatOptions,onError:()=>scope.logger.warn('EMP_HEARTBEAT_SCAN_FAILED')});
+@@ -98,7 +100,7 @@ export function installEmployees(ctx,directory,{store,onReady,heartbeatOptions={
+       }catch(error){const code=error instanceof z.ZodError?'EMP_INVALID_REQUEST':/^EMP_[A-Z_]+$/.test(error.message)?error.message:'EMP_STORAGE_UNAVAILABLE';
+         send(/CONFLICT/.test(code)?409:/NOT_FOUND/.test(code)?404:/REQUIRED|LOCKED|ARCHIVED|DISABLED/.test(code)?403:/STORAGE|SCHEMA/.test(code)?503:400,{error:code});}
+     }}));
+-    heartbeat.start();onReady?.({service,store:data,heartbeat,activityRuntime,gateRuntime,settled:()=>Promise.all([...background])});
+-    scope.effect(()=>async()=>{heartbeat.close();await gateRuntime?.close();await activityRuntime.close();await syncRuntime?.close();await workRuntime.dispose();for(const dispose of installed.values())dispose();installed.clear();await Promise.all(background);data.close();});
++    heartbeat.start();onReady?.({service,store:data,heartbeat,activityRuntime,gateRuntime,modelsRuntime,settled:()=>Promise.all([...background])});
++    scope.effect(()=>async()=>{heartbeat.close();await gateRuntime?.close();await modelsRuntime?.close();await activityRuntime.close();await syncRuntime?.close();await workRuntime.dispose();for(const dispose of installed.values())dispose();installed.clear();await Promise.all(background);data.close();});
+   });
+ }
+diff --git a/original/harness/plugins/naumi-enterprise/host.js b/modified/harness/plugins/naumi-enterprise/host.js
+index 838c736..27f9ed5 100644
+--- a/original/harness/plugins/naumi-enterprise/host.js
++++ b/modified/harness/plugins/naumi-enterprise/host.js
+@@ -16,6 +16,7 @@ export function apply(ctx,config) {
+   const designOrigin=validateOrigin(config.designOrigin);
+   const assets=new Map([['employee-enterprise-work.js','text/javascript; charset=utf-8'],['employee-memory-maintenance.js','text/javascript; charset=utf-8'],['employee-sync-panel.js','text/javascript; charset=utf-8'],['employee-center.js','text/javascript; charset=utf-8'],['employee-center-model.js','text/javascript; charset=utf-8'],['employee-center.css','text/css; charset=utf-8'],['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml'],['browser-client.js','text/javascript; charset=utf-8'],['browser-native-client.js','text/javascript; charset=utf-8'],['browser-native.css','text/css; charset=utf-8'],['browser-scheduler.js','text/javascript; charset=utf-8'],['browser.css','text/css; charset=utf-8'],['team-panel.css','text/css; charset=utf-8'],['team-panel.js','text/javascript; charset=utf-8'],['team-panel-model.js','text/javascript; charset=utf-8'],['bot-sidebar.js','text/javascript; charset=utf-8'],['bot-sidebar-model.js','text/javascript; charset=utf-8'],['bot-sidebar.css','text/css; charset=utf-8']]);
+   assets.set('employee-runtime-panel.js','text/javascript; charset=utf-8');
++  assets.set('employee-model-panel.js','text/javascript; charset=utf-8');
+   assets.set('employee-activity-panel.js','text/javascript; charset=utf-8');
+   ctx.effect(()=>ctx.webServer.register({kind:'prefix',path:'/naumi/assets',handler:async(req,res)=>{
+     const name=new URL(req.url,'http://localhost').pathname.split('/').at(-1);
