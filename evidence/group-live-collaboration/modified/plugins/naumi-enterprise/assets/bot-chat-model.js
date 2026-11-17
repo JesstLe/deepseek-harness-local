@@ -17,6 +17,14 @@ export function groupTimeline(posts,activity=[]){
  for(const item of activity)rows.push({...item,order:Number.MAX_SAFE_INTEGER});
  return rows.sort((a,b)=>a.createdAt.localeCompare(b.createdAt)||a.order-b.order||a.id.localeCompare(b.id));
 }
+/** Stop one current reply per member; preserve later queued chat topics. */
+export function groupInterruptTargets(replies){
+ const targets=new Map();
+ for(const r of replies){if(!['queued','starting','sent'].includes(r.state))continue;const prior=targets.get(r.sessionId);
+  if(!prior||prior.state==='queued'&&r.state!=='queued')targets.set(r.sessionId,r);
+ }
+ return [...targets.values()];
+}
 export function conversationRows(bots,rooms,query='',pinned=null){const q=query.trim().toLocaleLowerCase();const rows=[...bots.filter(b=>b.status==='active').map(bot=>({kind:'bot',id:bot.id,bot,name:bot.name,pinned:bot.id===pinned})),...rooms.map(room=>({kind:'group',id:room.id,room,name:room.name,pinned:false}))];return rows.filter(r=>!q||r.name.toLocaleLowerCase().includes(q)).sort((a,b)=>Number(b.pinned)-Number(a.pinned));}
 export async function groupRequest(url='/naumi/bot-groups',{signal,body,fetcher=globalThis.fetch}={}){
  const r=await fetcher(url,{credentials:'same-origin',cache:'no-store',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(15000)]):AbortSignal.timeout(15000),...(body?{method:'POST',headers:{'Content-Type':'application/json','x-naumi-bot-groups':'1'},body:JSON.stringify(body)}:{})});
