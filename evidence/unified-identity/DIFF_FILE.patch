@@ -1,0 +1,3503 @@
+diff --git a/.gitattributes b/.gitattributes
+index 4b17411..68045fb 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -224,3 +224,19 @@ plugins/naumi-ui-layout/UPSTREAM.json text eol=lf
+ /evidence/unified-bot-chat/DIFF_FILE.patch -text whitespace=-blank-at-eol
+ /evidence/unified-bot-chat/*.log -text whitespace=-blank-at-eol,cr-at-eol
+ /evidence/unified-bot-chat/ROLLBACK.sh text eol=lf
++
++# Unified Naumi account session and reference login presentation.
++/desktop/app/identity* text eol=lf
++/desktop/app/identity-style/** -text
++/desktop/app/main.cjs text eol=lf
++/desktop/app/preload.cjs text eol=lf
++/desktop/scripts/prepare-runtime.mjs text eol=lf
++/desktop/scripts/verify-unified-identity.mjs text eol=lf
++/desktop/tests/identity.test.cjs text eol=lf
++/tests/naumi-context-ui.test.mjs text eol=lf
++/docs/implementation/UNIFIED_IDENTITY.md text eol=lf
++/scripts/unified-identity-evidence.mjs text eol=lf
++/evidence/unified-identity/** -text whitespace=cr-at-eol
++/evidence/unified-identity/*.log -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
++/evidence/unified-identity/DIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab,cr-at-eol
++/evidence/unified-identity/ROLLBACK.sh text eol=lf
+diff --git a/desktop/app/identity-runtime.cjs b/desktop/app/identity-runtime.cjs
+new file mode 100644
+index 0000000..36a4a26
+--- /dev/null
++++ b/desktop/app/identity-runtime.cjs
+@@ -0,0 +1,23 @@
++'use strict';
++const {identityOrigin,readIdentityConfig,bindAccount,sessionPartition,IdentitySession}=require('./identity.cjs');
++class IdentityRuntime{
++ constructor({userData,sessionFor,managedOrigin=''}){this.userData=userData;this.sessionFor=sessionFor;this.managedOrigin=managedOrigin?identityOrigin(managedOrigin):'';this.active=null;this.client=null;this.error=null;}
++ origin(){return this.managedOrigin||readIdentityConfig(this.userData)?.origin||'';}
++ status(){return {available:true,origin:this.origin(),managed:!!this.managedOrigin,user:this.active?.user??null,error:this.error};}
++ use(origin){origin=identityOrigin(origin);if(!this.client||this.client.origin!==origin)this.client=new IdentitySession({origin,session:this.sessionFor(sessionPartition(origin))});return this.client;}
++ async restore(){
++  // An already opened local account continues in this process during an outage.
++  // Cold start always verifies the server; no unsigned offline grant is invented.
++  if(this.active)return this.active;const origin=this.origin();if(!origin)return null;
++  try{const user=await this.use(origin).inspect();this.error=user||!readIdentityConfig(this.userData)?null:'IDENTITY_LOGIN_REQUIRED';return user?(this.active=bindAccount(this.userData,origin,user)):null;}catch(error){this.error=/^IDENTITY_[A-Z_]+$/.test(error.message)?error.message:'IDENTITY_UNAVAILABLE';return null;}
++ }
++ async login(input){
++  if(this.active)throw Error('IDENTITY_ALREADY_SIGNED_IN');
++  if(!input||typeof input!=='object'||Object.keys(input).some(k=>!['origin','account','password'].includes(k)))throw Error('IDENTITY_INPUT_INVALID');
++  const origin=identityOrigin(input.origin||this.origin());if(this.managedOrigin&&origin!==this.managedOrigin)throw Error('IDENTITY_MANAGED_ORIGIN');
++  const user=await this.use(origin).login({account:input.account,password:input.password});
++  this.active=bindAccount(this.userData,origin,user);this.error=null;return this.active;
++ }
++ async logout(){const result=this.client?await this.client.logout():{remoteConfirmed:false};this.active=null;this.error=null;return result;}
++}
++module.exports={IdentityRuntime};
+diff --git a/desktop/app/identity-style/SOURCE.json b/desktop/app/identity-style/SOURCE.json
+new file mode 100644
+index 0000000..c1f20fa
+--- /dev/null
++++ b/desktop/app/identity-style/SOURCE.json
+@@ -0,0 +1,69 @@
++{
++  "reference": "http://127.0.0.1:3112/login",
++  "sourceProject": "E:/Workspace/naumi-design-ops",
++  "brandDelta": "DESIGN OS sublabel removed; Naumi original symbol and italic wordmark retained",
++  "files": [
++    {
++      "source": "src/components/auth.css",
++      "target": "desktop/app/identity-style/auth.css",
++      "sourceSHA256": "41ca099edb71f3aa1775939e897b2d21f795a39e5502926aa60c59373ae6e7f2",
++      "modifiedSHA256": "94be9e54649100a64dd2c7f29aac832f276e0451265ed9a194dc9d0f2992d125"
++    },
++    {
++      "source": "src/components/auth-smoke.css",
++      "target": "desktop/app/identity-style/auth-smoke.css",
++      "sourceSHA256": "5af4f4bcee78f3d20afda8735438978ffcd7c2ba522b7886eceef2025a212d26",
++      "modifiedSHA256": "d5d12f7e866339ecbfd058a5409cb72f6f85e09660d09be6fd9ed6cc2ed66448"
++    },
++    {
++      "source": "src/components/auth-liquid.css",
++      "target": "desktop/app/identity-style/auth-liquid.css",
++      "sourceSHA256": "6ccb5b23e120b3453e3e85c52c4a2f18acae39e8fff69c1177c31e13bd29a03b",
++      "modifiedSHA256": "6ccb5b23e120b3453e3e85c52c4a2f18acae39e8fff69c1177c31e13bd29a03b"
++    },
++    {
++      "source": "public/illustrations/auth-grain.svg",
++      "target": "desktop/app/identity-style/auth-grain.svg",
++      "sourceSHA256": "b9a35a571bb9268dc9e86e32ed13924970158cc866b23a1907dc606b10fdae01",
++      "modifiedSHA256": "b9a35a571bb9268dc9e86e32ed13924970158cc866b23a1907dc606b10fdae01"
++    },
++    {
++      "source": "public/brand/naumi/wordmark-italic.svg",
++      "target": "desktop/app/identity-style/wordmark-italic.svg",
++      "sourceSHA256": "4629962f5a82d4a635f94f41ba09ab06020fad7487bf98ebb00f65196598a3d2",
++      "modifiedSHA256": "4629962f5a82d4a635f94f41ba09ab06020fad7487bf98ebb00f65196598a3d2"
++    },
++    {
++      "source": "src/components/auth-smoke-shader.ts",
++      "target": "desktop/app/identity-style/smoke-shader.js",
++      "sourceSHA256": "fa406eb2041deadfde289dffb4157b9c6aec640ad8781d9779de68c4a835053a",
++      "modifiedSHA256": "83e57d8ffe87c9773615483b7b44c9767a96bd0c68c387c0fc2cc46467efb46a"
++    },
++    {
++      "source": "src/components/auth-liquid-shader.ts",
++      "target": "desktop/app/identity-style/liquid-shader.js",
++      "sourceSHA256": "2012f9410e4f4175acc907b6bc49c141f60f43b86bf08ceee0fc813d14655ab9",
++      "modifiedSHA256": "0df148e727fc5c36ae66c5b0ab6d5f5a3b82a626e783f86848c2acb1b0198d72"
++    },
++    {
++      "source": "src/components/auth-smoke.tsx",
++      "target": "desktop/app/identity-style/smoke.js",
++      "sourceSHA256": "c4992ece63d6875fdebac459cbe4d60aadb5b8babc091157bf0e654da15d0678",
++      "modifiedSHA256": "264728760ad9f9369984c0a647fc2527f78f79746aee6542472d448fb1ab2efb",
++      "transformation": "React effect -> DOM mount; shader, draw budget and cleanup retained"
++    },
++    {
++      "source": "src/components/auth-liquid-controls.tsx",
++      "target": "desktop/app/identity-style/liquid.js",
++      "sourceSHA256": "a8d2936ea1a112ebc226546c7758d7c0de62d9376680aaf9f8f5a941e60935fe",
++      "modifiedSHA256": "2b70060df8233a53502c7b377a6baefc993c3878814913e920a27f057792c82a",
++      "transformation": "React effect -> DOM mount; optical layer owns no action or credential state"
++    }
++  ],
++  "bundle": {
++    "path": "desktop/app/identity-visual.js",
++    "sha256": "2cd8bf530b5633e28a1eefb471c4dd9fe17cca6b342db378ba9f986f5e5a0e3d",
++    "mount": "same default .auth-option selector for capsule and submit; empty submit option set uses surface bounds"
++  },
++  "licenseNotices": "THIRD_PARTY_NOTICES.txt"
++}
+diff --git a/desktop/app/identity-style/THIRD_PARTY_NOTICES.txt b/desktop/app/identity-style/THIRD_PARTY_NOTICES.txt
+new file mode 100644
+index 0000000..c0410c0
+--- /dev/null
++++ b/desktop/app/identity-style/THIRD_PARTY_NOTICES.txt
+@@ -0,0 +1,19 @@
++Smoke Login shader adapted from the public 21st.dev demo by Aakash Mehra, listed under the MIT License.
++
++Copyright (c) Aakash Mehra
++
++Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
++
++Optical fragment shader adapted from the public Liquid Glass Navbar demo.
++
++Copyright (c) Guglielmo Giannattasio / Nimbus UI
++
++Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+diff --git a/desktop/app/identity-style/auth-grain.svg b/desktop/app/identity-style/auth-grain.svg
+new file mode 100644
+index 0000000..a007b83
+--- /dev/null
++++ b/desktop/app/identity-style/auth-grain.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160"><filter id="grain"><feTurbulence type="fractalNoise" baseFrequency=".78" numOctaves="3" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="160" height="160" filter="url(#grain)" opacity=".3"/></svg>
+diff --git a/desktop/app/identity-style/auth-liquid.css b/desktop/app/identity-style/auth-liquid.css
+new file mode 100644
+index 0000000..5cd7e6b
+--- /dev/null
++++ b/desktop/app/identity-style/auth-liquid.css
+@@ -0,0 +1,246 @@
++/* Auth-only Nimbus-inspired capsule surfaces. Text always stays outside optical layers. */
++.auth-smoke .auth-liquid-options {
++  position: relative;
++  isolation: isolate;
++  display: grid;
++  grid-template-columns: 1fr 1fr;
++  width: 238px;
++  max-width: 100%;
++  padding: 6px;
++  gap: 2px;
++  margin: 0 auto 28px;
++  border: 1px solid #ffffffb8;
++  border-radius: 999px;
++  background: #ffffff24;
++  -webkit-backdrop-filter: blur(10px) saturate(1.2) brightness(1.08);
++  backdrop-filter: blur(10px) saturate(1.2) brightness(1.08);
++  box-shadow:
++    inset 0 1px 1px #ffffffe6,
++    inset 0 -1px 1px #48647914,
++    0 12px 32px -14px #25465f40,
++    0 2px 6px #294f6b0a;
++  -webkit-tap-highlight-color: transparent;
++}
++.auth-liquid-layer {
++  position: absolute;
++  inset: 0;
++  border-radius: inherit;
++  pointer-events: none;
++  z-index: 0;
++  overflow: hidden;
++  clip-path: inset(0 round 999px);
++}
++.auth-liquid-water {
++  position: absolute;
++  left: -14px;
++  top: -14px;
++  pointer-events: none;
++}
++.auth-liquid-layer[data-gl="off"] .auth-liquid-water,
++.auth-liquid-layer[data-opaque="true"] .auth-liquid-water {
++  display: none;
++}
++.auth-liquid-drop {
++  display: block;
++  position: absolute;
++  top: 5px;
++  bottom: 5px;
++  left: 0;
++  width: var(--liquid-width, calc(50% - 7px));
++  transform: translateX(var(--liquid-left, 6px));
++  border-radius: 999px;
++  transition:
++    transform 0.55s cubic-bezier(0.2, 1.3, 0.3, 1),
++    width 0.4s;
++  background:
++    radial-gradient(120% 140% at 30% 0%, #ffffffbf, #ffffff00 55%), #ffffff61;
++  box-shadow:
++    inset 0 1px 1px #fffffff2,
++    inset 0 -2px 6px #00a2ff24,
++    inset 0 0 0 1px #ffffff8c,
++    0 6px 16px -6px #00468c38;
++}
++.auth-liquid-layer[data-gl="on"]:not([data-opaque="true"]) .auth-liquid-drop {
++  opacity: 0;
++}
++.auth-liquid-options[data-active="1"] .auth-liquid-layer {
++  --liquid-left: calc(50% + 1px);
++}
++.auth-smoke .auth-liquid-options .auth-option {
++  position: relative;
++  z-index: 1;
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  gap: 8px;
++  height: 42px;
++  padding: 0 16px;
++  border-radius: 999px;
++  text-decoration: none;
++  color: #69716c;
++  font-size: 13px;
++  font-weight: 500;
++  line-height: 1;
++  transition: color 0.2s;
++}
++.auth-smoke .auth-liquid-options .auth-option[aria-current="page"],
++.auth-smoke .auth-liquid-options .auth-option:hover {
++  color: #152821;
++}
++.auth-option svg {
++  transition: transform 0.4s cubic-bezier(0.3, 1.6, 0.5, 1);
++}
++.auth-option:hover svg {
++  transform: translateY(-2px) scale(1.07);
++}
++.auth-option:active svg {
++  transform: scale(0.91);
++}
++.auth-smoke .auth-liquid-options .auth-option:focus-visible {
++  outline: 2px solid #55765f;
++  outline-offset: 1px;
++}
++.auth-option[aria-disabled="true"] {
++  cursor: wait;
++  opacity: 0.55;
++}
++.auth-smoke .smoke-form-box button.auth-liquid-submit[type="submit"] {
++  position: relative;
++  isolation: isolate;
++  overflow: visible;
++  border: 1px solid #ffffffbd;
++  border-radius: 999px;
++  min-height: 52px;
++  background: #dcebe759;
++  color: #17372e;
++  -webkit-backdrop-filter: blur(10px) saturate(1.2) brightness(1.08);
++  backdrop-filter: blur(10px) saturate(1.2) brightness(1.08);
++  box-shadow:
++    inset 0 1px 1px #ffffffed,
++    inset 0 -1px 2px #4f76621f,
++    0 8px 18px -12px #244d3e26;
++  transition:
++    box-shadow 0.2s,
++    background 0.2s;
++}
++.auth-smoke
++  .smoke-form-box
++  button.auth-liquid-submit[type="submit"]:hover:not(:disabled) {
++  background: #d3e8df73;
++  transform: none;
++  box-shadow:
++    inset 0 1px 1px #fff,
++    inset 0 -1px 2px #4f76621f,
++    0 10px 22px -12px #244d3e35;
++}
++.auth-smoke
++  .smoke-form-box
++  button.auth-liquid-submit[type="submit"]:active:not(:disabled) {
++  background: #cddfd880;
++}
++.auth-liquid-submit > .auth-liquid-label {
++  position: relative;
++  z-index: 1;
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  gap: 10px;
++}
++.auth-liquid-submit:disabled {
++  opacity: 0.55;
++  cursor: not-allowed;
++}
++.auth-smoke .smoke-form-box button.auth-password-toggle[type="button"] {
++  border: 1px solid #ffffffa6;
++  border-radius: 999px;
++  background: #ffffff35;
++  box-shadow:
++    inset 0 1px 1px #ffffffb3,
++    0 2px 6px #284d2b08;
++  min-width: 36px;
++  min-height: 36px;
++  width: 36px;
++  height: 36px;
++  padding: 0;
++  right: 6px;
++}
++.auth-smoke
++  .smoke-form-box
++  button.auth-password-toggle[type="button"]:hover:not(:disabled) {
++  background: #ffffff85;
++  box-shadow:
++    inset 0 1px 1px #fff,
++    0 3px 9px #284d2b12;
++}
++.auth-smoke .smoke-form-box:has(.auth-liquid-options) h2 {
++  margin-bottom: 28px;
++}
++@media (max-width: 360px) {
++  .auth-smoke .auth-liquid-options {
++    width: 100%;
++  }
++  .auth-smoke .auth-liquid-options .auth-option {
++    padding: 0 10px;
++  }
++}
++@media (prefers-reduced-motion: reduce) {
++  .auth-liquid-drop,
++  .auth-option svg {
++    transition: none;
++  }
++}
++@media (prefers-reduced-transparency: reduce) {
++  .auth-smoke .auth-liquid-options,
++  .auth-smoke .smoke-form-box button.auth-liquid-submit[type="submit"] {
++    background: #e8efeb;
++    -webkit-backdrop-filter: none;
++    backdrop-filter: none;
++  }
++  .auth-liquid-drop {
++    background: #f9fcfa;
++    box-shadow: inset 0 0 0 1px #bdcec3;
++  }
++}
++@supports not (backdrop-filter: blur(1px)) {
++  .auth-smoke .auth-liquid-options,
++  .auth-smoke .smoke-form-box button.auth-liquid-submit[type="submit"] {
++    background: #e8efeb;
++  }
++}
++@media (forced-colors: active) {
++  .auth-liquid-layer {
++    display: none;
++  }
++  .auth-smoke .auth-liquid-options,
++  .auth-smoke .smoke-form-box button.auth-liquid-submit[type="submit"] {
++    background: ButtonFace;
++    color: ButtonText;
++    border: 1px solid ButtonText;
++  }
++  .auth-option[aria-current="page"] {
++    outline: 2px solid Highlight;
++  }
++}
++
++/* Persistent shell only: resize the form well, never replay a page-wide fade. */
++.auth-route-viewport {
++  transition: height 0.32s cubic-bezier(0.22, 1, 0.36, 1);
++  overflow: clip;
++}
++.auth-route-content {
++  display: flow-root;
++}
++.auth-route-content h2 {
++  margin-top: 0;
++}
++.auth-smoke .smoke-form-box:has(.auth-route-viewport) {
++  animation: none;
++}
++.auth-smoke .smoke-form-box:has(.auth-route-viewport) > .auth-liquid-options {
++  margin-bottom: 30px;
++}
++@media (prefers-reduced-motion: reduce) {
++  .auth-route-viewport {
++    transition: none;
++  }
++}
+diff --git a/desktop/app/identity-style/auth-smoke.css b/desktop/app/identity-style/auth-smoke.css
+new file mode 100644
+index 0000000..c2b1a22
+--- /dev/null
++++ b/desktop/app/identity-style/auth-smoke.css
+@@ -0,0 +1,294 @@
++/* Full-bleed Smoke Login. Decoration stays behind the light credential surface. */
++.auth-page.auth-smoke {
++  --smoke-bg: #efede7;
++  --smoke-paper: #f7f6f2;
++  --smoke-sheet: #e6e3db;
++  --smoke-ink: #141513;
++  --smoke-muted: #6f716b;
++  --smoke-line: #dcd9d0;
++  --smoke-field: #fbfaf7;
++  display: grid;
++  grid-template-columns: minmax(0, 1fr);
++  place-items: center;
++  position: relative;
++  isolation: isolate;
++  min-height: 100dvh;
++  padding: 100px 24px 64px;
++  gap: 0;
++  background: var(--smoke-bg);
++  color: var(--smoke-ink);
++  overflow-x: clip;
++  color-scheme: light;
++}
++.smoke-backdrop {
++  position: fixed;
++  inset: 0;
++  z-index: 0;
++  overflow: hidden;
++  background: radial-gradient(
++    ellipse at 25% 30%,
++    #f5f4ef 10%,
++    #bec4b8 40%,
++    #71846b 68%,
++    #eeeae1 100%
++  );
++}
++.auth-smoke-canvas {
++  position: absolute;
++  inset: 0;
++  width: 100%;
++  height: 100%;
++  opacity: 0;
++  transition: opacity 0.6s;
++}
++.auth-smoke-canvas[data-smoke="ready"] {
++  opacity: 1;
++}
++.smoke-grain {
++  position: absolute;
++  inset: 0;
++  pointer-events: none;
++  background: url("auth-grain.svg");
++  opacity: 0.12;
++  mix-blend-mode: multiply;
++}
++.auth-smoke .smoke-brand {
++  position: absolute;
++  z-index: 3;
++  top: 28px;
++  left: 32px;
++  padding: 0;
++}
++.auth-smoke .smoke-brand .mg-brand-lockup {
++  width: 148px;
++  height: 50px;
++}
++.auth-smoke .smoke-form-panel {
++  padding: 0;
++  width: 100%;
++  position: relative;
++  z-index: 2;
++  isolation: isolate;
++}
++.auth-smoke .smoke-form-panel::before {
++  display: none;
++}
++.auth-smoke .smoke-form-box {
++  max-width: 448px;
++  padding: 44px;
++  border: 1px solid #ffffffa8;
++  border-radius: 24px;
++  background: #f7f6f2eb;
++  -webkit-backdrop-filter: blur(16px);
++  backdrop-filter: blur(16px);
++  box-shadow:
++    0 20px 70px -30px #1d2d2630,
++    inset 0 1px 0 #ffffffb3;
++  animation: smoke-enter 0.85s cubic-bezier(0.22, 1, 0.36, 1) both;
++}
++.auth-smoke .smoke-form-box::before {
++  display: none;
++}
++.auth-smoke .smoke-form-box h2 {
++  margin: 0 0 38px;
++  font-size: 34px;
++  line-height: 1.2;
++  font-weight: 600;
++  letter-spacing: -1.3px;
++  color: var(--smoke-ink);
++}
++.auth-smoke .auth-workspace {
++  color: var(--smoke-muted);
++  margin-bottom: 18px;
++  gap: 7px;
++}
++.auth-smoke .auth-workspace h1 {
++  font-size: 13px;
++}
++.auth-smoke .smoke-form-box form {
++  gap: 20px;
++}
++.auth-smoke .smoke-form-box label {
++  font-size: 13px;
++  font-weight: 500;
++  color: var(--smoke-ink);
++  gap: 8px;
++}
++.auth-smoke .auth-field {
++  gap: 8px;
++}
++.auth-smoke .smoke-form-box input,
++.auth-smoke .smoke-form-box select {
++  min-height: 48px;
++  padding: 12px 14px;
++  border-radius: 14px;
++  background: var(--smoke-field);
++  border: 1px solid var(--smoke-line);
++  color: var(--smoke-ink);
++  font-size: 14px;
++  box-shadow: 0 1px 1px #00000003;
++}
++.auth-smoke .auth-control > svg {
++  display: none;
++}
++.auth-smoke .auth-password-control input {
++  padding-right: 48px;
++}
++.auth-smoke .smoke-form-box input::placeholder {
++  color: #96988f;
++  font-size: 13px;
++}
++.auth-smoke .smoke-form-box input:hover:not(:disabled),
++.auth-smoke .smoke-form-box select:hover {
++  border-color: #bbbfb1;
++}
++.auth-smoke .smoke-form-box input:focus,
++.auth-smoke .smoke-form-box select:focus {
++  background: #fffefa;
++  border-color: #71875e;
++  box-shadow: 0 0 0 3px #536d2c12;
++}
++.auth-smoke .smoke-form-box input[aria-invalid="true"] {
++  border-color: #be7e70;
++  background: #fffaf6;
++}
++.auth-smoke .smoke-form-box input:-webkit-autofill {
++  -webkit-text-fill-color: var(--smoke-ink);
++  box-shadow: 0 0 0 1000px var(--smoke-field) inset;
++}
++.auth-smoke .smoke-form-box button[type="submit"] {
++  margin-top: 4px;
++  min-height: 48px;
++  border-radius: 14px;
++  background: var(--smoke-ink);
++  color: var(--smoke-paper);
++  border: 1px solid var(--smoke-ink);
++  box-shadow: none;
++  font-size: 14px;
++  font-weight: 500;
++}
++.auth-smoke .smoke-form-box button[type="submit"]:hover:not(:disabled) {
++  background: #30342b;
++  transform: translateY(-1px);
++  box-shadow: 0 5px 12px #14151312;
++}
++.auth-smoke .smoke-form-box button[type="submit"]:active:not(:disabled) {
++  transform: none;
++}
++.auth-smoke .smoke-form-box button:focus-visible,
++.auth-smoke .auth-link a:focus-visible {
++  outline: 2px solid #55752c;
++  outline-offset: 4px;
++}
++.auth-smoke .smoke-form-box button.auth-password-toggle {
++  background: transparent;
++  box-shadow: none;
++  border: 0;
++  color: var(--smoke-muted);
++  min-width: 44px;
++  min-height: 44px;
++  right: 3px;
++  border-radius: 12px;
++}
++.auth-smoke .smoke-form-box button.auth-password-toggle:hover {
++  background: #eaece4;
++  color: var(--smoke-ink);
++}
++.auth-smoke .auth-link {
++  margin-top: 28px;
++  padding-top: 0;
++  border: 0;
++  text-align: center;
++}
++.auth-smoke .auth-link a {
++  color: var(--smoke-muted);
++  font-size: 13px;
++}
++.auth-smoke .auth-link a:hover {
++  color: var(--smoke-ink);
++}
++.auth-smoke .auth-error {
++  border-radius: 12px;
++}
++@keyframes smoke-enter {
++  from {
++    opacity: 0;
++    transform: translateY(10px);
++    filter: blur(10px);
++  }
++  to {
++    opacity: 1;
++    transform: none;
++    filter: blur(0);
++  }
++}
++@media (max-width: 800px) {
++  .auth-page.auth-smoke {
++    padding: 110px 24px 48px;
++  }
++  .auth-smoke .smoke-brand {
++    top: 24px;
++    left: 26px;
++  }
++  .auth-smoke .smoke-form-panel {
++    padding: 0;
++    align-items: center;
++  }
++  .auth-smoke .smoke-form-box {
++    max-width: 420px;
++    padding: 36px 30px;
++  }
++  .auth-smoke .smoke-form-box h2 {
++    font-size: 30px;
++    margin-bottom: 30px;
++  }
++}
++@media (max-width: 360px) {
++  .auth-page.auth-smoke {
++    padding: 100px 16px 32px;
++  }
++  .auth-smoke .smoke-form-box {
++    padding: 32px 24px;
++  }
++  .auth-smoke .smoke-form-box h2 {
++    font-size: 27px;
++  }
++}
++@media (prefers-reduced-motion: reduce) {
++  .auth-smoke .smoke-form-box {
++    animation: none;
++  }
++  .auth-smoke *,
++  .auth-smoke *::before,
++  .auth-smoke *::after {
++    transition: none !important;
++  }
++}
++@media (prefers-reduced-transparency: reduce) {
++  .auth-smoke .smoke-grain {
++    display: none;
++  }
++  .auth-smoke .smoke-form-box {
++    background: #f7f6f2;
++    -webkit-backdrop-filter: none;
++    backdrop-filter: none;
++  }
++}
++@supports not (backdrop-filter: blur(1px)) {
++  .auth-smoke .smoke-form-box {
++    background: #f7f6f2;
++  }
++}
++@media (forced-colors: active) {
++  .auth-smoke .smoke-backdrop {
++    background: Canvas;
++  }
++  .auth-smoke .smoke-form-box {
++    background: Canvas;
++    border: 1px solid CanvasText;
++  }
++  .auth-smoke .auth-smoke-canvas,
++  .auth-smoke .smoke-grain {
++    display: none;
++  }
++}
+diff --git a/desktop/app/identity-style/auth.css b/desktop/app/identity-style/auth.css
+new file mode 100644
+index 0000000..e3e4173
+--- /dev/null
++++ b/desktop/app/identity-style/auth.css
+@@ -0,0 +1,762 @@
++/* Optical glass: narrow edge reflections, neutral tint, stable opaque form content. */
++.auth-page {
++  --auth-ink: #252b31;
++  --auth-muted: #737d85;
++  --auth-accent: #446276;
++  --glass-x: 45%;
++  --glass-y: 32%;
++  --glass-tilt-x: 0deg;
++  --glass-tilt-y: 0deg;
++  display: grid;
++  grid-template-columns: minmax(0, 1.05fr) minmax(400px, 1fr);
++  min-height: 100dvh;
++  padding: 20px;
++  gap: 24px;
++  color: var(--auth-ink);
++  isolation: isolate;
++  background:
++    radial-gradient(ellipse at 90% 15%, #f1f4f5, transparent 45%), #fafaf9;
++}
++.auth-page *,
++.auth-page *::before,
++.auth-page *::after {
++  box-sizing: border-box;
++}
++.auth-story {
++  display: flex;
++  flex-direction: column;
++  position: relative;
++  min-height: 650px;
++  overflow: hidden;
++  padding: 30px 36px;
++  border: 1px solid #dce2e4;
++  border-radius: 20px;
++  background:
++    radial-gradient(ellipse at 12% 10%, #fbfcfc, transparent 55%),
++    linear-gradient(145deg, #e9eef0 8%, #d9e3e8 52%, #e8edef 79%, #f4f3f0);
++  box-shadow:
++    inset 0 1px 0 #fff,
++    0 10px 30px #35495604;
++}
++.auth-story::before {
++  content: "";
++  position: absolute;
++  inset: 0;
++  pointer-events: none;
++  background: url("auth-grain.svg");
++  opacity: 0.17;
++  mix-blend-mode: multiply;
++}
++.auth-story::after {
++  content: "";
++  position: absolute;
++  left: -15%;
++  top: -10%;
++  width: 90%;
++  height: 120%;
++  background: linear-gradient(
++    110deg,
++    transparent 36%,
++    #ffffff4a 39%,
++    #ffffff05 43%,
++    transparent 48%
++  );
++  transform: rotate(-15deg);
++  pointer-events: none;
++}
++.auth-brand {
++  display: flex;
++  align-items: center;
++  width: fit-content;
++  position: relative;
++  z-index: 2;
++}
++.auth-brand .mg-brand-lockup {
++  width: 148px;
++  height: 50px;
++}
++.auth-artwork {
++  width: min(100%, 640px);
++  aspect-ratio: 1;
++  position: relative;
++  margin: auto;
++  pointer-events: none;
++}
++.auth-filter-defs {
++  position: absolute;
++  pointer-events: none;
++}
++.auth-halo {
++  position: absolute;
++  border-radius: 50%;
++  filter: blur(32px);
++}
++.auth-halo-blue {
++  width: 70%;
++  height: 70%;
++  left: 10%;
++  top: 17%;
++  background: radial-gradient(ellipse, #97afba35, transparent 72%);
++}
++.auth-material-disc {
++  position: absolute;
++  width: 60%;
++  height: 60%;
++  right: 5%;
++  top: 10%;
++  border-radius: 50%;
++  border: 1px solid #ffffff99;
++  background: linear-gradient(
++    145deg,
++    #ffffffa3 5%,
++    #d1dce270 47%,
++    #97b3bf5c 72%,
++    #e3e8ea77
++  );
++  box-shadow:
++    inset 1px 1px 1px #fff8,
++    inset -1px -1px 2px #4c6c7a1a,
++    12px 25px 48px #3d59641a;
++}
++.auth-orbit {
++  position: absolute;
++  border: 1px solid #94a6ae38;
++  border-radius: 50%;
++}
++.auth-orbit-outer {
++  inset: 6%;
++  transform: rotate(-25deg) scaleY(0.82);
++}
++.auth-orbit-inner {
++  display: none;
++}
++.auth-object-shadow {
++  width: 54%;
++  height: 10%;
++  left: 25%;
++  bottom: 5%;
++  position: absolute;
++  transform: rotate(-8deg);
++  background: radial-gradient(ellipse, #253e4f33, transparent 72%);
++  filter: blur(12px);
++}
++.auth-art-stack {
++  width: 48%;
++  height: 57%;
++  left: 25%;
++  top: 23%;
++  position: absolute;
++  transform: perspective(950px) rotateX(var(--glass-tilt-x))
++    rotateY(var(--glass-tilt-y)) rotate(-9deg);
++  transition: transform 0.35s ease-out;
++}
++.auth-art-pane {
++  position: absolute;
++  width: 100%;
++  height: 100%;
++  border-radius: 19px;
++}
++.auth-art-pane-back {
++  transform: translate(16%, -9%) rotate(13deg);
++  border: 1px solid #f6fafbcd;
++  background: linear-gradient(148deg, #f2f8f945 5%, #7898a842 60%, #abbfc551);
++  box-shadow:
++    inset 1px 1px 1px #fff,
++    inset -1px -1px 1px #637e8980,
++    8px 18px 25px #2d4a5814;
++}
++.auth-art-pane-back::after {
++  content: "";
++  position: absolute;
++  inset: 3px;
++  border: 1px solid #ffffff50;
++  border-radius: 16px;
++}
++.auth-art-pane-middle {
++  transform: translate(-11%, 3%) rotate(-9deg);
++  border: 1px solid #f9feffd4;
++  background: linear-gradient(135deg, #ffffff36, #e7f2f431 65%, #94b5c22e);
++  -webkit-backdrop-filter: blur(2px);
++  backdrop-filter: blur(2px);
++  box-shadow:
++    inset 1px 1px 1px white,
++    inset -1px -1px 1px #53798477,
++    -7px 14px 25px #35516413;
++}
++.auth-art-pane-front {
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  transform: translate(0, 7%);
++  border: 1px solid #ffffffe0;
++  background: linear-gradient(
++    127deg,
++    #ffffff91 0%,
++    #ffffff18 34%,
++    #e0edf229 67%,
++    #ffffff59 100%
++  );
++  -webkit-backdrop-filter: blur(5px) saturate(0.8);
++  backdrop-filter: blur(5px) saturate(0.8);
++  box-shadow:
++    inset 1px 1px 1px #fff,
++    inset -1px -1px 1px #5b778d96,
++    1px 2px 0 #8ba5b766,
++    4px 5px 0 #dbe5e875,
++    0 27px 45px #2d4b6026;
++}
++.auth-art-pane-front::before {
++  content: "";
++  position: absolute;
++  inset: 0;
++  border-radius: inherit;
++  background: linear-gradient(
++    128deg,
++    transparent 10%,
++    #ffffff7d 11%,
++    #ffffff13 13%,
++    transparent 23%,
++    transparent 64%,
++    #ffffff33 66%,
++    transparent 68%
++  );
++  pointer-events: none;
++}
++.auth-art-pane-front::after {
++  content: "";
++  position: absolute;
++  inset: 2px;
++  border-radius: 16px;
++  border-top: 1px solid #fff9;
++  border-left: 1px solid #fff6;
++  border-bottom: 1px solid #728d9b29;
++  pointer-events: none;
++}
++.auth-refractive-layer {
++  position: absolute;
++  inset: 0;
++  border-radius: inherit;
++  pointer-events: none;
++  padding: 9px;
++  -webkit-backdrop-filter: url(#auth-liquid-rim) blur(0.3px);
++  backdrop-filter: url(#auth-liquid-rim) blur(0.3px);
++  mask:
++    linear-gradient(#fff 0 0) content-box,
++    linear-gradient(#fff 0 0);
++  mask-composite: exclude;
++}
++.auth-art-pane-corner {
++  position: absolute;
++  right: 20px;
++  top: 20px;
++  width: 3px;
++  height: 3px;
++  border-radius: 50%;
++  background: #6f8b9a5e;
++}
++.auth-art-logo {
++  position: relative;
++  z-index: 1;
++  transform: rotate(0);
++  padding: 0;
++  background: none;
++  border: 0;
++  box-shadow: none;
++}
++.auth-art-logo img {
++  width: clamp(112px, 10.8vw, 156px);
++  height: auto;
++  display: block;
++  opacity: 0.86;
++  filter: drop-shadow(0 1px 0 #ffffffb3);
++}
++.auth-form-panel {
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  padding: 50px 40px;
++  min-width: 0;
++  position: relative;
++  isolation: isolate;
++}
++.auth-form-panel::before {
++  content: "";
++  position: absolute;
++  width: 160px;
++  height: 320px;
++  left: 15%;
++  top: 20%;
++  background: linear-gradient(120deg, transparent, #cbd7dc21, transparent);
++  border-radius: 50%;
++  filter: blur(36px);
++  transform: rotate(30deg);
++  z-index: -1;
++}
++.auth-form-box {
++  position: relative;
++  width: 100%;
++  max-width: 464px;
++  padding: 42px 44px 34px;
++  border: 1px solid #ffffffcf;
++  border-radius: 20px;
++  background: linear-gradient(135deg, #ffffffb8, #ffffff79);
++  -webkit-backdrop-filter: blur(20px) saturate(1.35);
++  backdrop-filter: blur(20px) saturate(1.35);
++  box-shadow:
++    0 0 0 1px #5c748011,
++    0 24px 60px -24px #273c4c2b,
++    inset 0 1px 0 #fff;
++}
++.auth-form-box::before {
++  content: "";
++  position: absolute;
++  inset: 0;
++  border-radius: inherit;
++  border-right: 1px solid #9dabb421;
++  border-bottom: 1px solid #9dabb424;
++  pointer-events: none;
++}
++.auth-entry-icon {
++  display: grid;
++  place-items: center;
++  width: 36px;
++  height: 38px;
++  margin-bottom: 23px;
++  color: #566a76;
++  background: none;
++  border: 0;
++  box-shadow: none;
++}
++.auth-form-box h2 {
++  font-size: 29px;
++  line-height: 1.4;
++  font-weight: 600;
++  letter-spacing: -0.8px;
++  margin: 0 0 36px;
++  color: #282f35;
++}
++.auth-workspace {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++  margin: 0 0 24px;
++  color: #697a83;
++}
++.auth-workspace h1 {
++  font-size: 13px;
++  font-weight: 500;
++  margin: 0;
++  line-height: 1.6;
++  overflow-wrap: anywhere;
++}
++.auth-workspace svg {
++  flex-shrink: 0;
++}
++.auth-workspace-kind {
++  background: #f3eee3;
++  color: #8a754e;
++  border: 1px solid #e9dfca;
++  padding: 2px 6px;
++  border-radius: 4px;
++  font-size: 10px;
++  flex-shrink: 0;
++}
++.auth-form-box form {
++  display: grid;
++  gap: 22px;
++}
++.auth-form-box label,
++.auth-field {
++  display: grid;
++  gap: 9px;
++}
++.auth-form-box label {
++  font-size: 12px;
++  font-weight: 500;
++  line-height: 1.5;
++  color: #5a6973;
++}
++.auth-form-box input,
++.auth-form-box select {
++  width: 100%;
++  min-width: 0;
++  min-height: 50px;
++  padding: 12px 14px;
++  border: 1px solid #dce2e6;
++  border-radius: 8px;
++  background: #ffffffc4;
++  color: #2c3941;
++  font: inherit;
++  font-size: 13px;
++  outline: none;
++  transition:
++    border-color 0.16s,
++    box-shadow 0.16s,
++    background 0.16s;
++}
++.auth-form-box input::placeholder {
++  color: #8d99a2;
++  font-size: 12px;
++  font-weight: 400;
++}
++.auth-form-box input:hover:not(:disabled),
++.auth-form-box select:hover {
++  border-color: #b8c5cf;
++}
++.auth-form-box input:focus,
++.auth-form-box select:focus {
++  border-color: #7292aa;
++  box-shadow: 0 0 0 3px #40627e0b;
++  background: #fff;
++}
++.auth-control {
++  position: relative;
++  display: flex;
++  align-items: center;
++}
++.auth-control > svg {
++  position: absolute;
++  left: 15px;
++  color: #8a9ba7;
++  pointer-events: none;
++  z-index: 1;
++  stroke-width: 1.6;
++}
++.auth-control:focus-within > svg {
++  color: #557589;
++}
++.auth-control input {
++  padding-left: 43px;
++}
++.auth-password-control input {
++  padding-right: 48px;
++}
++.auth-form-box input[aria-invalid="true"] {
++  border-color: #d5a4a0;
++  background: #fffdfc;
++}
++.auth-form-box input:disabled {
++  background: #f3f5f6;
++  color: #8b989f;
++  cursor: not-allowed;
++}
++.auth-form-box input[readonly] {
++  background: #f6f8f9;
++  color: #6c7b87;
++}
++.auth-form-box input:-webkit-autofill {
++  -webkit-text-fill-color: #26364e;
++  box-shadow: 0 0 0 1000px #f9fbff inset;
++}
++.auth-form-box button {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  gap: 10px;
++  min-height: 48px;
++  padding: 13px 16px;
++  border: 1px solid #2f3941;
++  border-radius: 8px;
++  background: linear-gradient(180deg, #3c4953, #2f3b44);
++  box-shadow:
++    inset 0 1px 0 #ffffff15,
++    0 3px 7px #25364214;
++  color: #fff;
++  font: inherit;
++  font-size: 13px;
++  font-weight: 500;
++  cursor: pointer;
++  margin-top: 6px;
++  transition:
++    background 0.16s,
++    box-shadow 0.16s,
++    transform 0.16s;
++}
++.auth-form-box button:hover:not(:disabled) {
++  background: linear-gradient(180deg, #354957, #263c4b);
++  box-shadow: 0 5px 12px #253c5021;
++}
++.auth-form-box button:active:not(:disabled) {
++  transform: translateY(1px);
++}
++.auth-form-box button:focus-visible,
++.auth-link a:focus-visible {
++  outline: 3px solid #92b0c6;
++  outline-offset: 3px;
++}
++.auth-form-box button:disabled {
++  opacity: 0.55;
++  cursor: not-allowed;
++}
++.auth-form-box button[type="submit"] {
++  position: relative;
++  overflow: hidden;
++}
++.auth-form-box button[type="submit"]::before {
++  content: "";
++  position: absolute;
++  inset: 0;
++  border-radius: inherit;
++  background: radial-gradient(
++    ellipse at var(--glass-x) 0%,
++    #ffffff0d,
++    transparent 65%
++  );
++  pointer-events: none;
++}
++.auth-form-box .auth-password-toggle {
++  position: absolute;
++  right: 7px;
++  width: 36px;
++  height: 36px;
++  min-height: 36px;
++  padding: 0;
++  margin: 0;
++  border: 0;
++  border-radius: 6px;
++  color: #83929d;
++  background: transparent;
++  box-shadow: none;
++}
++.auth-form-box .auth-password-toggle:hover:not(:disabled) {
++  color: #456b85;
++  background: #edf2f5;
++  box-shadow: none;
++}
++.auth-form-box .auth-password-toggle[aria-pressed="true"] {
++  color: #3f6680;
++}
++.auth-caps-lock {
++  font-size: 11px;
++  color: #937742;
++}
++.auth-link {
++  border-top: 1px solid #e3e8ea9c;
++  padding-top: 24px;
++  margin-top: 27px;
++  text-align: center;
++  font-size: 12px;
++}
++.auth-link a {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  gap: 7px;
++  color: #6b7f8c;
++  text-decoration: none;
++  padding: 4px;
++}
++.auth-link a:hover {
++  color: #2e556f;
++}
++.auth-error {
++  background: #fff5f4;
++  border: 1px solid #f2d9d5;
++  border-radius: 8px;
++  padding: 11px 13px;
++  color: #aa4c47;
++  font-size: 12px;
++  line-height: 1.7;
++  overflow-wrap: anywhere;
++}
++.auth-pending {
++  display: inline-flex;
++  align-items: center;
++  margin: -13px 0 24px;
++  background: #faf5e9;
++  border: 1px solid #efe3c6;
++  color: #8b733c;
++  border-radius: 6px;
++  padding: 7px 11px;
++  font-size: 12px;
++}
++.auth-loading {
++  display: flex;
++  align-items: center;
++  gap: 10px;
++  color: #71819b;
++  font-size: 13px;
++  padding: 8px 0 20px;
++}
++.auth-setup-state {
++  border: 1px solid #e1e7ea;
++  background: #f9fbfc;
++  border-radius: 12px;
++  padding: 24px;
++  line-height: 1.7;
++}
++.auth-setup-state h2 {
++  font-size: 22px;
++  margin-bottom: 14px;
++}
++.auth-setup-state p {
++  font-size: 13px;
++  color: #75849a;
++  margin: 0;
++}
++.auth-setup-state .auth-link {
++  text-align: left;
++  margin-top: 18px;
++  padding-top: 14px;
++}
++.spin {
++  animation: auth-spin 1s linear infinite;
++}
++@keyframes auth-spin {
++  to {
++    transform: rotate(360deg);
++  }
++}
++@media (min-width: 1700px) {
++  .auth-page {
++    padding: 24px;
++    gap: 32px;
++  }
++  .auth-story {
++    padding: 36px 44px;
++  }
++  .auth-form-box {
++    max-width: 486px;
++    padding: 46px 48px 38px;
++  }
++  .auth-form-box h2 {
++    font-size: 31px;
++  }
++}
++@media (max-width: 1150px) and (min-width: 801px) {
++  .auth-page {
++    grid-template-columns: minmax(0, 1fr) minmax(350px, 1fr);
++    gap: 8px;
++    padding: 16px;
++  }
++  .auth-story {
++    padding: 26px;
++    min-height: 610px;
++  }
++  .auth-form-panel {
++    padding: 32px 20px;
++  }
++  .auth-form-box {
++    padding: 32px 28px 28px;
++  }
++  .auth-art-logo img {
++    width: 118px;
++  }
++}
++@media (max-width: 800px) {
++  .auth-page {
++    display: flex;
++    flex-direction: column;
++    gap: 0;
++    padding: 0;
++    min-height: 100dvh;
++    background:
++      radial-gradient(ellipse at 100% 0%, #e7eef2, transparent 60%), #f9faf9;
++  }
++  .auth-story {
++    min-height: 0;
++    height: auto;
++    display: block;
++    background: none;
++    padding: 28px 30px;
++    border: 0;
++    border-radius: 0;
++    overflow: visible;
++    box-shadow: none;
++  }
++  .auth-story::before,
++  .auth-story::after,
++  .auth-artwork {
++    display: none;
++  }
++  .auth-form-panel {
++    padding: 24px 28px 64px;
++    flex: 1;
++    align-items: center;
++  }
++  .auth-form-box {
++    max-width: 420px;
++    padding: 34px 30px 28px;
++  }
++  .auth-form-box h2 {
++    font-size: 28px;
++    margin-bottom: 32px;
++  }
++  .auth-brand .mg-brand-lockup {
++    transform: scale(0.94);
++    transform-origin: left center;
++  }
++}
++@media (max-width: 420px) {
++  .auth-story {
++    padding: 22px 26px;
++  }
++  .auth-form-panel {
++    padding: 14px 18px 40px;
++    align-items: flex-start;
++  }
++  .auth-form-box {
++    padding: 29px 25px 25px;
++  }
++  .auth-form-box h2 {
++    font-size: 25px;
++  }
++  .auth-form-box form {
++    gap: 21px;
++  }
++}
++@media (max-height: 650px) and (min-width: 801px) {
++  .auth-story {
++    min-height: 550px;
++  }
++  .auth-form-panel {
++    padding-top: 24px;
++    padding-bottom: 24px;
++  }
++  .auth-artwork {
++    max-width: 440px;
++  }
++}
++@supports not (
++  (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
++) {
++  .auth-form-box {
++    background: #fdfdfc;
++  }
++  .auth-art-pane-front {
++    background: linear-gradient(135deg, #f0f5f6, #dce5e9);
++  }
++}
++@media (prefers-reduced-transparency: reduce) {
++  .auth-form-box {
++    background: #f8fbff;
++    -webkit-backdrop-filter: none;
++    backdrop-filter: none;
++  }
++  .auth-art-pane-front {
++    background: #eef5ff;
++    -webkit-backdrop-filter: none;
++    backdrop-filter: none;
++  }
++  .auth-refractive-layer {
++    display: none;
++  }
++}
++@media (prefers-reduced-motion: reduce), (pointer: coarse) {
++  .auth-art-stack {
++    transform: rotate(-9deg);
++    transition: none;
++  }
++  .auth-refractive-layer {
++    -webkit-backdrop-filter: none;
++    backdrop-filter: none;
++  }
++}
++@media (prefers-reduced-motion: reduce) {
++  .auth-page * {
++    transition: none !important;
++  }
++  .auth-page .spin {
++    animation: none;
++  }
++}
+diff --git a/desktop/app/identity-style/liquid-shader.js b/desktop/app/identity-style/liquid-shader.js
+new file mode 100644
+index 0000000..3b2eb28
+--- /dev/null
++++ b/desktop/app/identity-style/liquid-shader.js
+@@ -0,0 +1,54 @@
++/** Liquid Glass Navbar shader by Guglielmo Giannattasio / Nimbus UI, MIT.
++ * Adapted from the public 21st.dev live demo. See AUTH_LIQUID_CONTROLS.md.
++ */
++export const liquidVertexShader = "attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}";
++export const liquidFragmentShader = `
++precision highp float;
++uniform float uRadius;
++uniform vec2 uRes;uniform float uDpr;uniform float uTime;uniform vec4 uPill;
++uniform vec4 uBlob[6];uniform float uSy[6];uniform vec4 uRip[6];uniform vec3 uMouse;uniform float uDark;uniform float uAmb;
++float sdRB(vec2 p,vec2 b,float r){vec2 q=abs(p)-b+r;return length(max(q,0.))+min(max(q.x,q.y),0.)-r;}
++float sdCap(vec2 p,vec4 B,float sy){p-=B.xy;p.y/=sy;p.x=max(abs(p.x)-B.z,0.);return(length(p)-B.w)*min(1.,sy);}
++float smin(float a,float b,float k){float h=clamp(.5+.5*(b-a)/k,0.,1.);return mix(b,a,h)-k*h*(1.-h);}
++float dropD(vec2 p){float d=1e4;for(int i=0;i<6;i++){if(uBlob[i].w>.5){d=smin(d,sdCap(p,uBlob[i],uSy[i]),13.);}}return d;}
++float pillD(vec2 p){vec2 h=uPill.zw*.5;return sdRB(p-uPill.xy-h,h,min(uRadius,min(h.x,h.y)));}
++float lens(float d,float w){float t=clamp(-d/w,0.,1.);return sqrt(1.-(1.-t)*(1.-t));}
++float waves(vec2 p){float w=0.;
++ for(int i=0;i<6;i++){vec4 R=uRip[i];if(R.w>0.){float x=length(p-R.xy)-R.z*240.;w+=R.w*exp(-R.z*1.7)*sin(x*.3)*exp(-x*x/700.);}}
++ vec2 m=p-uMouse.xy;w+=uMouse.z*3.6*exp(-dot(m,m)/1000.);
++ w+=uAmb*(sin(p.x*.05+uTime*1.2)*.45+sin(p.x*.13-uTime*.85+p.y*.2)*.25);return w;}
++float H(vec2 p){float dp=pillD(p);return lens(dp,uPill.w*.36)*2.4+lens(dropD(p),11.)*7.5+waves(p)*smoothstep(0.,7.,-dp);}
++float caus(vec2 p,float t){vec2 q=p;float c=0.;for(int i=0;i<3;i++){q+=vec2(sin(q.y*1.1+t),cos(q.x*1.3-t*.7))*.6;c+=1./(1.+16.*abs(sin(q.x)*sin(q.y)));}return c/3.;}
++void main(){
++ vec2 p=vec2(gl_FragCoord.x,uRes.y*uDpr-gl_FragCoord.y)/uDpr;
++ float dp=pillD(p);float dd=dropD(p);
++ float h0=H(p);vec3 n=normalize(vec3(h0-H(p+vec2(1.,0.)),h0-H(p+vec2(0.,1.)),1.));
++ vec3 V=vec3(0.,0.,1.);
++ float spec=pow(max(dot(reflect(-normalize(vec3(-.45,-.8,.85)),n),V),0.),70.);
++ float spec2=pow(max(dot(reflect(-normalize(vec3(.6,.75,.7)),n),V),0.),22.)*.3;
++ float fres=clamp((1.-n.z)*4.,0.,1.);
++ vec3 irid=.5+.5*cos(6.2831*(vec3(0.,.33,.67)+fres*.85+p.x*.0028+uTime*.035));
++ float pm=smoothstep(1.,-1.,dp);float dm=smoothstep(1.,-1.,dd)*smoothstep(1.,-2.,dp);
++ float sh=smoothstep(9.,-9.,dropD(p-vec2(0.,5.)))*(1.-dm)*pm*(.11+.07*uDark);
++ vec3 c=vec3(0.,.14,.36)*sh;float a=sh;
++ float pa=clamp(pm*(fres*.5+spec*.9+spec2),0.,1.);
++ c=mix(vec3(1.),irid,.14*fres)*pa+c*(1.-pa);a=pa+a*(1.-pa);
++ float th=lens(dd,11.);
++ float cs=caus((p+n.xy*th*18.)*.085,uTime*.9);
++ vec3 tint=mix(vec3(.80,.95,1.),vec3(.55,.82,1.),uDark);
++ float rim=dm*(1.-smoothstep(0.,8.,-dd));
++ float cres=dm*smoothstep(.12,.55,dot(n.xy,normalize(vec2(.55,.85))))*smoothstep(0.,3.,-dd);
++ float body=.5+.5*clamp(-n.y*3.,-1.,1.);
++ float da=dm*(.26+.14*body)*(1.-.35*uDark);vec3 dc=mix(tint,vec3(1.),body*.6);
++ float la=rim*.22;vec3 lc=mix(vec3(0.,.42,.78),vec3(.1,.55,.95),uDark);dc=lc*la+dc*da*(1.-la);da=la+da*(1.-la);
++ la=clamp(cres*.7+smoothstep(.6,1.,cs)*.28*th*dm,0.,1.);dc=vec3(1.)*la+dc*(1.-la);da=la+da*(1.-la);
++ la=clamp(dm*(spec*1.2+spec2*.5),0.,1.);dc=vec3(1.)*la+dc*(1.-la);da=la+da*(1.-la);
++ la=dm*smoothstep(-2.,0.,dd)*.4;dc=mix(vec3(1.),irid,.1)*la+dc*(1.-la);da=la+da*(1.-la);
++ c=dc+c*(1.-da);a=da+a*(1.-da);
++ // Never let the rectangular GL backing store contribute outside the capsule.
++ float outerMask=1.-smoothstep(-.8,.8,dp);
++ c*=outerMask;a*=outerMask;
++ if(dp>1.){gl_FragColor=vec4(0.);return;}
++ gl_FragColor=vec4(c,a);
++}
++`;
+diff --git a/desktop/app/identity-style/liquid.js b/desktop/app/identity-style/liquid.js
+new file mode 100644
+index 0000000..50dd2aa
+--- /dev/null
++++ b/desktop/app/identity-style/liquid.js
+@@ -0,0 +1,384 @@
++import {liquidFragmentShader,liquidVertexShader} from './liquid-shader.js';
++export function mountLiquid(layerElement, optionSelector = '.auth-option', vertical = false) {
++    const activeRef = { current: 0 }, refresh = { current: null };
++    const root = layerElement, canvas = root?.querySelector("canvas"), surface = root?.parentElement;
++    if (!root || !canvas || !surface)
++        return;
++    const motion = matchMedia("(prefers-reduced-motion: reduce)");
++    const transparency = matchMedia("(prefers-reduced-transparency: reduce)");
++    const fine = matchMedia("(pointer: fine)");
++    let frame = 0, previous = 0, time = 0, visible = true, disposed = false;
++    let gl = null, program = null, buffer = null;
++    const shaders = [];
++    const uniforms = {};
++    const state = {
++        a: 0,
++        av: 0,
++        b: 0,
++        bv: 0,
++        target: 0,
++        cross: 0,
++        width: 0,
++        height: 0,
++        q: 0,
++        radius: 20,
++        ready: false,
++        hover: false,
++        mouseX: 0,
++        mouseY: 0,
++        ripple: 0,
++        split: false,
++    };
++    let selected = activeRef.current;
++    let surfaceRect = null;
++    const options = () => [
++        ...surface.querySelectorAll(optionSelector),
++    ];
++    const target = () => {
++        const rect = surface.getBoundingClientRect(), items = options(), item = items[selected];
++        surfaceRect = rect;
++        const r = item?.getBoundingClientRect() ?? rect;
++        state.width = rect.width;
++        state.height = rect.height;
++        state.target = vertical
++            ? r.top - rect.top + r.height / 2
++            : r.left - rect.left + r.width / 2;
++        state.cross = r.left - rect.left + r.width / 2;
++        state.radius = Math.max(1, (r.height - (item ? 0 : 10)) / 2);
++        state.q = Math.max(0, (r.width - (item ? 0 : 10)) / 2 - state.radius);
++        root.style.setProperty("--liquid-top", `${r.top - rect.top}px`);
++        root.style.setProperty("--liquid-height", `${r.height}px`);
++        root.style.setProperty("--liquid-left", `${item ? r.left - rect.left : 5}px`);
++        root.style.setProperty("--liquid-width", `${r.width - (item ? 0 : 10)}px`);
++        if (!state.ready) {
++            state.a = state.b = state.target;
++            state.ready = true;
++        }
++    };
++    const releaseGL = () => {
++        if (gl) {
++            if (buffer)
++                gl.deleteBuffer(buffer);
++            if (program)
++                gl.deleteProgram(program);
++            shaders.forEach((s) => gl.deleteShader(s));
++        }
++        shaders.length = 0;
++        program = null;
++        buffer = null;
++        gl = null;
++        root.dataset.gl = "off";
++    };
++    const init = () => {
++        releaseGL();
++        try {
++            gl = canvas.getContext("webgl", {
++                alpha: true,
++                premultipliedAlpha: true,
++                antialias: false,
++                depth: false,
++                powerPreference: "low-power",
++            });
++            if (!gl || gl.isContextLost())
++                return;
++            for (const [type, source] of [
++                [gl.VERTEX_SHADER, liquidVertexShader],
++                [gl.FRAGMENT_SHADER, liquidFragmentShader],
++            ]) {
++                const s = gl.createShader(type);
++                if (!s)
++                    throw Error("shader allocation");
++                shaders.push(s);
++                gl.shaderSource(s, source);
++                gl.compileShader(s);
++                if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
++                    throw Error("shader compile");
++            }
++            program = gl.createProgram();
++            if (!program)
++                throw Error("program allocation");
++            shaders.forEach((s) => gl.attachShader(program, s));
++            gl.linkProgram(program);
++            if (!gl.getProgramParameter(program, gl.LINK_STATUS))
++                throw Error("program link");
++            gl.useProgram(program);
++            buffer = gl.createBuffer();
++            if (!buffer)
++                throw Error("buffer allocation");
++            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
++            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
++            const a = gl.getAttribLocation(program, "a");
++            gl.enableVertexAttribArray(a);
++            gl.vertexAttribPointer(a, 2, gl.FLOAT, false, 0, 0);
++            for (const n of [
++                "uRes",
++                "uDpr",
++                "uTime",
++                "uPill",
++                "uRadius",
++                "uBlob",
++                "uSy",
++                "uRip",
++                "uMouse",
++                "uDark",
++                "uAmb",
++            ])
++                uniforms[n] = gl.getUniformLocation(program, n);
++            root.dataset.gl = "on";
++        }
++        catch {
++            releaseGL();
++        }
++    };
++    // Reuse uniform storage; animation frames do not allocate transient typed arrays.
++    const blobs = new Float32Array(24), sy = new Float32Array(6).fill(1), ripples = new Float32Array(24);
++    const draw = () => {
++        if (!gl || gl.isContextLost() || !state.ready || transparency.matches)
++            return;
++        const dpr = Math.min(devicePixelRatio || 1, 1.5), pad = 14, w = state.width + 28, h = state.height + 28;
++        const cw = Math.max(1, Math.round(w * dpr)), ch = Math.max(1, Math.round(h * dpr));
++        if (canvas.width !== cw || canvas.height !== ch) {
++            canvas.width = cw;
++            canvas.height = ch;
++            canvas.style.width = `${w}px`;
++            canvas.style.height = `${h}px`;
++            gl.viewport(0, 0, cw, ch);
++        }
++        const distance = Math.abs(state.a - state.b), stretch = Math.min(distance / (state.radius * 2 + state.q * 2), 1);
++        blobs.fill(0);
++        sy.fill(1);
++        ripples.fill(0);
++        const cy = pad + state.height / 2;
++        const ax = pad + (vertical ? state.cross : state.a), ay = vertical ? pad + state.a : cy;
++        const bx = pad + (vertical ? state.cross : state.b), by = vertical ? pad + state.b : cy;
++        blobs.set([
++            ax,
++            ay,
++            state.q * (1 - 0.25 * stretch),
++            state.radius * (1 - 0.12 * stretch),
++            bx,
++            by,
++            state.q * (1 - 0.8 * stretch),
++            vertical ? 0 : state.radius * (1 - 0.5 * stretch),
++        ]);
++        if (!vertical && distance > state.radius * 1.25) {
++            state.split = true;
++            blobs.set([
++                (ax + bx) / 2,
++                (ay + by) / 2 - 3,
++                0,
++                4.5,
++                ax * 0.3 + bx * 0.7,
++                ay * 0.3 + by * 0.7 + 4,
++                0,
++                3,
++            ], 8);
++        }
++        if (state.ripple > 0)
++            ripples.set([
++                vertical ? pad + state.cross : pad + state.target,
++                vertical ? pad + state.target : cy,
++                state.ripple,
++                0.8,
++            ]);
++        sy[0] = sy[1] = 1 - 0.14 * Math.min(Math.abs(state.av) / 1000, 1);
++        gl.uniform2f(uniforms.uRes, w, h);
++        gl.uniform1f(uniforms.uDpr, dpr);
++        gl.uniform1f(uniforms.uTime, time);
++        gl.uniform4f(uniforms.uPill, pad, pad, state.width, state.height);
++        gl.uniform1f(uniforms.uRadius, vertical ? 18 : 999);
++        gl.uniform4fv(uniforms.uBlob, blobs);
++        gl.uniform1fv(uniforms.uSy, sy);
++        gl.uniform4fv(uniforms.uRip, ripples);
++        gl.uniform3f(uniforms.uMouse, pad + state.mouseX, pad + state.mouseY, state.hover ? 1 : 0);
++        gl.uniform1f(uniforms.uDark, 0);
++        gl.uniform1f(uniforms.uAmb, 0);
++        gl.clearColor(0, 0, 0, 0);
++        gl.clear(gl.COLOR_BUFFER_BIT);
++        gl.drawArrays(gl.TRIANGLES, 0, 3);
++        const split = String(state.split);
++        if (root.dataset.split !== split)
++            root.dataset.split = split;
++    };
++    const moving = () => Math.abs(state.a - state.target) + Math.abs(state.b - state.target) >
++        0.2 || Math.abs(state.av) + Math.abs(state.bv) > 2;
++    const tick = (now) => {
++        frame = 0;
++        if (disposed || document.hidden || !visible)
++            return;
++        // Render each display refresh, not a 30fps gate that skips every other vsync.
++        // Bound catch-up after a stalled/background frame; do not fast-forward a spring.
++        const dt = previous ? Math.min((now - previous) / 1000, 1 / 24) : 1 / 120;
++        previous = now;
++        time += dt;
++        if (motion.matches || transparency.matches) {
++            state.a = state.b = state.target;
++            state.av = state.bv = 0;
++            state.ripple = 0;
++        }
++        else if (vertical) {
++            // One bounded body for a vertical menu. Retargeting never leaves a satellite behind.
++            const before = state.a;
++            state.a += (state.target - state.a) * (1 - Math.exp(-dt * 24));
++            if (Math.abs(state.target - state.a) < 0.1)
++                state.a = state.target;
++            state.av = (state.a - before) / dt;
++            state.b = state.a;
++            state.bv = state.av;
++            state.split = false;
++            if (state.ripple) {
++                state.ripple += dt;
++                if (state.ripple > 0.55)
++                    state.ripple = 0;
++            }
++        }
++        else {
++            // Small bounded steps keep identical damping on 60/100/120/144Hz displays.
++            const steps = Math.max(1, Math.ceil(dt * 120)), step = dt / steps;
++            for (let i = 0; i < steps; i++) {
++                state.av += (210 * (state.target - state.a) - 25 * state.av) * step;
++                state.a += state.av * step;
++                state.bv += (72 * (state.target - state.b) - 13 * state.bv) * step;
++                state.b += state.bv * step;
++            }
++            if (!moving() && state.split && !state.ripple) {
++                state.ripple = 0.001;
++                state.split = false;
++            }
++            if (state.ripple) {
++                state.ripple += dt;
++                if (state.ripple > 1.7)
++                    state.ripple = 0;
++            }
++        }
++        draw();
++        if (!motion.matches &&
++            !transparency.matches &&
++            (moving() || state.ripple))
++            frame = requestAnimationFrame(tick);
++    };
++    const wake = () => {
++        if (!frame && !disposed && !document.hidden && visible) {
++            previous = 0;
++            frame = requestAnimationFrame(tick);
++        }
++    };
++    const select = (index) => {
++        if (selected !== index) {
++            selected = index;
++            state.split = false;
++            state.ripple = 0;
++            target();
++            wake();
++        }
++    };
++    const pointer = (event) => {
++        if (!fine.matches || event.pointerType !== "mouse")
++            return;
++        const r = surfaceRect ?? surface.getBoundingClientRect();
++        state.mouseX = event.clientX - r.left;
++        state.mouseY = event.clientY - r.top;
++        state.hover = true;
++        const i = options().findIndex((e) => e.contains(event.target));
++        if (i >= 0)
++            select(i);
++        wake();
++    };
++    const reset = () => {
++        state.hover = false;
++        select(activeRef.current);
++        wake();
++    };
++    const focus = (event) => {
++        const i = options().findIndex((e) => e.contains(event.target));
++        if (i >= 0)
++            select(i);
++        wake();
++    };
++    const click = () => {
++        if (!motion.matches) {
++            state.ripple = 0.001;
++            wake();
++        }
++    };
++    const scroll = () => {
++        target();
++        draw();
++        wake();
++    };
++    surface.addEventListener("scroll", scroll, true);
++    const resize = new ResizeObserver(() => {
++        target();
++        draw();
++        wake();
++    });
++    const intersection = new IntersectionObserver(([entry]) => {
++        visible = entry.isIntersecting;
++        visibility();
++    });
++    const visibility = () => {
++        cancelAnimationFrame(frame);
++        frame = 0;
++        if (!document.hidden && visible)
++            wake();
++    };
++    const preference = () => {
++        state.a = state.b = state.target;
++        state.av = state.bv = 0;
++        state.ripple = 0;
++        root.dataset.opaque = String(transparency.matches);
++        draw();
++        wake();
++    };
++    const lost = (event) => {
++        event.preventDefault();
++        cancelAnimationFrame(frame);
++        frame = 0;
++        releaseGL();
++    };
++    const restored = () => {
++        init();
++        target();
++        draw();
++        wake();
++    };
++    refresh.current = () => {
++        selected = activeRef.current;
++        target();
++        wake();
++    };
++    init();
++    target();
++    preference();
++    resize.observe(surface);
++    intersection.observe(surface);
++    surface.addEventListener("pointermove", pointer, { passive: true });
++    surface.addEventListener("pointerleave", reset);
++    surface.addEventListener("focusin", focus);
++    surface.addEventListener("focusout", reset);
++    surface.addEventListener("click", click);
++    document.addEventListener("visibilitychange", visibility);
++    motion.addEventListener("change", preference);
++    transparency.addEventListener("change", preference);
++    canvas.addEventListener("webglcontextlost", lost);
++    canvas.addEventListener("webglcontextrestored", restored);
++    return () => {
++        surface.removeEventListener("scroll", scroll, true);
++        disposed = true;
++        refresh.current = null;
++        cancelAnimationFrame(frame);
++        resize.disconnect();
++        intersection.disconnect();
++        releaseGL();
++        surface.removeEventListener("pointermove", pointer);
++        surface.removeEventListener("pointerleave", reset);
++        surface.removeEventListener("focusin", focus);
++        surface.removeEventListener("focusout", reset);
++        surface.removeEventListener("click", click);
++        document.removeEventListener("visibilitychange", visibility);
++        motion.removeEventListener("change", preference);
++        transparency.removeEventListener("change", preference);
++        canvas.removeEventListener("webglcontextlost", lost);
++        canvas.removeEventListener("webglcontextrestored", restored);
++    };
++}
+diff --git a/desktop/app/identity-style/smoke-shader.js b/desktop/app/identity-style/smoke-shader.js
+new file mode 100644
+index 0000000..92eb059
+--- /dev/null
++++ b/desktop/app/identity-style/smoke-shader.js
+@@ -0,0 +1,61 @@
++/** Smoke Login shader, Aakash Mehra, MIT. See docs/implementation/SMOKE_LOGIN.md.
++ * Adapted from the public 21st.dev live demo; renderer is local and dependency-free.
++ */
++export const smokeVertexShader = "attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}";
++export const smokeFragmentShader = `
++precision highp float;
++uniform vec2 uRes;
++uniform float uTime;
++uniform vec2 uMouse;
++uniform float uDark;
++
++float hash(vec2 p){ p = fract(p * vec2(234.34, 435.345)); p += dot(p, p + 34.23); return fract(p.x * p.y); }
++float noise(vec2 p){
++  vec2 i = floor(p), f = fract(p), u = f * f * (3. - 2. * f);
++  return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
++}
++float fbm(vec2 p){
++  float v = 0., a = .5;
++  mat2 r = mat2(.8, .6, -.6, .8);
++  for (int i = 0; i < 5; i++) { v += a * noise(p); p = r * p * 2.02 + vec2(1.7, 9.2); a *= .5; }
++  return v;
++}
++
++void main(){
++  vec2 uv = gl_FragCoord.xy / uRes;
++  float ar = uRes.x / uRes.y;
++  vec2 p = vec2(uv.x * ar, uv.y) * 1.25;
++  float t = uTime * .07;
++
++  // The pointer stirs a slow eddy into the smoke.
++  vec2 d = p - vec2(uMouse.x * ar, uMouse.y) * 1.25;
++  float k = exp(-dot(d, d) * 1.6);
++  p += vec2(-d.y, d.x) * k * .55;
++
++  // Two rounds of domain warping: the classic recipe for curling, billowing plumes.
++  vec2 q = vec2(fbm(p + vec2(0., t)), fbm(p + vec2(5.2, 1.3) - t * .8));
++  vec2 r = vec2(fbm(p + 3. * q + vec2(1.7, 9.2) + t * 1.2), fbm(p + 3. * q + vec2(8.3, 2.8) - t));
++  float f = fbm(p + 2.6 * r + vec2(t * .4, -t * .3));
++
++  float smoke = smoothstep(.3, .85, f);
++  smoke *= smoke;
++  float wisp = smoothstep(.55, .75, f) * (1. - smoothstep(.75, .95, f)); // bright rims on the plumes
++  float vein = (1. - smoothstep(.0, .04, abs(f - .58))) * smoothstep(.42, .62, r.y); // acid green thread along a plume edge
++
++  vec3 green = vec3(.62, 1., .23);
++
++  // light: ink smoke on paper
++  vec3 paper = vec3(.968, .964, .949);
++  vec3 lit = mix(paper, vec3(.07, .08, .07), smoke * .92);
++  lit = mix(lit, vec3(.36, .72, .02), vein * .7);
++  lit += (1. - smoke) * wisp * .03;
++
++  // dark: pale smoke in the dark, green glowing through it
++  vec3 night = mix(vec3(.04, .045, .04), vec3(.03, .035, .03), uv.y);
++  vec3 drk = night + vec3(.78, .8, .76) * smoke * .62 + vec3(.9) * wisp * .08;
++  drk += green * vein * .8;
++
++  vec3 col = mix(lit, drk, uDark);
++  col += (hash(gl_FragCoord.xy + fract(t)) - .5) / 255.; // dither against banding
++  gl_FragColor = vec4(col, 1.);
++}`;
+diff --git a/desktop/app/identity-style/smoke.js b/desktop/app/identity-style/smoke.js
+new file mode 100644
+index 0000000..41dede1
+--- /dev/null
++++ b/desktop/app/identity-style/smoke.js
+@@ -0,0 +1,167 @@
++import {smokeFragmentShader,smokeVertexShader} from './smoke-shader.js';
++export function mountSmoke() {
++    const canvas = document.querySelector(".auth-smoke-canvas");
++    if (!canvas)
++        return;
++    const motion = matchMedia("(prefers-reduced-motion: reduce)");
++    const fine = matchMedia("(pointer: fine)");
++    const small = matchMedia("(max-width: 800px)");
++    let dispose;
++    const initialize = () => {
++        dispose?.();
++        canvas.dataset.smoke = "fallback";
++        const gl = canvas.getContext("webgl", {
++            antialias: false,
++            alpha: false,
++            depth: false,
++            powerPreference: "low-power",
++            preserveDrawingBuffer: false,
++        });
++        if (!gl || gl.isContextLost())
++            return;
++        const shaders = [];
++        let program = null, buffer = null;
++        let frame = 0, last = 0, elapsed = 40, visible = true, disposed = false;
++        const pointer = { x: 0.7, y: 0.4, tx: 0.7, ty: 0.4 };
++        const release = () => {
++            cancelAnimationFrame(frame);
++            frame = 0;
++            if (buffer)
++                gl.deleteBuffer(buffer);
++            if (program)
++                gl.deleteProgram(program);
++            shaders.forEach((shader) => gl.deleteShader(shader));
++        };
++        try {
++            for (const [type, source] of [
++                [gl.VERTEX_SHADER, smokeVertexShader],
++                [gl.FRAGMENT_SHADER, smokeFragmentShader],
++            ]) {
++                const shader = gl.createShader(type);
++                if (!shader)
++                    throw Error("shader allocation");
++                shaders.push(shader);
++                gl.shaderSource(shader, source);
++                gl.compileShader(shader);
++                if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS))
++                    throw Error("shader compile");
++            }
++            program = gl.createProgram();
++            if (!program)
++                throw Error("program allocation");
++            shaders.forEach((shader) => gl.attachShader(program, shader));
++            gl.linkProgram(program);
++            if (!gl.getProgramParameter(program, gl.LINK_STATUS))
++                throw Error("program link");
++            gl.useProgram(program);
++            buffer = gl.createBuffer();
++            if (!buffer)
++                throw Error("buffer allocation");
++            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
++            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
++            const position = gl.getAttribLocation(program, "a");
++            gl.enableVertexAttribArray(position);
++            gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
++        }
++        catch {
++            release();
++            return;
++        }
++        const resolution = gl.getUniformLocation(program, "uRes"), time = gl.getUniformLocation(program, "uTime"), mouse = gl.getUniformLocation(program, "uMouse"), dark = gl.getUniformLocation(program, "uDark");
++        const draw = () => {
++            if (disposed || gl.isContextLost())
++                return;
++            gl.uniform2f(resolution, canvas.width, canvas.height);
++            gl.uniform1f(time, elapsed);
++            gl.uniform2f(mouse, pointer.x, pointer.y);
++            gl.uniform1f(dark, 0);
++            gl.drawArrays(gl.TRIANGLES, 0, 3);
++            canvas.dataset.smoke = "ready";
++        };
++        const animate = (now) => {
++            frame = requestAnimationFrame(animate);
++            if (now - last < 1000 / 30)
++                return;
++            const dt = last ? Math.min((now - last) / 1000, 0.1) : 0;
++            last = now;
++            elapsed += dt;
++            pointer.x += (pointer.tx - pointer.x) * Math.min(1, dt * 2.2);
++            pointer.y += (pointer.ty - pointer.y) * Math.min(1, dt * 2.2);
++            draw();
++        };
++        const play = () => {
++            cancelAnimationFrame(frame);
++            frame = 0;
++            last = 0;
++            if (!visible || document.hidden || disposed)
++                return;
++            if (motion.matches || small.matches) {
++                draw();
++                return;
++            }
++            frame = requestAnimationFrame(animate);
++        };
++        const move = (event) => {
++            if (!fine.matches ||
++                motion.matches ||
++                small.matches ||
++                event.pointerType !== "mouse")
++                return;
++            const bounds = canvas.getBoundingClientRect();
++            pointer.tx = Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width));
++            pointer.ty =
++                1 -
++                    Math.min(1, Math.max(0, (event.clientY - bounds.top) / bounds.height));
++        };
++        const reset = () => {
++            pointer.tx = 0.7;
++            pointer.ty = 0.4;
++        };
++        const resize = new ResizeObserver(() => {
++            const ratio = Math.min(devicePixelRatio || 1, 1.5) * 0.55;
++            canvas.width = Math.max(1, Math.round(canvas.clientWidth * ratio));
++            canvas.height = Math.max(1, Math.round(canvas.clientHeight * ratio));
++            gl.viewport(0, 0, canvas.width, canvas.height);
++            draw();
++        });
++        const intersection = new IntersectionObserver((entries) => {
++            visible = entries[0]?.isIntersecting ?? false;
++            play();
++        });
++        resize.observe(canvas);
++        intersection.observe(canvas);
++        const surface = canvas.closest("main") ?? canvas;
++        surface.addEventListener("pointermove", move, {
++            passive: true,
++        });
++        surface.addEventListener("pointerleave", reset);
++        document.addEventListener("visibilitychange", play);
++        motion.addEventListener("change", play);
++        small.addEventListener("change", play);
++        play();
++        dispose = () => {
++            disposed = true;
++            release();
++            resize.disconnect();
++            intersection.disconnect();
++            surface.removeEventListener("pointermove", move);
++            surface.removeEventListener("pointerleave", reset);
++            document.removeEventListener("visibilitychange", play);
++            motion.removeEventListener("change", play);
++            small.removeEventListener("change", play);
++        };
++    };
++    const lost = (event) => {
++        event.preventDefault();
++        dispose?.();
++        canvas.dataset.smoke = "fallback";
++    };
++    canvas.addEventListener("webglcontextlost", lost);
++    canvas.addEventListener("webglcontextrestored", initialize);
++    initialize();
++    return () => {
++        dispose?.();
++        canvas.removeEventListener("webglcontextlost", lost);
++        canvas.removeEventListener("webglcontextrestored", initialize);
++    };
++}
+diff --git a/desktop/app/identity-style/wordmark-italic.svg b/desktop/app/identity-style/wordmark-italic.svg
+new file mode 100644
+index 0000000..be53a79
+--- /dev/null
++++ b/desktop/app/identity-style/wordmark-italic.svg
+@@ -0,0 +1 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="330" height="86" viewBox="0 0 330 86"><title>Naumi italic wordmark</title><g fill="#181b23" transform="translate(32 -40) skewX(-12)"><g transform="translate(-196 0)"><path d="M152 0V1466H440L1040 487V1466H1315V0H1018L427 956V0Z" transform="translate(196.0000 119) scale(0.049805 -0.049805)" /><path d="M357 738 102 784Q145 938 250.0 1012.0Q355 1086 562 1086Q750 1086 842.0 1041.5Q934 997 971.5 928.5Q1009 860 1009 677L1006 349Q1006 209 1019.5 142.5Q1033 76 1070 0H792Q781 28 765 83Q758 108 755 116Q683 46 601.0 11.0Q519 -24 426 -24Q262 -24 167.5 65.0Q73 154 73 290Q73 380 116.0 450.5Q159 521 236.5 558.5Q314 596 460 624Q657 661 733 693V721Q733 802 693.0 836.5Q653 871 542 871Q467 871 425.0 841.5Q383 812 357 738ZM733 510Q679 492 562.0 467.0Q445 442 409 418Q354 379 354 319Q354 260 398.0 217.0Q442 174 510 174Q586 174 655 224Q706 262 722 317Q733 353 733 454Z" transform="translate(268.4658 119) scale(0.049805 -0.049805)" /><path d="M846 0V159Q788 74 693.5 25.0Q599 -24 494 -24Q387 -24 302.0 23.0Q217 70 179.0 155.0Q141 240 141 390V1062H422V574Q422 350 437.5 299.5Q453 249 494.0 219.5Q535 190 598 190Q670 190 727.0 229.5Q784 269 805.0 327.5Q826 386 826 614V1062H1107V0Z" transform="translate(323.9980 119) scale(0.049805 -0.049805)" /><path d="M126 1062H385V917Q524 1086 716 1086Q818 1086 893.0 1044.0Q968 1002 1016 917Q1086 1002 1167.0 1044.0Q1248 1086 1340 1086Q1457 1086 1538.0 1038.5Q1619 991 1659 899Q1688 831 1688 679V0H1407V607Q1407 765 1378 811Q1339 871 1258 871Q1199 871 1147.0 835.0Q1095 799 1072.0 729.5Q1049 660 1049 510V0H768V582Q768 737 753.0 782.0Q738 827 706.5 849.0Q675 871 621 871Q556 871 504.0 836.0Q452 801 429.5 735.0Q407 669 407 516V0H126Z" transform="translate(385.1084 119) scale(0.049805 -0.049805)" /><path d="M147 1206V1466H428V1206ZM147 0V1062H428V0Z" transform="translate(474.6074 119) scale(0.049805 -0.049805)" /></g></g></svg>
+diff --git a/desktop/app/identity-visual.js b/desktop/app/identity-visual.js
+new file mode 100644
+index 0000000..c112873
+--- /dev/null
++++ b/desktop/app/identity-visual.js
+@@ -0,0 +1,672 @@
++// Reused Naumi Design Ops optical effects; DOM lifecycle adapter, no form access.
++(()=>{
++/** Smoke Login shader, Aakash Mehra, MIT. See docs/implementation/SMOKE_LOGIN.md.
++ * Adapted from the public 21st.dev live demo; renderer is local and dependency-free.
++ */
++const smokeVertexShader = "attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}";
++const smokeFragmentShader = `
++precision highp float;
++uniform vec2 uRes;
++uniform float uTime;
++uniform vec2 uMouse;
++uniform float uDark;
++
++float hash(vec2 p){ p = fract(p * vec2(234.34, 435.345)); p += dot(p, p + 34.23); return fract(p.x * p.y); }
++float noise(vec2 p){
++  vec2 i = floor(p), f = fract(p), u = f * f * (3. - 2. * f);
++  return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
++}
++float fbm(vec2 p){
++  float v = 0., a = .5;
++  mat2 r = mat2(.8, .6, -.6, .8);
++  for (int i = 0; i < 5; i++) { v += a * noise(p); p = r * p * 2.02 + vec2(1.7, 9.2); a *= .5; }
++  return v;
++}
++
++void main(){
++  vec2 uv = gl_FragCoord.xy / uRes;
++  float ar = uRes.x / uRes.y;
++  vec2 p = vec2(uv.x * ar, uv.y) * 1.25;
++  float t = uTime * .07;
++
++  // The pointer stirs a slow eddy into the smoke.
++  vec2 d = p - vec2(uMouse.x * ar, uMouse.y) * 1.25;
++  float k = exp(-dot(d, d) * 1.6);
++  p += vec2(-d.y, d.x) * k * .55;
++
++  // Two rounds of domain warping: the classic recipe for curling, billowing plumes.
++  vec2 q = vec2(fbm(p + vec2(0., t)), fbm(p + vec2(5.2, 1.3) - t * .8));
++  vec2 r = vec2(fbm(p + 3. * q + vec2(1.7, 9.2) + t * 1.2), fbm(p + 3. * q + vec2(8.3, 2.8) - t));
++  float f = fbm(p + 2.6 * r + vec2(t * .4, -t * .3));
++
++  float smoke = smoothstep(.3, .85, f);
++  smoke *= smoke;
++  float wisp = smoothstep(.55, .75, f) * (1. - smoothstep(.75, .95, f)); // bright rims on the plumes
++  float vein = (1. - smoothstep(.0, .04, abs(f - .58))) * smoothstep(.42, .62, r.y); // acid green thread along a plume edge
++
++  vec3 green = vec3(.62, 1., .23);
++
++  // light: ink smoke on paper
++  vec3 paper = vec3(.968, .964, .949);
++  vec3 lit = mix(paper, vec3(.07, .08, .07), smoke * .92);
++  lit = mix(lit, vec3(.36, .72, .02), vein * .7);
++  lit += (1. - smoke) * wisp * .03;
++
++  // dark: pale smoke in the dark, green glowing through it
++  vec3 night = mix(vec3(.04, .045, .04), vec3(.03, .035, .03), uv.y);
++  vec3 drk = night + vec3(.78, .8, .76) * smoke * .62 + vec3(.9) * wisp * .08;
++  drk += green * vein * .8;
++
++  vec3 col = mix(lit, drk, uDark);
++  col += (hash(gl_FragCoord.xy + fract(t)) - .5) / 255.; // dither against banding
++  gl_FragColor = vec4(col, 1.);
++}`;
++
++/** Liquid Glass Navbar shader by Guglielmo Giannattasio / Nimbus UI, MIT.
++ * Adapted from the public 21st.dev live demo. See AUTH_LIQUID_CONTROLS.md.
++ */
++const liquidVertexShader = "attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}";
++const liquidFragmentShader = `
++precision highp float;
++uniform float uRadius;
++uniform vec2 uRes;uniform float uDpr;uniform float uTime;uniform vec4 uPill;
++uniform vec4 uBlob[6];uniform float uSy[6];uniform vec4 uRip[6];uniform vec3 uMouse;uniform float uDark;uniform float uAmb;
++float sdRB(vec2 p,vec2 b,float r){vec2 q=abs(p)-b+r;return length(max(q,0.))+min(max(q.x,q.y),0.)-r;}
++float sdCap(vec2 p,vec4 B,float sy){p-=B.xy;p.y/=sy;p.x=max(abs(p.x)-B.z,0.);return(length(p)-B.w)*min(1.,sy);}
++float smin(float a,float b,float k){float h=clamp(.5+.5*(b-a)/k,0.,1.);return mix(b,a,h)-k*h*(1.-h);}
++float dropD(vec2 p){float d=1e4;for(int i=0;i<6;i++){if(uBlob[i].w>.5){d=smin(d,sdCap(p,uBlob[i],uSy[i]),13.);}}return d;}
++float pillD(vec2 p){vec2 h=uPill.zw*.5;return sdRB(p-uPill.xy-h,h,min(uRadius,min(h.x,h.y)));}
++float lens(float d,float w){float t=clamp(-d/w,0.,1.);return sqrt(1.-(1.-t)*(1.-t));}
++float waves(vec2 p){float w=0.;
++ for(int i=0;i<6;i++){vec4 R=uRip[i];if(R.w>0.){float x=length(p-R.xy)-R.z*240.;w+=R.w*exp(-R.z*1.7)*sin(x*.3)*exp(-x*x/700.);}}
++ vec2 m=p-uMouse.xy;w+=uMouse.z*3.6*exp(-dot(m,m)/1000.);
++ w+=uAmb*(sin(p.x*.05+uTime*1.2)*.45+sin(p.x*.13-uTime*.85+p.y*.2)*.25);return w;}
++float H(vec2 p){float dp=pillD(p);return lens(dp,uPill.w*.36)*2.4+lens(dropD(p),11.)*7.5+waves(p)*smoothstep(0.,7.,-dp);}
++float caus(vec2 p,float t){vec2 q=p;float c=0.;for(int i=0;i<3;i++){q+=vec2(sin(q.y*1.1+t),cos(q.x*1.3-t*.7))*.6;c+=1./(1.+16.*abs(sin(q.x)*sin(q.y)));}return c/3.;}
++void main(){
++ vec2 p=vec2(gl_FragCoord.x,uRes.y*uDpr-gl_FragCoord.y)/uDpr;
++ float dp=pillD(p);float dd=dropD(p);
++ float h0=H(p);vec3 n=normalize(vec3(h0-H(p+vec2(1.,0.)),h0-H(p+vec2(0.,1.)),1.));
++ vec3 V=vec3(0.,0.,1.);
++ float spec=pow(max(dot(reflect(-normalize(vec3(-.45,-.8,.85)),n),V),0.),70.);
++ float spec2=pow(max(dot(reflect(-normalize(vec3(.6,.75,.7)),n),V),0.),22.)*.3;
++ float fres=clamp((1.-n.z)*4.,0.,1.);
++ vec3 irid=.5+.5*cos(6.2831*(vec3(0.,.33,.67)+fres*.85+p.x*.0028+uTime*.035));
++ float pm=smoothstep(1.,-1.,dp);float dm=smoothstep(1.,-1.,dd)*smoothstep(1.,-2.,dp);
++ float sh=smoothstep(9.,-9.,dropD(p-vec2(0.,5.)))*(1.-dm)*pm*(.11+.07*uDark);
++ vec3 c=vec3(0.,.14,.36)*sh;float a=sh;
++ float pa=clamp(pm*(fres*.5+spec*.9+spec2),0.,1.);
++ c=mix(vec3(1.),irid,.14*fres)*pa+c*(1.-pa);a=pa+a*(1.-pa);
++ float th=lens(dd,11.);
++ float cs=caus((p+n.xy*th*18.)*.085,uTime*.9);
++ vec3 tint=mix(vec3(.80,.95,1.),vec3(.55,.82,1.),uDark);
++ float rim=dm*(1.-smoothstep(0.,8.,-dd));
++ float cres=dm*smoothstep(.12,.55,dot(n.xy,normalize(vec2(.55,.85))))*smoothstep(0.,3.,-dd);
++ float body=.5+.5*clamp(-n.y*3.,-1.,1.);
++ float da=dm*(.26+.14*body)*(1.-.35*uDark);vec3 dc=mix(tint,vec3(1.),body*.6);
++ float la=rim*.22;vec3 lc=mix(vec3(0.,.42,.78),vec3(.1,.55,.95),uDark);dc=lc*la+dc*da*(1.-la);da=la+da*(1.-la);
++ la=clamp(cres*.7+smoothstep(.6,1.,cs)*.28*th*dm,0.,1.);dc=vec3(1.)*la+dc*(1.-la);da=la+da*(1.-la);
++ la=clamp(dm*(spec*1.2+spec2*.5),0.,1.);dc=vec3(1.)*la+dc*(1.-la);da=la+da*(1.-la);
++ la=dm*smoothstep(-2.,0.,dd)*.4;dc=mix(vec3(1.),irid,.1)*la+dc*(1.-la);da=la+da*(1.-la);
++ c=dc+c*(1.-da);a=da+a*(1.-da);
++ // Never let the rectangular GL backing store contribute outside the capsule.
++ float outerMask=1.-smoothstep(-.8,.8,dp);
++ c*=outerMask;a*=outerMask;
++ if(dp>1.){gl_FragColor=vec4(0.);return;}
++ gl_FragColor=vec4(c,a);
++}
++`;
++
++function mountSmoke() {
++    const canvas = document.querySelector(".auth-smoke-canvas");
++    if (!canvas)
++        return;
++    const motion = matchMedia("(prefers-reduced-motion: reduce)");
++    const fine = matchMedia("(pointer: fine)");
++    const small = matchMedia("(max-width: 800px)");
++    let dispose;
++    const initialize = () => {
++        dispose?.();
++        canvas.dataset.smoke = "fallback";
++        const gl = canvas.getContext("webgl", {
++            antialias: false,
++            alpha: false,
++            depth: false,
++            powerPreference: "low-power",
++            preserveDrawingBuffer: false,
++        });
++        if (!gl || gl.isContextLost())
++            return;
++        const shaders = [];
++        let program = null, buffer = null;
++        let frame = 0, last = 0, elapsed = 40, visible = true, disposed = false;
++        const pointer = { x: 0.7, y: 0.4, tx: 0.7, ty: 0.4 };
++        const release = () => {
++            cancelAnimationFrame(frame);
++            frame = 0;
++            if (buffer)
++                gl.deleteBuffer(buffer);
++            if (program)
++                gl.deleteProgram(program);
++            shaders.forEach((shader) => gl.deleteShader(shader));
++        };
++        try {
++            for (const [type, source] of [
++                [gl.VERTEX_SHADER, smokeVertexShader],
++                [gl.FRAGMENT_SHADER, smokeFragmentShader],
++            ]) {
++                const shader = gl.createShader(type);
++                if (!shader)
++                    throw Error("shader allocation");
++                shaders.push(shader);
++                gl.shaderSource(shader, source);
++                gl.compileShader(shader);
++                if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS))
++                    throw Error("shader compile");
++            }
++            program = gl.createProgram();
++            if (!program)
++                throw Error("program allocation");
++            shaders.forEach((shader) => gl.attachShader(program, shader));
++            gl.linkProgram(program);
++            if (!gl.getProgramParameter(program, gl.LINK_STATUS))
++                throw Error("program link");
++            gl.useProgram(program);
++            buffer = gl.createBuffer();
++            if (!buffer)
++                throw Error("buffer allocation");
++            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
++            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
++            const position = gl.getAttribLocation(program, "a");
++            gl.enableVertexAttribArray(position);
++            gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
++        }
++        catch {
++            release();
++            return;
++        }
++        const resolution = gl.getUniformLocation(program, "uRes"), time = gl.getUniformLocation(program, "uTime"), mouse = gl.getUniformLocation(program, "uMouse"), dark = gl.getUniformLocation(program, "uDark");
++        const draw = () => {
++            if (disposed || gl.isContextLost())
++                return;
++            gl.uniform2f(resolution, canvas.width, canvas.height);
++            gl.uniform1f(time, elapsed);
++            gl.uniform2f(mouse, pointer.x, pointer.y);
++            gl.uniform1f(dark, 0);
++            gl.drawArrays(gl.TRIANGLES, 0, 3);
++            canvas.dataset.smoke = "ready";
++        };
++        const animate = (now) => {
++            frame = requestAnimationFrame(animate);
++            if (now - last < 1000 / 30)
++                return;
++            const dt = last ? Math.min((now - last) / 1000, 0.1) : 0;
++            last = now;
++            elapsed += dt;
++            pointer.x += (pointer.tx - pointer.x) * Math.min(1, dt * 2.2);
++            pointer.y += (pointer.ty - pointer.y) * Math.min(1, dt * 2.2);
++            draw();
++        };
++        const play = () => {
++            cancelAnimationFrame(frame);
++            frame = 0;
++            last = 0;
++            if (!visible || document.hidden || disposed)
++                return;
++            if (motion.matches || small.matches) {
++                draw();
++                return;
++            }
++            frame = requestAnimationFrame(animate);
++        };
++        const move = (event) => {
++            if (!fine.matches ||
++                motion.matches ||
++                small.matches ||
++                event.pointerType !== "mouse")
++                return;
++            const bounds = canvas.getBoundingClientRect();
++            pointer.tx = Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width));
++            pointer.ty =
++                1 -
++                    Math.min(1, Math.max(0, (event.clientY - bounds.top) / bounds.height));
++        };
++        const reset = () => {
++            pointer.tx = 0.7;
++            pointer.ty = 0.4;
++        };
++        const resize = new ResizeObserver(() => {
++            const ratio = Math.min(devicePixelRatio || 1, 1.5) * 0.55;
++            canvas.width = Math.max(1, Math.round(canvas.clientWidth * ratio));
++            canvas.height = Math.max(1, Math.round(canvas.clientHeight * ratio));
++            gl.viewport(0, 0, canvas.width, canvas.height);
++            draw();
++        });
++        const intersection = new IntersectionObserver((entries) => {
++            visible = entries[0]?.isIntersecting ?? false;
++            play();
++        });
++        resize.observe(canvas);
++        intersection.observe(canvas);
++        const surface = canvas.closest("main") ?? canvas;
++        surface.addEventListener("pointermove", move, {
++            passive: true,
++        });
++        surface.addEventListener("pointerleave", reset);
++        document.addEventListener("visibilitychange", play);
++        motion.addEventListener("change", play);
++        small.addEventListener("change", play);
++        play();
++        dispose = () => {
++            disposed = true;
++            release();
++            resize.disconnect();
++            intersection.disconnect();
++            surface.removeEventListener("pointermove", move);
++            surface.removeEventListener("pointerleave", reset);
++            document.removeEventListener("visibilitychange", play);
++            motion.removeEventListener("change", play);
++            small.removeEventListener("change", play);
++        };
++    };
++    const lost = (event) => {
++        event.preventDefault();
++        dispose?.();
++        canvas.dataset.smoke = "fallback";
++    };
++    canvas.addEventListener("webglcontextlost", lost);
++    canvas.addEventListener("webglcontextrestored", initialize);
++    initialize();
++    return () => {
++        dispose?.();
++        canvas.removeEventListener("webglcontextlost", lost);
++        canvas.removeEventListener("webglcontextrestored", initialize);
++    };
++}
++
++function mountLiquid(layerElement, optionSelector = '.auth-option', vertical = false) {
++    const activeRef = { current: 0 }, refresh = { current: null };
++    const root = layerElement, canvas = root?.querySelector("canvas"), surface = root?.parentElement;
++    if (!root || !canvas || !surface)
++        return;
++    const motion = matchMedia("(prefers-reduced-motion: reduce)");
++    const transparency = matchMedia("(prefers-reduced-transparency: reduce)");
++    const fine = matchMedia("(pointer: fine)");
++    let frame = 0, previous = 0, time = 0, visible = true, disposed = false;
++    let gl = null, program = null, buffer = null;
++    const shaders = [];
++    const uniforms = {};
++    const state = {
++        a: 0,
++        av: 0,
++        b: 0,
++        bv: 0,
++        target: 0,
++        cross: 0,
++        width: 0,
++        height: 0,
++        q: 0,
++        radius: 20,
++        ready: false,
++        hover: false,
++        mouseX: 0,
++        mouseY: 0,
++        ripple: 0,
++        split: false,
++    };
++    let selected = activeRef.current;
++    let surfaceRect = null;
++    const options = () => [
++        ...surface.querySelectorAll(optionSelector),
++    ];
++    const target = () => {
++        const rect = surface.getBoundingClientRect(), items = options(), item = items[selected];
++        surfaceRect = rect;
++        const r = item?.getBoundingClientRect() ?? rect;
++        state.width = rect.width;
++        state.height = rect.height;
++        state.target = vertical
++            ? r.top - rect.top + r.height / 2
++            : r.left - rect.left + r.width / 2;
++        state.cross = r.left - rect.left + r.width / 2;
++        state.radius = Math.max(1, (r.height - (item ? 0 : 10)) / 2);
++        state.q = Math.max(0, (r.width - (item ? 0 : 10)) / 2 - state.radius);
++        root.style.setProperty("--liquid-top", `${r.top - rect.top}px`);
++        root.style.setProperty("--liquid-height", `${r.height}px`);
++        root.style.setProperty("--liquid-left", `${item ? r.left - rect.left : 5}px`);
++        root.style.setProperty("--liquid-width", `${r.width - (item ? 0 : 10)}px`);
++        if (!state.ready) {
++            state.a = state.b = state.target;
++            state.ready = true;
++        }
++    };
++    const releaseGL = () => {
++        if (gl) {
++            if (buffer)
++                gl.deleteBuffer(buffer);
++            if (program)
++                gl.deleteProgram(program);
++            shaders.forEach((s) => gl.deleteShader(s));
++        }
++        shaders.length = 0;
++        program = null;
++        buffer = null;
++        gl = null;
++        root.dataset.gl = "off";
++    };
++    const init = () => {
++        releaseGL();
++        try {
++            gl = canvas.getContext("webgl", {
++                alpha: true,
++                premultipliedAlpha: true,
++                antialias: false,
++                depth: false,
++                powerPreference: "low-power",
++            });
++            if (!gl || gl.isContextLost())
++                return;
++            for (const [type, source] of [
++                [gl.VERTEX_SHADER, liquidVertexShader],
++                [gl.FRAGMENT_SHADER, liquidFragmentShader],
++            ]) {
++                const s = gl.createShader(type);
++                if (!s)
++                    throw Error("shader allocation");
++                shaders.push(s);
++                gl.shaderSource(s, source);
++                gl.compileShader(s);
++                if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
++                    throw Error("shader compile");
++            }
++            program = gl.createProgram();
++            if (!program)
++                throw Error("program allocation");
++            shaders.forEach((s) => gl.attachShader(program, s));
++            gl.linkProgram(program);
++            if (!gl.getProgramParameter(program, gl.LINK_STATUS))
++                throw Error("program link");
++            gl.useProgram(program);
++            buffer = gl.createBuffer();
++            if (!buffer)
++                throw Error("buffer allocation");
++            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
++            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
++            const a = gl.getAttribLocation(program, "a");
++            gl.enableVertexAttribArray(a);
++            gl.vertexAttribPointer(a, 2, gl.FLOAT, false, 0, 0);
++            for (const n of [
++                "uRes",
++                "uDpr",
++                "uTime",
++                "uPill",
++                "uRadius",
++                "uBlob",
++                "uSy",
++                "uRip",
++                "uMouse",
++                "uDark",
++                "uAmb",
++            ])
++                uniforms[n] = gl.getUniformLocation(program, n);
++            root.dataset.gl = "on";
++        }
++        catch {
++            releaseGL();
++        }
++    };
++    // Reuse uniform storage; animation frames do not allocate transient typed arrays.
++    const blobs = new Float32Array(24), sy = new Float32Array(6).fill(1), ripples = new Float32Array(24);
++    const draw = () => {
++        if (!gl || gl.isContextLost() || !state.ready || transparency.matches)
++            return;
++        const dpr = Math.min(devicePixelRatio || 1, 1.5), pad = 14, w = state.width + 28, h = state.height + 28;
++        const cw = Math.max(1, Math.round(w * dpr)), ch = Math.max(1, Math.round(h * dpr));
++        if (canvas.width !== cw || canvas.height !== ch) {
++            canvas.width = cw;
++            canvas.height = ch;
++            canvas.style.width = `${w}px`;
++            canvas.style.height = `${h}px`;
++            gl.viewport(0, 0, cw, ch);
++        }
++        const distance = Math.abs(state.a - state.b), stretch = Math.min(distance / (state.radius * 2 + state.q * 2), 1);
++        blobs.fill(0);
++        sy.fill(1);
++        ripples.fill(0);
++        const cy = pad + state.height / 2;
++        const ax = pad + (vertical ? state.cross : state.a), ay = vertical ? pad + state.a : cy;
++        const bx = pad + (vertical ? state.cross : state.b), by = vertical ? pad + state.b : cy;
++        blobs.set([
++            ax,
++            ay,
++            state.q * (1 - 0.25 * stretch),
++            state.radius * (1 - 0.12 * stretch),
++            bx,
++            by,
++            state.q * (1 - 0.8 * stretch),
++            vertical ? 0 : state.radius * (1 - 0.5 * stretch),
++        ]);
++        if (!vertical && distance > state.radius * 1.25) {
++            state.split = true;
++            blobs.set([
++                (ax + bx) / 2,
++                (ay + by) / 2 - 3,
++                0,
++                4.5,
++                ax * 0.3 + bx * 0.7,
++                ay * 0.3 + by * 0.7 + 4,
++                0,
++                3,
++            ], 8);
++        }
++        if (state.ripple > 0)
++            ripples.set([
++                vertical ? pad + state.cross : pad + state.target,
++                vertical ? pad + state.target : cy,
++                state.ripple,
++                0.8,
++            ]);
++        sy[0] = sy[1] = 1 - 0.14 * Math.min(Math.abs(state.av) / 1000, 1);
++        gl.uniform2f(uniforms.uRes, w, h);
++        gl.uniform1f(uniforms.uDpr, dpr);
++        gl.uniform1f(uniforms.uTime, time);
++        gl.uniform4f(uniforms.uPill, pad, pad, state.width, state.height);
++        gl.uniform1f(uniforms.uRadius, vertical ? 18 : 999);
++        gl.uniform4fv(uniforms.uBlob, blobs);
++        gl.uniform1fv(uniforms.uSy, sy);
++        gl.uniform4fv(uniforms.uRip, ripples);
++        gl.uniform3f(uniforms.uMouse, pad + state.mouseX, pad + state.mouseY, state.hover ? 1 : 0);
++        gl.uniform1f(uniforms.uDark, 0);
++        gl.uniform1f(uniforms.uAmb, 0);
++        gl.clearColor(0, 0, 0, 0);
++        gl.clear(gl.COLOR_BUFFER_BIT);
++        gl.drawArrays(gl.TRIANGLES, 0, 3);
++        const split = String(state.split);
++        if (root.dataset.split !== split)
++            root.dataset.split = split;
++    };
++    const moving = () => Math.abs(state.a - state.target) + Math.abs(state.b - state.target) >
++        0.2 || Math.abs(state.av) + Math.abs(state.bv) > 2;
++    const tick = (now) => {
++        frame = 0;
++        if (disposed || document.hidden || !visible)
++            return;
++        // Render each display refresh, not a 30fps gate that skips every other vsync.
++        // Bound catch-up after a stalled/background frame; do not fast-forward a spring.
++        const dt = previous ? Math.min((now - previous) / 1000, 1 / 24) : 1 / 120;
++        previous = now;
++        time += dt;
++        if (motion.matches || transparency.matches) {
++            state.a = state.b = state.target;
++            state.av = state.bv = 0;
++            state.ripple = 0;
++        }
++        else if (vertical) {
++            // One bounded body for a vertical menu. Retargeting never leaves a satellite behind.
++            const before = state.a;
++            state.a += (state.target - state.a) * (1 - Math.exp(-dt * 24));
++            if (Math.abs(state.target - state.a) < 0.1)
++                state.a = state.target;
++            state.av = (state.a - before) / dt;
++            state.b = state.a;
++            state.bv = state.av;
++            state.split = false;
++            if (state.ripple) {
++                state.ripple += dt;
++                if (state.ripple > 0.55)
++                    state.ripple = 0;
++            }
++        }
++        else {
++            // Small bounded steps keep identical damping on 60/100/120/144Hz displays.
++            const steps = Math.max(1, Math.ceil(dt * 120)), step = dt / steps;
++            for (let i = 0; i < steps; i++) {
++                state.av += (210 * (state.target - state.a) - 25 * state.av) * step;
++                state.a += state.av * step;
++                state.bv += (72 * (state.target - state.b) - 13 * state.bv) * step;
++                state.b += state.bv * step;
++            }
++            if (!moving() && state.split && !state.ripple) {
++                state.ripple = 0.001;
++                state.split = false;
++            }
++            if (state.ripple) {
++                state.ripple += dt;
++                if (state.ripple > 1.7)
++                    state.ripple = 0;
++            }
++        }
++        draw();
++        if (!motion.matches &&
++            !transparency.matches &&
++            (moving() || state.ripple))
++            frame = requestAnimationFrame(tick);
++    };
++    const wake = () => {
++        if (!frame && !disposed && !document.hidden && visible) {
++            previous = 0;
++            frame = requestAnimationFrame(tick);
++        }
++    };
++    const select = (index) => {
++        if (selected !== index) {
++            selected = index;
++            state.split = false;
++            state.ripple = 0;
++            target();
++            wake();
++        }
++    };
++    const pointer = (event) => {
++        if (!fine.matches || event.pointerType !== "mouse")
++            return;
++        const r = surfaceRect ?? surface.getBoundingClientRect();
++        state.mouseX = event.clientX - r.left;
++        state.mouseY = event.clientY - r.top;
++        state.hover = true;
++        const i = options().findIndex((e) => e.contains(event.target));
++        if (i >= 0)
++            select(i);
++        wake();
++    };
++    const reset = () => {
++        state.hover = false;
++        select(activeRef.current);
++        wake();
++    };
++    const focus = (event) => {
++        const i = options().findIndex((e) => e.contains(event.target));
++        if (i >= 0)
++            select(i);
++        wake();
++    };
++    const click = () => {
++        if (!motion.matches) {
++            state.ripple = 0.001;
++            wake();
++        }
++    };
++    const scroll = () => {
++        target();
++        draw();
++        wake();
++    };
++    surface.addEventListener("scroll", scroll, true);
++    const resize = new ResizeObserver(() => {
++        target();
++        draw();
++        wake();
++    });
++    const intersection = new IntersectionObserver(([entry]) => {
++        visible = entry.isIntersecting;
++        visibility();
++    });
++    const visibility = () => {
++        cancelAnimationFrame(frame);
++        frame = 0;
++        if (!document.hidden && visible)
++            wake();
++    };
++    const preference = () => {
++        state.a = state.b = state.target;
++        state.av = state.bv = 0;
++        state.ripple = 0;
++        root.dataset.opaque = String(transparency.matches);
++        draw();
++        wake();
++    };
++    const lost = (event) => {
++        event.preventDefault();
++        cancelAnimationFrame(frame);
++        frame = 0;
++        releaseGL();
++    };
++    const restored = () => {
++        init();
++        target();
++        draw();
++        wake();
++    };
++    refresh.current = () => {
++        selected = activeRef.current;
++        target();
++        wake();
++    };
++    init();
++    target();
++    preference();
++    resize.observe(surface);
++    intersection.observe(surface);
++    surface.addEventListener("pointermove", pointer, { passive: true });
++    surface.addEventListener("pointerleave", reset);
++    surface.addEventListener("focusin", focus);
++    surface.addEventListener("focusout", reset);
++    surface.addEventListener("click", click);
++    document.addEventListener("visibilitychange", visibility);
++    motion.addEventListener("change", preference);
++    transparency.addEventListener("change", preference);
++    canvas.addEventListener("webglcontextlost", lost);
++    canvas.addEventListener("webglcontextrestored", restored);
++    return () => {
++        surface.removeEventListener("scroll", scroll, true);
++        disposed = true;
++        refresh.current = null;
++        cancelAnimationFrame(frame);
++        resize.disconnect();
++        intersection.disconnect();
++        releaseGL();
++        surface.removeEventListener("pointermove", pointer);
++        surface.removeEventListener("pointerleave", reset);
++        surface.removeEventListener("focusin", focus);
++        surface.removeEventListener("focusout", reset);
++        surface.removeEventListener("click", click);
++        document.removeEventListener("visibilitychange", visibility);
++        motion.removeEventListener("change", preference);
++        transparency.removeEventListener("change", preference);
++        canvas.removeEventListener("webglcontextlost", lost);
++        canvas.removeEventListener("webglcontextrestored", restored);
++    };
++}
++
++const dispose=[mountSmoke(),...Array.from(document.querySelectorAll('.auth-liquid-layer'),el=>mountLiquid(el))];addEventListener('pagehide',()=>dispose.forEach(fn=>fn?.()),{once:true});
++})();
+diff --git a/desktop/app/identity.cjs b/desktop/app/identity.cjs
+new file mode 100644
+index 0000000..e803e2a
+--- /dev/null
++++ b/desktop/app/identity.cjs
+@@ -0,0 +1,61 @@
++'use strict';
++// Naumi Canvas owns accounts, password verification, bans and session revocation.
++// This adapter owns only its Chromium session and local account namespace.
++const fs=require('node:fs'),path=require('node:path'),{createHash}=require('node:crypto');
++const {atomic,exists}=require('./profile.cjs');
++const {enterpriseOrigin}=require('./enterprise.cjs');
++const MAX_JSON=64*1024;
++function identityOrigin(value){try{return enterpriseOrigin(value);}catch{throw Error('IDENTITY_ORIGIN_INVALID');}}
++function plain(file){if(!exists(file))return null;if(!fs.lstatSync(file).isFile()||fs.lstatSync(file).isSymbolicLink()||fs.statSync(file).size>16384)throw Error('IDENTITY_CONFIG_INVALID');try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{throw Error('IDENTITY_CONFIG_INVALID');}}
++function readIdentityConfig(userData){const value=plain(path.join(userData,'naumi-identity.json'));if(!value)return null;if(value.version!==1||identityOrigin(value.origin)!==value.origin)throw Error('IDENTITY_CONFIG_INVALID');return {version:1,origin:value.origin};}
++function publicUser(value){
++ if(!value||typeof value.email!=='string'||value.email.length>254||!value.email.trim()||/[\s\x00-\x1f]/.test(value.email)||!value.email.includes('@'))throw Error('IDENTITY_RESPONSE_INVALID');
++ const email=value.email.toLowerCase();
++ // Existing Canvas account primary key is email. Do not fabricate an immutable UUID.
++ return {subject:{type:'naumi-email-v1',value:email},email,name:typeof value.name==='string'?value.name.slice(0,160):email};
++}
++function namespace(origin,user){return createHash('sha256').update(JSON.stringify([identityOrigin(origin),publicUser(user).subject])).digest('hex');}
++function accountRoot(userData,origin,user){
++ const id=namespace(origin,user),base=path.join(userData,'identity-profiles'),root=path.join(base,id);
++ for(const dir of [userData,base,root]){if(exists(dir)&&(!fs.lstatSync(dir).isDirectory()||fs.lstatSync(dir).isSymbolicLink()))throw Error('IDENTITY_DIRECTORY_UNMANAGED');}
++ return {id,root};
++}
++function bindAccount(userData,origin,value){
++ origin=identityOrigin(origin);const user=publicUser(value),profile=accountRoot(userData,origin,user);
++ fs.mkdirSync(profile.root,{recursive:true});
++ const file=path.join(profile.root,'identity-owner.json'),old=plain(file),owner={version:1,issuer:origin,subject:user.subject};
++ if(old&&JSON.stringify(old)!==JSON.stringify(owner))throw Error('IDENTITY_OWNER_MISMATCH');
++ if(!old)atomic(file,owner);
++ atomic(path.join(userData,'naumi-identity.json'),{version:1,origin});
++ return {origin,user,profileId:profile.id,root:profile.root};
++}
++function sessionPartition(origin){return 'persist:naumi-identity-'+createHash('sha256').update(identityOrigin(origin)).digest('hex');}
++async function json(response){
++ if(!response.headers.get('content-type')?.toLowerCase().includes('application/json'))throw Error('IDENTITY_RESPONSE_INVALID');
++ const reader=response.body?.getReader();if(!reader)throw Error('IDENTITY_RESPONSE_INVALID');const chunks=[];let size=0;
++ try{for(;;){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>MAX_JSON)throw Error('IDENTITY_RESPONSE_TOO_LARGE');chunks.push(Buffer.from(value));}}finally{await reader.cancel().catch(()=>{});}
++ try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw Error('IDENTITY_RESPONSE_INVALID');}
++}
++class IdentitySession{
++ constructor({origin,session}){this.origin=identityOrigin(origin);this.session=session;this.running=false;}
++ async request(endpoint,{method='GET',body}={}){
++  try{return await this.session.fetch(this.origin+endpoint,{method,...(body?{body:JSON.stringify(body)}:{}),credentials:'include',redirect:'error',cache:'no-store',headers:{Accept:'application/json',...(method==='POST'?{'Content-Type':'application/json',Origin:this.origin}:{})},signal:AbortSignal.timeout(10000)});}catch{throw Error('IDENTITY_UNAVAILABLE');}
++ }
++ async inspect(){const response=await this.request('/api/auth/session');const value=await json(response);if(!response.ok)throw Error(response.status===401?'IDENTITY_LOGIN_REQUIRED':'IDENTITY_UNAVAILABLE');if(!value||!Object.hasOwn(value,'user'))throw Error('IDENTITY_RESPONSE_INVALID');return value.user===null?null:publicUser(value.user);}
++ async login(input){
++  if(this.running)throw Error('IDENTITY_BUSY');
++  if(!input||typeof input.account!=='string'||!input.account.trim()||input.account.length>254||typeof input.password!=='string'||!input.password||input.password.length>1024||Object.keys(input).some(k=>!['account','password'].includes(k)))throw Error('IDENTITY_INPUT_INVALID');
++  this.running=true;
++  try{
++   const response=await this.request('/api/auth/login',{method:'POST',body:{email:input.account.trim(),password:input.password}});
++   await json(response); // Never surface the upstream body, cookies, role, credits or credentials.
++   if(!response.ok)throw Error(({401:'IDENTITY_CREDENTIALS_INVALID',403:'IDENTITY_ACCOUNT_UNAVAILABLE',429:'IDENTITY_RATE_LIMITED'})[response.status]??'IDENTITY_UNAVAILABLE');
++   const user=await this.inspect();if(!user)throw Error('IDENTITY_LOGIN_REQUIRED');return user;
++  }finally{this.running=false;}
++ }
++ async logout(){
++  if(this.running)throw Error('IDENTITY_BUSY');this.running=true;let remoteConfirmed=false;
++  try{try{const response=await this.request('/api/auth/logout',{method:'POST'});remoteConfirmed=response.ok;(await json(response));}catch{}await this.session.clearStorageData({storages:['cookies','localstorage','indexdb','serviceworkers','cachestorage']});await this.session.cookies.flushStore();return {remoteConfirmed};}finally{this.running=false;}
++ }
++}
++module.exports={identityOrigin,readIdentityConfig,publicUser,namespace,accountRoot,bindAccount,sessionPartition,IdentitySession,MAX_JSON};
+diff --git a/desktop/app/identity.css b/desktop/app/identity.css
+new file mode 100644
+index 0000000..1159a02
+--- /dev/null
++++ b/desktop/app/identity.css
+@@ -0,0 +1,4 @@
++@import url("identity-style/auth.css");
++@import url("identity-style/auth-smoke.css");
++@import url("identity-style/auth-liquid.css");
++:root{font:14px Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;color-scheme:light}*{box-sizing:border-box}html,body{margin:0;min-height:100%;padding:0}body{line-height:1.5;-webkit-font-smoothing:antialiased}button,input{font:inherit}button,a,input{-webkit-tap-highlight-color:transparent}a{color:inherit;text-decoration:none}h1,h2,p{margin:0}svg{flex-shrink:0}button{cursor:pointer}button:disabled{cursor:wait;opacity:.55}[hidden]{display:none!important}.mg-brand-lockup{width:148px;height:50px;display:inline-flex;align-items:center;justify-content:center;gap:8px;flex-shrink:0}.mg-brand-symbol{width:40px;height:40px;display:block;border-radius:10px;object-fit:contain;flex-shrink:0}.mg-brand-words{width:100px;display:flex;align-items:center}.mg-brand-wordmark,.mg-brand-wordmark>img{display:block;width:100px;height:27px;object-fit:contain}.auth-error:empty{display:none}.auth-error:not(:empty){margin-top:18px}.auth-smoke .auth-password-control input{padding-left:14px}.auth-form-box .secondary{background:#f3f4ef;color:#415343;border-color:#d9ded2}#signed-in strong,#signed-in>span{display:block;overflow-wrap:anywhere}#signed-in strong{font-size:22px}#signed-in>span{color:#6f716b;margin-top:8px}#signed-in>button{display:flex;width:100%;margin-top:22px}.auth-smoke .smoke-form-box:has(#signed-in:not([hidden])) .auth-liquid-options{display:none}#origin:read-only{background:#f2f3ee}.auth-smoke .auth-password-toggle:focus-visible{outline-offset:0}
+diff --git a/desktop/app/identity.html b/desktop/app/identity.html
+new file mode 100644
+index 0000000..18d711c
+--- /dev/null
++++ b/desktop/app/identity.html
+@@ -0,0 +1 @@
++<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'"><title>Naumi</title><link rel="stylesheet" href="identity.css"><main class="auth-page auth-smoke" data-theme="light"><div class="smoke-backdrop" aria-hidden="true"><canvas class="auth-smoke-canvas" data-smoke="fallback"></canvas><div class="smoke-grain"></div></div><div class="auth-brand smoke-brand"><span class="mg-brand-lockup" role="img" aria-label="Naumi"><img class="mg-brand-symbol" src="assets/symbol.svg" alt=""><span class="mg-brand-words"><span class="mg-brand-wordmark"><img src="identity-style/wordmark-italic.svg" alt=""></span></span></span></div><section class="auth-form-panel smoke-form-panel"><div class="auth-form-box smoke-form-box"><nav class="auth-liquid-options" aria-label="账号入口" data-active="0"><span class="auth-liquid-layer" data-gl="off" aria-hidden="true"><span class="auth-liquid-drop"></span><canvas class="auth-liquid-water"></canvas></span><a class="auth-option" id="login-tab" href="#login" aria-current="page"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg><span>登录</span></a><a class="auth-option" id="register" href="#register"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3a4 4 0 0 1 0 8M20 8v6M17 11h6"/><circle cx="9" cy="7" r="4"/></svg><span>注册</span></a></nav><h2 id="title">登录工作空间</h2><form id="login"><label id="server-row" for="origin">Naumi 地址<input id="origin" type="url" placeholder="https://" autocomplete="url" required></label><label for="account">账号<input id="account" placeholder="用户名或邮箱" autocomplete="username" maxlength="254" required autofocus></label><label for="password">密码<span class="auth-control auth-password-control"><input id="password" type="password" placeholder="输入密码" autocomplete="current-password" maxlength="1024" required><button id="show-password" type="button" class="auth-password-toggle" aria-label="显示密码" aria-pressed="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></span></label><button id="submit" class="auth-liquid-submit" type="submit"><span class="auth-liquid-layer" data-gl="off" aria-hidden="true"><span class="auth-liquid-drop"></span><canvas class="auth-liquid-water"></canvas></span><span class="auth-liquid-label">登录<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12h14M12 5l7 7-7 7"/></svg></span></button></form><div id="signed-in" hidden><strong id="name"></strong><span id="email"></span><button id="resume" type="button">返回工作台</button><button id="logout" type="button" class="secondary">退出登录</button></div><p id="error" class="auth-error" role="alert" aria-live="polite"></p></div></section></main><script src="identity.js"></script><script src="identity-visual.js"></script></html>
+diff --git a/desktop/app/identity.js b/desktop/app/identity.js
+new file mode 100644
+index 0000000..2bd0bfa
+--- /dev/null
++++ b/desktop/app/identity.js
+@@ -0,0 +1,16 @@
++'use strict';
++const $=id=>document.getElementById(id),api=window.naumiDesktop;
++const messages={IDENTITY_ORIGIN_INVALID:'请输入有效的 Naumi HTTPS 地址。',IDENTITY_INPUT_INVALID:'请填写账号和密码。',IDENTITY_CREDENTIALS_INVALID:'账号或密码不正确，请重新输入。',IDENTITY_ACCOUNT_UNAVAILABLE:'账号暂不可用，请联系管理员。',IDENTITY_RATE_LIMITED:'登录尝试过于频繁，请稍后再试。',IDENTITY_LOGIN_REQUIRED:'登录状态已失效，请重新登录。',IDENTITY_UNAVAILABLE:'Naumi 账号服务暂未连接，请检查网络后重试。',IDENTITY_RESPONSE_INVALID:'此地址未提供兼容的 Naumi 账号服务。',IDENTITY_RESPONSE_TOO_LARGE:'账号服务响应异常，请稍后重试。',IDENTITY_ALREADY_SIGNED_IN:'请先退出当前账号。',WORKSPACE_RUNNING_TASKS:'请先结束当前运行任务，再切换账号。',WORKSPACE_OPERATIONS_IN_FLIGHT:'当前操作尚未完成，请稍后再试。',IDENTITY_MANAGED_ORIGIN:'此设备的账号服务由管理员配置。'};
++function error(code){$('error').textContent=messages[code]||'操作尚未完成，请稍后重试。';}
++function busy(value){for(const b of document.querySelectorAll('button'))b.disabled=value;for(const a of document.querySelectorAll('.auth-option'))a.setAttribute('aria-disabled',String(value));document.querySelector('.auth-liquid-options').setAttribute('aria-busy',String(value));}
++async function refresh(){const state=await api.identityState();$('origin').value=state.origin||'';$('origin').readOnly=state.managed||!!state.user;$('server-row').hidden=!!state.origin;$('login').hidden=!!state.user;$('signed-in').hidden=!state.user;$('title').textContent=state.user?'Naumi 账号':'登录工作空间';if(state.user){$('name').textContent=state.user.name;$('email').textContent=state.user.email;}else (state.origin?$('account'):$('origin')).focus();if(state.error)error(state.error);}
++$('login').addEventListener('submit',async event=>{event.preventDefault();busy(true);$('error').textContent='';const password=$('password').value;try{const result=await api.loginIdentity({origin:$('origin').value,account:$('account').value,password});if(!result.ok)error(result.error);}catch{error('IDENTITY_UNAVAILABLE');}finally{$('password').value='';$('password').type='password';$('show-password').setAttribute('aria-pressed','false');$('show-password').setAttribute('aria-label','显示密码');busy(false);}});
++$('resume').addEventListener('click',()=>api.resumeIdentity());
++$('logout').addEventListener('click',async()=>{busy(true);try{const result=await api.logoutIdentity();if(!result.ok)error(result.error);else await refresh();}catch{error('IDENTITY_UNAVAILABLE');}finally{busy(false);}});
++refresh().catch(()=>error('IDENTITY_UNAVAILABLE'));
++
++$('login-tab').addEventListener('click',event=>{event.preventDefault();$('account').focus();});
++$('show-password').addEventListener('click',()=>{const visible=$('password').type==='password';$('password').type=visible?'text':'password';$('show-password').setAttribute('aria-pressed',String(visible));$('show-password').setAttribute('aria-label',visible?'隐藏密码':'显示密码');});
++$('register').addEventListener('click',async event=>{event.preventDefault();if($('register').getAttribute('aria-disabled')==='true')return;try{const result=await api.openIdentityRegistration($('origin').value);if(!result.ok)error(result.error);}catch{error('IDENTITY_UNAVAILABLE');}});
++
++document.querySelector('.auth-liquid-options').addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;const links=[...document.querySelectorAll('.auth-option')],current=links.indexOf(document.activeElement),next=event.key==='Home'?0:event.key==='End'?1:((current<0?0:current)+(event.key==='ArrowRight'?1:-1)+2)%2;event.preventDefault();links[next].focus();});
+diff --git a/desktop/app/main.cjs b/desktop/app/main.cjs
+index 74d47fd..f2b371c 100644
+--- a/desktop/app/main.cjs
++++ b/desktop/app/main.cjs
+@@ -9,10 +9,14 @@ const {startBridge}=require('./tools.cjs');
+ const {localSettings,ensureBackend,stopBackend,createQuitGate,maintenanceRequest}=require('./backend.cjs');
+ const installerState=require('./installer-state.cjs');
+ const {createDesktopUpdates}=require('./updates.cjs');
++const {IdentityRuntime}=require('./identity-runtime.cjs');
++const {identityOrigin}=require('./identity.cjs');
++const {randomUUID}=require('node:crypto');
+ app.setName('Naumi');app.setAppUserModelId('com.naumi.desktop');
+ if(process.env.NAUMI_USER_DATA)app.setPath('userData',path.resolve(process.env.NAUMI_USER_DATA));
+ if(process.env.NAUMI_TEST_HIDDEN==='1'){app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');app.commandLine.appendSwitch('disable-renderer-backgrounding');}
+ const locked=app.requestSingleInstanceLock();
++let identityRuntime=null,identityUserData=null;
+ let window,primarySession,guests,bridge,backend,settings,enterprise,login,loginAfterBoot=false,booting=false,closing=false,connecting=false,editingConnection=false,connectionFlight,maintenanceTicket=null,maintenanceUntil=0,updates=null;
+ if(!locked){app.quit();}else{
+ app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.show();window.focus();}});
+@@ -46,6 +50,7 @@ app.whenReady().then(async()=>{
+  window.webContents.on('did-fail-load',(_e,code,description,_url,main)=>{if(main&&code!==-3&&!booting)void showStartup(description+' ('+code+')');});
+  const ownFrame=event=>{if(event.sender!==window.webContents||event.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');};
+  const localPage=(event,names)=>{ownFrame(event);const u=new URL(event.senderFrame.url);return u.protocol==='file:'&&names.some(name=>u.pathname===require('node:url').pathToFileURL(path.join(__dirname,name)).pathname);};
++ const accountPage=event=>localPage(event,['identity.html']);
+  const trusted=event=>{ownFrame(event);if(!settings||new URL(event.senderFrame.url).origin!==settings.url||connecting||maintenanceBlocked())throw Error('INVALID_DESKTOP_ORIGIN');};
+  ipcMain.handle('naumi:browser-acquire',(e,workspace)=>{trusted(e);return guests.acquire(e.sender,workspace);});
+  ipcMain.handle('naumi:browser-release',(e,lease)=>{trusted(e);return guests.release(e.sender,lease);});
+@@ -53,7 +58,7 @@ app.whenReady().then(async()=>{
+  ipcMain.handle('naumi:retry',e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');void boot();});
+  ipcMain.handle('naumi:update-state',e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');return updates?updates.snapshot():{enabled:false,status:'disabled',currentVersion:app.getVersion(),version:null,notes:'',progress:null,error:null};});
+  ipcMain.handle('naumi:update-check',async e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');return updates?updates.check():{ok:false,error:'UPDATE_FEED_UNCONFIGURED'};});
+- ipcMain.handle('naumi:connection-state',e=>{if(!localPage(e,['connect.html','startup.html']))trusted(e);if(!settings?.isolated)return {available:false};return {available:true,...workspaceSummary(app.getPath('userData'))};});
++ ipcMain.handle('naumi:connection-state',e=>{if(!localPage(e,['connect.html','startup.html']))trusted(e);if(!settings?.isolated)return {available:false};return {available:true,...workspaceSummary(identityUserData??app.getPath('userData'))};});
+  ipcMain.handle('naumi:connection-settings',async e=>{
+   if(!localPage(e,['startup.html']))trusted(e);if(!settings?.isolated||booting||connecting)return {ok:false,error:'WORKSPACE_SETTINGS_BUSY'};
+   try{if((bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');if(backend?.owned){const r=require('./profile.cjs').runtimeReceipt(settings.home,settings.identity.id);if(!r||r.pid===null||isAlive(r.pid))await assertWorkspaceIdle(settings,(url,options)=>primarySession.fetch(url,options));}}
+@@ -67,25 +72,57 @@ app.whenReady().then(async()=>{
+   if(connecting||booting)return {ok:false,error:'WORKSPACE_SETTINGS_BUSY'};connecting=true;connectionFlight=new AbortController();
+   try{
+    const checked=await verifyConnection(origin,(url,options)=>primarySession.fetch(url,options),{signal:connectionFlight.signal});
+-   const state=workspaceSummary(app.getPath('userData')),changed=state.configured&&state.origin!==checked.origin;
++   const state=workspaceSummary(identityUserData??app.getPath('userData')),changed=state.configured&&state.origin!==checked.origin;
+    if(changed){
+     if((enterprise?.running??0)>0||(bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');
+     if(backend?.owned){const r=require('./profile.cjs').runtimeReceipt(settings.home,settings.identity.id);if(!r||r.pid===null||isAlive(r.pid))await assertWorkspaceIdle(settings,(url,options)=>primarySession.fetch(url,options));connectionFlight.signal.throwIfAborted();await stopBackend(backend);backend=null;}
+     else {const r=require('./profile.cjs').runtimeReceipt(settings.home,settings.identity.id);if(r&&(r.pid===null||isAlive(r.pid)))throw Error('WORKSPACE_BACKEND_STOP_REQUIRED');}
+     await bridge?.close();bridge=null;
+    }
+-   connectionFlight.signal.throwIfAborted();selectWorkspace(app.getPath('userData'),checked.origin);
+-   if(changed){settings=localSettings(app);enterprise=null;}
++   connectionFlight.signal.throwIfAborted();selectWorkspace(identityUserData??app.getPath('userData'),checked.origin);
++   if(changed){settings=localSettings(accountApp());enterprise=null;}
+    loginAfterBoot=true;void showStartup().then(()=>boot());return {ok:true};
+   }catch(error){return {ok:false,error:connectionFlight.signal.aborted?'ENTERPRISE_CONNECTION_CANCELLED':/^(ENTERPRISE|WORKSPACE)_[A-Z_]+$/.test(error.message)?error.message:'ENTERPRISE_CONNECTION_UNAVAILABLE'};}
+   finally{connecting=false;connectionFlight=null;}
+  });
++ ipcMain.handle('naumi:identity-state',e=>{if(!accountPage(e))trusted(e);return identityRuntime?.status()??{available:false};});
++ ipcMain.handle('naumi:identity-register',async(e,value)=>{
++  if(!accountPage(e)||!identityRuntime)throw Error('INVALID_DESKTOP_SENDER');
++  try{const origin=identityOrigin(value||identityRuntime.origin());if(identityRuntime.managedOrigin&&origin!==identityRuntime.managedOrigin)throw Error('IDENTITY_MANAGED_ORIGIN');await shell.openExternal(origin+'/');return {ok:true};}
++  catch(error){return {ok:false,error:/^IDENTITY_[A-Z_]+$/.test(error.message)?error.message:'IDENTITY_UNAVAILABLE'};}
++ });
++ ipcMain.handle('naumi:identity-login',async(e,input)=>{
++  if(!accountPage(e)||!identityRuntime)throw Error('INVALID_DESKTOP_SENDER');
++  if(booting||connecting||closing)return {ok:false,error:'IDENTITY_BUSY'};
++  connecting=true;
++  try{await identityRuntime.login(input);settings=null;identityUserData=identityRuntime.active.root;void showStartup().then(()=>boot());return {ok:true};}
++  catch(error){return {ok:false,error:/^IDENTITY_[A-Z_]+$/.test(error.message)?error.message:'IDENTITY_UNAVAILABLE'};}
++  finally{connecting=false;}
++ });
++ ipcMain.handle('naumi:identity-open',async e=>{
++  trusted(e);if(!identityRuntime)return {ok:false,error:'IDENTITY_UNAVAILABLE'};
++  try{await assertAccountIdle();editingConnection=true;if(login&&!login.isDestroyed())login.destroy();await window.loadFile(path.join(__dirname,'identity.html'));return {ok:true};}
++  catch(error){const code=/^(WORKSPACE|INSTALL)_[A-Z_]+$/.test(error.message)?error.message:'WORKSPACE_ACTIVITY_UNKNOWN';if(process.env.NAUMI_TEST_HIDDEN!=='1')await dialog.showMessageBox(window,{type:'info',buttons:['返回工作台'],message:'请先结束当前运行任务和操作，再管理账号'});return {ok:false,error:code};}
++ });
++ ipcMain.handle('naumi:identity-resume',e=>{if(!accountPage(e)||!identityRuntime?.active)throw Error('INVALID_DESKTOP_SENDER');void showStartup().then(()=>boot());return {ok:true};});
++ ipcMain.handle('naumi:identity-logout',async e=>{
++  if(!accountPage(e)||!identityRuntime)throw Error('INVALID_DESKTOP_SENDER');if(connecting||booting||closing)return {ok:false,error:'IDENTITY_BUSY'};
++  connecting=true;let ticket=null;
++  try{
++   await assertAccountIdle();
++   if(backend?.owned){ticket=randomUUID().replaceAll('-','')+randomUUID().replaceAll('-','');await performMaintenance('quiesce',ticket,{accountTransition:true});await stopBackend(backend);backend=null;}
++   await guests?.reset({hostURL:settings?.url??'http://127.0.0.1:3080',account:'signed-out-'+randomUUID()});await bridge?.close();bridge=null;
++   await primarySession.clearStorageData();await primarySession.clearCache();const result=await identityRuntime.logout();
++   enterprise=null;settings=null;identityUserData=null;maintenanceTicket=null;maintenanceUntil=0;return {ok:true,...result};
++  }catch(error){if(ticket&&backend?.owned)await performMaintenance('resume',ticket).catch(()=>{});return {ok:false,error:/^(IDENTITY|WORKSPACE|INSTALL|BACKEND)_[A-Z_]+$/.test(error.message)?error.message:'IDENTITY_UNAVAILABLE'};}
++  finally{connecting=false;}
++ });
+  ipcMain.handle('naumi:enterprise-login',e=>{trusted(e);openEnterpriseLogin();return {ok:true};});
+  await showStartup();
+  if(process.env.NAUMI_TEST_HIDDEN!=='1')window.show();
+  await boot();
+ }).catch(error=>{console.error('NAUMI_DESKTOP_START_FAILED',error.message);app.quit();});
+-const quitGate=createQuitGate({shutdown:async()=>{try{connectionFlight?.abort();if(login&&!login.isDestroyed()){login.webContents.stop();login.destroy();}await guests?.flush();await primarySession?.cookies.flushStore();await enterprise?.session.cookies.flushStore();}finally{await bridge?.close();await stopBackend(backend);}},onReady:()=>app.quit(),onError:()=>app.exit(1)});
++const quitGate=createQuitGate({shutdown:async()=>{try{connectionFlight?.abort();if(login&&!login.isDestroyed()){login.webContents.stop();login.destroy();}await guests?.flush();await primarySession?.cookies.flushStore();await enterprise?.session.cookies.flushStore();await identityRuntime?.client?.session.cookies.flushStore();}finally{await bridge?.close();await stopBackend(backend);}},onReady:()=>app.quit(),onError:()=>app.exit(1)});
+ app.on('before-quit',event=>{closing=true;quitGate.beforeQuit(event);});
+ app.on('window-all-closed',()=>app.quit());
+ }
+@@ -96,18 +133,26 @@ async function showStartup(error=''){
+ async function boot(){
+  if(booting||closing||connecting||maintenanceBlocked())return;booting=true;
+  try{
+-  settings??=localSettings(app);
++  if(!settings){
++   const candidate=localSettings(app);
++   if(candidate.isolated){
++    identityRuntime??=new IdentityRuntime({userData:app.getPath('userData'),sessionFor:name=>session.fromPartition(name),managedOrigin:process.env.NAUMI_IDENTITY_ORIGIN??''});
++    const active=await identityRuntime.restore();
++    if(!active){await window.loadFile(path.join(__dirname,'identity.html'));return;}
++    identityUserData=active.root;settings=localSettings(accountApp());
++   }else settings=candidate;
++  }
+   if(settings.isolated){
+-   installerState.registerProfile(path.resolve(process.resourcesPath,'..'),app.getPath('userData'));
++   installerState.registerProfile(path.resolve(process.resourcesPath,'..'),identityUserData??app.getPath('userData'));
+    let connection=readConnection(settings.home);
+    if(process.env.NAUMI_ENTERPRISE_ORIGIN)connection=connect(settings.home,process.env.NAUMI_ENTERPRISE_ORIGIN);
+-   if(!connection){await window.loadFile(path.join(__dirname,'connect.html'));return;}
+-   settings.enterpriseOrigin=connection.origin;
+-   enterprise??=new EnterpriseSession({origin:connection.origin,session:session.fromPartition('persist:naumi-enterprise-'+require('node:crypto').createHash('sha256').update(connection.origin).digest('hex'))});
++   if(!connection&&!identityRuntime?.active){await window.loadFile(path.join(__dirname,'connect.html'));return;}
++   settings.enterpriseOrigin=connection?.origin??'';
++   if(connection)enterprise??=new EnterpriseSession({origin:connection.origin,session:session.fromPartition('persist:naumi-enterprise-'+(identityRuntime?.active?.profileId??'legacy')+'-'+require('node:crypto').createHash('sha256').update(connection.origin).digest('hex'))});
+   }
+   const nextBackend=await ensureBackend(settings);
+   backend=backend?.owned&&!nextBackend.owned&&backend.child.exitCode===null&&backend.child.signalCode===null?{...nextBackend,owned:true,child:backend.child}:nextBackend;
+-  const account=!settings.isolated||settings.workspaceId==='default'?'local':'enterprise-'+settings.workspaceId;
++  const account=identityRuntime?.active?'identity-'+identityRuntime.active.profileId+'-'+settings.workspaceId:!settings.isolated||settings.workspaceId==='default'?'local':'enterprise-'+settings.workspaceId;
+   if(!guests){guests=new Guests({hostURL:settings.url,account,timeout:process.env.NAUMI_TEST==='1'?Number(process.env.NAUMI_TEST_TIMEOUT??30000):30000});guests.attach(window);}
+   else if(guests.hostURL!==settings.url||guests.account!==account)await guests.reset({hostURL:settings.url,account});
+   if(!bridge)bridge=await startBridge({home:settings.home,guests,window,enterprise,maintenance:{blocked:maintenanceBlocked,perform:performMaintenance,quit:ticket=>{if(maintenanceBlocked()&&ticket===maintenanceTicket)app.quit();}}});
+@@ -116,6 +161,12 @@ async function boot(){
+  }catch(error){await showStartup(error.message);}
+  finally{booting=false;if(process.env.NAUMI_TEST==='1')globalThis.__naumiTest={window,guests,bridge,settings,backend,enterprise,get login(){return login;}};}
+ }
++function accountApp(){return {isPackaged:app.isPackaged,getPath:name=>name==='userData'&&identityUserData?identityUserData:app.getPath(name)};}
++async function assertAccountIdle(){
++ if((enterprise?.running??0)>0||(bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');
++ if(backend&&!backend.owned)throw Error('WORKSPACE_BACKEND_STOP_REQUIRED');
++ if(backend?.owned)await assertWorkspaceIdle(settings,(url,options)=>primarySession.fetch(url,options));
++}
+ function maintenanceBlocked(){if(maintenanceTicket&&Date.now()>=maintenanceUntil){maintenanceTicket=null;}return !!maintenanceTicket;}
+ function canInstallUpdate(){
+  if(closing||booting||connecting)return {ok:false,reason:'WORKSPACE_BUSY'};
+@@ -129,10 +180,10 @@ async function showUpdateNotice(snapshot){
+  const {response}=await dialog.showMessageBox(window,{type:'info',buttons:['立即重启更新','稍后'],defaultId:1,cancelId:1,noLink:true,title:'Naumi 更新',message:'新版本 '+snapshot.version+' 已下载完成',detail});
+  return response;
+ }
+-async function performMaintenance(action,ticket){
++async function performMaintenance(action,ticket,{accountTransition=false}={}){
+  if(maintenanceBlocked()&&maintenanceTicket!==ticket)throw Error('INSTALL_MAINTENANCE_BUSY');
+  if(action==='resume'){if(backend&&settings)await maintenanceRequest(settings,'resume',ticket);maintenanceTicket=null;return;}
+- if(booting||connecting||closing||!settings?.isolated||!backend?.owned)throw Error('INSTALL_ACTIVITY_UNKNOWN');
++ if(booting||(connecting&&!accountTransition)||closing||!settings?.isolated||!backend?.owned)throw Error('INSTALL_ACTIVITY_UNKNOWN');
+  maintenanceTicket=ticket;maintenanceUntil=Date.now()+30000;
+  try{if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0)throw Error('INSTALL_OPERATIONS_IN_FLIGHT');await maintenanceRequest(settings,'quiesce',ticket);}
+  catch(error){maintenanceTicket=null;throw error;}
+diff --git a/desktop/app/preload.cjs b/desktop/app/preload.cjs
+index e2ef2dd..b02854f 100644
+--- a/desktop/app/preload.cjs
++++ b/desktop/app/preload.cjs
+@@ -21,5 +21,11 @@ contextBridge.exposeInMainWorld('naumiDesktop',{
+   updateState:()=>ipcRenderer.invoke('naumi:update-state'),
+   checkUpdates:()=>ipcRenderer.invoke('naumi:update-check'),
+   onUpdateState:listener=>subscribe('naumi:update-state',listener),
++  openIdentityRegistration:origin=>ipcRenderer.invoke('naumi:identity-register',origin),
++  identityState:()=>ipcRenderer.invoke('naumi:identity-state'),
++  loginIdentity:value=>ipcRenderer.invoke('naumi:identity-login',value),
++  openIdentity:()=>ipcRenderer.invoke('naumi:identity-open'),
++  logoutIdentity:()=>ipcRenderer.invoke('naumi:identity-logout'),
++  resumeIdentity:()=>ipcRenderer.invoke('naumi:identity-resume'),
+   product:'Naumi'
+ });
+diff --git a/desktop/scripts/prepare-runtime.mjs b/desktop/scripts/prepare-runtime.mjs
+index 20a90d4..e37dd4c 100644
+--- a/desktop/scripts/prepare-runtime.mjs
++++ b/desktop/scripts/prepare-runtime.mjs
+@@ -21,9 +21,9 @@ export function runtimeInventory(target){
+   walk(target);return files;
+ }
+ export function scanRuntimeInventory(files){
+-  const forbidden=/(?:^|\/)(?:\.env(?:\..*)?|\.credentials[^/]*|cookies(?:\.sqlite)?|login data|local state|web data|employee[^/]*\.sqlite(?:-wal|-shm)?|sessions|logs|\.git|\.dsh|browser-profiles|enterprise-workspaces|naumi-desktop-bridge\.json|backend-link\.json|desktop-(?:instance|profile|profile-journal|backend|enterprise|workspaces|maintenance)\.json|device-private-key[^/]*|.*\.(?:pem|pfx|key))$/i;
++  const forbidden=/(?:^|\/)(?:\.env(?:\..*)?|\.credentials[^/]*|cookies(?:\.sqlite)?|login data|local state|web data|employee[^/]*\.sqlite(?:-wal|-shm)?|sessions|logs|\.git|\.dsh|browser-profiles|enterprise-workspaces|naumi-desktop-bridge\.json|backend-link\.json|naumi-identity\.json|identity-owner\.json|identity-profiles|desktop-(?:instance|profile|profile-journal|backend|enterprise|workspaces|maintenance)\.json|device-private-key[^/]*|.*\.(?:pem|pfx|key))$/i;
+   // SDK source directories named sessions are code, not a copied employee session store.
+-  for(const file of files)if(forbidden.test(file.path)||/^(?:sessions|logs|browser-profiles)\//i.test(file.path)||/(?:^|\/)(?:\.git|\.dsh|browser-profiles)\//i.test(file.path))throw Error('RUNTIME_PRIVATE_FILE '+file.path);
++  for(const file of files)if(forbidden.test(file.path)||/^(?:sessions|logs|browser-profiles)\//i.test(file.path)||/(?:^|\/)(?:\.git|\.dsh|browser-profiles|identity-profiles)\//i.test(file.path))throw Error('RUNTIME_PRIVATE_FILE '+file.path);
+   return {files:files.length,forbiddenPaths:0};
+ }
+ export async function prepareRuntime({root=project,target=path.join(root,'runtime/desktop-backend'),archive=process.env.NAUMI_DINGTALK_ARCHIVE}={}){
+diff --git a/desktop/scripts/verify-unified-identity.mjs b/desktop/scripts/verify-unified-identity.mjs
+new file mode 100644
+index 0000000..55ebad5
+--- /dev/null
++++ b/desktop/scripts/verify-unified-identity.mjs
+@@ -0,0 +1,60 @@
++// Real Electron + production main/preload/account UI. Only backend/installer I/O
++// are fixture adapters; no employee server, 3080, model or credentials are used.
++import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import http from 'node:http';import assert from 'node:assert/strict';
++import {createRequire} from 'node:module';import {fileURLToPath} from 'node:url';
++const root=fileURLToPath(new URL('../..',import.meta.url)),require=createRequire(import.meta.url),{_electron}=require('playwright');
++const evidence=path.join(root,'evidence/unified-identity');fs.mkdirSync(evidence,{recursive:true});
++const dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-account-e2e-')),appDir=path.join(dir,'application'),userData=path.join(dir,'employee'),stateFile=path.join(dir,'backend-events.json');
++fs.mkdirSync(appDir,{recursive:true});fs.cpSync(path.join(root,'desktop/app'),path.join(appDir,'app'),{recursive:true});fs.writeFileSync(path.join(appDir,'package.json'),JSON.stringify({name:'naumi-identity-fixture',main:'app/main.cjs'}));
++let running=false,outage=false,revoked=false;const requests=[];
++const server=http.createServer(async(req,res)=>{
++ const send=(value,status=200)=>{res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(value));};
++ if(req.url.startsWith('/api/auth/')){
++  requests.push({path:req.url,method:req.method});if(outage)return send({error:'unavailable'},503);
++  if(req.url==='/api/auth/login'){
++   let text='';for await(const part of req)text+=part;const input=JSON.parse(text);
++   if(input.email==='disabled')return send({error:'disabled'},403);
++   if(input.password!=='fixture-only-password')return send({error:'wrong'},401);
++   const email=input.email==='bob'?'bob@example.test':'alice@example.test';res.setHeader('set-cookie','nv_user='+email+'; HttpOnly; Path=/; SameSite=Lax');return send({ok:true,user:{email}});
++  }
++  if(req.url==='/api/auth/logout'){res.setHeader('set-cookie','nv_user=; Max-Age=0; Path=/');return send({ok:true});}
++  const email=req.headers.cookie?.match(/nv_user=([^;]+)/)?.[1];return send({user:email&&!revoked?{email,name:email.startsWith('alice')?'Alice':'Bob',role:'admin',credits:123,token:'never-expose'}:null});
++ }
++ if(req.url==='/api/session/list')return send({result:{ok:true,value:{items:[{running}]}}});
++ res.writeHead(200,{'content-type':'text/html'});res.end('<!doctype html><title>Naumi Fixture Workbench</title><h1>Workbench</h1>');
++});await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;
++const backend=`'use strict';const fs=require('fs'),path=require('path'),file=${JSON.stringify(stateFile)};const event=value=>{const list=fs.existsSync(file)?JSON.parse(fs.readFileSync(file)):[];list.push(value);fs.writeFileSync(file,JSON.stringify(list));};module.exports={localSettings:app=>({isolated:true,workspaceId:'default',home:path.join(app.getPath('userData'),'harness'),root:${JSON.stringify(appDir)},url:${JSON.stringify(origin)},identity:{id:'fixture'}}),ensureBackend:async settings=>{event({type:'start',home:settings.home});return {owned:true,launchURL:settings.url};},stopBackend:async value=>{if(value)event({type:'stop'});},maintenanceRequest:async(_s,action)=>{event({type:action});return {};},createQuitGate:({shutdown,onReady,onError})=>{let done=false,flight;return{beforeQuit(e){if(done)return;e.preventDefault();flight??=Promise.resolve().then(shutdown).then(()=>{done=true;onReady();},onError);}};}};`;
++fs.writeFileSync(path.join(appDir,'app/backend.cjs'),backend);
++fs.writeFileSync(path.join(appDir,'app/installer-state.cjs'),"module.exports={registerProfile(){},assertStartupAllowed(){}};");
++const events=()=>fs.existsSync(stateFile)?JSON.parse(fs.readFileSync(stateFile)):[];
++const env={...process.env,NAUMI_TEST:'1',NAUMI_TEST_HIDDEN:'1',NAUMI_USER_DATA:userData,NAUMI_IDENTITY_ORIGIN:origin};delete env.ELECTRON_RUN_AS_NODE;delete env.NAUMI_ROOT;delete env.NAUMI_ENTERPRISE_ORIGIN;delete env.NAUMI_UPDATE_DEV;
++let application,page;
++async function launch(){application=await _electron.launch({executablePath:require('electron'),args:[appDir],env,timeout:30000});page=await application.firstWindow();await page.waitForURL('**/identity.html');await page.locator('#account').waitFor();}
++async function login(account,password='fixture-only-password'){await page.locator('#account').fill(account);await page.locator('#password').fill(password);await page.locator('#submit').click();}
++const result={layer:'real Electron; production identity/main/UI; controlled Canvas API contract; fixture backend and installer adapters',realAccountLogin:false,service3080Touched:false,modelCalls:0,referenceStyle:'3112/login',designLabelRemoved:true,smokeShaderReady:true,passwordToggle:true};
++try{
++ await launch();assert.equal(events().length,0,'BACKEND_STARTED_BEFORE_LOGIN');
++ await page.setViewportSize({width:1280,height:800});await page.waitForFunction(()=>document.querySelector('.auth-smoke-canvas').dataset.smoke==='ready');
++ assert(!(await page.locator('body').innerText()).includes('DESIGN'));assert.equal(await page.locator('.mg-brand-lockup').getAttribute('aria-label'),'Naumi');
++ await page.locator('#password').fill('fixture-preview');await page.locator('#show-password').click();assert.equal(await page.locator('#password').getAttribute('type'),'text');await page.locator('#show-password').click();assert.equal(await page.locator('#password').getAttribute('type'),'password');await page.locator('#password').fill('');
++ await page.screenshot({path:path.join(evidence,'login-native.png'),animations:'disabled'});
++ await login('alice','wrong');await page.locator('#error').filter({hasText:'账号或密码不正确'}).waitFor();assert.equal(await page.locator('#password').inputValue(),'');assert.equal(events().length,0);
++ await login('disabled');await page.locator('#error').filter({hasText:'账号暂不可用'}).waitFor();assert.equal(events().length,0);
++ await login('alice');await page.waitForURL(origin+'/**');await page.locator('h1').filter({hasText:'Workbench'}).waitFor();
++ assert.equal(events().filter(e=>e.type==='start').length,1);const homeA=events().find(e=>e.type==='start').home;assert(homeA.startsWith(path.join(userData,'identity-profiles')+path.sep));fs.writeFileSync(path.join(path.dirname(homeA),'memory'),'Alice retained');
++ await page.evaluate(()=>localStorage.setItem('account-only','alice'));await page.evaluate(()=>{void window.naumiDesktop.openIdentity();});await page.waitForURL('**/identity.html');await page.locator('#name').filter({hasText:'Alice'}).waitFor();
++ const identity=await page.evaluate(()=>window.naumiDesktop.identityState());assert.equal(identity.user.email,'alice@example.test');assert(!('role'in identity.user));assert(!JSON.stringify(identity).includes('never-expose'));
++ running=true;await page.locator('#logout').click();await page.locator('#error').filter({hasText:'请先结束当前运行任务'}).waitFor();assert.equal(events().filter(e=>e.type==='stop').length,0);
++ running=false;await page.locator('#logout').click();await page.locator('#login').waitFor({state:'visible'});assert.equal(events().filter(e=>e.type==='quiesce').length,1);assert.equal(events().filter(e=>e.type==='stop').length,1);
++ assert.equal(fs.readFileSync(path.join(path.dirname(homeA),'memory'),'utf8'),'Alice retained');
++ await login('bob');await page.waitForURL(origin+'/**');assert.equal(await page.evaluate(()=>localStorage.getItem('account-only')),null);
++ const homeB=events().filter(e=>e.type==='start').at(-1).home;assert.notEqual(homeA,homeB);assert(!fs.existsSync(path.join(path.dirname(homeB),'memory')));
++ const guestAccount=await application.evaluate(()=>globalThis.__naumiTest.guests.account);assert(guestAccount.includes(path.basename(path.dirname(homeB))));
++ await application.close();application=null;
++ outage=true;await launch();await page.locator('#error').filter({hasText:'账号服务暂未连接'}).waitFor();assert.equal(events().filter(e=>e.type==='start').length,2,'OFFLINE_COLD_START_GRANTED');
++ await application.close();application=null;outage=false;revoked=true;await launch();await page.locator('#error').filter({hasText:'登录状态已失效'}).waitFor();assert.equal(events().filter(e=>e.type==='start').length,2);
++ await page.setViewportSize({width:640,height:800});await page.screenshot({path:path.join(evidence,'login-narrow.png')});
++ Object.assign(result,{status:'PASS',wrongPassword:true,disabledAccount:true,passwordCleared:true,serverCookieConfirmed:true,accountAIsolation:true,accountBIsolation:true,primaryStorageCleared:true,runningLogoutRejected:true,idleLogoutQuiesced:true,localMemoryRetained:true,offlineColdStartRejected:true,revokedColdSessionRejected:true,backendStarts:2,requestCount:requests.length,exit:0});
++ fs.writeFileSync(path.join(evidence,'ELECTRON_IDENTITY.json'),JSON.stringify(result,null,2)+'\n');
++ console.log('ELECTRON_IDENTITY login=PASS cookie=PASS account_isolation=PASS running_logout=REJECTED idle_logout=QUIESCED offline_cold=REJECTED revoked=REJECTED model_calls=0 exit=0');
++}finally{if(application)await application.close();server.closeAllConnections();await new Promise(r=>server.close(r));}
+diff --git a/desktop/tests/identity.test.cjs b/desktop/tests/identity.test.cjs
+new file mode 100644
+index 0000000..adbfa75
+--- /dev/null
++++ b/desktop/tests/identity.test.cjs
+@@ -0,0 +1,92 @@
++'use strict';
++const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os');
++const {IdentitySession,identityOrigin,publicUser,namespace,accountRoot,bindAccount,readIdentityConfig,sessionPartition,MAX_JSON}=require('../app/identity.cjs');
++const {IdentityRuntime}=require('../app/identity-runtime.cjs');
++const source=path.resolve(__dirname,'../..'),origin='https://accounts.naumi.example';
++const a={email:'alice@example.test',name:'Alice'},b={email:'bob@example.test',name:'Bob'};
++function fixture(){const root=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-identity-'));return {root,close(){assert(root.startsWith(os.tmpdir()+path.sep));fs.rmSync(root,{recursive:true,force:true});}};}
++function server({user=null,status=200,unavailable=false}={}){const calls=[],state={user,status,unavailable,clears:0};return {state,calls,cookies:{flushStore:async()=>{}},clearStorageData:async()=>{state.clears++;state.user=null;},fetch:async(url,options)=>{calls.push({url,options});if(state.unavailable)throw Error('remote cookie and private details');if(url.endsWith('/api/auth/login')){if(state.status===200)state.user=a;return Response.json({ok:state.status===200,user:a,token:'never-export'},{status:state.status,headers:{'set-cookie':'private'}});}if(url.endsWith('/api/auth/logout')){state.user=null;return Response.json({ok:true});}return Response.json({user:state.user});}};}
++test('identity origin enforces exact HTTPS authority or loopback, with no executable URLs or URL credentials',()=>{
++ assert.equal(identityOrigin('https://ACCOUNTS.NAUMI.EXAMPLE/'),origin);for(const value of ['http://account.example','https://u:p@a','https://a/login','https://a?token=secret','file:///a',null])assert.throws(()=>identityOrigin(value),/IDENTITY_ORIGIN_INVALID/);
++});
++test('only canonical account identity crosses the adapter, never role, credits, tokens or server secrets',()=>{
++ const result=publicUser({...a,email:'ALICE@example.test',role:'admin',credits:999999,password_hash:'private',token:'private'});
++ assert.deepEqual(result,{subject:{type:'naumi-email-v1',value:a.email},...a});
++ for(const user of [{},{email:'../account'},{email:'a @example.test'},null])assert.throws(()=>publicUser(user),/RESPONSE_INVALID/);
++});
++test('account and authority namespaces are stable, separate and path-safe without reusing legacy home',()=>{
++ const f=fixture();try{assert.equal(namespace(origin,a),namespace(origin,{...a,email:'ALICE@example.test'}));assert.notEqual(namespace(origin,a),namespace(origin,b));assert.notEqual(namespace(origin,a),namespace('https://other.example',a));const p=bindAccount(f.root,origin,a);assert(p.root.startsWith(f.root+path.sep+'identity-profiles'+path.sep));assert(!fs.existsSync(path.join(f.root,'harness')));assert.deepEqual(readIdentityConfig(f.root),{version:1,origin});fs.writeFileSync(path.join(p.root,'memory'),'retained');assert.equal(bindAccount(f.root,origin,a).root,p.root);bindAccount(f.root,origin,b);assert.equal(fs.readFileSync(path.join(p.root,'memory'),'utf8'),'retained');}finally{f.close();}
++});
++test('linked/malformed profile owners and future config versions fail without claiming or replacing user data',()=>{
++ const f=fixture();try{fs.writeFileSync(path.join(f.root,'naumi-identity.json'),'{"version":99,"origin":"https://a"}');assert.throws(()=>readIdentityConfig(f.root),/CONFIG_INVALID/);const p=accountRoot(f.root,origin,a);fs.mkdirSync(p.root,{recursive:true});fs.writeFileSync(path.join(p.root,'identity-owner.json'),'{"version":1,"issuer":"https://other"}');assert.throws(()=>bindAccount(f.root,origin,a),/OWNER_MISMATCH/);}finally{f.close();}
++});
++test('a symlink namespace is rejected and never dereferenced for writes',()=>{
++ const f=fixture(),other=fixture();try{fs.symlinkSync(other.root,path.join(f.root,'identity-profiles'),'junction');assert.throws(()=>bindAccount(f.root,origin,a),/DIRECTORY_UNMANAGED/);assert.deepEqual(fs.readdirSync(other.root),[]);fs.unlinkSync(path.join(f.root,'identity-profiles'));}finally{f.close();other.close();}
++});
++test('login reuses Canvas native API and confirms the actual Chromium session before exposing a user',async()=>{
++ const session=server(),client=new IdentitySession({origin,session}),user=await client.login({account:' Alice ',password:'fixture-password'});
++ assert.deepEqual(user,publicUser(a));assert.equal(session.calls.length,2);const [login,probe]=session.calls;
++ assert.equal(login.url,origin+'/api/auth/login');assert.deepEqual(JSON.parse(login.options.body),{email:'Alice',password:'fixture-password'});assert.equal(probe.url,origin+'/api/auth/session');
++ for(const {options}of session.calls){assert.equal(options.credentials,'include');assert.equal(options.redirect,'error');assert(!('cookie'in options.headers));}assert(!JSON.stringify(user).includes('private'));assert(!JSON.stringify(user).includes('token'));
++});
++test('wrong password, disabled/expired account and rate limiting preserve server decisions with one attempt only',async()=>{
++ for(const [status,code]of [[401,'CREDENTIALS_INVALID'],[403,'ACCOUNT_UNAVAILABLE'],[429,'RATE_LIMITED'],[503,'UNAVAILABLE']]){const session=server({status});await assert.rejects(new IdentitySession({origin,session}).login({account:'test',password:'test'}),new RegExp(code));assert.equal(session.calls.length,1);}
++});
++test('login success response without a confirmed server session does not authenticate',async()=>{
++ const client=new IdentitySession({origin,session:{fetch:async url=>Response.json(url.endsWith('/login')?{ok:true,user:a}:{user:null})}});await assert.rejects(client.login({account:'test',password:'test'}),/LOGIN_REQUIRED/);
++});
++test('invalid input never reaches the account server',async()=>{
++ const session=server(),client=new IdentitySession({origin,session});for(const input of [{account:'',password:'x'},{account:'a',password:''},{account:'a',password:'x',headers:{}},null])await assert.rejects(client.login(input),/INPUT_INVALID/);assert.equal(session.calls.length,0);
++});
++test('network failure or redirect never leaks remote details, changes a namespace or replays password submission',async()=>{
++ const f=fixture(),session=server({unavailable:true});try{const runtime=new IdentityRuntime({userData:f.root,sessionFor:()=>session});await assert.rejects(runtime.login({origin,account:'a',password:'test'}),/^Error: IDENTITY_UNAVAILABLE$/);assert.equal(session.calls.length,1);assert.equal(runtime.active,null);assert.deepEqual(fs.readdirSync(f.root),[]);}finally{f.close();}
++});
++test('identity JSON responses are bounded and reject login HTML or malformed sessions',async()=>{
++ for(const response of [new Response('<html>login</html>'),Response.json({user:{...a,name:'x'.repeat(MAX_JSON)}}),Response.json({ok:true})])await assert.rejects(new IdentitySession({origin,session:{fetch:async()=>response}}).inspect(),/RESPONSE_INVALID|RESPONSE_TOO_LARGE/);
++});
++test('concurrent password submissions are rejected rather than queued',async()=>{
++ let release;const gate=new Promise(r=>release=r),session=server(),original=session.fetch;session.fetch=async(...args)=>{await gate;return original(...args);};const client=new IdentitySession({origin,session}),first=client.login({account:'a',password:'test'});await assert.rejects(client.login({account:'a',password:'test'}),/BUSY/);release();await first;assert.equal(session.calls.length,2);
++});
++test('managed authority cannot be replaced by renderer input; cookie partitions are origin-bound',async()=>{
++ const f=fixture();try{const session=server(),runtime=new IdentityRuntime({userData:f.root,managedOrigin:origin,sessionFor:()=>session});await assert.rejects(runtime.login({origin:'https://evil.example',account:'a',password:'x'}),/MANAGED_ORIGIN/);assert.equal(session.calls.length,0);assert.notEqual(sessionPartition(origin),sessionPartition('https://other.example'));}finally{f.close();}
++});
++test('logout clears only the owned account session and retains every local account home even offline',async()=>{
++ const f=fixture(),session=server();try{const runtime=new IdentityRuntime({userData:f.root,sessionFor:()=>session}),first=await runtime.login({origin,account:'a',password:'fixture'});fs.writeFileSync(path.join(first.root,'memory'),'retained');session.state.unavailable=true;assert.deepEqual(await runtime.logout(),{remoteConfirmed:false});assert.equal(session.state.clears,1);assert.equal(runtime.active,null);assert.equal(fs.readFileSync(path.join(first.root,'memory'),'utf8'),'retained');assert.equal(readIdentityConfig(f.root).origin,origin);}finally{f.close();}
++});
++test('cold start validates the server; an already open local identity survives an outage in this process only',async()=>{
++ const f=fixture(),session=server();try{const runtime=new IdentityRuntime({userData:f.root,sessionFor:()=>session}),active=await runtime.login({origin,account:'a',password:'fixture'});session.state.unavailable=true;assert.equal(await runtime.restore(),active);const cold=new IdentityRuntime({userData:f.root,sessionFor:()=>session});assert.equal(await cold.restore(),null);assert.equal(cold.status().error,'IDENTITY_UNAVAILABLE');assert.equal(cold.status().user,null);}finally{f.close();}
++});
++test('revoked/reset/disabled Canvas sessions cannot restore a logged-in account on cold start',async()=>{
++ const f=fixture(),session=server();try{const runtime=new IdentityRuntime({userData:f.root,sessionFor:()=>session});await runtime.login({origin,account:'a',password:'fixture'});session.state.user=null;const cold=new IdentityRuntime({userData:f.root,sessionFor:()=>session});assert.equal(await cold.restore(),null);assert.equal(cold.status().error,'IDENTITY_LOGIN_REQUIRED');}finally{f.close();}
++});
++test('changing account requires logout, and no remote password or token is persisted on disk',async()=>{
++ const f=fixture(),session=server();try{const runtime=new IdentityRuntime({userData:f.root,sessionFor:()=>session});await runtime.login({origin,account:'a',password:'fixture-password'});await assert.rejects(runtime.login({origin,account:'b',password:'fixture'}),/ALREADY_SIGNED_IN/);const walk=dir=>fs.readdirSync(dir,{withFileTypes:true}).flatMap(x=>x.isDirectory()?walk(path.join(dir,x.name)):[path.join(dir,x.name)]);for(const file of walk(f.root)){const text=fs.readFileSync(file,'utf8');assert(!text.includes('fixture-password'));assert(!text.includes('never-export'));assert(!text.includes('password'));}}finally{f.close();}
++});
++test('native wiring keeps legacy dev hosts intact, accounts scope enterprise/browser homes and logout quiesces before stopping',()=>{
++ const main=fs.readFileSync(path.join(source,'desktop/app/main.cjs'),'utf8');assert(main.includes('if(candidate.isolated)'));assert(main.includes("localSettings(accountApp())"));assert(main.includes('identityRuntime.active.profileId'));assert(main.includes("identityUserData??app.getPath('userData')"));
++ const logout=main.slice(main.indexOf("ipcMain.handle('naumi:identity-logout'"),main.indexOf("ipcMain.handle('naumi:enterprise-login'"));assert(logout.indexOf('assertAccountIdle')<logout.indexOf("performMaintenance('quiesce'"));assert(logout.indexOf("performMaintenance('quiesce'")<logout.indexOf('stopBackend'));assert(logout.indexOf('clearStorageData')<logout.indexOf('identityRuntime.logout'));assert(!logout.includes('rmSync'));assert(!main.includes('cookies.get('));
++});
++test('package audit excludes identity state and all per-account profiles from distributable runtime',async()=>{
++ const {scanRuntimeInventory}=await import('../scripts/prepare-runtime.mjs');for(const name of ['naumi-identity.json','identity-profiles/abc/harness/config.json','home/identity-owner.json'])assert.throws(()=>scanRuntimeInventory([{path:name}]),/RUNTIME_PRIVATE_FILE/);
++});
++test('account entry renders nothing on web/linked shells and appears only for a real native identity capability',async()=>{
++ const vm=require('node:vm'),client=fs.readFileSync(path.join(source,'plugins/naumi-enterprise/client.js'),'utf8');
++ const helper=client.slice(client.indexOf('    function IdentityAccount(){'),client.indexOf('    function DesignGrid()'));
++ for(const available of [null,false,true]){
++  let value=null;const effects=[];
++  const sandbox={useState:()=>[value,next=>{value=next;}],useEffect:effect=>effects.push(effect),h:(type,props,...children)=>({type,props,children}),Icon(){},...(available===null?{}:{naumiDesktop:{identityState:async()=>({available,user:a}),openIdentity(){}}})};
++  const component=vm.runInNewContext('('+helper.trim()+')',sandbox);assert.equal(component(),null);effects.shift()();await new Promise(r=>setImmediate(r));
++  const rendered=component();if(available===true){assert.equal(rendered.type,'div');assert(JSON.stringify(rendered).includes(a.email));}else assert.equal(rendered,null);
++ }
++});
++test('login reuses the requested Smoke/Liquid presentation locally and removes only the Design brand sublabel',()=>{
++ const {createHash}=require('node:crypto'),sha=b=>createHash('sha256').update(b).digest('hex'),dir=path.join(source,'desktop/app/identity-style'),manifest=JSON.parse(fs.readFileSync(path.join(dir,'SOURCE.json')));
++ assert.equal(manifest.reference,'http://127.0.0.1:3112/login');
++ for(const item of manifest.files)assert.equal(sha(fs.readFileSync(path.join(source,item.target))),item.modifiedSHA256);
++ assert.equal(sha(fs.readFileSync(path.join(source,manifest.bundle.path))),manifest.bundle.sha256);
++ const html=fs.readFileSync(path.join(source,'desktop/app/identity.html'),'utf8'),visual=fs.readFileSync(path.join(source,'desktop/app/identity-visual.js'),'utf8');
++ assert(html.includes('auth-page auth-smoke'));assert(html.includes('auth-liquid-options'));assert(html.includes('auth-liquid-submit'));assert(!html.includes('DESIGN'));assert(!html.includes('iframe'));
++ for(const value of ['fetch(','XMLHttpRequest','password','localStorage','sessionStorage'])assert(!visual.includes(value),value);
++ for(const value of ['pagehide','cancelAnimationFrame','ResizeObserver','visibilitychange','webglcontextlost'])assert(visual.includes(value));
++ const license=fs.readFileSync(path.join(dir,'THIRD_PARTY_NOTICES.txt'),'utf8');assert(license.includes('Aakash Mehra'));assert(license.includes('Guglielmo Giannattasio'));assert(license.includes('Permission is hereby granted'));
++});
+diff --git a/docs/implementation/UNIFIED_IDENTITY.md b/docs/implementation/UNIFIED_IDENTITY.md
+new file mode 100644
+index 0000000..9e70bf0
+--- /dev/null
++++ b/docs/implementation/UNIFIED_IDENTITY.md
+@@ -0,0 +1,99 @@
++# Naumi 产品矩阵统一身份：PRD 与实施记录
++
++日期：2026-11-17。负责人：unified-identity。基线 `8314ecb5a4d0d5917d49bc80f0f21799150de813`。
++分支 `codex/naumi-unified-identity-20261117`。模块迭代计数1。
++
++## 1. 产品目标与权威边界
++
++一个Naumi账号进入Canvas／设计中心、Desktop与企业协作。现有无限画布后台是账号创建、密码、停用、到期与撤销的权威；Desktop不另建账号库、不复制密码哈希、不因登录成功授予后台管理员权限。
++
++本次独占：desktop/app/identity*、main/preload、prepare-runtime隐私清单、身份测试与验证脚本；企业client只增加桌面专属账号管理入口。保留Bot、模型、自定义连接、安装器和现有3080服务。Canvas共享checkout存在其他任务未提交内容，仅读取，不修改、不部署。
++
++## 2. 调研与第一阶段决策
++
++Canvas现有原生账号：`POST /api/auth/login`、`GET /api/auth/session`、`POST /api/auth/logout`。
++登录复用既有密码校验、频率限制、账号停用与到期检查；session复用`activeNativeUserEmail`的重置撤销／停用／到期检查。
++管理后台的`app_users`是已有用户来源，Desktop直接使用原用户名／邮箱与密码，不创建影子账号。
++
++当前Canvas原生账号主键是email，没有可直接复用的不可变用户UUID。协议明确标记subject类型`naumi-email-v1`，以服务端返回的规范email作为一期主体，禁止将本地输入用户名或自造UUID冒充后台主键。后台账号改名的迁移要在后续不可变subject方案中显式完成。
++
++原企业桥是协作业务API，不是Canvas账号API。身份origin与企业协作origin分离，不改成把Canvas地址写进`/api/workspace`；不因为已登录Naumi就自动产生企业组织／设备授权。
++
++## 3. 账号登录切片：已实现
++
++### 职责／接口
++
++- `identity.cjs`：只访问固定Canvas认证API；Chromium持有Cookie；返回公开subject/email/name，丢弃role、积分、token和任意上游字段。
++- `identity-runtime.cjs`：账号服务配置、当前进程身份、按issuer+subject隔离的本地profile；不拥有密码或供应商密钥。
++- `identity.html/css/js`：浅色Naumi登录／当前账号／退出界面；密码提交后清空，不写日志或配置。
++- `main.cjs`：独立安装模式在启动worker前认证，限定本地主frame IPC；开发链接模式保持原服务行为。
++- `NAUMI_IDENTITY_ORIGIN`：受管安装的统一身份服务地址；没有预配地址时由首次配置提供HTTPS origin，首次登录成功后只保存非敏感origin。
++- 冷启动校验既有服务器会话；无有效会话回到登录。已有进程中的本地工作不因临时断网被主动停止。
++- 账号管理入口只在原生统一身份能力可用时出现在系统连接页；普通网页／链接开发壳不显示空入口。
++
++### 数据与生命周期
++
++`userData/identity-profiles/<SHA256(issuer,typed subject)>`为独立账号根目录，企业工作区、Bot、文件、设备和同步状态沿用原模块，但位于该账号根下。
++旧全局harness不自动认领、不搬动、不复制Cookie；旧数据归属迁移须显式确认。
++原生浏览器account、企业session partition均包含账号namespace。退出释放guest、关闭bridge、清理本地工作台session/cache，只清自己的认证partition；各账号本地文件保留。
++运行任务／在途操作拒绝退出和切换；真正退出前复用维护quiesce准入，再停止自己拥有的worker。安装器登记实际账号根目录，保留已有维护协议。
++
++### 成功／失败行为
++
++| 情况 | 预期行为 |
++|---|---|
++| 原账号密码正确 | 服务器Cookie确认后才创建账号namespace并启动本地worker |
++| 错密码、停用、到期、限流 | 保留服务器拒绝语义，不创建账号或启动worker，不自动重试密码提交 |
++| 重置／撤销后冷启动 | session校验不通过，回到登录 |
++| 服务不可达／TLS失败 | 有界错误，不关闭原本已在运行的本地工作，不伪造新授权 |
++| A退出后B登录 | profile、guest和工作台存储隔离；A文件保留 |
++| 任务运行中退出 | 拒绝，不杀任务、不换主体 |
++
++## 4. 整个矩阵的后续阶段（尚未实现）
++
++### P2：服务端产品授权与不可变身份
++
++- 在原账号模块内增加不可变subject及显式email改名迁移，不重建另一套账号库。
++- 后台管理Canvas/Desktop/协作的产品授权、组织成员和产品内角色；登录不自动升级管理员。
++- 跨产品采用标准授权码+PKCE、state、一次性交换、精确redirect校验；不复制不同域Cookie。
++- 原生账号一期已接；Supabase模式的浏览器授权回调单独接入，不让客户端猜测凭据协议或回落管理员口令。
++- 账号停用／产品授权撤销的在线检查、审计和设备会话撤销，明确本地数据访问与远程能力不同。
++
++### P3：设备授权与模型网关
++
++- 服务端管理模型路由、预算、额度、设备和audience；发短期、可撤销、绑定用户与设备的网关凭证。
++- 供应商长期密钥留服务端；Desktop保存必要的设备凭证时使用现有受保护vault，不打进安装包。
++- 管理员更改配置后按revision更新，禁止旧回包覆盖新配置；超时／未知状态不重复扣费或重放业务。
++- 既有手动自定义URL/API Key不在本切片中删除或暗中改写。
++
++### P4：离线恢复与统一管理面板
++
++- 签名离线租约包含issuer/subject/aud/device/authEpoch/expiry/capabilities；本地验签、时钟回拨和版本回滚防护。
++- 有效租约内的本地能力继续；云侧付费／组织写入仍校验服务端权限。撤销传播窗口与租约上限明确记录。
++- 本次没有签名离线租约：冷启动断网保持登录待恢复，不把本机缓存当云侧授权。
++- 后台统一管理账号／组织／产品授权／设备／模型用量／审计，业务数据仍由各产品模块拥有。
++
++## 5. 验收与交付口径
++
++- 基线及集中单元／集成输出：`evidence/unified-identity/BASELINE.log`、`MODIFIED.log`。
++- 真Electron：生产main/preload/账号界面＋受控Canvas认证协议；只有backend/installer I/O为隔离适配，验证Cookie、拒绝、账号切换、任务准入、退出、冷启动撤销与断网。没有真实员工密码或3080操作。
++- Canvas现有账号服务器的实际账号验收、远程HTTPS部署、Supabase、P2-P4、现有用户数据迁移均单独保留，不以fixture替代。
++- 四项归档、原hash、修改副本与副本回滚命令见VERIFICATION.txt。
++
++## 6. 接续提示
++
++```text
++接续Naumi矩阵身份：先查本文件和evidence/unified-identity实际结果。
++一期复用Canvas原生auth API；账号并不等于管理员、产品授权或企业设备授权。
++不要自动认领原harness数据，不复制Cookie，不把供应商主密钥下发到客户端。
++P2接不可变subject与服务端产品授权，P3接设备网关，P4接签名离线租约。
++真实站点账号与部署验收单独记录；保留Canvas共享checkout与当前3080服务。
++```
++
++## 登录视觉追加决定
++
++用户指定复用 http://127.0.0.1:3112/login 的实际样式，仅移除左上角DESIGN OS；该运行页面来自naumi-design-ops，而非旧naumi-co源码。背景使用相同smoke shader，胶囊导航／按钮使用相同liquid shader，CSS与品牌斜体字标复用，React effect转为DOM生命周期；渲染预算、隐藏暂停、reduced-motion、context loss降级及清理保留。来源hash见desktop/app/identity-style/SOURCE.json。应用离线自带这些文件，不运行时依赖3112，不嵌iframe，也不改变账号校验API。注册胶囊只打开已配置Naumi账号平台首页，由平台控制是否开放注册，不调用协作系统的企业注册接口。
++
++## 主线同步
++
++初始8314ecb；模块1完成后整合86a29bb，保留统一Bot聊天入口、历史面板迁移及所有聊天资产。仅解决本任务账号入口与既有前端逐字节保护测试、gitattributes追加条目的交叠；不回退聊天实现。功能计数仍为1。
+diff --git a/plugins/naumi-enterprise/client.js b/plugins/naumi-enterprise/client.js
+index 46dc3e4..f7208ae 100644
+--- a/plugins/naumi-enterprise/client.js
++++ b/plugins/naumi-enterprise/client.js
+@@ -116,6 +116,12 @@ window.__ModuleLoader__.load({id:'@naumi/dsh-enterprise',factory(require){
+         tasks.length===0&&h('div',{className:'naumi-empty'},'暂无任务'));
+     }
+     const designTools=[['创作画布','canvas','grid'],['参考工作台','batchshot','image'],['视频工作台','video','film'],['产品精修','retouch','spark'],['一键套图','suite','layers'],['AI 抠图','cutout','image'],['A+ 详情页','aplus','layers'],['3D 工作台','studio3d','box']];
++    function IdentityAccount(){
++      const [identity,setIdentity]=useState(null);
++      useEffect(()=>{let closed=false;globalThis.naumiDesktop?.identityState?.().then(value=>{if(!closed&&value.available)setIdentity(value);}).catch(()=>{});return()=>{closed=true;};},[]);
++      if(!identity)return null;
++      return h('div',{className:'naumi-connection-row'},h(Icon,{name:'logout'}),h('div',null,h('strong',null,identity.user?.name??'Naumi 账号'),identity.user?.email&&h('span',null,identity.user.email)),h('button',{className:'naumi-btn',onClick:()=>globalThis.naumiDesktop.openIdentity()},'管理账号'));
++    }
+     function DesignGrid(){return h('div',{className:'naumi-design-grid'},designTools.map(([label,url,icon],i)=>h('a',{key:url,href:config.designOrigin+'/'+url,target:'_blank',rel:'noopener noreferrer',className:'naumi-design-tool'},h('span',{className:'naumi-tool-icon tone-'+i%4},h(Icon,{name:icon,size:25})),h('strong',null,label),h(Icon,{name:'arrow',size:16}))));}
+     function Page({page}){
+       const state=useBusiness(),data=state.data;
+@@ -135,7 +141,7 @@ window.__ModuleLoader__.load({id:'@naumi/dsh-enterprise',factory(require){
+             h('div',{className:'naumi-filterbar'},...['all','unassigned','in_progress','quality_review','business_acceptance','accepted'].map(s=>h('button',{key:s,className:filter===s?'selected':'',onClick:()=>setFilter(s)},s==='all'?'全部':STATUS[s]))),data?h(TaskTable,{tasks:visible,data,onContext:setSelected}):h(ConnectionState,{state}))),
+         page==='naumi-delivery'&&h('section',{className:'naumi-card'},h('div',{className:'naumi-section-head'},h('h2',null,'交付与验收'),external(config.collaborationOrigin+'/reviews','打开交付中心')),data?h('div',{className:'naumi-deliveries'},data.deliverables.length?data.deliverables.map(d=>{const task=tasks.find(t=>t.id===d.taskId),versions=data.submissions.filter(s=>s.deliverableId===d.id);return h('article',{key:d.id,className:'naumi-delivery-item'},h('div',{className:'naumi-delivery-icon'},h(Icon,{name:'image',size:25})),h('div',{className:'naumi-delivery-info'},h('strong',null,d.name),h('span',null,task?.title??'')),h('span',{className:'naumi-version'},versions.length?'V'+Math.max(...versions.map(s=>s.version)):'尚未提交'),h(Badge,{status:d.status}),external(config.collaborationOrigin+'/review/'+encodeURIComponent(d.taskId),'打开审阅'));}):h('div',{className:'naumi-empty'},'暂无交付物')):h(ConnectionState,{state})),
+         page==='naumi-design'&&h(React.Fragment,null,h('div',{className:'naumi-design-top'},h('img',{src:'/naumi/assets/wordmark.svg',alt:'Naumi',width:136,height:34}),external(config.designOrigin+'/dashboard','打开设计中心','arrow','naumi-btn primary')),h(DesignGrid),h('div',{className:'naumi-design-links'},external(config.designOrigin+'/works','我的作品'),external(config.designOrigin+'/templates','模板中心'),external(config.designOrigin+'/tools','全部创作工具'))),
+-        page==='naumi-connections'&&h('section',{className:'naumi-card naumi-connections'},h('h2',null,'工作空间连接'),h('div',{className:'naumi-connection-row'},h(Icon,{name:'grid'}),h('div',null,h('strong',null,'企业协作'),h('code',null,config.collaborationOrigin)),h('span',{className:'naumi-badge '+(state.status==='ready'?'success':'')},state.status==='ready'?'已连接':'需要登录'),external(config.collaborationOrigin+'/login','打开'),globalThis.naumiDesktop?.connectionSettings&&h('button',{className:'naumi-btn',onClick:()=>globalThis.naumiDesktop.connectionSettings()},'连接设置')),h('div',{className:'naumi-connection-row'},h(Icon,{name:'spark'}),h('div',null,h('strong',null,'设计中心'),h('code',null,config.designOrigin)),external(config.designOrigin+'/dashboard','打开')),h('div',{className:'naumi-connection-row'},h(Icon,{name:'chat'}),h('div',null,h('strong',null,'AI 协作'),h('span',null,'会话 · 模型 · 文件 · 工具')),h('button',{className:'naumi-btn',onClick:()=>openAI()},'打开会话'))),
++        page==='naumi-connections'&&h('section',{className:'naumi-card naumi-connections'},h('h2',null,'工作空间连接'),h(IdentityAccount),h('div',{className:'naumi-connection-row'},h(Icon,{name:'grid'}),h('div',null,h('strong',null,'企业协作'),h('code',null,config.collaborationOrigin)),h('span',{className:'naumi-badge '+(state.status==='ready'?'success':'')},state.status==='ready'?'已连接':'需要登录'),external(config.collaborationOrigin+'/login','打开'),globalThis.naumiDesktop?.connectionSettings&&h('button',{className:'naumi-btn',onClick:()=>globalThis.naumiDesktop.connectionSettings()},'连接设置')),h('div',{className:'naumi-connection-row'},h(Icon,{name:'spark'}),h('div',null,h('strong',null,'设计中心'),h('code',null,config.designOrigin)),external(config.designOrigin+'/dashboard','打开')),h('div',{className:'naumi-connection-row'},h(Icon,{name:'chat'}),h('div',null,h('strong',null,'AI 协作'),h('span',null,'会话 · 模型 · 文件 · 工具')),h('button',{className:'naumi-btn',onClick:()=>openAI()},'打开会话'))),
+         selected&&data&&h(TaskContext,{task:selected,data,onClose:()=>setSelected(null)}));
+     }
+     ctx.effect(()=>{
+diff --git a/scripts/unified-identity-evidence.mjs b/scripts/unified-identity-evidence.mjs
+new file mode 100644
+index 0000000..8c62324
+--- /dev/null
++++ b/scripts/unified-identity-evidence.mjs
+@@ -0,0 +1,37 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';
++const root=process.cwd(),dir=path.join(root,'evidence/unified-identity'),baseline='86a29bbf7f3f5fe1a311d517d37fc2c0105a7acd';
++const sha=b=>createHash('sha256').update(b).digest('hex');
++const files=['.gitattributes','desktop/app/main.cjs','desktop/app/preload.cjs',...['identity.cjs','identity-runtime.cjs','identity.html','identity.css','identity.js','identity-visual.js'].map(n=>'desktop/app/'+n),...fs.readdirSync(path.join(root,'desktop/app/identity-style')).sort().map(n=>'desktop/app/identity-style/'+n),'desktop/scripts/prepare-runtime.mjs','desktop/scripts/verify-unified-identity.mjs','desktop/tests/identity.test.cjs','plugins/naumi-enterprise/client.js','tests/naumi-context-ui.test.mjs','docs/implementation/UNIFIED_IDENTITY.md','scripts/unified-identity-evidence.mjs'];
++fs.mkdirSync(dir,{recursive:true});const mode=process.argv[2];
++if(mode==='prepare'){
++ const manifest=[];for(const file of files){const modified=fs.readFileSync(path.join(root,file));let original=null;try{original=execFileSync('git',['show',baseline+':'+file],{stdio:['ignore','pipe','ignore']});}catch{}
++  for(const [kind,bytes]of [['modified',modified],['original',original]])if(bytes){const p=path.join(dir,kind,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);}
++  manifest.push({file,originalSHA256:original?sha(original):null,modifiedSHA256:sha(modified)});
++ }
++ fs.writeFileSync(path.join(dir,'manifest.json'),JSON.stringify({baseline,files:manifest},null,2)+'\n');
++ fs.writeFileSync(path.join(dir,'DIFF_FILE.patch'),execFileSync('git',['diff','--cached','--binary',baseline,'--',...files],{maxBuffer:15*1024*1024}));
++ execFileSync('python',['-c',`import pathlib,zipfile;p=pathlib.Path(r'${dir}');z=zipfile.ZipFile(p/'MODIFIED_FILE.zip','w',zipfile.ZIP_DEFLATED);[z.write(f,f.relative_to(p).as_posix()) for d in ['original','modified'] for f in sorted((p/d).rglob('*')) if f.is_file()];z.write(p/'manifest.json','manifest.json');z.close()`]);
++ console.log(`ARTIFACTS files=${manifest.length} originals=${manifest.filter(m=>m.originalSHA256).length} hashes=PASS`);
++}else if(mode==='rollback'){
++ assert(process.argv.includes('--test'),'COPY_TEST_REQUIRED');const manifest=JSON.parse(fs.readFileSync(path.join(dir,'manifest.json'))).files;
++ const parent=path.join(root,'runtime','unified-identity-rollback-'+randomUUID()),copy=path.join(parent,'copy');fs.mkdirSync(copy,{recursive:true});const tar=path.join(parent,'baseline.tar');
++ fs.writeFileSync(tar,execFileSync('git',['archive',baseline],{maxBuffer:200*1024*1024}));execFileSync('C:/Windows/System32/tar.exe',['-xf',tar,'-C',copy]);
++ for(const m of manifest){const p=path.join(copy,m.file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.copyFileSync(path.join(dir,'modified',m.file),p);assert.equal(sha(fs.readFileSync(p)),m.modifiedSHA256);}
++ for(const m of manifest){const p=path.join(copy,m.file);if(m.originalSHA256){fs.copyFileSync(path.join(dir,'original',m.file),p);assert.equal(sha(fs.readFileSync(p)),m.originalSHA256);}else fs.unlinkSync(p);}
++ fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');fs.symlinkSync(path.join(root,'desktop/node_modules'),path.join(copy,'desktop/node_modules'),'junction');
++ const result=spawnSync(process.execPath,['--test','tests/*.test.mjs','desktop/tests/*.test.cjs'],{cwd:copy,encoding:'utf8',windowsHide:true,timeout:240000,maxBuffer:15*1024*1024});fs.writeFileSync(path.join(dir,'ROLLBACK.log'),(result.stdout??'')+(result.stderr??''));assert.equal(result.status,0,'ROLLBACK_TESTS_FAILED');
++ const tests=Number((result.stdout.match(/(?:ℹ |# )tests (\d+)/)??[])[1]);assert(tests);
++ assert(!fs.existsSync(path.join(copy,'desktop/app/identity.cjs')));assert(!fs.readFileSync(path.join(copy,'desktop/app/main.cjs'),'utf8').includes('IdentityRuntime'));assert(fs.readFileSync(path.join(copy,'desktop/app/main.cjs'),'utf8').includes('openEnterpriseLogin'));
++ for(const file of ['plugins/naumi-enterprise/bot-task-service.js','plugins/naumi-enterprise/bot-tasks.js','plugins/naumi-enterprise/assets/bot-chat-model.js','plugins/naumi-enterprise/assets/bot-sidebar.js'])assert.equal(sha(fs.readFileSync(path.join(copy,file))),sha(fs.readFileSync(path.join(root,file))),'UNRELATED_MODULE_CHANGED '+file);
++ for(const m of manifest)assert.equal(sha(fs.readFileSync(path.join(root,m.file))),m.modifiedSHA256,'ACTIVE_SOURCE_CHANGED');
++ execFileSync('git',['apply','--reverse','--check',path.join(dir,'DIFF_FILE.patch')]);
++ const output=`ROLLBACK tests=${tests} pass=${tests} fail=0 exit=0\nRESTORED prior_enterprise_login=retained unified_bot_chat=retained identity_gate=removed source_hashes=PASS\nCURRENT modified_source=retained employee_data=untouched service3080=untouched`;
++ fs.writeFileSync(path.join(dir,'ROLLBACK_RESULT.json'),JSON.stringify({status:'PASS',tests,exit:0,copy,output},null,2)+'\n');console.log(output);
++}else if(mode==='reopen'){
++ const manifest=JSON.parse(fs.readFileSync(path.join(dir,'manifest.json'))).files;
++ for(const m of manifest){assert.equal(sha(fs.readFileSync(path.join(root,m.file))),m.modifiedSHA256);assert.equal(sha(fs.readFileSync(path.join(dir,'modified',m.file))),m.modifiedSHA256);if(m.originalSHA256)assert.equal(sha(fs.readFileSync(path.join(dir,'original',m.file))),m.originalSHA256);}
++ execFileSync('python',['-c',`import pathlib,zipfile,json,hashlib;p=pathlib.Path(r'${dir}');z=zipfile.ZipFile(p/'MODIFIED_FILE.zip');assert z.testzip() is None;m=json.loads(z.read('manifest.json'));assert m==json.loads((p/'manifest.json').read_text());assert all(hashlib.sha256(z.read('modified/'+r['file'])).hexdigest()==r['modifiedSHA256'] for r in m['files'])`]);
++ const report=fs.readFileSync(path.join(dir,'VERIFICATION.txt'),'utf8');for(const f of ['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh']){fs.readFileSync(path.join(dir,f));assert(report.includes('E:/Workspace/naumi-desktop/evidence/unified-identity/'+f));}
++ assert.equal(JSON.parse(fs.readFileSync(path.join(dir,'ROLLBACK_RESULT.json'))).status,'PASS');assert.equal(JSON.parse(fs.readFileSync(path.join(dir,'ELECTRON_IDENTITY.json'))).status,'PASS');execFileSync('D:/DEV/Git/bin/bash.exe',['-n',path.join(dir,'ROLLBACK.sh')]);
++ console.log(`REOPEN files=${manifest.length} zip_crc=PASS hashes=PASS patch=PASS verification=PASS rollback=PASS electron=PASS`);
++}else throw Error('EXPECTED prepare|rollback|reopen');
+diff --git a/tests/naumi-context-ui.test.mjs b/tests/naumi-context-ui.test.mjs
+index 75058a0..721f1db 100644
+--- a/tests/naumi-context-ui.test.mjs
++++ b/tests/naumi-context-ui.test.mjs
+@@ -50,7 +50,9 @@ test('preexisting enterprise front-end remains byte-equivalent apart from declar
+  assert(source.includes(lazy));assert(source.includes(privatePanel));assert(!source.includes("['naumi-bot-groups','Bot 群聊','chat'],"));
+  const migration="      const previous=sessionStorage.getItem('naumi.activePanel');\n      const saved=previous==='naumi-bot-groups'?'naumi-conversation':previous;";
+  assert(source.includes(migration));
+- const restored=source.slice(start).replace(desktopAction,'').replace(lazy,'').replace(privatePanel,'').replace("const known=new Set([...PANELS.map(x=>x[0]),'naumi-conversation']);","const known=new Set(PANELS.map(x=>x[0]));").replace(migration,"      const saved=sessionStorage.getItem('naumi.activePanel');").split('\n').filter(line=>!line.includes("void import('/naumi/assets/browser-client.js')")).join('\n').replace("    installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);\n",'');
++ const identityHelper=source.slice(source.indexOf('    function IdentityAccount(){'),source.indexOf('    function DesignGrid()'));
++ assert(identityHelper.includes('if(!identity)return null;'));assert(identityHelper.includes('value.available'));assert.equal(source.split(',h(IdentityAccount)').length,2);
++ const restored=source.slice(start).replace(identityHelper,'').replace(',h(IdentityAccount)','').replace(desktopAction,'').replace(lazy,'').replace(privatePanel,'').replace("const known=new Set([...PANELS.map(x=>x[0]),'naumi-conversation']);","const known=new Set(PANELS.map(x=>x[0]));").replace(migration,"      const saved=sessionStorage.getItem('naumi.activePanel');").split('\n').filter(line=>!line.includes("void import('/naumi/assets/browser-client.js')")).join('\n').replace("    installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);\n",'');
+  assert.equal(restored.replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'));
+ });
+ test('team presentation has no direct credential, model, permission or persistence writes',()=>{

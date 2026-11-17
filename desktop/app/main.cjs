@@ -9,10 +9,14 @@ const {startBridge}=require('./tools.cjs');
 const {localSettings,ensureBackend,stopBackend,createQuitGate,maintenanceRequest}=require('./backend.cjs');
 const installerState=require('./installer-state.cjs');
 const {createDesktopUpdates}=require('./updates.cjs');
+const {IdentityRuntime}=require('./identity-runtime.cjs');
+const {identityOrigin}=require('./identity.cjs');
+const {randomUUID}=require('node:crypto');
 app.setName('Naumi');app.setAppUserModelId('com.naumi.desktop');
 if(process.env.NAUMI_USER_DATA)app.setPath('userData',path.resolve(process.env.NAUMI_USER_DATA));
 if(process.env.NAUMI_TEST_HIDDEN==='1'){app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');app.commandLine.appendSwitch('disable-renderer-backgrounding');}
 const locked=app.requestSingleInstanceLock();
+let identityRuntime=null,identityUserData=null;
 let window,primarySession,guests,bridge,backend,settings,enterprise,login,loginAfterBoot=false,booting=false,closing=false,connecting=false,editingConnection=false,connectionFlight,maintenanceTicket=null,maintenanceUntil=0,updates=null;
 if(!locked){app.quit();}else{
 app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.show();window.focus();}});
@@ -46,6 +50,7 @@ app.whenReady().then(async()=>{
  window.webContents.on('did-fail-load',(_e,code,description,_url,main)=>{if(main&&code!==-3&&!booting)void showStartup(description+' ('+code+')');});
  const ownFrame=event=>{if(event.sender!==window.webContents||event.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');};
  const localPage=(event,names)=>{ownFrame(event);const u=new URL(event.senderFrame.url);return u.protocol==='file:'&&names.some(name=>u.pathname===require('node:url').pathToFileURL(path.join(__dirname,name)).pathname);};
+ const accountPage=event=>localPage(event,['identity.html']);
  const trusted=event=>{ownFrame(event);if(!settings||new URL(event.senderFrame.url).origin!==settings.url||connecting||maintenanceBlocked())throw Error('INVALID_DESKTOP_ORIGIN');};
  ipcMain.handle('naumi:browser-acquire',(e,workspace)=>{trusted(e);return guests.acquire(e.sender,workspace);});
  ipcMain.handle('naumi:browser-release',(e,lease)=>{trusted(e);return guests.release(e.sender,lease);});
@@ -53,7 +58,7 @@ app.whenReady().then(async()=>{
  ipcMain.handle('naumi:retry',e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');void boot();});
  ipcMain.handle('naumi:update-state',e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');return updates?updates.snapshot():{enabled:false,status:'disabled',currentVersion:app.getVersion(),version:null,notes:'',progress:null,error:null};});
  ipcMain.handle('naumi:update-check',async e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');return updates?updates.check():{ok:false,error:'UPDATE_FEED_UNCONFIGURED'};});
- ipcMain.handle('naumi:connection-state',e=>{if(!localPage(e,['connect.html','startup.html']))trusted(e);if(!settings?.isolated)return {available:false};return {available:true,...workspaceSummary(app.getPath('userData'))};});
+ ipcMain.handle('naumi:connection-state',e=>{if(!localPage(e,['connect.html','startup.html']))trusted(e);if(!settings?.isolated)return {available:false};return {available:true,...workspaceSummary(identityUserData??app.getPath('userData'))};});
  ipcMain.handle('naumi:connection-settings',async e=>{
   if(!localPage(e,['startup.html']))trusted(e);if(!settings?.isolated||booting||connecting)return {ok:false,error:'WORKSPACE_SETTINGS_BUSY'};
   try{if((bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');if(backend?.owned){const r=require('./profile.cjs').runtimeReceipt(settings.home,settings.identity.id);if(!r||r.pid===null||isAlive(r.pid))await assertWorkspaceIdle(settings,(url,options)=>primarySession.fetch(url,options));}}
@@ -67,25 +72,57 @@ app.whenReady().then(async()=>{
   if(connecting||booting)return {ok:false,error:'WORKSPACE_SETTINGS_BUSY'};connecting=true;connectionFlight=new AbortController();
   try{
    const checked=await verifyConnection(origin,(url,options)=>primarySession.fetch(url,options),{signal:connectionFlight.signal});
-   const state=workspaceSummary(app.getPath('userData')),changed=state.configured&&state.origin!==checked.origin;
+   const state=workspaceSummary(identityUserData??app.getPath('userData')),changed=state.configured&&state.origin!==checked.origin;
    if(changed){
     if((enterprise?.running??0)>0||(bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');
     if(backend?.owned){const r=require('./profile.cjs').runtimeReceipt(settings.home,settings.identity.id);if(!r||r.pid===null||isAlive(r.pid))await assertWorkspaceIdle(settings,(url,options)=>primarySession.fetch(url,options));connectionFlight.signal.throwIfAborted();await stopBackend(backend);backend=null;}
     else {const r=require('./profile.cjs').runtimeReceipt(settings.home,settings.identity.id);if(r&&(r.pid===null||isAlive(r.pid)))throw Error('WORKSPACE_BACKEND_STOP_REQUIRED');}
     await bridge?.close();bridge=null;
    }
-   connectionFlight.signal.throwIfAborted();selectWorkspace(app.getPath('userData'),checked.origin);
-   if(changed){settings=localSettings(app);enterprise=null;}
+   connectionFlight.signal.throwIfAborted();selectWorkspace(identityUserData??app.getPath('userData'),checked.origin);
+   if(changed){settings=localSettings(accountApp());enterprise=null;}
    loginAfterBoot=true;void showStartup().then(()=>boot());return {ok:true};
   }catch(error){return {ok:false,error:connectionFlight.signal.aborted?'ENTERPRISE_CONNECTION_CANCELLED':/^(ENTERPRISE|WORKSPACE)_[A-Z_]+$/.test(error.message)?error.message:'ENTERPRISE_CONNECTION_UNAVAILABLE'};}
   finally{connecting=false;connectionFlight=null;}
+ });
+ ipcMain.handle('naumi:identity-state',e=>{if(!accountPage(e))trusted(e);return identityRuntime?.status()??{available:false};});
+ ipcMain.handle('naumi:identity-register',async(e,value)=>{
+  if(!accountPage(e)||!identityRuntime)throw Error('INVALID_DESKTOP_SENDER');
+  try{const origin=identityOrigin(value||identityRuntime.origin());if(identityRuntime.managedOrigin&&origin!==identityRuntime.managedOrigin)throw Error('IDENTITY_MANAGED_ORIGIN');await shell.openExternal(origin+'/');return {ok:true};}
+  catch(error){return {ok:false,error:/^IDENTITY_[A-Z_]+$/.test(error.message)?error.message:'IDENTITY_UNAVAILABLE'};}
+ });
+ ipcMain.handle('naumi:identity-login',async(e,input)=>{
+  if(!accountPage(e)||!identityRuntime)throw Error('INVALID_DESKTOP_SENDER');
+  if(booting||connecting||closing)return {ok:false,error:'IDENTITY_BUSY'};
+  connecting=true;
+  try{await identityRuntime.login(input);settings=null;identityUserData=identityRuntime.active.root;void showStartup().then(()=>boot());return {ok:true};}
+  catch(error){return {ok:false,error:/^IDENTITY_[A-Z_]+$/.test(error.message)?error.message:'IDENTITY_UNAVAILABLE'};}
+  finally{connecting=false;}
+ });
+ ipcMain.handle('naumi:identity-open',async e=>{
+  trusted(e);if(!identityRuntime)return {ok:false,error:'IDENTITY_UNAVAILABLE'};
+  try{await assertAccountIdle();editingConnection=true;if(login&&!login.isDestroyed())login.destroy();await window.loadFile(path.join(__dirname,'identity.html'));return {ok:true};}
+  catch(error){const code=/^(WORKSPACE|INSTALL)_[A-Z_]+$/.test(error.message)?error.message:'WORKSPACE_ACTIVITY_UNKNOWN';if(process.env.NAUMI_TEST_HIDDEN!=='1')await dialog.showMessageBox(window,{type:'info',buttons:['返回工作台'],message:'请先结束当前运行任务和操作，再管理账号'});return {ok:false,error:code};}
+ });
+ ipcMain.handle('naumi:identity-resume',e=>{if(!accountPage(e)||!identityRuntime?.active)throw Error('INVALID_DESKTOP_SENDER');void showStartup().then(()=>boot());return {ok:true};});
+ ipcMain.handle('naumi:identity-logout',async e=>{
+  if(!accountPage(e)||!identityRuntime)throw Error('INVALID_DESKTOP_SENDER');if(connecting||booting||closing)return {ok:false,error:'IDENTITY_BUSY'};
+  connecting=true;let ticket=null;
+  try{
+   await assertAccountIdle();
+   if(backend?.owned){ticket=randomUUID().replaceAll('-','')+randomUUID().replaceAll('-','');await performMaintenance('quiesce',ticket,{accountTransition:true});await stopBackend(backend);backend=null;}
+   await guests?.reset({hostURL:settings?.url??'http://127.0.0.1:3080',account:'signed-out-'+randomUUID()});await bridge?.close();bridge=null;
+   await primarySession.clearStorageData();await primarySession.clearCache();const result=await identityRuntime.logout();
+   enterprise=null;settings=null;identityUserData=null;maintenanceTicket=null;maintenanceUntil=0;return {ok:true,...result};
+  }catch(error){if(ticket&&backend?.owned)await performMaintenance('resume',ticket).catch(()=>{});return {ok:false,error:/^(IDENTITY|WORKSPACE|INSTALL|BACKEND)_[A-Z_]+$/.test(error.message)?error.message:'IDENTITY_UNAVAILABLE'};}
+  finally{connecting=false;}
  });
  ipcMain.handle('naumi:enterprise-login',e=>{trusted(e);openEnterpriseLogin();return {ok:true};});
  await showStartup();
  if(process.env.NAUMI_TEST_HIDDEN!=='1')window.show();
  await boot();
 }).catch(error=>{console.error('NAUMI_DESKTOP_START_FAILED',error.message);app.quit();});
-const quitGate=createQuitGate({shutdown:async()=>{try{connectionFlight?.abort();if(login&&!login.isDestroyed()){login.webContents.stop();login.destroy();}await guests?.flush();await primarySession?.cookies.flushStore();await enterprise?.session.cookies.flushStore();}finally{await bridge?.close();await stopBackend(backend);}},onReady:()=>app.quit(),onError:()=>app.exit(1)});
+const quitGate=createQuitGate({shutdown:async()=>{try{connectionFlight?.abort();if(login&&!login.isDestroyed()){login.webContents.stop();login.destroy();}await guests?.flush();await primarySession?.cookies.flushStore();await enterprise?.session.cookies.flushStore();await identityRuntime?.client?.session.cookies.flushStore();}finally{await bridge?.close();await stopBackend(backend);}},onReady:()=>app.quit(),onError:()=>app.exit(1)});
 app.on('before-quit',event=>{closing=true;quitGate.beforeQuit(event);});
 app.on('window-all-closed',()=>app.quit());
 }
@@ -96,18 +133,26 @@ async function showStartup(error=''){
 async function boot(){
  if(booting||closing||connecting||maintenanceBlocked())return;booting=true;
  try{
-  settings??=localSettings(app);
+  if(!settings){
+   const candidate=localSettings(app);
+   if(candidate.isolated){
+    identityRuntime??=new IdentityRuntime({userData:app.getPath('userData'),sessionFor:name=>session.fromPartition(name),managedOrigin:process.env.NAUMI_IDENTITY_ORIGIN??''});
+    const active=await identityRuntime.restore();
+    if(!active){await window.loadFile(path.join(__dirname,'identity.html'));return;}
+    identityUserData=active.root;settings=localSettings(accountApp());
+   }else settings=candidate;
+  }
   if(settings.isolated){
-   installerState.registerProfile(path.resolve(process.resourcesPath,'..'),app.getPath('userData'));
+   installerState.registerProfile(path.resolve(process.resourcesPath,'..'),identityUserData??app.getPath('userData'));
    let connection=readConnection(settings.home);
    if(process.env.NAUMI_ENTERPRISE_ORIGIN)connection=connect(settings.home,process.env.NAUMI_ENTERPRISE_ORIGIN);
-   if(!connection){await window.loadFile(path.join(__dirname,'connect.html'));return;}
-   settings.enterpriseOrigin=connection.origin;
-   enterprise??=new EnterpriseSession({origin:connection.origin,session:session.fromPartition('persist:naumi-enterprise-'+require('node:crypto').createHash('sha256').update(connection.origin).digest('hex'))});
+   if(!connection&&!identityRuntime?.active){await window.loadFile(path.join(__dirname,'connect.html'));return;}
+   settings.enterpriseOrigin=connection?.origin??'';
+   if(connection)enterprise??=new EnterpriseSession({origin:connection.origin,session:session.fromPartition('persist:naumi-enterprise-'+(identityRuntime?.active?.profileId??'legacy')+'-'+require('node:crypto').createHash('sha256').update(connection.origin).digest('hex'))});
   }
   const nextBackend=await ensureBackend(settings);
   backend=backend?.owned&&!nextBackend.owned&&backend.child.exitCode===null&&backend.child.signalCode===null?{...nextBackend,owned:true,child:backend.child}:nextBackend;
-  const account=!settings.isolated||settings.workspaceId==='default'?'local':'enterprise-'+settings.workspaceId;
+  const account=identityRuntime?.active?'identity-'+identityRuntime.active.profileId+'-'+settings.workspaceId:!settings.isolated||settings.workspaceId==='default'?'local':'enterprise-'+settings.workspaceId;
   if(!guests){guests=new Guests({hostURL:settings.url,account,timeout:process.env.NAUMI_TEST==='1'?Number(process.env.NAUMI_TEST_TIMEOUT??30000):30000});guests.attach(window);}
   else if(guests.hostURL!==settings.url||guests.account!==account)await guests.reset({hostURL:settings.url,account});
   if(!bridge)bridge=await startBridge({home:settings.home,guests,window,enterprise,maintenance:{blocked:maintenanceBlocked,perform:performMaintenance,quit:ticket=>{if(maintenanceBlocked()&&ticket===maintenanceTicket)app.quit();}}});
@@ -115,6 +160,12 @@ async function boot(){
   if(loginAfterBoot){loginAfterBoot=false;openEnterpriseLogin();}
  }catch(error){await showStartup(error.message);}
  finally{booting=false;if(process.env.NAUMI_TEST==='1')globalThis.__naumiTest={window,guests,bridge,settings,backend,enterprise,get login(){return login;}};}
+}
+function accountApp(){return {isPackaged:app.isPackaged,getPath:name=>name==='userData'&&identityUserData?identityUserData:app.getPath(name)};}
+async function assertAccountIdle(){
+ if((enterprise?.running??0)>0||(bridge?.runtime.queues.size??0)>0)throw Error('WORKSPACE_OPERATIONS_IN_FLIGHT');
+ if(backend&&!backend.owned)throw Error('WORKSPACE_BACKEND_STOP_REQUIRED');
+ if(backend?.owned)await assertWorkspaceIdle(settings,(url,options)=>primarySession.fetch(url,options));
 }
 function maintenanceBlocked(){if(maintenanceTicket&&Date.now()>=maintenanceUntil){maintenanceTicket=null;}return !!maintenanceTicket;}
 function canInstallUpdate(){
@@ -129,10 +180,10 @@ async function showUpdateNotice(snapshot){
  const {response}=await dialog.showMessageBox(window,{type:'info',buttons:['立即重启更新','稍后'],defaultId:1,cancelId:1,noLink:true,title:'Naumi 更新',message:'新版本 '+snapshot.version+' 已下载完成',detail});
  return response;
 }
-async function performMaintenance(action,ticket){
+async function performMaintenance(action,ticket,{accountTransition=false}={}){
  if(maintenanceBlocked()&&maintenanceTicket!==ticket)throw Error('INSTALL_MAINTENANCE_BUSY');
  if(action==='resume'){if(backend&&settings)await maintenanceRequest(settings,'resume',ticket);maintenanceTicket=null;return;}
- if(booting||connecting||closing||!settings?.isolated||!backend?.owned)throw Error('INSTALL_ACTIVITY_UNKNOWN');
+ if(booting||(connecting&&!accountTransition)||closing||!settings?.isolated||!backend?.owned)throw Error('INSTALL_ACTIVITY_UNKNOWN');
  maintenanceTicket=ticket;maintenanceUntil=Date.now()+30000;
  try{if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0)throw Error('INSTALL_OPERATIONS_IN_FLIGHT');await maintenanceRequest(settings,'quiesce',ticket);}
  catch(error){maintenanceTicket=null;throw error;}
