@@ -66,6 +66,21 @@ test('unknown sends survive restart without blind replay; only explicit owner re
  await f.command({action:'resolve',id:output.id,received:false,confirm:true});await f.service.kick();assert.equal(f.sends.filter(s=>s.payload.text==='成果').length,1);assert.equal(f.deliveries.length,1);
 });
 
+test('lost native admission receipt retries stable identity, and a revoked UNKNOWN cannot block the next binding generation',async t=>{
+ const f=imFixture(t),id=await f.connection(),binding=await f.pair(id),deliver=f.runtime.deliver;let lost=true;
+ f.runtime.deliver=async input=>{const receipt=await deliver(input);if(lost){lost=false;throw Error('receipt lost after native flush');}return receipt;};
+ const input=await f.receive(id,binding);await f.service.kick();assert.equal(f.deliveries.length,1);assert.equal(f.store.input(input.id).state,'accepted');
+ f.finish(input,'旧未知');f.failSend(Error('timeout'));await f.service.kick();assert.equal(f.store.outputs().find(v=>v.payload.text==='旧未知').state,'unknown');
+ await f.command({action:'binding',id:binding.id,active:false,users:binding.users});const next=await f.pair(id,{kind:'bot',id:'bot-a'},{chat:binding.chat});const current=await f.receive(id,next);f.finish(current,'新一代回复');await f.service.kick();assert.equal(f.sends.filter(v=>v.payload.text==='新一代回复').length,1);
+});
+
+test('stale file fails before platform upload and revoked interaction settles without granting permission',async t=>{
+ const f=imFixture(t),id=await f.connection(),b=await f.pair(id),input=await f.receive(id,b),path=joinPath(f.home,'result.txt');
+ f.sessions.set('worker',{header:{cwd:f.home},events:[{seq:3,type:'deliverables/presented',data:{turn:1,files:[{path}]}}]});
+ f.service.delivery.files(input,'stale',[{sessionId:'worker',seq:3,index:0,turn:1,path,version:'old'}]);await f.service.kick();assert.equal(f.store.outputs().find(v=>v.payload.type==='file').state,'failed');assert.equal(f.sends.filter(v=>v.file).length,0);
+ const waiting=f.service.interactions.open(input,{type:'approval',sessionId:input.sessionId,toolName:'shell'});await f.command({action:'binding',id:b.id,active:false,users:b.users});assert.equal(await waiting,'cancelled');assert.equal(f.service.waiters.size,0);
+});
+
 test('crash during send becomes UNKNOWN, rate-limit rejection retries without changing native work',async t=>{
  const f=imFixture(t),id=await f.connection(),binding=await f.pair(id),input=await f.receive(id,binding);f.finish(input,'成果');f.failSend(Object.assign(Error('429'),{status:429}));await f.service.kick();
  const row=f.store.outputs().find(v=>v.payload.text==='成果');assert.equal(row.state,'queued');f.store.updateOutput(row.id,{nextAt:0});await f.service.kick();assert.equal(f.sends.filter(s=>s.payload.text==='成果').length,1);

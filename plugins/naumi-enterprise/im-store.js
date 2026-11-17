@@ -44,7 +44,7 @@ export class IMStore{
     if(value.target.kind==='bot')this.db.prepare('INSERT OR IGNORE INTO binding_sessions VALUES(?,?)').run(value.sessionId,value.target.id);
   }
   issuePair(value,code){this.db.prepare('DELETE FROM pairs WHERE expires<? OR connection_id=?').run(Date.now(),value.connectionId);this.db.prepare('INSERT INTO pairs VALUES(?,?,?,?)').run(digest(code),value.connectionId,value.expires,JSON.stringify(value));}
-  pair(connectionId,event,code,validate=()=>{}){return this.write(()=>{
+  pair(connectionId,event,code,validate=()=>{},onBound=()=>{}){return this.write(()=>{
     const hash=digest(code),pair=parse(this.db.prepare('SELECT value FROM pairs WHERE hash=? AND connection_id=? AND expires>?').get(hash,connectionId,Date.now()));
     if(!pair||pair.chatKind!==event.chat.kind)fail('IM_PAIR_INVALID');
     validate(pair);
@@ -53,7 +53,7 @@ export class IMStore{
     if(old?.active)fail('IM_ALREADY_BOUND');
     const value={id:old?.id??randomUUID(),connectionId,chat:{key:event.chat.key,kind:event.chat.kind,title:event.chat.title??''},target:pair.target,
       users:[event.sender.id],active:true,revision:(old?.revision??0)+1,sessionId:'session-'+randomUUID(),createdAt:new Date().toISOString()};
-    this.saveBinding(value);this.db.prepare('DELETE FROM pairs WHERE hash=?').run(hash);this.db.exec('UPDATE meta SET revision=revision+1 WHERE id=1');return value;
+    this.saveBinding(value);onBound(value);this.db.prepare('DELETE FROM pairs WHERE hash=?').run(hash);this.db.exec('UPDATE meta SET revision=revision+1 WHERE id=1');return value;
   });}
   valid(origin){const b=this.binding(origin.bindingId),c=b&&this.connection(b.connectionId);return !!(c?.enabled&&b.active&&b.revision===origin.bindingRevision&&b.users.includes(origin.userId));}
   admit(binding,event){return this.write(()=>{

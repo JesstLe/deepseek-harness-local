@@ -100,7 +100,7 @@ export class IMService{
     if(event.threadId||event.unsupported||!event.text.trim()&&!event.images.length)return;
     const pair=/^\/pair\s+([A-F0-9]{24})$/i.exec(event.text.trim());
     if(pair){
-      try{const b=this.store.pair(connectionId,event,pair[1].toUpperCase(),p=>this.assertTarget(p.target,p.chatKind));const input={...b,bindingId:b.id,bindingRevision:b.revision,userId:event.sender.id};this.delivery.text(input,'pair:'+b.id+':'+b.revision,'已连接');void this.kick();}catch(e){if(!/^IM_/.test(e.message))throw e;}
+      try{this.store.pair(connectionId,event,pair[1].toUpperCase(),p=>this.assertTarget(p.target,p.chatKind),b=>{const input={...b,bindingId:b.id,bindingRevision:b.revision,userId:event.sender.id};this.delivery.text(input,'pair:'+b.id+':'+b.revision,'已连接');});void this.kick();}catch(e){if(!/^IM_/.test(e.message))throw e;}
       return;
     }
     const b=this.store.findBinding(connectionId,event.chat);if(!b?.active||!b.users.includes(event.sender.id))return;
