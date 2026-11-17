@@ -44,3 +44,67 @@ CURRENT version=0.3.4 source=modified service3080=untouched
 Exit status: 0
 Full output: ROLLBACK_COMMAND.txt and ROLLBACK.txt; copy location in ROLLBACK_RESULT.json.
 Restored behavior/status: baseline version 0.3.3 and original unlinked-account startup branch restored only in the second copy; existing settings-right update entry retained. Current source remains 0.3.4. This is a source-copy rollback test, not an installed employee downgrade or a published-feed rollback.
+
+FINAL BUILD AND RELEASE — PUBLISHED
+Fixed main build and release tag SHA: 3b81257f393d5d37ead6f10e40d9ebec5248666e
+Version: 0.3.4; Windows x64; 494218752 bytes (471.3 MiB).
+Installer: E:/Workspace/naumi-desktop/runtime/naumi-desktop-release-0.3.4/Naumi-Setup-0.3.4-x64.exe
+SHA256: f23a8e89cd2b91c3c1d5a50cfe5e78cddba844f5e9a95bb9bc8e157bc5a575f2
+Release: https://github.com/JesstLe/naumi-desktop/releases/tag/v0.3.4
+Download: https://github.com/JesstLe/naumi-desktop/releases/download/v0.3.4/Naumi-Setup-0.3.4-x64.exe
+
+BUILD
+Command: npm --prefix desktop run build -- --output=../runtime/naumi-desktop-release-0.3.4
+CWD: E:/Workspace/naumi-desktop, fixed clean main 3b81257.
+Input: current main source and pinned dependencies; fresh runtime stage; no employee configs/profiles/keys.
+Literal result: BUILD_EXIT=0 SOURCE=3b81257f393d5d37ead6f10e40d9ebec5248666e
+Exit status: 0
+Runtime stage: 45496 files, closure PASS, forbiddenPaths=0, DingTalk 1.0.68. Standard two-pass NSIS and Naumi Logo/presentation retained. No code-signing certificate was configured. Full output: BUILD.txt.
+
+STATIC PACKAGE INSPECTION
+Command: node evidence/release-0.3.4/INSPECT.mjs
+Input: the fixed-main unpacked resources, app.asar, final installer, latest.yml and CHANGELOG notes.
+Literal result: INSPECT version=0.3.4 app_files=39 backend_files=45496 hashes=PASS logo=PASS manifest_sha512=PASS exit=0
+Exit status: 0
+39 shipped app files matched source byte-for-byte, including main/preload/update/login and Logo; 45496 backend inventory hashes matched. Installed-source enterprise plugin and update assets matched. Full receipt: BUILD.json and INSPECT.txt.
+Initial inspector used slash-normalized ASAR lookup paths on Windows and stopped before validation; corrected to native paths. This was an inspector path issue, not a missing packaged asset.
+
+NSIS ARCHIVE
+Command: D:/DEV/7zip/7z.exe t runtime/naumi-desktop-release-0.3.4/Naumi-Setup-0.3.4-x64.exe
+Input: final NSIS installer, no installer execution.
+Literal result: Everything is Ok
+Exit status: 0
+Full output: NSIS_ARCHIVE.txt.
+
+REAL PACKAGED SMOKE
+Command: node desktop/scripts/verify-release-034.mjs E:/Workspace/naumi-desktop
+CWD: E:/Workspace/naumi-desktop-release-034
+Input: real 0.3.4 packaged main/preload/renderer and real bundled backend, fresh temp account profile; only account API and same-version update manifest controlled. No development Node/pnpm/Python on app PATH.
+Literal result: PACKAGE version=0.3.4 login=PASS bundled_backend=PASS settings_right=PASS check_update=PASS dingtalk=PASS worker_stop=PASS model_calls=0 exit=0
+Exit status: 0
+Full receipt: PACKAGE.json and PACKAGE_FINAL.txt.
+First run passed login/backend/layout/update assertions but timed out waiting for a hidden-window CDP screenshot. The QA verifier now uses bounded supporting native capture; final smoke completed, including unauthenticated DingTalk CLI and observed owned-worker shutdown. Only the QA script changed after the build; no shipped app/backend input changed. Rollback hash replay confirmed the identical restored baseline; the preceding full 540/540 rollback remains applicable. packaged-update.png is supporting native capture, not an installed employee upgrade or a complete visual matrix.
+
+RELEASE AND REMOTE HASH
+Command: gh release create v0.3.4 runtime/naumi-desktop-release-0.3.4/Naumi-Setup-0.3.4-x64.exe runtime/naumi-desktop-release-0.3.4/latest.yml --repo JesstLe/naumi-desktop --target 3b81257f393d5d37ead6f10e40d9ebec5248666e --title "Naumi Desktop v0.3.4" --notes-file evidence/release-0.3.4/RELEASE_NOTES.md --draft
+Exit status: 0
+Command: gh release download v0.3.4 --repo JesstLe/naumi-desktop --pattern Naumi-Setup-0.3.4-x64.exe --pattern latest.yml --dir runtime/naumi-desktop-release-0.3.4/remote-check
+Exit status: 0
+Input: uploaded draft assets. Full downloaded installer SHA256 and latest.yml bytes compared with local.
+Literal result: REMOTE_DOWNLOAD bytes=494218752 installer_sha256=PASS latest_yml=IDENTICAL exit=0
+Command: gh release edit v0.3.4 --repo JesstLe/naumi-desktop --draft=false --latest
+Literal result: PUBLISH_EXIT=0
+Exit status: 0
+Tag refs/tags/v0.3.4 resolves to fixed main SHA above. Draft=false, prerelease=false. GitHub asset SHA256 digests and sizes match. Receipts: GITHUB_RELEASE.json, RELEASE.json, REMOTE_HASH.txt.
+
+PUBLIC FEED
+Public installer HEAD: HTTP 200, Content-Length 494218752.
+GitHub latest.yml: HTTP 200, version 0.3.4, SHA512 matches final installer.
+Mirror response was malformed (YAMLException); this is retained in FEED.txt/RELEASE.json, not reported as a mirror success.
+Production default feed resolver exercised against the real public endpoints with updater side effects replaced by a probe adapter:
+Literal result: DEFAULT_UPDATER feed=github metadata_version=0.3.4 check=PASS install=0 exit=0
+Exit status: 0
+This confirms mirror rejection and automatic GitHub fallback. Receipts: DEFAULT_FEED.json and DEFAULT_FEED.txt.
+
+FINAL STATUS
+Source metadata/startup branch remains modified at 0.3.4. Original SHA256 and copy-rollback proof retained. User 3080 service, existing installation, real employee sessions and model config untouched. Release and download are real/public. Actual NSIS execution over an existing employee installation, a future-version automatic installation, real employee login/business tasks and high-DPI multi-display matrix were not performed in this isolated package check.
