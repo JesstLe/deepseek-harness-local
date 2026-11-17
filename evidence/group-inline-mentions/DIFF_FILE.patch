@@ -20,10 +20,10 @@ index afbd96a..b544a58 100644
      fs.copyFileSync(process.execPath,path.join(staged,'node.exe'));
 diff --git a/docs/implementation/GROUP_INLINE_MENTIONS.md b/docs/implementation/GROUP_INLINE_MENTIONS.md
 new file mode 100644
-index 0000000..18ae68e
+index 0000000..4e643ab
 --- /dev/null
 +++ b/docs/implementation/GROUP_INLINE_MENTIONS.md
-@@ -0,0 +1,39 @@
+@@ -0,0 +1,44 @@
 +# 输入框内 Agent 点名
 +
 +## 模块与职责
@@ -63,6 +63,11 @@ index 0000000..18ae68e
 +
 +## 未完成项与下一步
 +真实运行加载和 Git 收口以 DEPLOYMENT.json / VERIFICATION.txt 为准。安装包构建不在本切片执行；已更新后续 staging 装配。回滚只恢复本模块源码/依赖 bundle，不回滚群名、消息、任务、模型配置和用户草稿。
++
++## 并行主线整合
++已整合 origin/main `0282b7b` 的员工管理新增模块，相关文件与本任务互不覆盖；最终副本回滚基线同样更新为该 SHA，不撤销并行功能。初轮完整测试 587/587；整合后的全量及 22 项真实原生 UI 复测结果追加至验证记录。候选弹层检查后已收窄为 340px，并将实际复用的形象 SVG 显示为 32px，不改变原生 MenuView 的实现。
++
++整合后集中全量 599/599 通过。最终原生菜单 UI 22 项通过，零页面错误、零推理；主线既有员工管理/群改名场景与本次原生 Session 级 provider 共存。
 diff --git a/plugins/naumi-enterprise/assets/bot-groups.css b/plugins/naumi-enterprise/assets/bot-groups.css
 index 81db5cc..e9af791 100644
 --- a/plugins/naumi-enterprise/assets/bot-groups.css
@@ -280,12 +285,12 @@ index 0000000..afe4b35
 +if(process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url)console.log('AGENT_TRIGGER_EXTENSION '+JSON.stringify(installAgentTriggers(path.resolve(process.argv[2]??'node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js'))));
 diff --git a/scripts/package-group-inline-mentions.mjs b/scripts/package-group-inline-mentions.mjs
 new file mode 100644
-index 0000000..7ec5f3c
+index 0000000..f10c72e
 --- /dev/null
 +++ b/scripts/package-group-inline-mentions.mjs
 @@ -0,0 +1,11 @@
 +import fs from 'node:fs';import path from 'node:path';import {execFileSync,spawnSync} from 'node:child_process';import {createHash} from 'node:crypto';import assert from 'node:assert/strict';import {extendAgentTriggers,INPUT_TRIGGER_SHA} from './native-agent-mentions-extension.mjs';
-+const root=process.cwd(),e=path.join(root,'evidence/group-inline-mentions'),base='7de781ffac355e360c4a418d2947da7873ea2367',temp=path.join(root,'runtime/inline-mentions-evidence'),original=path.join(temp,'baseline'),copy=path.join(temp,'rollback-copy'),sha=b=>createHash('sha256').update(b).digest('hex');fs.mkdirSync(temp,{recursive:true});
++const root=process.cwd(),e=path.join(root,'evidence/group-inline-mentions'),base='0282b7b282f983174563817883fffd3105cd2ae7',temp=path.join(root,'runtime/inline-mentions-evidence-0282b7b'),original=path.join(temp,'baseline'),copy=path.join(temp,'rollback-copy'),sha=b=>createHash('sha256').update(b).digest('hex');fs.mkdirSync(temp,{recursive:true});
 +const existing=['plugins/naumi-enterprise/host.js','plugins/naumi-enterprise/assets/bot-groups.js','plugins/naumi-enterprise/assets/bot-groups.css','scripts/sync-naumi.mjs','desktop/scripts/prepare-runtime.mjs'],added=['plugins/naumi-enterprise/assets/bot-mentions.js','scripts/native-agent-mentions-extension.mjs'],extra=['tests/naumi-group-inline-mentions.test.mjs','scripts/verify-group-inline-mentions-ui.mjs','scripts/deploy-group-inline-mentions.mjs','scripts/package-group-inline-mentions.mjs','docs/implementation/GROUP_INLINE_MENTIONS.md'];
 +if(!fs.existsSync(original)){execFileSync('git',['archive','--format=zip','--output='+path.join(temp,'baseline.zip'),base]);execFileSync('python',['-c','import zipfile,sys;zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])',path.join(temp,'baseline.zip'),original]);fs.symlinkSync(path.join(root,'node_modules'),path.join(original,'node_modules'),'junction');}
 +const manifest=existing.map(file=>{const bytes=execFileSync('git',['show',base+':'+file]),p=path.join(e,'original',file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);return {file,before:sha(bytes),after:sha(fs.readFileSync(path.join(root,file)))};});for(const file of added)manifest.push({file,before:null,after:sha(fs.readFileSync(path.join(root,file)))});

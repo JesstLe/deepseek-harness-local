@@ -37,3 +37,8 @@ const stop = inputTriggers.registerSessionTrigger(sessionId, {
 
 ## 未完成项与下一步
 真实运行加载和 Git 收口以 DEPLOYMENT.json / VERIFICATION.txt 为准。安装包构建不在本切片执行；已更新后续 staging 装配。回滚只恢复本模块源码/依赖 bundle，不回滚群名、消息、任务、模型配置和用户草稿。
+
+## 并行主线整合
+已整合 origin/main `0282b7b` 的员工管理新增模块，相关文件与本任务互不覆盖；最终副本回滚基线同样更新为该 SHA，不撤销并行功能。初轮完整测试 587/587；整合后的全量及 22 项真实原生 UI 复测结果追加至验证记录。候选弹层检查后已收窄为 340px，并将实际复用的形象 SVG 显示为 32px，不改变原生 MenuView 的实现。
+
+整合后集中全量 599/599 通过。最终原生菜单 UI 22 项通过，零页面错误、零推理；主线既有员工管理/群改名场景与本次原生 Session 级 provider 共存。
