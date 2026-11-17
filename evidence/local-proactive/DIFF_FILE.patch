@@ -1,8 +1,8 @@
 diff --git a/.gitattributes b/.gitattributes
-index 5ff48c7..f865c31 100644
+index 5ff48c7..eb7d1cc 100644
 --- a/.gitattributes
 +++ b/.gitattributes
-@@ -282,3 +282,9 @@ plugins/naumi-enterprise/third-party/ds-bot-im/** -text
+@@ -282,3 +282,20 @@ plugins/naumi-enterprise/third-party/ds-bot-im/** -text
  /evidence/im-settings-polish/*.log -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
  /evidence/im-settings-polish/DIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab,cr-at-eol
  /evidence/im-settings-polish/ROLLBACK.sh text eol=lf
@@ -12,6 +12,17 @@ index 5ff48c7..f865c31 100644
 +/evidence/local-proactive/*.log -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
 +/evidence/local-proactive/DIFF_FILE.patch -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab,cr-at-eol
 +/evidence/local-proactive/ROLLBACK.sh text eol=lf
++# Blender MCP source/evidence and copy rollback byte stability.
++/plugins/naumi-enterprise/blender* text eol=lf
++/plugins/naumi-enterprise/blender-bridge/** text eol=lf
++/plugins/naumi-enterprise/blender-skills/** text eol=lf
++/plugins/naumi-enterprise/assets/blender* text eol=lf
++/plugins/naumi-enterprise/third-party/blender-mcp/** text eol=lf
++/scripts/*blender* text eol=lf
++/tests/blender-mcp.test.mjs text eol=lf
++/docs/implementation/BLENDER_MCP.md text eol=lf
++/evidence/blender-mcp/** -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab,cr-at-eol
++/evidence/blender-mcp/ROLLBACK.sh text eol=lf
 diff --git a/docs/implementation/LOCAL_PROACTIVE_DESIGN.md b/docs/implementation/LOCAL_PROACTIVE_DESIGN.md
 index 8185281..14cec8d 100644
 --- a/docs/implementation/LOCAL_PROACTIVE_DESIGN.md
@@ -26,10 +37,10 @@ index 8185281..14cec8d 100644
  
 diff --git a/docs/implementation/LOCAL_PROACTIVE_EXECUTION.md b/docs/implementation/LOCAL_PROACTIVE_EXECUTION.md
 new file mode 100644
-index 0000000..798d86f
+index 0000000..949a92e
 --- /dev/null
 +++ b/docs/implementation/LOCAL_PROACTIVE_EXECUTION.md
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,46 @@
 +# 本地主动执行：共享消费器的 local-owner 策略
 +
 +模块与职责：本线程负责D4本地策略，不复制调度器、AgentLoop、工具执行器或权限系统。基线 main/origin/main 406277c1c6f3f892b5c2218911971927e8cef4d1；独立分支 codex/local-proactive-execution，worktree E:/Workspace/naumi-local-proactive-execution。功能切片计数1。
@@ -74,6 +85,8 @@ index 0000000..798d86f
 +D1运行接续：4静态资源已从main406277c加载，HTTP200/117无关文件hash保持/无重启。D4首轮完整回归684/685，唯一失败为未改动的desktop backend测试临时目录清理EPERM；同名定向复测1/1通过，原失败保留，不把它算全仓通过。最终整合后集中复测另记。独立壳最终16项通过，2次loopback原PiAiAdapter请求，0真实供应商/企业登记；SIGKILL恢复UNKNOWN与不重放、owner核对通过。首次强杀观察器把signalCode已结束误判exitCode仍null，最终等待已修正，初次exit13与最终exit0分别留证。
 +
 +整合主线406277c→ba4ee2a（模型审计最终证据与暂缓的常驻自主Bot愿景保留），功能计数1。node --test --test-concurrency=4 tests/*.test.mjs desktop/tests/*.test.cjs：686/686，exit0；没有跳过测试，降低跨文件并发以避免Windows临时目录句柄争用。本地固定触发/明确批准工作不是BOT-AUTONOMY-001长期自主规划，该愿景仍暂缓。
++
++接续整合：6761e61→f518cdd，纳入origin/main b825ed7的Blender/Cloud47既有变更，不修改其实现或配置；只保留package新增模块清单，.gitattributes两方追加均保留。最终集中全仓712/712、exit0（INTEGRATED_MAIN.log）；独立壳16/16、exit0，桌面1360/580/360图片已逐张重开检查。真实3080只读检查98sessions/1running/0activeTasks，因此未执行停止、加载、真实规则创建或模型调用，等待空闲窗口。
 diff --git a/docs/prd/DAILY_EMPLOYEE_PRIORITY.md b/docs/prd/DAILY_EMPLOYEE_PRIORITY.md
 index 131a4c1..ad3f4e8 100644
 --- a/docs/prd/DAILY_EMPLOYEE_PRIORITY.md
@@ -544,7 +557,7 @@ index 1975906..9b9ea6d 100644
    return {engine,async close(){clearInterval(timer);await engine.close();guard();await loaderHost.dispose();}};
  }
 diff --git a/plugins/naumi-enterprise/package.json b/plugins/naumi-enterprise/package.json
-index a189b6e..f5146d2 100644
+index a189b6e..ac67a88 100644
 --- a/plugins/naumi-enterprise/package.json
 +++ b/plugins/naumi-enterprise/package.json
 @@ -55,6 +55,7 @@
@@ -555,9 +568,80 @@ index a189b6e..f5146d2 100644
      "employee-runtime-gate.js",
      "employee-runtime-policy.js",
      "dingtalk-skills",
+@@ -76,7 +77,11 @@
+     "im-platforms.js",
+     "im-adapters",
+     "model-reasoning.js",
+-    "official-reasoning-specs.json"
++    "official-reasoning-specs.json",
++    "blender.js",
++    "blender-runtime.js",
++    "blender-bridge",
++    "blender-skills"
+   ],
+   "dsh": {
+     "bundle": {
+@@ -113,6 +118,7 @@
+     "@deepseek-ai/dsh-schedule": "0.2.2-rc.1",
+     "@deepseek-ai/dsh-skill-filesystem": "0.2.2-rc.1",
+     "@deepseek-ai/dsh-tool-executor-native": "0.2.2-rc.1",
+-    "@earendil-works/pi-ai": "1.5.2"
++    "@earendil-works/pi-ai": "1.5.2",
++    "@modelcontextprotocol/server": "2.2.0"
+   }
+ }
+diff --git a/scripts/deploy-local-proactive.mjs b/scripts/deploy-local-proactive.mjs
+new file mode 100644
+index 0000000..135e939
+--- /dev/null
++++ b/scripts/deploy-local-proactive.mjs
+@@ -0,0 +1,43 @@
++// Narrow main-only runtime delta. No account enrollment, provider calls, or task writes.
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';import {DatabaseSync} from 'node:sqlite';import {botLiveApi} from './bot-live-api.mjs';
++const root=process.cwd(),mode=process.argv[2]??'prepare',runtime=path.resolve(process.argv[3]??root),baseline='406277c1c6f3f892b5c2218911971927e8cef4d1';
++const installed=path.join(runtime,'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise'),backup=path.join(runtime,'runtime/local-proactive-load-'+randomUUID()),out=path.join(root,'evidence/local-proactive');
++const files=['employee-proactive-ai.js','employee-activity-store.js','employee-activity.js','employee-local-proactive.js','assets/employee-activity-panel.js','assets/employee-center.js','package.json'];
++const read=p=>fs.readFileSync(p),sha=v=>createHash('sha256').update(v).digest('hex'),norm=v=>v.toString().replaceAll('\r\n','\n');
++const inventory=()=>Object.fromEntries(fs.readdirSync(installed,{recursive:true}).filter(f=>fs.statSync(path.join(installed,f)).isFile()).map(f=>[f.replaceAll('\\','/'),sha(read(path.join(installed,f)))]));
++const sourceCommit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
++fs.mkdirSync(backup,{recursive:true});fs.mkdirSync(out,{recursive:true});const original=inventory(),rows=[];
++for(const file of files){const target=path.join(installed,file),before=fs.existsSync(target)?read(target):null,source=read(path.join(root,'plugins/naumi-enterprise',file));let after=source;assert.equal(norm(source),norm(execFileSync('git',['show',sourceCommit+':plugins/naumi-enterprise/'+file])),'SOURCE_NOT_COMMITTED '+file);
++ if(file==='employee-local-proactive.js')assert.equal(before,null,'LOCAL_MODULE_ALREADY_PRESENT');else if(file==='package.json'){assert(before,'RUNTIME_PACKAGE_MISSING');const pkg=JSON.parse(before);assert(!pkg.files.includes('employee-local-proactive.js'));pkg.files.push('employee-local-proactive.js');after=Buffer.from(JSON.stringify(pkg,null,2)+'\n');JSON.parse(after.toString());}else{assert(before,'RUNTIME_FILE_MISSING '+file);assert.equal(norm(before),norm(execFileSync('git',['show',baseline+':plugins/naumi-enterprise/'+file])),'RUNTIME_DRIFT '+file);}
++ for(const[kind,bytes]of[['before',before],['after',after]])if(bytes){const p=path.join(backup,kind,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);}
++ rows.push({file,beforeSHA256:before?sha(before):null,afterSHA256:sha(after)});
++}
++fs.writeFileSync(path.join(backup,'manifest.json'),JSON.stringify({baseline,rows},null,2));
++if(mode==='prepare'){console.log('LOCAL_PROACTIVE_PREPARED files=7 host_client=UNCHANGED backup='+backup);process.exit(0);}assert.equal(mode,'apply');
++assert.equal(execFileSync('git',['branch','--show-current'],{encoding:'utf8'}).trim(),'main');const unrelatedTracked=execFileSync('git',['diff','HEAD','--name-only','-z'],{encoding:'utf8'}).split('\0').filter(Boolean);assert(unrelatedTracked.every(f=>!files.map(p=>'plugins/naumi-enterprise/'+p).includes(f)),'TASK_SOURCE_DIRTY');
++const untracked=execFileSync('git',['ls-files','--others','--exclude-standard','-z'],{encoding:'utf8'}).split('\0').filter(f=>f&&!f.startsWith('evidence/local-proactive/')),untrackedHashes=Object.fromEntries(untracked.map(f=>[f,sha(read(path.join(root,f)))]));
++const api=await botLiveApi(runtime),sessions=await api.rpc('session/list',{_request:{}}),bots=await api.json('/naumi/bots'),tasks=await api.json('/naumi/bot-tasks'),models=sha(JSON.stringify(await api.json('/naumi/model-connections')));
++assert(!sessions.items.some(s=>s.running),'RUNNING_SESSIONS');assert(!tasks.tasks.some(t=>['queued','starting','running','waiting'].includes(t.status)),'ACTIVE_TASKS');
++const groupRows=()=>{const db=new DatabaseSync(path.join(runtime,'.dsh/naumi/bot-groups.sqlite'),{readOnly:true});try{const rows=Object.fromEntries(['rooms','members','posts','replies','post_context','room_name_operations'].map(t=>[t,db.prepare('SELECT * FROM '+t+' ORDER BY rowid').all()]));assert(!rows.replies.some(r=>['queued','starting','sent'].includes(r.state)),'GROUP_BUSY');return sha(JSON.stringify(rows));}finally{db.close();}};
++const groupsBefore=groupRows(),employees=async api=>Object.fromEntries(await Promise.all(bots.bots.map(async b=>{const {exportedAt,...v}=await api.json('/naumi/employees?view=export&botId='+encodeURIComponent(b.id));return[b.id,sha(JSON.stringify(v))];}))),employeesBefore=await employees(api);
++const protectedPaths=['.dsh/.credentials.yaml','.dsh/cordis.patch.yml','.dsh/profiles/web/package.json','.dsh/profiles/web/cordis.yml','.dsh/profiles/web/cordis.patch.yml','.dsh/naumi/bots.json','.dsh/naumi/bot-tasks.json','config/local.json','node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'];
++for(const f of fs.readdirSync(path.join(runtime,'.dsh/sessions'),{recursive:true}))if(path.basename(f)==='session.v4.jsonl.zstd')protectedPaths.push('.dsh/sessions/'+f);
++const protectedBefore=Object.fromEntries(protectedPaths.filter(f=>fs.existsSync(path.join(runtime,f))).map(f=>[f,sha(read(path.join(runtime,f)))]));
++const shell=name=>{const r=spawnSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-File',path.join(runtime,name)],{windowsHide:true,stdio:'ignore',timeout:150000});assert.equal(r.status,0,'SERVICE_COMMAND '+name);};
++const atomic=(p,bytes)=>{fs.mkdirSync(path.dirname(p),{recursive:true});const tmp=p+'.'+randomUUID()+'.tmp';fs.writeFileSync(tmp,bytes);fs.renameSync(tmp,p);};let complete=false;
++try{
++ shell('Stop-Naumi.ps1');for(const[f,h]of Object.entries(protectedBefore))assert.equal(sha(read(path.join(runtime,f))),h,'PRELOAD_DATA_DRIFT '+f);
++ for(const r of rows){const p=path.join(installed,r.file);if(r.beforeSHA256)assert.equal(sha(read(p)),r.beforeSHA256,'PRELOAD_RUNTIME_DRIFT');else assert(!fs.existsSync(p));}
++ for(const r of rows)atomic(path.join(installed,r.file),read(path.join(backup,'after',r.file)));shell('Start-Naumi.ps1');
++ const loaded=await botLiveApi(runtime),afterSessions=await loaded.rpc('session/list',{_request:{}});assert(!afterSessions.items.some(s=>s.running));assert.equal(afterSessions.items.length,sessions.items.length);
++ for(const f of ['employee-activity-panel.js','employee-center.js'])assert.equal((await loaded.request('/naumi/assets/'+f)).status,200);const localHeaders=await loaded.request('/naumi/employee-activity?botId='+encodeURIComponent(bots.bots[0].id));assert.equal(localHeaders.status,200);assert.equal(localHeaders.headers.get('x-naumi-local-proactive'),'1');for(const bot of bots.bots){const v=await loaded.json('/naumi/employee-activity?botId='+encodeURIComponent(bot.id));assert(v.proactive.localConfigured);assert(!v.rules.some(r=>r.config.action.kind==='run_local_agent'&&r.enabled),'UNEXPECTED_LOCAL_RULE_ENABLED');}
++ assert.deepEqual(await loaded.json('/naumi/bots'),bots);assert.deepEqual(await loaded.json('/naumi/bot-tasks'),tasks);assert.equal(sha(JSON.stringify(await loaded.json('/naumi/model-connections'))),models);assert.deepEqual(await employees(loaded),employeesBefore);assert.equal(groupRows(),groupsBefore);
++ const after=inventory();for(const r of rows)assert.equal(after[r.file],r.afterSHA256);for(const[f,h]of Object.entries(original))if(!files.includes(f))assert.equal(after[f],h,'UNRELATED_RUNTIME '+f);
++ for(const[f,h]of Object.entries(protectedBefore))assert.equal(sha(read(path.join(runtime,f))),h,'PROTECTED_DATA '+f);for(const[f,h]of Object.entries(untrackedHashes))assert.equal(sha(read(path.join(root,f))),h,'OTHER_EVIDENCE_CHANGED '+f);
++ fs.writeFileSync(path.join(out,'DEPLOYMENT.json'),JSON.stringify({status:'PASS',sourceCommit,files:rows,backup,http:200,sessions:afterSessions.items.length,running:0,bots:bots.bots.length,revision:bots.revision,automaticLocalRulesEnabled:false,enterpriseConfigurationChanges:0,modelCalls:0,modelGroupsUnchanged:true,employeeExportsUnchanged:true,taskAndGroupRowsUnchanged:true,protectedFilesUnchanged:Object.keys(protectedBefore).length,unrelatedRuntimeUnchanged:Object.keys(original).filter(f=>!files.includes(f)).length,otherUntrackedFilesPreserved:untracked.length,unrelatedTrackedEditsNotTouched:unrelatedTracked,nativeComposerUnchanged:true,packageChange:"append_employee-local-proactive.js_only"},null,2)+'\n');
++ complete=true;console.log('LOCAL_PROACTIVE_LOADED files=7 http=200 running=0 models=UNCHANGED employees=UNCHANGED tasks=UNCHANGED groups=UNCHANGED account_data=UNCHANGED model_calls=0');
++}finally{if(!complete){
++ const dataFile=path.join(runtime,'.dsh/naumi/bots.json'),expected=protectedBefore['.dsh/naumi/bots.json'];
++ if(expected&&sha(read(dataFile))!==expected)console.error('LOCAL_PROACTIVE_LOAD_INCOMPLETE new_directory_metadata=RETAINED compatible_reader=RETAINED backup='+backup);
++ else{try{shell('Stop-Naumi.ps1');}catch{}for(const r of rows){const p=path.join(installed,r.file);if(r.beforeSHA256)atomic(p,read(path.join(backup,'before',r.file)));else if(fs.existsSync(p))fs.unlinkSync(p);}shell('Start-Naumi.ps1');console.error('LOCAL_PROACTIVE_LOAD_FAILED runtime=RESTORED backup='+backup);}
++}}
 diff --git a/scripts/package-local-proactive.mjs b/scripts/package-local-proactive.mjs
 new file mode 100644
-index 0000000..1467fc0
+index 0000000..4c00461
 --- /dev/null
 +++ b/scripts/package-local-proactive.mjs
 @@ -0,0 +1,11 @@
@@ -570,7 +654,7 @@ index 0000000..1467fc0
 +fs.writeFileSync(path.join(out,'ROLLBACK.sh'),`#!/usr/bin/env bash\nset -euo pipefail\nHERE="$(cd "$(dirname "$0")" && pwd)"\nnode - "$1" "$HERE" <<'NODE'\nconst fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');const target=path.resolve(process.argv[2]),out=path.resolve(process.argv[3]);if(!fs.existsSync(path.join(target,'.naumi-local-proactive-rollback-copy')))throw Error('MARKED_COPY_REQUIRED');if(target===path.resolve(out,'../..'))throw Error('SOURCE_TARGET_REJECTED');const m=JSON.parse(fs.readFileSync(path.join(out,'manifest.json'))),hash=b=>crypto.createHash('sha256').update(b).digest('hex');for(const e of m.entries){const file=path.resolve(target,e.path);if(!file.startsWith(target+path.sep))throw Error('INVALID_TARGET');if(fs.existsSync(file)&&hash(fs.readFileSync(file))!==e.modified)throw Error('COPY_CHANGED '+e.path);if(e.original){const bytes=fs.readFileSync(path.join(out,'original',e.path));if(hash(bytes)!==e.original)throw Error('ORIGINAL_CHANGED');fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,bytes);}else if(fs.existsSync(file))fs.unlinkSync(file);}for(const e of m.entries){const file=path.join(target,e.path);if(e.original?hash(fs.readFileSync(file))!==e.original:fs.existsSync(file))throw Error('RESTORE_FAILED');}console.log('ROLLBACK_SOURCE originals='+m.entries.filter(e=>e.original).length+' new_removed='+m.entries.filter(e=>!e.original).length+' hashes=PASS live_data=UNTOUCHED');\nNODE\n`);
 +const patch=execFileSync('git',['diff',baseline,'--binary','--',...paths]);fs.writeFileSync(path.join(out,'DIFF_FILE.patch'),patch);if(!patch.length)throw Error('NO_TASK_CHANGES');
 +execFileSync('python',['-X','utf8','-c',"import json,zipfile,pathlib; r=pathlib.Path('.'); o=r/'evidence/local-proactive'; m=json.loads((o/'manifest.json').read_text()); z=zipfile.ZipFile(o/'MODIFIED_FILE.zip','w',zipfile.ZIP_DEFLATED); [z.write(r/e['path'],e['path']) for e in m['entries']]; z.close(); z=zipfile.ZipFile(o/'MODIFIED_FILE.zip'); assert z.testzip() is None; print('ZIP entries='+str(len(z.namelist()))+' CRC=PASS')"],{stdio:'inherit'});
-+if(process.argv.includes('--rollback-test')){const copy=path.join(root,'runtime/local-proactive-source-rollback-final-2');if(fs.existsSync(copy))throw Error('COPY_ALREADY_EXISTS');fs.mkdirSync(copy,{recursive:true});fs.writeFileSync(path.join(copy,'.naumi-local-proactive-rollback-copy'),'source-only');for(const dir of ['plugins','tests'])fs.cpSync(path.join(root,dir),path.join(copy,dir),{recursive:true});fs.copyFileSync(path.join(root,'package.json'),path.join(copy,'package.json'));for(const e of manifest.entries){const dest=path.join(copy,e.path);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(path.join(root,e.path),dest);}fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');fs.mkdirSync(path.join(copy,'desktop'));fs.cpSync(path.join(root,'services'),path.join(copy,'services'),{recursive:true});for(const dir of ['app','installer','scripts'])fs.cpSync(path.join(root,'desktop',dir),path.join(copy,'desktop',dir),{recursive:true});fs.symlinkSync(path.join(root,'desktop/node_modules'),path.join(copy,'desktop/node_modules'),'junction');const r=spawnSync('D:/DEV/Git/bin/bash.exe',[path.join(out,'ROLLBACK.sh'),copy],{encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK.log'),r.stdout+r.stderr);if(r.status!==0)throw Error('ROLLBACK_FAILED '+r.stdout+r.stderr);console.log(r.stdout.trim());const t=spawnSync(process.execPath,['--test','tests/naumi-proactive-ai.test.mjs','tests/naumi-employee-activity.test.mjs'],{cwd:copy,encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK_TESTS.log'),t.stdout+t.stderr);if(t.status!==0)throw Error('ROLLBACK_TESTS_FAILED '+t.stdout);console.log('ROLLBACK tests=35 pass=35 fail=0 exit=0');}
++if(process.argv.includes('--rollback-test')){const copy=path.join(root,'runtime/local-proactive-source-rollback-final-3');if(fs.existsSync(copy))throw Error('COPY_ALREADY_EXISTS');fs.mkdirSync(copy,{recursive:true});fs.writeFileSync(path.join(copy,'.naumi-local-proactive-rollback-copy'),'source-only');for(const dir of ['plugins','tests'])fs.cpSync(path.join(root,dir),path.join(copy,dir),{recursive:true});fs.copyFileSync(path.join(root,'package.json'),path.join(copy,'package.json'));for(const e of manifest.entries){const dest=path.join(copy,e.path);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(path.join(root,e.path),dest);}fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');fs.mkdirSync(path.join(copy,'desktop'));fs.cpSync(path.join(root,'services'),path.join(copy,'services'),{recursive:true});for(const dir of ['app','installer','scripts'])fs.cpSync(path.join(root,'desktop',dir),path.join(copy,'desktop',dir),{recursive:true});fs.symlinkSync(path.join(root,'desktop/node_modules'),path.join(copy,'desktop/node_modules'),'junction');const r=spawnSync('D:/DEV/Git/bin/bash.exe',[path.join(out,'ROLLBACK.sh'),copy],{encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK.log'),r.stdout+r.stderr);if(r.status!==0)throw Error('ROLLBACK_FAILED '+r.stdout+r.stderr);console.log(r.stdout.trim());const t=spawnSync(process.execPath,['--test','tests/naumi-proactive-ai.test.mjs','tests/naumi-employee-activity.test.mjs'],{cwd:copy,encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK_TESTS.log'),t.stdout+t.stderr);if(t.status!==0)throw Error('ROLLBACK_TESTS_FAILED '+t.stdout);console.log('ROLLBACK tests=35 pass=35 fail=0 exit=0');}
 +for(const e of manifest.entries)if(hash(fs.readFileSync(path.join(root,e.path)))!==e.modified)throw Error('MODIFIED_SOURCE_CHANGED');console.log('ARTIFACTS paths='+paths.length+' modified=RETAINED enterprise=UNCHANGED');
 diff --git a/scripts/verify-daily-work-ui.mjs b/scripts/verify-daily-work-ui.mjs
 index d2395eb..8799db6 100644
@@ -610,7 +694,7 @@ index 0000000..91da643
 +}
 diff --git a/scripts/verify-local-proactive-ui.mjs b/scripts/verify-local-proactive-ui.mjs
 new file mode 100644
-index 0000000..2e91e02
+index 0000000..2e36b88
 --- /dev/null
 +++ b/scripts/verify-local-proactive-ui.mjs
 @@ -0,0 +1,28 @@
@@ -639,7 +723,7 @@ index 0000000..2e91e02
 + const summary=await call('/naumi/employee-work?botId='+bot.id),details=await call('/naumi/employee-work?botId='+bot.id+'&view=delivery&deliveryId='+job.deliveryIds[0]);check('immutable_draft_not_self_accepted',details.businessStatus==='draft'&&details.currentContent.includes('实际本地交付内容')&&summary.goals[0].status==='planned');check('native_model_choice_preserved',state.proactive.localTargets.some(t=>t.selection.provider==='fixture'&&t.selection.model==='fixture-model'));
 + await work.locator('.emp-delivery-row').waitFor({timeout:45000});check('new_work_refreshes_into_daily_delivery_list',await work.locator('.emp-delivery-row').count()===1);
 + const previous=state.rules[0],strict={...previous.config,action:{...previous.config.action,allowedTools:['employee_delivery_create'],maxToolCalls:1,maxModelRequests:2}};const stricter=await fetch(base+'/naumi/employee-activity',{method:'POST',headers:{...headers,'x-naumi-employee-activity':'1'},body:JSON.stringify({action:'rule_update',botId:bot.id,ruleId:previous.id,expectedRevision:previous.revision,operationId:randomUUID(),config:strict})});assert.equal(stricter.status,200);await activity.getByRole('button',{name:'刷新',exact:true}).click();await activity.getByRole('button',{name:'编辑',exact:true}).click();const edit=activity.locator('.emp-rule-form');await edit.getByLabel('规则名称').fill('调整后的分析计划');await edit.getByRole('button',{name:'保存为停用规则',exact:true}).click();await edit.waitFor({state:'hidden'});const afterEdit=(await call('/naumi/employee-activity?botId='+bot.id)).rules[0];check('editing_keeps_stricter_tool_and_request_limits',afterEdit.config.action.maxToolCalls===1&&afterEdit.config.action.maxModelRequests===2&&JSON.stringify(afterEdit.config.action.allowedTools)==='["employee_delivery_create"]');check('editing_revokes_prior_approval_without_inference',!afterEdit.enabled&&!afterEdit.approvalId&&requests.length===2);
-+ for(const width of [1360,580,360]){await page.setViewportSize({width,height:960});check('daily_local_layout_'+width,await work.evaluate(el=>el.scrollWidth<=el.clientWidth+2&&el.getBoundingClientRect().right<=innerWidth+1));await page.screenshot({path:path.join(out,'local-'+width+'.png'),animations:'disabled'});}check('no_page_errors',errors.length===0);
++ for(const width of [1360,580,360]){await page.setViewportSize({width,height:960});await work.locator('.emp-main').evaluate(el=>el.scrollTop=0);check('daily_local_layout_'+width,await work.evaluate(el=>el.scrollWidth<=el.clientWidth+2&&el.getBoundingClientRect().right<=innerWidth+1));await page.screenshot({path:path.join(out,'local-'+width+'.png'),animations:'disabled'});}check('no_page_errors',errors.length===0);
 + fs.writeFileSync(path.join(out,'UI_VERIFICATION.json'),JSON.stringify({status:'PASS',checks,errors,modelRequests:requests.length,upstream:'loopback SSE fixture via original PiAiAdapter',realSupplierCalls:0,enterpriseRegistration:false,tier:'independent actual Harness/native React/AgentLoop/Native tools/SQLite; no real account writes'},null,2)+'\n');console.log('LOCAL_UI checks='+checks.length+' errors=0 native_model_requests='+requests.length+' enterprise_registration=0');
 +}catch(error){fs.writeFileSync(path.join(out,'UI_FAILURE.json'),JSON.stringify({error:error.message,checks},null,2));throw error;}finally{await browser?.close();child.kill();await new Promise(r=>child.exitCode!==null?r():child.once('close',r));upstream.closeAllConnections();await new Promise(r=>upstream.close(r));fs.writeFileSync(path.join(out,'HOST.log'),output.replace(/token=[A-Za-z0-9_~.%-]+/g,'token=REDACTED'));}
 diff --git a/tests/helpers/local-proactive-host.mjs b/tests/helpers/local-proactive-host.mjs
