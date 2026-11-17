@@ -1,0 +1,7 @@
+import fs from 'node:fs';import assert from 'node:assert/strict';import {createHash} from 'node:crypto';
+const dir='evidence/browser-default-baidu',receipt=JSON.parse(fs.readFileSync(dir+'/RUNTIME_LOAD.json'));
+const logs=['logs/server.out.log','logs/server.err.log'].map(p=>fs.readFileSync(p,'utf8')).join('\n');const launch=[...logs.matchAll(/http:\/\/127\.0\.0\.1:3080\/?\?token=[A-Za-z0-9_~.%-]+/g)].at(-1)[0];const exchange=await fetch(launch,{redirect:'manual'});const cookie=exchange.headers.getSetCookie().map(v=>v.split(';')[0]).join('; ');assert(cookie);
+const html=await(await fetch('http://127.0.0.1:3080',{headers:{cookie}})).text();const url=html.match(/"id":"@naumi\/dsh-sidebar-browser","url":"([^"]+)"/)[1];
+const response=await fetch(new URL(url,'http://127.0.0.1:3080/'),{headers:{cookie}});assert.equal(response.status,200);const body=await response.text();assert(body.includes('currentBrowserTarget(initial.current) === void 0 ? "https://baidu.com" : void 0'));
+const hash=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');assert.equal(hash('.dsh/profiles/web/node_modules/@naumi/dsh-sidebar-browser/client.js'),hash('plugins/naumi-sidebar-browser/client.js'));
+fs.writeFileSync(dir+'/RUNTIME_LOAD.json',JSON.stringify({...receipt,httpModuleContainsDefault:true,checked:[{status:response.status,baiduDefault:true,url}],verification:'verify-runtime.mjs; reads published graph row, no resync or restart'},null,2)+'\n');console.log('RUNTIME files=2 unrelated=preserved http_default=true restarted=false');

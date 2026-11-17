@@ -1,0 +1,140 @@
+diff --git a/desktop/tests/policy.test.cjs b/desktop/tests/policy.test.cjs
+index 2f171a9..857e11e 100644
+--- a/desktop/tests/policy.test.cjs
++++ b/desktop/tests/policy.test.cjs
+@@ -5,4 +5,4 @@ test('browser navigation never enters the host or executable schemes',()=>{for(c
+ test('bindings require explicit scope and visibility',()=>{assert.throws(()=>binding({lease:'a',sessionId:'s'}));assert.deepEqual(binding({lease:'a',sessionId:'s',tabId:'t',visible:false,token:'ignored'}),{lease:'a',sessionId:'s',tabId:'t',visible:false});});
+ test('branding covers executable, installer and shortcuts',()=>{const p=JSON.parse(fs.readFileSync(path.join(__dirname,'../package.json')));assert.equal(p.build.productName,'Naumi');assert.equal(p.build.appId,'com.naumi.desktop');assert.equal(p.build.nsis.shortcutName,'Naumi');for(const k of ['installerIcon','uninstallerIcon','installerHeaderIcon'])assert.match(p.build.nsis[k],/naumi.ico$/);const icon=fs.readFileSync(path.join(__dirname,'../app/assets/naumi.ico'));assert.equal(icon.readUInt16LE(2),1);assert.equal(icon.readUInt16LE(4),7);});
+ test('desktop presentation keeps upstream native module and excludes screenshot loop',()=>{const s=fs.readFileSync(path.join(__dirname,'../../plugins/naumi-enterprise/assets/browser-native-client.js'),'utf8');assert.match(s,/@deepseek-ai\/dsh-client-ui-sidebar-browser/);assert.match(s,/h\(entry.component,props\)/);for(const forbidden of ['captureScreenshot','BrowserScheduler','onWheel','setInterval','resizeBrowser'])assert(!s.includes(forbidden));});
+-test('preload offers product-scoped operations, not full official desktop semantics',()=>{const s=fs.readFileSync(path.join(__dirname,'../app/preload.cjs'),'utf8');assert(!s.includes("exposeInMainWorld('ipc"));assert(!s.includes('executeJavaScript'));assert(!s.includes("exposeInMainWorld('dshDesktop'"));assert.match(s,/protocolVersion:1,browser/);const upstream=fs.readFileSync(path.join(__dirname,'../../node_modules/@deepseek-ai/dsh-client-ui-sidebar-browser/lib/client.js'),'utf8'),built=fs.readFileSync(path.join(__dirname,'../../plugins/naumi-sidebar-browser/client.js'),'utf8');assert.equal(built,upstream.replace('id: "@deepseek-ai/dsh-client-ui-sidebar-browser"','id: "@naumi/dsh-sidebar-browser"').replace('const carrier = globalThis.dshDesktop;','const carrier = globalThis.naumiDesktop;').replace('const tagId = "@deepseek-ai/dsh-client-ui-sidebar-browser/Browser.module.css";','const tagId = "@naumi/dsh-sidebar-browser/Browser.module.css";').replace('tag.dataset.plugin = "@deepseek-ai/dsh-client-ui-sidebar-browser";','tag.dataset.plugin = "@naumi/dsh-sidebar-browser";'));});
++test('preload offers product-scoped operations, not full official desktop semantics',()=>{const s=fs.readFileSync(path.join(__dirname,'../app/preload.cjs'),'utf8');assert(!s.includes("exposeInMainWorld('ipc"));assert(!s.includes('executeJavaScript'));assert(!s.includes("exposeInMainWorld('dshDesktop'"));assert.match(s,/protocolVersion:1,browser/);const upstream=fs.readFileSync(path.join(__dirname,'../../node_modules/@deepseek-ai/dsh-client-ui-sidebar-browser/lib/client.js'),'utf8'),built=fs.readFileSync(path.join(__dirname,'../../plugins/naumi-sidebar-browser/client.js'),'utf8');assert.equal(built.replace("const initialUrl = (0, react.useRef)(tab.navigation.params?.url ?? (currentBrowserTarget(initial.current) === void 0 ? \"https://baidu.com\" : void 0));","const initialUrl = (0, react.useRef)(tab.navigation.params?.url);"),upstream.replace('id: "@deepseek-ai/dsh-client-ui-sidebar-browser"','id: "@naumi/dsh-sidebar-browser"').replace('const carrier = globalThis.dshDesktop;','const carrier = globalThis.naumiDesktop;').replace('const tagId = "@deepseek-ai/dsh-client-ui-sidebar-browser/Browser.module.css";','const tagId = "@naumi/dsh-sidebar-browser/Browser.module.css";').replace('tag.dataset.plugin = "@deepseek-ai/dsh-client-ui-sidebar-browser";','tag.dataset.plugin = "@naumi/dsh-sidebar-browser";'));});
+diff --git a/docs/changes/2026-11-17-browser-default-baidu.md b/docs/changes/2026-11-17-browser-default-baidu.md
+new file mode 100644
+index 0000000..aba79b1
+--- /dev/null
++++ b/docs/changes/2026-11-17-browser-default-baidu.md
+@@ -0,0 +1,28 @@
++# 浏览器默认打开百度
++
++日期：2026-11-17。负责人：本任务；独立分支 codex/browser-default-baidu-20261117。
++基线：c1fe9f0955f5d2344cbf3f7c6a2d2523fd2fa3b3。功能模块计数：1。
++
++## 模块与职责
++
++Naumi 派生侧栏浏览器的初始导航。无显式 URL、无已有页面 checkpoint 的新标签页默认打开 https://baidu.com。
++
++## 公共接口、依赖方向、数据与状态归属
++
++保留官方 BrowserBody、控制器、原生 WebView、导航校验和恢复流程；仅改变 initialUrl 的空值分支。
++显式工具 URL、about:blank 和已有 checkpoint 优先于默认页；已有页面仍使用原有显式恢复，不自动重新加载。
++独立 ego Web 传输不属于本次修改。员工记忆、模型、权限、浏览历史和 Cookie 不迁移。
++
++## 本次实现与迁移状态
++
++构建脚本增加第五项精确替换，并同步派生 client.js/UPSTREAM.json；原 npm 包字节不变。
++更新两处上游等价性测试，仅排除这一项声明的默认页差异，新增三项默认页回归。
++
++## 验证命令、结果及证据层级
++
++命令、原始 SHA256、基线/修改/副本回滚结果见 ../../evidence/browser-default-baidu/VERIFICATION.txt。
++源代码与模块测试不等于新的安装包已发布；本任务不发布新安装包。
++
++## 未完成项与下一步
++
++新安装包会在下次从 main 正式构建时包含此变更。当前开发配置的运行副本接入结果另见 VERIFICATION.txt。
+diff --git a/plugins/naumi-sidebar-browser/UPSTREAM.json b/plugins/naumi-sidebar-browser/UPSTREAM.json
+index 8a2d1ca..cc7fd67 100644
+--- a/plugins/naumi-sidebar-browser/UPSTREAM.json
++++ b/plugins/naumi-sidebar-browser/UPSTREAM.json
+@@ -2,12 +2,15 @@
+   "package": "@deepseek-ai/dsh-client-ui-sidebar-browser",
+   "version": "0.2.2-rc.1",
+   "originalSHA256": "f987b046b8cc7384f009bb1cf09f129faac619fc8562bada82ec64b499f6a7b2",
+-  "modifiedSHA256": "37d2bbcd786404009d9ff92238ae39e0cd1db5332ebce2a509b82f6e1a1c83ec",
++  "modifiedSHA256": "8293c5f1e742102fbee4f704bee04440b6a5d13801af7b850868efb515dabb1a",
+   "changes": [
+     "module registration id",
+     "product-scoped preload carrier",
+     "product-scoped CSS identity",
+-    "product-scoped CSS owner"
++    "product-scoped CSS owner",
++    "Baidu default for fresh tabs without an explicit URL"
+   ],
+-  "navigationAndPresentationUnchanged": true
++  "navigationAndPresentationUnchanged": false,
++  "defaultPage": "https://baidu.com",
++  "existingCheckpointRestoreUnchanged": true
+ }
+diff --git a/plugins/naumi-sidebar-browser/client.js b/plugins/naumi-sidebar-browser/client.js
+index 94f712f..2fdb02d 100644
+--- a/plugins/naumi-sidebar-browser/client.js
++++ b/plugins/naumi-sidebar-browser/client.js
+@@ -138,7 +138,7 @@ window.__ModuleLoader__.load({
+ 				reload
+ 			]);
+ 			const initial = (0, react.useRef)(useStore((state) => state.byTab[tab.id]));
+-			const initialUrl = (0, react.useRef)(tab.navigation.params?.url);
++			const initialUrl = (0, react.useRef)(tab.navigation.params?.url ?? (currentBrowserTarget(initial.current) === void 0 ? "https://baidu.com" : void 0));
+ 			const viewportId = (0, react.useId)();
+ 			const [mountEpoch, setMountEpoch] = (0, react.useState)(0);
+ 			const state = useBrowserState(tab.id);
+diff --git a/scripts/build-naumi-browser.mjs b/scripts/build-naumi-browser.mjs
+index 6b734d6..04a9ab6 100644
+--- a/scripts/build-naumi-browser.mjs
++++ b/scripts/build-naumi-browser.mjs
+@@ -5,6 +5,7 @@ import {fileURLToPath} from 'node:url';
+ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+ const source=fs.readFileSync(path.join(root,'node_modules/@deepseek-ai/dsh-client-ui-sidebar-browser/lib/client.js'),'utf8');
+ const changes=[
++  ["const initialUrl = (0, react.useRef)(tab.navigation.params?.url);","const initialUrl = (0, react.useRef)(tab.navigation.params?.url ?? (currentBrowserTarget(initial.current) === void 0 ? \"https://baidu.com\" : void 0));"],
+   ['id: "@deepseek-ai/dsh-client-ui-sidebar-browser"','id: "@naumi/dsh-sidebar-browser"'],
+   ['const carrier = globalThis.dshDesktop;','const carrier = globalThis.naumiDesktop;'],
+   ['const tagId = "@deepseek-ai/dsh-client-ui-sidebar-browser/Browser.module.css";','const tagId = "@naumi/dsh-sidebar-browser/Browser.module.css";'],
+@@ -14,5 +15,5 @@ let built=source;
+ for(const [from,to]of changes){if(built.split(from).length!==2)throw Error('Upstream browser drift: '+from);built=built.replace(from,to);}
+ const hash=x=>createHash('sha256').update(x).digest('hex');
+ fs.writeFileSync(path.join(root,'plugins/naumi-sidebar-browser/client.js'),built);
+-fs.writeFileSync(path.join(root,'plugins/naumi-sidebar-browser/UPSTREAM.json'),JSON.stringify({package:'@deepseek-ai/dsh-client-ui-sidebar-browser',version:'0.2.2-rc.1',originalSHA256:hash(source),modifiedSHA256:hash(built),changes:['module registration id','product-scoped preload carrier','product-scoped CSS identity','product-scoped CSS owner'],navigationAndPresentationUnchanged:true},null,2)+'\n');
+-console.log('NAUMI_BROWSER substitutions=4 upstream_unchanged=1');
++fs.writeFileSync(path.join(root,'plugins/naumi-sidebar-browser/UPSTREAM.json'),JSON.stringify({package:'@deepseek-ai/dsh-client-ui-sidebar-browser',version:'0.2.2-rc.1',originalSHA256:hash(source),modifiedSHA256:hash(built),changes:['module registration id','product-scoped preload carrier','product-scoped CSS identity','product-scoped CSS owner','Baidu default for fresh tabs without an explicit URL'],navigationAndPresentationUnchanged:false,defaultPage:"https://baidu.com",existingCheckpointRestoreUnchanged:true},null,2)+'\n');
++console.log('NAUMI_BROWSER substitutions=5 upstream_unchanged=1');
+diff --git a/tests/naumi-browser-default.test.mjs b/tests/naumi-browser-default.test.mjs
+new file mode 100644
+index 0000000..a35273c
+--- /dev/null
++++ b/tests/naumi-browser-default.test.mjs
+@@ -0,0 +1,20 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import vm from 'node:vm';
++const source=fs.readFileSync('plugins/naumi-sidebar-browser/client.js','utf8');
++const expression=source.match(/const initialUrl = \(0, react.useRef\)\(([^\n]+)\);/)[1];
++const currentTarget=source.match(/function currentBrowserTarget\(state\) \{[\s\S]*?\n\s*\}/)[0];
++const initialUrl=(url,state)=>vm.runInNewContext(currentTarget+';'+expression,{tab:{navigation:{params:url===undefined?undefined:{url}}},initial:{current:state}});
++test('new browser tabs open Baidu, including empty persisted navigation',()=>{
++ assert.equal(initialUrl(undefined,undefined),'https://baidu.com');
++ assert.equal(initialUrl(undefined,{index:-1,entries:[]}),'https://baidu.com');
++});
++test('explicit browser URLs and blank requests take precedence over the homepage',()=>{
++ for(const url of ['https://example.com/task','about:blank',''])assert.equal(initialUrl(url,undefined),url);
++});
++test('saved pages retain explicit restore and are not redirected to Baidu',()=>{
++ const saved={index:0,entries:[{url:'https://example.com/saved'}]};
++ assert.equal(initialUrl(undefined,saved),undefined);
++ assert.equal(initialUrl('https://example.com/task',saved),'https://example.com/task');
++});
+diff --git a/tests/naumi-browser-style.test.mjs b/tests/naumi-browser-style.test.mjs
+index f782d3a..d6c6f50 100644
+--- a/tests/naumi-browser-style.test.mjs
++++ b/tests/naumi-browser-style.test.mjs
+@@ -20,7 +20,7 @@ test('unloading the upstream browser preserves Naumi styles, including preloaded
+ test('own style teardown and repeated materialization do not leak or disappear',()=>{
+  const d=styleDocument();for(let i=0;i<5;i++){d.load(built);d.load(built);assert.equal(d.tags.length,1);d.dispose(owner);assert.equal(d.tags.length,0);}d.load(built);assert.equal(d.tags.length,1);
+ });
+-test('CSS content and browser logic remain upstream-identical apart from four product bindings',()=>{
+- const restored=built.replace('id: "'+owner+'"','id: "'+oldOwner+'"').replace('const carrier = globalThis.naumiDesktop;','const carrier = globalThis.dshDesktop;').replace('const tagId = "'+owner+'/Browser.module.css";','const tagId = "'+oldOwner+'/Browser.module.css";').replace('tag.dataset.plugin = "'+owner+'";','tag.dataset.plugin = "'+oldOwner+'";');assert.equal(restored,upstream);
++test('CSS content and browser logic remain upstream-identical apart from four product bindings and the declared default page',()=>{
++ const restored=built.replace('id: "'+owner+'"','id: "'+oldOwner+'"').replace('const carrier = globalThis.naumiDesktop;','const carrier = globalThis.dshDesktop;').replace('const tagId = "'+owner+'/Browser.module.css";','const tagId = "'+oldOwner+'/Browser.module.css";').replace('tag.dataset.plugin = "'+owner+'";','tag.dataset.plugin = "'+oldOwner+'";');assert.equal(restored.replace("const initialUrl = (0, react.useRef)(tab.navigation.params?.url ?? (currentBrowserTarget(initial.current) === void 0 ? \"https://baidu.com\" : void 0));","const initialUrl = (0, react.useRef)(tab.navigation.params?.url);"),upstream);
+  const a=styleDocument(),b=styleDocument();a.load(upstream);b.load(built);assert.equal(a.tags[0].textContent,b.tags[0].textContent);
+ });

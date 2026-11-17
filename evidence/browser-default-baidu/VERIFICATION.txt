@@ -1,0 +1,86 @@
+Naumi browser default page verification
+Task branch: codex/browser-default-baidu-20261117
+Baseline: c1fe9f0955f5d2344cbf3f7c6a2d2523fd2fa3b3
+Changed field: BrowserBody.initialUrl, only absent explicit URL AND absent saved target.
+Before: tab.navigation.params?.url
+After: tab.navigation.params?.url ?? (currentBrowserTarget(initial.current) === void 0 ? "https://baidu.com" : void 0)
+MODIFIED_FILE: E:/Workspace/naumi-desktop/plugins/naumi-sidebar-browser/client.js
+DIFF_FILE: E:/Workspace/naumi-desktop/evidence/browser-default-baidu/CHANGE.diff
+VERIFICATION: E:/Workspace/naumi-desktop/evidence/browser-default-baidu/VERIFICATION.txt
+ROLLBACK: E:/Workspace/naumi-desktop/evidence/browser-default-baidu/ROLLBACK.sh
+Original SHA256: 37d2bbcd786404009d9ff92238ae39e0cd1db5332ebce2a509b82f6e1a1c83ec
+All original/modified source hashes: manifest.json. Upstream npm source unchanged.
+
+BASELINE
+Command: node --test tests/naumi-browser-style.test.mjs desktop/tests/policy.test.cjs
+Input: original source, original regression tests.
+Literal summary:
+ℹ tests 10
+ℹ pass 10
+ℹ fail 0
+Exit status: 0
+Command: node evidence/browser-default-baidu/check.mjs evidence/browser-default-baidu/original baseline
+Input: absent URL; empty checkpoint; explicit URL; saved page; about:blank; saved+explicit URL.
+Literal output:
+{"fresh":null,"emptyCheckpoint":null,"explicit":"https://example.com/task","saved":null,"explicitBlank":"about:blank","savedExplicit":"https://example.com/task"}
+Exit status: 0
+
+MODIFIED
+Command: node --test tests/naumi-browser-default.test.mjs tests/naumi-browser-style.test.mjs desktop/tests/policy.test.cjs
+Input: modified source; default-page and upstream-equivalence tests.
+Literal summary:
+ℹ tests 13
+ℹ pass 13
+ℹ fail 0
+Exit status: 0
+Command: node evidence/browser-default-baidu/check.mjs . modified
+Input: same six cases as baseline.
+Literal output:
+{"fresh":"https://baidu.com","emptyCheckpoint":"https://baidu.com","explicit":"https://example.com/task","saved":null,"explicitBlank":"about:blank","savedExplicit":"https://example.com/task"}
+Exit status: 0
+
+ROLLBACK
+Command: D:/DEV/Git/bin/bash.exe evidence/browser-default-baidu/ROLLBACK.sh .dsh/browser-default-baidu-rollback
+Input: separate copy containing five modified manifest files; explicit target required; original and modified SHA256 checked before write.
+Literal output:
+ROLLBACK restored=5 hashes=PASS modified_source=preserved
+Exit status: 0
+Command: node evidence/browser-default-baidu/check.mjs .dsh/browser-default-baidu-rollback baseline
+Literal output:
+{"fresh":null,"emptyCheckpoint":null,"explicit":"https://example.com/task","saved":null,"explicitBlank":"about:blank","savedExplicit":"https://example.com/task"}
+Exit status: 0
+Command: node --test tests/naumi-browser-style.test.mjs desktop/tests/policy.test.cjs
+Working directory: E:/Workspace/naumi-browser-default-baidu/.dsh/browser-default-baidu-rollback
+Input: restored copy and required unchanged resources; dependency junction to installed npm packages.
+Literal summary:
+ℹ tests 10
+ℹ pass 10
+ℹ fail 0
+Exit status: 0
+Restored behavior: fresh browser has no initial URL; saved page restore and explicit URLs unchanged. Modified source remains Baidu.
+Diagnostic correction: first rollback-test invocation used the task root as cwd, so relative reads saw modified source and missing copy resources; exit 1. Rerun from the fully prepared copy passed as above. Product code was not changed for this runner correction.
+
+Release boundary: no installer rebuilt or GitHub Release published by this task. Local module synchronization and Git integration receipts follow.
+
+FULL REGRESSION
+Command: npm run app:test
+Literal summary:
+ℹ tests 394
+ℹ pass 394
+ℹ fail 0
+ℹ skipped 0
+Exit status: 0
+
+RUNTIME
+Command: node evidence/browser-default-baidu/load-runtime.mjs
+Input: only client.js and UPSTREAM.json in the active @naumi/dsh-sidebar-browser profile; all other files hash-preserved; original runtime copies saved under the receipt backup path.
+Initial output: RUNTIME files=2 unrelated=preserved http_default=false restarted=false
+Initial exit status: 1. The first HTTP checker selected only /plugins/ URLs, but published URLs are relative plugins/ URLs; synchronization itself succeeded. ATTEMPT1 receipt preserved; selector corrected in the reusable loader.
+Command: node evidence/browser-default-baidu/verify-runtime.mjs
+Input: current authenticated boot graph's exact @naumi/dsh-sidebar-browser URL; no further synchronization or restart.
+Literal output: RUNTIME files=2 unrelated=preserved http_default=true restarted=false
+Exit status: 0
+Active client SHA256: 8293c5f1e742102fbee4f704bee04440b6a5d13801af7b850868efb515dabb1a
+Runtime status: changed module served HTTP 200; initialUrl defaults to Baidu for fresh tabs. Existing mounted tabs unchanged. No visual screenshot or external-site load claimed.
+Git implementation commit: 6d3627c
+Git main integration: 56fe41d09b466b466f59a04daa6f540712cda10e, pushed origin/main.
