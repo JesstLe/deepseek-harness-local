@@ -193,7 +193,7 @@ test('message matching excludes unrelated turns and respects parked or discarded
 });
 test('tool set exposes dispatch/reply/lifecycle with exact caller and cancellation, never spawn replacement',async()=>{
   const f=await taskFixture();try{
-    const tools=Object.fromEntries(createBotTaskTools(f.service).map(t=>[t.name,t]));assert.equal(Object.keys(tools).length,7);
+    const tools=Object.fromEntries(createBotTaskTools(f.service).map(t=>[t.name,t]));assert.equal(Object.keys(tools).length,8);
     assert(!Object.hasOwn(tools,'spawn_teammate'));
     await assert.rejects(tools.bot_dispatch.execute(f.input(),{agent:f.sender,signal:AbortSignal.abort()}),{name:'AbortError'});
     assert.equal(f.store.read().tasks.length,0);

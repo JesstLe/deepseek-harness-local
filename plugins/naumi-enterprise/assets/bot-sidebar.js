@@ -1,6 +1,6 @@
 import {EXPERIENCE_EVENT,EXPERIENCE_ACTIONS,advancedEmployeeAccess} from './employee-experience-model.js';
-import {taskActivity,employeeTaskState,receptionTarget,ACTIVE_TASKS} from './bot-task-model.js';
-import {MODE_KEY,navigationMode,botActivity,botSummary,botSessions,botTone,newBotTaskRequest,botCatalog,currentSessionId,botSelected} from './bot-sidebar-model.js';
+import {taskActivity,employeeTaskState,employeeTasks,receptionTarget} from './bot-task-model.js';
+import {MODE_KEY,navigationMode,botActivity,botSessions,botTone,newBotTaskRequest,botCatalog,currentSessionId,botSelected} from './bot-sidebar-model.js';
 
 export function installBotSidebar(ctx,React,Icon,createPortal){
   return ctx.inject(['remote.session'],scope=>installNavigation(scope,React,Icon,createPortal));
@@ -16,9 +16,9 @@ function installNavigation(ctx,React,Icon,createPortal){
     const openSettings=mode=>{setMenu(null);window.dispatchEvent(new CustomEvent(EXPERIENCE_EVENT,{detail:{bot:{id:bot.id,name:bot.name,status:bot.status},mode}}));};
     const jobs=useSyncExternalStore(activity.subscribe,activity.getSnapshot,activity.getSnapshot);
     const target=receptionTarget(bot,jobs.tasks,sessions,workspaces),state=jobs.status==='ready'?employeeTaskState(bot,jobs.tasks,botActivity(bot,sessions,status)):botActivity(bot,sessions,status),rows=botSessions(bot,sessions,workspaces);
-    const active=jobs.tasks.filter(t=>t.targetBotId===bot.id&&ACTIVE_TASKS.has(t.status));
+    const active=employeeTasks(bot,jobs.tasks).active.filter(t=>t.targetBotId===bot.id);
     const stateName={running:'工作中',starting:'准备中',waiting:'待你确认',queued:'排队中',idle:'待命',unknown:'待同步'}[state];
-    const open=id=>{setError(null);try{ctx.uiWorkspace.openSession(id);}catch{setError('任务暂未就绪');}};
+    const open=id=>{setError(null);try{ctx.layout.beginNavigation();ctx.uiWorkspace.openSession(id);}catch{setError('任务暂未就绪');}};
     const newTask=async()=>{
       if(flight.current)return;flight.current=true;setBusy(true);setError(null);let id=unbound;
       try{
@@ -28,7 +28,8 @@ function installNavigation(ctx,React,Icon,createPortal){
       finally{flight.current=false;if(alive.current)setBusy(false);}
     };
     return h('div',{className:'naumi-bot-entry','data-bot-id':bot.id,'data-selected':botSelected(bot,currentId,sessions),'data-bot-state':state},
-      h('div',{className:'naumi-bot-row'},h('button',{type:'button',className:'naumi-bot-open',onClick:()=>target?open(target):void newTask(),'aria-label':bot.name+'，'+stateName,title:bot.name},h('span',{className:'naumi-bot-avatar '+botTone(bot.id),'aria-hidden':true},h(Icon,{name:bot.kind==='team'?'layers':'spark',size:21})),h('span',{className:'naumi-bot-caption'},h('strong',null,bot.name),h('span',null,active.length?stateName+' · '+active.length:botSummary(bot,sessions))),h('span',{className:'naumi-bot-state',title:stateName,'aria-label':stateName})),
+      h('div',{className:'naumi-bot-row'},h('button',{type:'button',className:'naumi-bot-open',onClick:()=>{if(target)open(target);else{setHistory(true);setError('日常会话已归档，可新建聊天');}},'aria-label':bot.name+'，'+stateName,title:bot.name},h('span',{className:'naumi-bot-avatar '+botTone(bot.id),'aria-hidden':true},h(Icon,{name:bot.kind==='team'?'layers':'spark',size:21})),h('span',{className:'naumi-bot-caption'},h('strong',null,bot.name),h('span',null,stateName)),h('span',{className:'naumi-bot-state',title:stateName,'aria-label':stateName})),
+        active.length>0&&h('button',{type:'button',className:'naumi-bot-current','aria-label':'查看'+bot.name+'的当前任务（'+active.length+'）',title:'查看当前任务',onClick:()=>{const task=active[0];if(sessions.byId[task.targetSessionId])open(task.targetSessionId);else{setHistory(true);if(target)open(target);}}},active.length),
         h('button',{ref:menuButton,type:'button',className:'naumi-bot-menu-toggle','aria-label':bot.name+'的设置','aria-haspopup':'menu','aria-expanded':!!menu,onClick:e=>{const r=e.currentTarget.getBoundingClientRect();setMenu(v=>v?null:{left:Math.max(8,Math.min(window.innerWidth-205,r.left)),top:Math.max(8,Math.min(window.innerHeight-240,r.bottom+5))});}},'⋯'),h('button',{type:'button',className:'naumi-bot-history-toggle','aria-label':bot.name+'的任务记录','aria-expanded':history,onClick:()=>setHistory(v=>!v)},'⌄')),
       menu&&createPortal(h('div',{ref:menuRef,className:'nx-bot-menu',role:'menu','aria-label':bot.name+'的设置',style:menu},[...EXPERIENCE_ACTIONS,...(advanced?[['advanced','高级管理']]:[])].map(([mode,label])=>h('button',{type:'button',key:mode,role:'menuitem','data-advanced':mode==='advanced'||undefined,onClick:()=>openSettings(mode)},label))),document.body),
       h('div',{className:'naumi-bot-history',hidden:!history},h('div',{className:'naumi-bot-history-head'},h('span',null,'任务记录'),h('button',{type:'button',className:'naumi-bot-link',disabled:busy,onClick:newTask},busy?'创建中…':unbound?'重试关联':'+ 新任务')),rows.length?rows.slice().reverse().map(row=>h('button',{type:'button',key:row.sessionId,className:'naumi-bot-task-link','aria-current':row.sessionId===currentId?'page':undefined,onClick:()=>open(row.sessionId)},h(Icon,{name:'chat',size:13}),h('span',null,sessions.projectionsBySession[row.sessionId]?.values.title??row.projections?.values?.title??'新任务'))):h('p',{className:'naumi-bot-empty'},'暂无可打开的任务')),

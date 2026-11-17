@@ -22,7 +22,7 @@ const logs=['server.out.log','server.err.log'].map(n=>fs.readFileSync(runtime+'/
 try{
   await page.goto(launch,{waitUntil:'domcontentloaded'});await page.addStyleTag({content:fs.readFileSync(root+'/assets/bot-task.css','utf8')});
   const row=page.locator('.naumi-bot-entry[data-bot-id="'+source.id+'"]');await row.locator('.naumi-bot-open').click();
-  const card=page.locator('[data-task-id="'+task.id+'"]');await card.waitFor();
+  const card=page.locator('.naumi-task-dock').locator('[data-task-id="'+task.id+'"]');await card.waitFor();
   check('background_task_visible_without_waiting',await card.getAttribute('data-task-state')==='running');
   check('source_reception_session_preserved',await page.locator('[data-naumi-context-session="'+source.homeSessionId+'"]').count()>0);
   const employee=page.locator('.naumi-bot-entry[data-bot-id="'+target.id+'"]');await page.waitForFunction(id=>document.querySelector('[data-bot-id="'+id+'"]')?.dataset.botState==='running',target.id);

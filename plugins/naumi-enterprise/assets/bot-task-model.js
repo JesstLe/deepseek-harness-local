@@ -1,5 +1,10 @@
 export const ACTIVE_TASKS=new Set(['queued','starting','running','waiting']);
 export const taskLabel=task=>({queued:'排队中',starting:'准备中',running:'工作中',waiting:'待确认',completed:'已完成',failed:'未完成',cancelled:'已取消',interrupted:'已中断'}[task.status]??'待同步');
+export function employeeTasks(bot,tasks){
+  const priority={running:0,starting:1,waiting:2,queued:3};
+  const own=bot?tasks.filter(t=>t.targetBotId===bot.id||t.sourceBotId===bot.id):[];
+  return {active:own.filter(t=>ACTIVE_TASKS.has(t.status)).sort((a,b)=>(priority[a.status]-priority[b.status])||b.updatedAt.localeCompare(a.updatedAt)),history:own.filter(t=>SETTLED_TASKS.has(t.status)).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))};
+}
 export function employeeTaskState(bot,tasks,fallback='idle'){
   const own=tasks.filter(t=>t.targetBotId===bot.id);
   if(own.some(t=>t.status==='running'))return 'running';
@@ -11,7 +16,9 @@ export function employeeTaskState(bot,tasks,fallback='idle'){
 export function receptionTarget(bot,tasks,sessions,workspaces){
   const jobs=new Set(tasks.map(t=>t.targetSessionId)),archived=new Set(workspaces?.archivedSessionIds??[]);
   const available=id=>!!sessions.byId[id]&&!jobs.has(id)&&!archived.has(id);
-  if(available(bot.homeSessionId))return bot.homeSessionId;
+  // The durable home identity is valid before the native Session catalog finishes loading.
+  // Never turn a transient catalog miss into an implicit new conversation.
+  if(!jobs.has(bot.homeSessionId)&&!archived.has(bot.homeSessionId))return bot.homeSessionId;
   return [...bot.sessionIds].reverse().find(available)??null;
 }
 export function sessionTasks(tasks,sessionId){
