@@ -63,3 +63,7 @@ D1–D4共同属于第一优先级，顺序为依赖安排，不是把主动性�
 ## D3 目标—任务—交付接续
 
 已确认工作目标通过workGoalId/workGoalRevision绑定原bot_dispatch，任务保留最初目标快照与显式更新历史；精确受托Session向源目标保存交付，未赋予跨员工记忆/目标管理权。日常页复用原TaskCard续办/停止/文件预览与原交付审核表单，owner确认后才验收；返工沿原task/Session形成新版本与当时验收条件。具体源码/主线/隔离壳/加载状态以[实现记录](../implementation/WORK_GOAL_TASK_LINKS.md)与evidence/work-goal-task-links为准。Codex/Claude导入和包含本切片的最终安装/更新分发仍继续。
+
+## 日常体验：Codex / Claude 会话导入
+
+导入标准本机JSONL，预览后保存新的原生Naumi Session并使用原输入器继续；固定工作区、指纹计划/收据防重复，历史工具不重放，运行配置/权限/密钥不继承。真实来源只读核验、隔离原生UI与重启继续分别记证，不导入现存业务会话。实现和当前剩余门槛见[会话导入记录](../implementation/SESSION_IMPORT.md)。发布候选必须包含本模块及最新目标关联后，再完成整体D5，不把先前0.3.6候选视为含未打包新功能；企业模块继续冻结。
