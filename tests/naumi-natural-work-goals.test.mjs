@@ -28,6 +28,17 @@ test('native goal tool persists pending proposal with verified source and no goa
     assert.throws(()=>f.work.goal(f.sourceBot.id,p.id),/GOAL_NOT_FOUND/);
   }finally{await f.cleanup();}
 });
+
+test('goal proposal policy has its own native section, requires durable receipts and preserves owner confirmation',async()=>{
+  const f=await fixture();try{
+    const policy=f.sender.prompts.get('naumi:goal-proposal-policy'),delivery=f.sender.prompts.get('naumi:delivery-policy');
+    assert(policy&&delivery);assert(policy.order<delivery.order);
+    for(const text of ['employee_work','recentUserSources','employee_goal_propose','exact real user sourceMessageId','NOT a saved proposal','successful tool receipt','Only the human owner','Ordinary questions'])assert(policy.text.includes(text),text);
+    assert(delivery.text.includes('Only the human owner can start review'));
+    assert.equal(f.work.proposals(f.sourceBot.id).length,0);assert.equal(f.work.goals(f.sourceBot.id).length,0);
+  }finally{await f.cleanup();}
+  assert(!f.sender.prompts.has('naumi:goal-proposal-policy'));
+});
 test('same source/content deduplicates across operation IDs and ignores never revive from retries',async()=>{
   const f=await fixture();try{
     const p=await f.propose();assert.deepEqual(await f.propose(),p);assert.deepEqual(await f.propose({operationId:'other-op'}),p);
