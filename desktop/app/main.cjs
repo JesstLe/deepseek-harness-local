@@ -1,7 +1,7 @@
 'use strict';
 const path=require('node:path');
 const fs=require('node:fs');
-const {app,BrowserWindow,ipcMain,Menu,nativeTheme,shell,session,dialog}=require('electron');
+const {app,BrowserWindow,ipcMain,Menu,nativeTheme,shell,session,dialog,safeStorage}=require('electron');
 const {readConnection,connect,EnterpriseSession}=require('./enterprise.cjs');
 const {workspaceSummary,selectWorkspace,verifyConnection,assertWorkspaceIdle}=require('./workspaces.cjs');
 const {Guests}=require('./guests.cjs');
@@ -12,6 +12,7 @@ const {createDesktopUpdates}=require('./updates.cjs');
 const {IdentityRuntime}=require('./identity-runtime.cjs');
 const {MarketSession}=require('./market.cjs');
 const {CloudSession,CloudBackup}=require('./cloud.cjs');
+const {CreationVault}=require('./creation-vault.cjs');
 const {identityOrigin}=require('./identity.cjs');
 const {randomUUID}=require('node:crypto');
 app.setName('Naumi');app.setAppUserModelId('com.naumi.desktop');
@@ -21,6 +22,7 @@ const locked=app.requestSingleInstanceLock();
 let identityRuntime=null,identityUserData=null;
 const market=new MarketSession({identity:()=>identityRuntime});
 const cloud=new CloudSession({identity:()=>identityRuntime});
+const creation=new CreationVault({identity:()=>identityRuntime,safeStorage});
 const DEFAULT_IDENTITY_ORIGIN='https://47.105.59.142';
 let cloudBusy=0;
 let window,primarySession,guests,bridge,backend,settings,enterprise,login,loginAfterBoot=false,booting=false,closing=false,connecting=false,editingConnection=false,connectionFlight,maintenanceTicket=null,maintenanceUntil=0,updates=null;
@@ -105,6 +107,26 @@ app.whenReady().then(async()=>{
    const value=await backup.download(input.id);const chosen=await dialog.showSaveDialog(window,{defaultPath:'Naumi-backup-'+input.id+'.json',filters:[{name:'Naumi 数据副本',extensions:['json']}]});if(chosen.canceled)return{ok:true,canceled:true};if(identityRuntime.active!==active)throw Error('CLOUD_ACCOUNT_CHANGED');fs.writeFileSync(chosen.filePath,JSON.stringify(value,null,2)+'\n',{flag:'wx',mode:0o600});return{ok:true,saved:true};
   }catch(error){return{ok:false,error:/^(CLOUD|MARKET|WORKSPACE)_[A-Z_]+$/.test(error.message)?error.message:'CLOUD_UNAVAILABLE'};}finally{cloudBusy--;}
  });
+ ipcMain.handle('naumi:creation',async(e,input)=>{
+  if(!accountPage(e)){if(input?.action==='state')trusted(e);else throw Error('INVALID_DESKTOP_SENDER');}if(!identityRuntime?.active)return {ok:false,error:'CREATION_LOGIN_REQUIRED'};
+  if(!input||typeof input!=='object'||Object.keys(input).some(k=>!['action','token','workspace'].includes(k))||!['state','save','disconnect','open'].includes(input.action))return {ok:false,error:'CREATION_INPUT_INVALID'};
+  let ticket=null,acquired=false,previous=null,changed=false;
+  try{
+   if(input.action==='state')return {ok:true,...creation.state()};
+   if(input.action==='open'){await shell.openExternal(identityRuntime.active.origin+'/account/agent');return {ok:true};}
+   if(connecting||closing||booting)throw Error('CREATION_BUSY');
+   connecting=true;acquired=true;await assertAccountIdle();
+   if(backend?.owned){ticket=randomUUID().replaceAll('-','')+randomUUID().replaceAll('-','');await performMaintenance('quiesce',ticket,{accountTransition:true});}
+   previous=creation.snapshot();
+   if(backend)await creationControl('disconnect');
+   changed=true;
+   await creation.release();
+   if(input.action==='save')await creation.save({token:input.token,workspace:input.workspace});else await creation.disconnect();
+   if(settings&&settings.isolated){await creation.activate(settings.home);if(backend)await creationControl('refresh');}
+   return {ok:true,...creation.state()};
+  }catch(error){if(changed&&previous){try{await creation.restore(previous);if(settings?.isolated){await creation.activate(settings.home);if(backend)await creationControl('refresh');}}catch{return {ok:false,error:'CREATION_RECOVERY_REQUIRED'};}}return {ok:false,error:/^CREATION_[A-Z_]+$/.test(error.message)?error.message:'CREATION_TRANSITION_FAILED'};}
+  finally{if(ticket)await performMaintenance('resume',ticket).catch(()=>{});if(acquired)connecting=false;}
+ });
  ipcMain.handle('naumi:identity-register',async(e,value)=>{
   if(!accountPage(e)||!identityRuntime)throw Error('INVALID_DESKTOP_SENDER');
   try{const origin=identityOrigin(value||identityRuntime.origin());if(identityRuntime.managedOrigin&&origin!==identityRuntime.managedOrigin)throw Error('IDENTITY_MANAGED_ORIGIN');await shell.openExternal(origin+'/');return {ok:true};}
@@ -131,7 +153,7 @@ app.whenReady().then(async()=>{
    await assertAccountIdle();
    if(backend?.owned){ticket=randomUUID().replaceAll('-','')+randomUUID().replaceAll('-','');await performMaintenance('quiesce',ticket,{accountTransition:true});await stopBackend(backend);backend=null;}
    await guests?.reset({hostURL:settings?.url??'http://127.0.0.1:3080',account:'signed-out-'+randomUUID()});await bridge?.close();bridge=null;
-   await primarySession.clearStorageData();await primarySession.clearCache();const result=await identityRuntime.logout();
+   await creation.release();await primarySession.clearStorageData();await primarySession.clearCache();const result=await identityRuntime.logout();
    enterprise=null;settings=null;identityUserData=null;maintenanceTicket=null;maintenanceUntil=0;return {ok:true,...result};
   }catch(error){if(ticket&&backend?.owned)await performMaintenance('resume',ticket).catch(()=>{});return {ok:false,error:/^(IDENTITY|WORKSPACE|INSTALL|BACKEND)_[A-Z_]+$/.test(error.message)?error.message:'IDENTITY_UNAVAILABLE'};}
   finally{connecting=false;}
@@ -141,7 +163,7 @@ app.whenReady().then(async()=>{
  if(process.env.NAUMI_TEST_HIDDEN!=='1')window.show();
  await boot();
 }).catch(error=>{console.error('NAUMI_DESKTOP_START_FAILED',error.message);app.quit();});
-const quitGate=createQuitGate({shutdown:async()=>{try{connectionFlight?.abort();if(login&&!login.isDestroyed()){login.webContents.stop();login.destroy();}await guests?.flush();await primarySession?.cookies.flushStore();await enterprise?.session.cookies.flushStore();await identityRuntime?.client?.session.cookies.flushStore();}finally{await bridge?.close();await stopBackend(backend);}},onReady:()=>app.quit(),onError:()=>app.exit(1)});
+const quitGate=createQuitGate({shutdown:async()=>{try{connectionFlight?.abort();if(login&&!login.isDestroyed()){login.webContents.stop();login.destroy();}await guests?.flush();await primarySession?.cookies.flushStore();await enterprise?.session.cookies.flushStore();await identityRuntime?.client?.session.cookies.flushStore();}finally{await bridge?.close();await stopBackend(backend);await creation.release();}},onReady:()=>app.quit(),onError:()=>app.exit(1)});
 app.on('before-quit',event=>{closing=true;quitGate.beforeQuit(event);});
 app.on('window-all-closed',()=>app.quit());
 }
@@ -170,6 +192,7 @@ async function boot(){
    settings.enterpriseOrigin=connection?.origin??'';
    if(connection)enterprise??=new EnterpriseSession({origin:connection.origin,session:session.fromPartition('persist:naumi-enterprise-'+(identityRuntime?.active?.profileId??'legacy')+'-'+require('node:crypto').createHash('sha256').update(connection.origin).digest('hex'))});
   }
+  if(identityRuntime?.active&&settings.isolated)await creation.activate(settings.home);
   const nextBackend=await ensureBackend(settings);
   backend=backend?.owned&&!nextBackend.owned&&backend.child.exitCode===null&&backend.child.signalCode===null?{...nextBackend,owned:true,child:backend.child}:nextBackend;
   const account=identityRuntime?.active?'identity-'+identityRuntime.active.profileId+'-'+settings.workspaceId:!settings.isolated||settings.workspaceId==='default'?'local':'enterprise-'+settings.workspaceId;
@@ -220,4 +243,9 @@ function openEnterpriseLogin(){
  for(const event of ['will-navigate','will-redirect'])login.webContents.on(event,(e,url)=>{if(!allowed(url))e.preventDefault();});
  void login.loadURL(origin+'/login').catch(()=>{});
  login.on('closed',()=>{login=null;if(!closing&&!editingConnection&&window&&!window.isDestroyed()&&new URL(window.webContents.getURL()).origin===settings.url)window.webContents.reload();});
+}
+
+async function creationControl(action){
+ const response=await primarySession.fetch(settings.url+'/naumi/creation',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json','x-naumi-creation':'1'},body:JSON.stringify({action}),signal:AbortSignal.timeout(30000)});
+ if(!response.ok)throw Error('CREATION_HOST_NOT_READY');const value=await response.json();if(!value.ok)throw Error('CREATION_HOST_NOT_READY');return value;
 }
