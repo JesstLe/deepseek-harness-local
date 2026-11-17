@@ -36,7 +36,7 @@ window.__ModuleLoader__.load({id:'@naumi/dsh-enterprise',factory(require){
   const h=React.createElement;
   const {useEffect,useState,useSyncExternalStore,useRef}=React;
   const STATUS={draft:'草稿',unassigned:'待分配',assigned:'待领取',in_progress:'制作中',quality_review:'专业审核',changes_requested:'待修改',business_acceptance:'业务验收',accepted:'已验收',paused:'已暂停',cancelled:'已取消'};
-  const PANELS=[['naumi-workbench','工作台','grid'],['naumi-projects','项目与需求','layers'],['naumi-delivery','交付中心','check'],['naumi-design','设计中心','spark'],['naumi-bot-groups','Bot 群聊','chat'],['naumi-connections','系统连接','link']];
+  const PANELS=[['naumi-workbench','工作台','grid'],['naumi-projects','项目与需求','layers'],['naumi-delivery','交付中心','check'],['naumi-design','设计中心','spark'],['naumi-connections','系统连接','link']];
   const PATHS={grid:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',layers:'m12 3 10 6-10 6L2 9z M2 13l10 6 10-6 M2 17l10 6 10-6',check:'M9 12l2 2 4-4 M20 12a8 8 0 1 1-8-8 M16 3h5v5',spark:'m12 3 2.6 6.4L21 12l-6.4 2.6L12 21l-2.6-6.4L3 12l6.4-2.6z',link:'m10 13 4-4 M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0 M16 8l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0',arrow:'M7 17 17 7 M7 7h10v10',refresh:'M20 7v5h-5 M4 17v-5h5 M19 10a7 7 0 0 0-12-5L4 8 M5 14a7 7 0 0 0 12 5l3-3',search:'M21 21l-6-6 M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0',chat:'M21 11a9 9 0 0 1-9 9H4l-3 2V11a10 10 0 0 1 20 0z M7 10h10 M7 14h6',calendar:'M4 5h16v16H4z M8 2v6 M16 2v6 M4 10h16',box:'m3 7 9-5 9 5v11l-9 5-9-5z M3 7l9 5 9-5 M12 12v11',film:'M3 4h18v16H3z M7 4v16 M17 4v16 M3 9h4 M3 15h4 M17 9h4 M17 15h4',image:'M3 3h18v18H3z m0 14 5-5 5 5 4-4 4 4 M7 7h.01',clock:'M12 4a8 8 0 1 1-8 8 8 8 0 0 1 8-8z M12 8v5l3 2',logout:'M10 4H3v16h7 M14 8l4 4-4 4 M8 12h12'};
   function Icon({name,size=19}){return h('svg',{width:size,height:size,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.6,strokeLinecap:'round',strokeLinejoin:'round','aria-hidden':true},h('path',{d:PATHS[name]??PATHS.grid}));}
   function apply(ctx){
@@ -147,11 +147,12 @@ window.__ModuleLoader__.load({id:'@naumi/dsh-enterprise',factory(require){
     ctx.slots.inject('sidebar.brand.name',()=>ctx.slots.register({name:'sidebar.brand.name'},Wordmark));
     ctx.slots.inject('conversation.header.leading',()=>ctx.slots.register({name:'conversation.header.leading'},()=>h('button',{className:'naumi-back',onClick:()=>ctx.layout.selectPanel('naumi-workbench')},h(Icon,{name:'grid',size:15}),'工作台')));
     ctx.slots.inject('main',function*(){
-      for(const [id]of PANELS)yield ctx.slots.register({name:'main',key:id},()=>id==='naumi-bot-groups'
-        ? h(React.Suspense,{fallback:h('p',{role:'status',className:'naumi-page'},'正在载入群聊…')},h(BotGroups)) : h(Page,{page:id}));
+      for(const [id]of PANELS)yield ctx.slots.register({name:'main',key:id},()=>h(Page,{page:id}));
+      yield ctx.slots.register({name:'main',key:'naumi-conversation'},()=>h(React.Suspense,{fallback:null},h(BotGroups)));
       yield ctx.slots.inject('sidebar.panellist',function*(){for(const [id,label,icon]of PANELS)yield ctx.slots.register({name:'sidebar.panellist',id,order:-100+PANELS.findIndex(x=>x[0]===id),label:()=>label},()=>h(Icon,{name:icon}));});
-      const known=new Set(PANELS.map(x=>x[0]));
-      const saved=sessionStorage.getItem('naumi.activePanel');
+      const known=new Set([...PANELS.map(x=>x[0]),'naumi-conversation']);
+      const previous=sessionStorage.getItem('naumi.activePanel');
+      const saved=previous==='naumi-bot-groups'?'naumi-conversation':previous;
       const hash=new URLSearchParams(location.hash.slice(1));
       if(!hash.has('session')&&!new URLSearchParams(location.search).has('session'))ctx.layout.selectPanel(saved==='conversation'?null:known.has(saved)?saved:'naumi-workbench');
       yield ctx.layout.panelInfo.subscribe(()=>{const active=ctx.layout.panelInfo.getSnapshot().activePanelId;sessionStorage.setItem('naumi.activePanel',active??'conversation');});
