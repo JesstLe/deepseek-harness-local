@@ -54,7 +54,7 @@ export async function botTaskHost(){
     agentPresets:{resolve:async id=>({id:id??'default-preset'}),mount:async(_scope,id)=>{mounts.push(id);},presetForSession:session=>session.header.agentPreset},
     agentDefaultModel:{currentSelection:()=>({provider:'fixture',model:'default-model'})},
     sessions:{get:id=>agents.get(id)?.session,flush},
-    workspaceFiles:{async stat(scope,file,signal){signal.throwIfAborted();const absolutePath=await fs.promises.realpath(path.resolve(scope.workspaceRoot,file)),stat=await fs.promises.stat(absolutePath);if(!stat.isFile())throw Error('NOT_REGULAR_FILE');return {absolutePath,version:String(stat.mtimeMs),bytes:stat.size};}},
+    workspaceFiles:{async readBytes(scope,file,options,signal){signal.throwIfAborted();const absolutePath=await fs.promises.realpath(path.resolve(scope.workspaceRoot,file)),stat=await fs.promises.stat(absolutePath),bytes=await fs.promises.readFile(absolutePath),offset=options.range?.offset??0,length=options.range?.length??bytes.length;return {absolutePath,version:String(stat.mtimeMs),bytes:stat.size,offset,data:bytes.subarray(offset,offset+length),eof:offset+length>=bytes.length};},async stat(scope,file,signal){signal.throwIfAborted();const absolutePath=await fs.promises.realpath(path.resolve(scope.workspaceRoot,file)),stat=await fs.promises.stat(absolutePath);if(!stat.isFile())throw Error('NOT_REGULAR_FILE');return {absolutePath,version:String(stat.mtimeMs),bytes:stat.size};}},
     sessionPersistence:{stat:async id=>log.has(id)?{header:log.get(id).header}:null,
       open:async id=>({header:log.get(id).header,read:async()=>({events:log.get(id).events}),close:async()=>{}})},
     tools:{},systemPrompt:{},

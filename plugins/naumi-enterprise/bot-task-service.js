@@ -1,3 +1,4 @@
+import {archiveDelivery} from './bot-file-versions.js';
 import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import {TERMINAL} from './bot-task-store.js';
@@ -159,7 +160,7 @@ export class BotTaskService{
         t.amendment={text:args.message,...(acceptance!==undefined?{acceptance}:{}),...(sourceMessage?{source:sourceMessage}:{})};
         if(t.status==='completed'){
           if(t.attempt>=100)fail('BOT_TASK_RETRY_LIMIT');
-          t.attempt++;t.status='queued';t.instruction=args.message;delete t.result;delete t.delivery;delete t.error;delete t.progress;
+          archiveDelivery(t);t.attempt++;t.status='queued';t.instruction=args.message;delete t.result;delete t.delivery;delete t.error;delete t.progress;
           const m=this.addMessage(doc,t,{key:messageKey,kind:'message',text:args.message,acceptance:args.acceptance,fromSessionId:caller.root.id,toSessionId:t.targetSessionId});
           t.messageId=m.messageId;
         }else{
@@ -183,7 +184,7 @@ export class BotTaskService{
         if(caller.bot.id!==task.sourceBotId)fail('BOT_TASK_SENDER_REQUIRED');if(task.revision!==expectedRevision)fail('BOT_TASK_CONFLICT');
         if(!['failed','interrupted','cancelled'].includes(task.status))fail('BOT_TASK_NOT_RETRYABLE');
         if(task.attempt>=100)fail('BOT_TASK_RETRY_LIMIT');if(this.runtime.isRunning(task.targetSessionId))fail('BOT_TASK_STILL_RUNNING');
-        task.attempt++;task.messageId=randomUUID();task.status='queued';delete task.result;delete task.error;delete task.delivery;this.bump(task);return {value:null};
+        archiveDelivery(task);task.attempt++;task.messageId=randomUUID();task.status='queued';delete task.result;delete task.error;delete task.delivery;this.bump(task);return {value:null};
       });this.kick();return this.view(this.current(taskId));
     });
   }
@@ -224,7 +225,7 @@ export class BotTaskService{
     return this.serial(task.handoff.taskId,async()=>{
       const source=this.current(task.handoff.taskId);
       if(source.revision!==task.handoff.revision||source.status!=='completed')fail('BOT_HANDOFF_SOURCE_CHANGED');
-      if(task.handoff.files.length)await this.runtime.verifyHandoff(task.targetSessionId,task.handoff.files);
+      if(task.handoff.files.length){const copies=await this.runtime.verifyHandoff(task.targetSessionId,task.handoff.files);if(copies?.length)text+='\n交接文件已校验并复制到本任务工作区：'+JSON.stringify(copies);}
       return run();
     });
   }
@@ -306,7 +307,7 @@ export class BotTaskService{
     void this.serial(task.id,()=>this.store.change(doc=>{const t=doc.tasks.find(t=>t.id===task.id);if(!['waiting','completed'].includes(t.status)||t.messageId===message.id)return {value:null,unchanged:true};
       if(t.status==='completed'){
         if(t.attempt>=100)fail('BOT_TASK_RETRY_LIMIT');
-        t.attempt++;t.instruction=bounded((message.content??[]).filter(p=>p.type==='text').map(p=>p.text).join('\n').trim()||'用户在原任务会话继续处理');
+        archiveDelivery(t);t.attempt++;t.instruction=bounded((message.content??[]).filter(p=>p.type==='text').map(p=>p.text).join('\n').trim()||'用户在原任务会话继续处理');
         t.amendment={text:t.instruction,...(t.amendment?.acceptance!==undefined?{acceptance:t.amendment.acceptance}:{}),...(source?.messageId===message.id?{source}:{})};
         delete t.result;delete t.delivery;delete t.error;delete t.progress;
       }

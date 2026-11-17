@@ -11,8 +11,24 @@ sha=lambda b:hashlib.sha256(b).hexdigest()
 def run(args,timeout=180,cwd=None):return subprocess.check_output(args,stderr=subprocess.PIPE,timeout=timeout,cwd=cwd)
 def request(url):
  try:
-  with urllib.request.urlopen(url,timeout=15) as r:return r.status,json.load(r)
- except urllib.error.HTTPError as e:return e.code,json.load(e)
+  with urllib.request.urlopen(url,timeout=15) as r:
+   raw=r.read()
+   try:value=json.loads(raw)
+   except ValueError:value={'invalidJSON':True}
+   return r.status,value
+ except urllib.error.HTTPError as e:
+  try:value=json.loads(e.read())
+  except ValueError:value={'invalidJSON':True}
+  return e.code,value
+def wait_health(url,product):
+ deadline=time.monotonic()+20
+ while True:
+  try:
+   code,value=request(url)
+   if code==200 and value.get('product')==product:return
+  except Exception:pass
+  if time.monotonic()>=deadline:raise RuntimeError('HEALTH_NOT_READY '+url)
+  time.sleep(.3)
 def atomic(file,data):
  temp=file.with_name(file.name+'.cloud47-tmp');temp.write_bytes(data);temp.chmod(0o644);os.replace(temp,file)
 def main():
@@ -61,8 +77,8 @@ def main():
    assert marker not in text and text.count(anchor)==1,'UNEXPECTED_NGINX_ANCHOR'
    after=text.replace(anchor,anchor+'\n'+marker).encode();atomic(GATE,after);switched=True
    run(['nginx','-t']);run(['systemctl','reload','nginx'])
-   assert request(ORIGIN+'/api/desktop-cloud/health')[1]['product']=='Naumi Desktop Cloud'
-   assert request(ORIGIN+'/api/plugin-market/health')[1]['product']=='Naumi Market'
+   wait_health(ORIGIN+'/api/desktop-cloud/health','Naumi Desktop Cloud')
+   wait_health(ORIGIN+'/api/plugin-market/health','Naumi Market')
    assert request(ORIGIN+'/api/desktop-cloud/v1/me')[0]==401
    assert request(ORIGIN+'/api/plugin-market/v1/me')[0]==401
    assert request(ORIGIN+'/api/auth/session')==(200,{'user':None})
