@@ -1,4 +1,4 @@
-# 桌面端自动更新（0.3.0）
+# 桌面端自动更新（0.3.1）
 
 ## 结论：是否需要服务器？
 
@@ -8,10 +8,27 @@
 2. **安装包托管**：`Naumi-Setup-x.y.z-x64.exe` 作为 Release 资产下载
 3. **更新日志**：Release 描述（发布脚本从 `CHANGELOG.md` 注入），客户端弹窗直接展示
 
-客户端用 `electron-updater` 的 GitHub provider 匿名读取，无需向用户分发 token。
+客户端用 `electron-updater` 的 generic provider 读取（见下节"更新通道与国内加速"），
+无需向用户分发 token。
 仅在完全离线/内网场景才需要自建：把 `NAUMI_UPDATE_URL` 指向任意静态 HTTP(S)
 目录（NAS/nginx/对象存储均可），目录里放 `latest.yml` + 安装包即可，仍然不需要
 任何服务端程序。
+
+
+## 更新通道与国内加速（0.3.1）
+
+generic provider 直取 Release 资产，候选源按序探测：
+
+1. `https://gh.ddlc.top/` 前缀镜像（2026-11-17 实测 ~15 MB/s）
+2. GitHub 直连 `releases/latest/download/`（实测 ~4 MB/s，自动回退）
+
+探测规则：GET `{base}/latest.yml`（8 秒超时），应答必须含合法 `version:` 与
+`sha512:` 才采用；检查失败 10 秒后自动换源重试。安装包 URL 相对 feed 基址解析，
+下载自动复用同一镜像。选型实测（8MB 采样）：gh.ddlc.top 6.06→14.79 MB/s、
+直连 4.26、gh-proxy.com 2.00、mirror.ghproxy.com 峰值 18 但随即 TLS 失败（弃用）、
+ghfast.top 0.77、ghproxy.net 0.34。镜像列表固化在 `updates.cjs` 的
+`DEFAULT_FEED_BASES`，更新列表即随下一版本分发；`NAUMI_UPDATE_URL` 仍可整体覆盖。
+`latest.yml` 由发布脚本注入 `releaseNotes`，generic 通道弹窗同样展示完整更新日志。
 
 ## 客户端行为
 
@@ -23,7 +40,7 @@
 
 ## 安全边界
 
-- 默认源来自打包产物 `app-update.yml`（构建期固化 GitHub 仓库）
+- 默认源为镜像 + GitHub 直连回退列表（构建期固化于 `updates.cjs`；打包产物 `app-update.yml` 仅作残留兜底）
 - `NAUMI_UPDATE_URL` 覆盖仅接受 HTTPS；HTTP 仅允许回环地址，`NAUMI_UPDATE_ALLOW_INSECURE_HTTP=1` 才放行局域网 HTTP（明文有中间人风险，仅限内网自用）
 - 禁止 URL 内嵌凭据；安装包完整性由 latest.yml 内 SHA-512 校验
 
@@ -46,5 +63,5 @@ npm run release -- --prerelease
 - `desktop/app/updates.cjs` 更新客户端（可注入、带门禁）
 - `desktop/app/main.cjs` 集成：初始化、弹窗、安装门禁、IPC
 - `desktop/app/preload.cjs` `naumiDesktop.updateState/checkUpdates/onUpdateState`
-- `scripts/publish-desktop-update.mjs` 发布脚本（含 CHANGELOG 小节提取）
+- `scripts/publish-desktop-update.mjs` 发布脚本（CHANGELOG 小节提取 + latest.yml releaseNotes 注入）
 - `desktop/tests/updates.test.cjs` 单元测试

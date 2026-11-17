@@ -29,6 +29,19 @@ export function extractReleaseNotes(changelog, version) {
   return collected.join('\n').trim();
 }
 
+export function injectReleaseNotes(manifest, notes) {
+  if (typeof manifest !== 'string' || !/^version:\s*\d+\.\d+\.\d+$/m.test(manifest)) throw Error('RELEASE_MANIFEST_INVALID');
+  if (typeof notes !== 'string' || !notes.trim()) throw Error('RELEASE_NOTES_INVALID');
+  const lines = manifest.replace(/\r/g, '').split('\n').filter(line => line !== '');
+  const kept = [];
+  for (let index = 0; index < lines.length; index++) {
+    if (/^releaseNotes:/.test(lines[index])) { while (index + 1 < lines.length && /^\s+\S/.test(lines[index + 1])) index++; continue; }
+    kept.push(lines[index]);
+  }
+  const block = ['releaseNotes: |', ...notes.trim().split('\n').map(line => line.trim() ? '  ' + line : '')];
+  return kept.join('\n') + '\n' + block.join('\n') + '\n';
+}
+
 function argValue(name) {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] : undefined;
@@ -61,6 +74,7 @@ function main() {
 
   const notes = extractReleaseNotes(fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8'), version);
   if (!notes) throw Error('RELEASE_NOTES_MISSING add a ## ' + version + ' section to CHANGELOG.md');
+  fs.writeFileSync(manifest, injectReleaseNotes(fs.readFileSync(manifest, 'utf8'), notes), 'utf8');
   const notesFile = path.join(os.tmpdir(), `naumi-release-notes-${version}.md`);
   fs.writeFileSync(notesFile, notes + '\n', 'utf8');
 
@@ -72,7 +86,7 @@ function main() {
     : ['release', 'create', tag, ...ghArgs, '--title', 'Naumi Desktop ' + tag, '--notes-file', notesFile, ...(args.includes('--prerelease') ? ['--prerelease'] : []), String(installer), String(manifest)];
   run('gh', common);
   const size = (fs.statSync(installer).size / 1024 / 1024).toFixed(1);
-  console.log(`RELEASE ${tag} artifacts=Naumi-Setup-${version}-x64.exe(${size}MB)+latest.yml feed=github:${REPO}`);
+  console.log(`RELEASE ${tag} artifacts=Naumi-Setup-${version}-x64.exe(${size}MB)+latest.yml(with releaseNotes) feed=github:${REPO}`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

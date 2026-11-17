@@ -2,17 +2,19 @@
 const test=require('node:test'),assert=require('node:assert/strict'),{EventEmitter}=require('node:events'),path=require('node:path'),{pathToFileURL}=require('node:url');
 const {createDesktopUpdates,feedOverride,normalizeNotes}=require('../app/updates.cjs');
 class FakeUpdater extends EventEmitter{
- constructor(){super();this.feed=null;this.checks=0;this.downloads=0;this.installs=0;this.quit=null;}
- setFeedURL(feed){this.feed=feed;}
+ constructor(){super();this.feed=null;this.feeds=[];this.checks=0;this.downloads=0;this.installs=0;this.quit=null;}
+ setFeedURL(feed){this.feed=feed;this.feeds.push(feed);}
  async checkForUpdates(){this.checks++;this.emit('checking-for-update');return null;}
  async downloadUpdate(){this.downloads++;return null;}
  quitAndInstall(isSilent,isForceRunAfter){this.installs++;this.quit={isSilent,isForceRunAfter};}
 }
-function harness({gate={ok:true},choice=0,version='0.2.2'}={}){
+function harness({gate={ok:true},choice=0,version='0.2.2',fetcher}={}){
  const updater=new FakeUpdater(),notified=[];
- const updates=createDesktopUpdates({app:{getVersion:()=>version},updater,notify:async snapshot=>{notified.push(snapshot);return choice;},canInstall:()=>gate,startupDelayMs:0,intervalMs:0});
+ const updates=createDesktopUpdates({app:{getVersion:()=>version},updater,notify:async snapshot=>{notified.push(snapshot);return choice;},canInstall:()=>gate,startupDelayMs:0,intervalMs:0,fetcher});
  return {updates,updater,notified};
 }
+const manifest='version: 0.3.1\nfiles:\n  - url: Naumi-Setup-0.3.1-x64.exe\n    sha512: abc=\npath: Naumi-Setup-0.3.1-x64.exe\nsha512: abc=\nreleaseDate: \'2026-11-17T00:00:00Z\'\n';
+function feedFetcher(results){let index=0;return async url=>{const current=results[Math.min(index,results.length-1)];index++;if(current instanceof Error)throw current;return {ok:current.ok,text:async()=>current.body};};}
 test('release notes render as bounded plain text',()=>{
  assert.equal(normalizeNotes('<p>修复 <b>登录</b></p><br/>细节<script>alert(1)</script>'),'修复 登录\n\n细节alert(1)');
  assert.equal(normalizeNotes({note:'对象形式'}),'对象形式');
@@ -63,11 +65,35 @@ test('manual check is deduplicated while one is in flight',async()=>{
  const {updates,updater}=harness();updates.start();
  const first=await updates.check();assert.deepEqual(first,{ok:true,status:'checking'});assert.equal(updater.checks,1);
 });
+test('feed resolution prefers the CN mirror and validates the manifest',async()=>{
+ const {updates,updater}=harness({fetcher:feedFetcher([{ok:true,body:manifest}])});
+ updates.start();const result=await updates.check();
+ assert.deepEqual(result,{ok:true,status:'checking'});assert.equal(updater.feeds.length,1);
+ assert.equal(updater.feeds[0].provider,'generic');assert.match(updater.feeds[0].url,/^https:\/\/gh\.ddlc\.top\/https:\/\/github\.com/);
+});
+test('feed resolution falls back to GitHub direct when the mirror fails',async()=>{
+ const {updates,updater}=harness({fetcher:feedFetcher([{ok:false,body:''},{ok:true,body:manifest}])});
+ updates.start();const result=await updates.check();
+ assert.equal(result.ok,true);assert.match(updater.feeds[0].url,/^https:\/\/github\.com\/JesstLe\/deepseek-harness-local\/releases\/latest\/download$/);
+});
+test('feed resolution rejects malformed manifests and reports unreachable when all fail',async()=>{
+ const broken=harness({fetcher:feedFetcher([{ok:true,body:'version: 9.9.9\n'},{ok:true,body:'<html>blocked</html>'}])});
+ broken.updates.start();assert.deepEqual(await broken.updates.check(),{ok:false,error:'UPDATE_FEED_UNREACHABLE'});
+ const dead=harness({fetcher:feedFetcher([new Error('offline'),new Error('offline')])});dead.updates.start();
+ assert.deepEqual(await dead.updates.check(),{ok:false,error:'UPDATE_FEED_UNREACHABLE'});
+});
 test('publish script extracts exactly the requested changelog section',async()=>{
- const {extractReleaseNotes}=await import(pathToFileURL(path.resolve(__dirname,'../../scripts/publish-desktop-update.mjs')).href);
+ const {extractReleaseNotes,injectReleaseNotes}=await import(pathToFileURL(path.resolve(__dirname,'../../scripts/publish-desktop-update.mjs')).href);
  const changelog='# 标题\n\n## 0.3.0 - 2026-11-17\n\n- 新增自动更新\n- 展示日志\n\n## 0.2.2 - 2026-11-16\n\n- 维护协议\n';
  assert.equal(extractReleaseNotes(changelog,'0.3.0'),'- 新增自动更新\n- 展示日志');
  assert.equal(extractReleaseNotes(changelog,'0.2.2'),'- 维护协议');
  assert.equal(extractReleaseNotes(changelog,'9.9.9'),'');
  assert.equal(extractReleaseNotes(changelog,'../evil'),'');
+  const injected=injectReleaseNotes(manifest,'- 国内镜像加速\n- 自动回退');
+  assert.match(injected,/releaseNotes: \|\n  - 国内镜像加速\n  - 自动回退\n$/);
+  assert.equal((injected.match(/^releaseNotes:/gm)||[]).length,1);
+  const replaced=injectReleaseNotes('version: 1.0.0\nreleaseNotes: |\n  old\nsha512: x\n','新内容');
+  assert.equal((replaced.match(/^releaseNotes:/gm)||[]).length,1);assert.doesNotMatch(replaced,/old/);
+  assert.throws(()=>injectReleaseNotes(manifest,'  '),/RELEASE_NOTES_INVALID/);
+  assert.throws(()=>injectReleaseNotes('not yaml','x'),/RELEASE_MANIFEST_INVALID/);
 });
