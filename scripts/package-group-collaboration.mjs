@@ -16,7 +16,7 @@ for(const r of manifest.rows){const p=path.join(target,r.file);if(r.before)fs.co
 console.log('ROLLBACK_SOURCE_RESTORED files='+manifest.rows.length+' hashes=PASS runtime_data=UNTOUCHED');
 `;
 fs.writeFileSync(path.join(out,'rollback.mjs'),rollback);fs.writeFileSync(path.join(out,'ROLLBACK.sh'),'#!/usr/bin/env bash\nset -euo pipefail\n[ "$#" -eq 1 ] || { echo "Usage: ROLLBACK.sh EXPLICIT_SOURCE_COPY"; exit 2; }\nhere="$(cd -- "$(dirname -- "$0")" && pwd)"\nnode "$here/rollback.mjs" "$1"\n');
-fs.writeFileSync(path.join(out,'.gitattributes'),'* -text whitespace=cr-at-eol\nDIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab\nROLLBACK.sh text eol=lf\n');
+fs.writeFileSync(path.join(out,'.gitattributes'),'* -text whitespace=cr-at-eol\nDIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab\nROLLBACK.sh text eol=lf\n*.log -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol\n');
 const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-group-rollback-')),archive=path.join(tmp,'base.tar');fs.writeFileSync(archive,execFileSync('git',['archive',base],{maxBuffer:100*1024*1024}));execFileSync('tar',['-xf',archive,'-C',tmp]);fs.unlinkSync(archive);
 fs.symlinkSync(path.join(root,'node_modules'),path.join(tmp,'node_modules'),'junction');fs.symlinkSync(path.join(root,'desktop/node_modules'),path.join(tmp,'desktop/node_modules'),'junction');
 const args=['--test','tests/naumi-bot-groups.test.mjs','tests/naumi-bot-groups-http.test.mjs','tests/naumi-unified-chat.test.mjs','tests/naumi-async-bot.test.mjs'];
