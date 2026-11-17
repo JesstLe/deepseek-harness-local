@@ -15,9 +15,9 @@ if($current -ne $manifest.originalSHA256 -and $current -ne $manifest.modifiedSHA
 if($LASTEXITCODE -ne 0){throw 'RUNTIME_NOT_IDLE_OR_UNVERIFIED'}
 if($current -ne $manifest.modifiedSHA256){
   Copy-Item -LiteralPath $target -Destination (Join-Path $evidence 'original/runtime-bots.js')
-  & (Join-Path $runtime 'Stop-DeepSeek.ps1')
+  & (Join-Path $runtime 'Stop-Naumi.ps1')
   Copy-Item -LiteralPath $modified -Destination $target
-  & (Join-Path $runtime 'Start-DeepSeek.ps1')
+  & (Join-Path $runtime 'Start-Naumi.ps1')
 }
 & node (Join-Path $PSScriptRoot 'check-bot-runtime.mjs') $runtime '2'
 if($LASTEXITCODE -ne 0){throw 'RUNTIME_POSTCHECK_FAILED'}

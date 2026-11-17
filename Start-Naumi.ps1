@@ -46,7 +46,7 @@ for ($i=0; $i -lt 90; $i++) {
     if ($server.HasExited) { throw "Server exited $($server.ExitCode). See logs/server.err.log." }
     try {
         $response = Invoke-WebRequest (Get-LaunchUrl) -TimeoutSec 2 -SessionVariable bootSession
-        if ($response.StatusCode -eq 200 -and $response.Content -match 'DeepSeek|deepseek|<div id="root"') {
+        if ($response.StatusCode -eq 200 -and $response.Content -match '<title>Naumi(?:[^<]*)</title>') {
             Write-Output "RUNNING PID=$($server.Id) URL=$url HTTP=200"
             $launchUrl = Get-LaunchUrl
             "[InternetShortcut]`r`nURL=$launchUrl" | Set-Content -Encoding utf8 (Join-Path $root 'runtime/Open Naumi Workbench.url')
