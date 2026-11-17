@@ -1,6 +1,6 @@
 # 本地主动执行 D4：复用与依赖拆解
 
-日期：2026-11-17。状态：调研完成，尚未实现新的local-owner主动AI路径。关联：docs/prd/DAILY_EMPLOYEE_PRIORITY.md。
+日期：2026-11-17。状态：调研方案已实现为共享消费器local-owner策略，当前验收见 [实现记录](LOCAL_PROACTIVE_EXECUTION.md)；以下调研时点原记录保留。关联：docs/prd/DAILY_EMPLOYEE_PRIORITY.md。
 
 ## 模块与职责
 

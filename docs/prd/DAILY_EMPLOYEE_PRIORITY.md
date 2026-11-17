@@ -37,7 +37,7 @@ D1–D4共同属于第一优先级，顺序为依赖安排，不是把主动性�
 公共接口/状态归属：沿用 BotDirectory、原 Session/任务账本、employees.sqlite、原 owner API；企业权威保持原模块。
 本次迁移状态：仅更新交付决策，不迁移员工数据或企业配置。
 验证命令与层级：文档相对链接、优先级一致性、git diff --check；纯文档不触发业务测试或发布。
-未完成项：D1–D5逐项收口；系统Goal工具上一实查为paused且无恢复/改写接口，用户已明确要求继续执行；不以文档状态冒充工具状态改变。
+未完成项：D1–D5逐项收口；旧Goal已按用户明确确认清除；新D1–D5目标已由create_goal建立并由get_goal核验active。
 
 ## 可复用实施指令
 
@@ -51,3 +51,7 @@ D1–D4共同属于第一优先级，顺序为依赖安排，不是把主动性�
 ## D1 实施进展
 
 已实现轻量工作入口并复用原组件；25项模块、602项全仓与18项隔离真实壳交互通过。首次UI runner的关闭按钮可访问名与窄屏隐藏侧栏两个定位错误已更正，失败日志保留。最终源码/主线/加载状态以 evidence/daily-work/VERIFICATION.txt 为准；D2–D5未因此退出。
+
+## D3 自然目标提议进展
+
+复用原生会话来源校验、EmployeeWorkStore与GoalForm，新增employee_goal_propose，仅形成待确认记录。用户修改后确认或忽略；确认与正式goal同事务，支持CAS与原operationId重试，原提议/消息来源保留，不派单、不启用规则。该切片的源码/主线/隔离壳/运行加载分别以 [实现记录](../implementation/NATURAL_WORK_GOALS.md) 和evidence/natural-work-goals/VERIFICATION.txt为准。D3任务关联与固定文件版本、D2员工连续性、D5安装分发及真实供应商验收仍保留。

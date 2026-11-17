@@ -33,7 +33,7 @@ export function installEmployeeActivity(scope,directory,store,service,{sync,inte
   };
   const read=botId=>({domain:'local-owner',scheduler:{...value,modelCalls:0,externalActions:0,stale:!value.sampledAt||Date.now()-Date.parse(value.sampledAt)>intervalMs*3},proactive:proactive.engine.view(botId),rules:activity.rules(botId),runs:activity.runs(botId),notifications:activity.notifications(botId),observation:observation.read(botId),capabilities:capabilities.read(botId)});
   scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/employee-activity',handler:async(req,res)=>{
-    res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Naumi-Activity','1');
+    res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Naumi-Activity','1');res.setHeader('X-Naumi-Local-Proactive','1');
     const admission=scope.connection.admit(req);if('rejection'in admission){res.writeHead(admission.rejection).end();return;}if(admission.peer.principal.kind!=='owner'){res.writeHead(403).end();return;}
     const send=(code,value)=>{if(!res.destroyed)res.writeHead(code,{'Content-Type':'application/json; charset=utf-8'}).end(JSON.stringify(value));};
     try{

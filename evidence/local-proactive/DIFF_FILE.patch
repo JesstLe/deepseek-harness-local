@@ -1,0 +1,806 @@
+diff --git a/.gitattributes b/.gitattributes
+index 5ff48c7..eb7d1cc 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -282,3 +282,20 @@ plugins/naumi-enterprise/third-party/ds-bot-im/** -text
+ /evidence/im-settings-polish/*.log -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
+ /evidence/im-settings-polish/DIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab,cr-at-eol
+ /evidence/im-settings-polish/ROLLBACK.sh text eol=lf
++
++# Local proactive execution source and audit evidence.
++/evidence/local-proactive/** -text whitespace=cr-at-eol
++/evidence/local-proactive/*.log -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
++/evidence/local-proactive/DIFF_FILE.patch -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab,cr-at-eol
++/evidence/local-proactive/ROLLBACK.sh text eol=lf
++# Blender MCP source/evidence and copy rollback byte stability.
++/plugins/naumi-enterprise/blender* text eol=lf
++/plugins/naumi-enterprise/blender-bridge/** text eol=lf
++/plugins/naumi-enterprise/blender-skills/** text eol=lf
++/plugins/naumi-enterprise/assets/blender* text eol=lf
++/plugins/naumi-enterprise/third-party/blender-mcp/** text eol=lf
++/scripts/*blender* text eol=lf
++/tests/blender-mcp.test.mjs text eol=lf
++/docs/implementation/BLENDER_MCP.md text eol=lf
++/evidence/blender-mcp/** -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab,cr-at-eol
++/evidence/blender-mcp/ROLLBACK.sh text eol=lf
+diff --git a/docs/implementation/LOCAL_PROACTIVE_DESIGN.md b/docs/implementation/LOCAL_PROACTIVE_DESIGN.md
+index 8185281..14cec8d 100644
+--- a/docs/implementation/LOCAL_PROACTIVE_DESIGN.md
++++ b/docs/implementation/LOCAL_PROACTIVE_DESIGN.md
+@@ -1,6 +1,6 @@
+ # 本地主动执行 D4：复用与依赖拆解
+ 
+-日期：2026-11-17。状态：调研完成，尚未实现新的local-owner主动AI路径。关联：docs/prd/DAILY_EMPLOYEE_PRIORITY.md。
++日期：2026-11-17。状态：调研方案已实现为共享消费器local-owner策略，当前验收见 [实现记录](LOCAL_PROACTIVE_EXECUTION.md)；以下调研时点原记录保留。关联：docs/prd/DAILY_EMPLOYEE_PRIORITY.md。
+ 
+ ## 模块与职责
+ 
+diff --git a/docs/implementation/LOCAL_PROACTIVE_EXECUTION.md b/docs/implementation/LOCAL_PROACTIVE_EXECUTION.md
+new file mode 100644
+index 0000000..24c62da
+--- /dev/null
++++ b/docs/implementation/LOCAL_PROACTIVE_EXECUTION.md
+@@ -0,0 +1,48 @@
++# 本地主动执行：共享消费器的 local-owner 策略
++
++模块与职责：本线程负责D4本地策略，不复制调度器、AgentLoop、工具执行器或权限系统。基线 main/origin/main 406277c1c6f3f892b5c2218911971927e8cef4d1；独立分支 codex/local-proactive-execution，worktree E:/Workspace/naumi-local-proactive-execution。功能切片计数1。
++
++文件归属：employee-proactive-ai.js、employee-activity-store.js、新增employee-local-proactive.js、原活动/日常工作组件、package仅追加该模块、对应测试/隔离runner、文档与本任务证据。企业sync/model/runtime/权限模块、host/client、原生输入器、模型位置、插件市场、IM、模型思考档位均不改。共享checkout已有其他任务未跟踪证据保留。
++
++## 公共接口与归属
++
++- 新action.kind=run_local_agent；严格schema包含当前Bot根Session、目标、原provider/model/可选显式reasoning、指令、模型请求/运行时长/工具次数上限和精确工具清单。不接tenant/device/taskId/token/apikey或权限修改。
++- EmployeeActivityStore继续拥有规则、批准nonce、窗口/冷却/累计次数、occurrence唯一收据、原子队列与时钟高水位；两个AI action共用proactive_ai与原消费器。
++- LocalProactivePolicy只做本地准入、模型/工具回执、核对，不注册模型适配器或创建Session。模型和权限始终沿用原Session；只恢复既有Bot根会话。企业managed绑定或naumi-enterprise provider拒绝以local模式运行，原企业策略分支保持原授权/预算/回执。
++- 本地可批准工具限定真实注册的员工记忆读取/工作/交付/观察与原生str_replace_editor；不添加shell、独立派单/调度/创建员工或企业审批旁路。原工具审批和工作区策略继续执行，本模块不是OS沙箱。
++- SQLite仍employees.sqlite schema1；新增local_proactive_model/tool实体和按Bot/type/jobId查询索引，不迁移旧目录、任务、人格、记忆或企业数据。每次模型请求的UUID/次数与running回执同事务先落盘；工具调用同样先留精确callId，不保存工具参数/正文/密钥。
++- 模型输出来自原native流，不改冻结options、不用已废弃agent/request、不重选模型/思考档位。请求失败通过原agent/request-error停止本轮本地主动重试；正常手工会话/企业请求不受影响。
++
++## 使用体验
++
++工作与交付里直接配置主动工作；复用原RuleForm、ActivityPanel及HTTP。普通模式隐藏设备/网关/预算/心跳/Session ID/原始回执。间隔以分钟输入、工作时区用系统值、创建停用并由用户另行确认启用；编辑撤销旧批准。完成产物后原工作列表刷新，不另建展示账本。
++
++本地规则使用现有窗口、冷却、累计次数、单会话串行、最多四个消费器、原生输入抢占、最长24小时队列有效期、单规则未结束项限制。心跳和无事项不调用模型，休眠只取最新一次，不重放整段历史。
++
++## 可靠性与回执
++
++- 自己正在执行的工具回执不当作前一次遗留UNKNOWN；当前inflight与持久回执分别核验。
++- 模型断流、工具含糊结果、执行中撤销/强杀、回执写入失败保持UNKNOWN，冻结该会话后续主动消费，不发新attempt掩盖。
++- owner确认已核对停止后，在同一CAS事务记录原回执resolution与job reviewed_stopped；原unknown和usage未知状态不伪造成completed，不自动重新执行，不退款。
++- 记录供应商返回的input/output usage；缺usage显示unknown。没有企业网关的BYO本地路径不宣称权威计费或实际金额，次数/时长/工具上限由程序执行。
++- 工具清单与更严的旧上限在表单编辑时保留，不因改标题自动扩大。原模型选择变化会阻止规则，不自动切换更贵路由。
++
++## 验证命令与层级
++
++修改前原主动/活动35/35。首轮新旧合跑45/47，两个旧轻量fixture未提供schemas导致只读view失败；已改为缺少真实guard/schemas时local能力明确不可用，旧确定性规则仍可读可用，后续47/47。新增边界与最终全仓、独立实际Harness/原PiAiAdapter/Native工具UI、真实子进程强杀、副本回滚、运行加载以evidence/local-proactive/VERIFICATION.txt实际记录为准。
++
++本地协议fixture不是收费供应商自然语言自主决策验收；测试Session/账号/工作区与真实3080数据隔离。
++
++## 迁移与剩余
++
++旧企业action、已有记录与开关不改，新增本地规则默认不自动启用。旧严格/分支读取器不认识run_local_agent；源码副本回滚不是在线数据降级，旧版运行前须停用并保留新规则兼容读取，或经确认恢复无新业务写入快照，禁止删除记录装作兼容。
++
++本切片不关闭D2身份/历史工作区迁移、D3自然目标确认/跨Bot目标与任务关联/二进制固定版本、真实供应商验收和D5最终安装/更新分发。Goal当前active，企业模块保持现状。
++
++D1运行接续：4静态资源已从main406277c加载，HTTP200/117无关文件hash保持/无重启。D4首轮完整回归684/685，唯一失败为未改动的desktop backend测试临时目录清理EPERM；同名定向复测1/1通过，原失败保留，不把它算全仓通过。最终整合后集中复测另记。独立壳最终16项通过，2次loopback原PiAiAdapter请求，0真实供应商/企业登记；SIGKILL恢复UNKNOWN与不重放、owner核对通过。首次强杀观察器把signalCode已结束误判exitCode仍null，最终等待已修正，初次exit13与最终exit0分别留证。
++
++整合主线406277c→ba4ee2a（模型审计最终证据与暂缓的常驻自主Bot愿景保留），功能计数1。node --test --test-concurrency=4 tests/*.test.mjs desktop/tests/*.test.cjs：686/686，exit0；没有跳过测试，降低跨文件并发以避免Windows临时目录句柄争用。本地固定触发/明确批准工作不是BOT-AUTONOMY-001长期自主规划，该愿景仍暂缓。
++
++接续整合：6761e61→f518cdd，纳入origin/main b825ed7的Blender/Cloud47既有变更，不修改其实现或配置；只保留package新增模块清单，.gitattributes两方追加均保留。最终集中全仓712/712、exit0（INTEGRATED_MAIN.log）；独立壳16/16、exit0，桌面1360/580/360图片已逐张重开检查。真实3080只读检查98sessions/1running/0activeTasks，因此未执行停止、加载、真实规则创建或模型调用，等待空闲窗口。
++
++实际加载：空闲窗口101sessions/0running，固定main cf56ad3执行node scripts/deploy-local-proactive.mjs apply E:/Workspace/naumi-desktop，exit0。仅7个目标文件，package只追加employee-local-proactive.js；PID53684、HTTP200、X-Naumi-Local-Proactive=1、4bots/revision46。126无关运行文件、110个权威会话/配置文件、模型组、员工export、任务/群账本与46个其他未跟踪证据hash保持。未创建/启用真实规则，0模型/企业登记/同步配置变更；窗口已工具通知释放。Source主线、实际加载、真实供应商自然语言和最终安装仍分别记证；后两者本切片未完成。
+diff --git a/docs/prd/DAILY_EMPLOYEE_PRIORITY.md b/docs/prd/DAILY_EMPLOYEE_PRIORITY.md
+index 131a4c1..ad3f4e8 100644
+--- a/docs/prd/DAILY_EMPLOYEE_PRIORITY.md
++++ b/docs/prd/DAILY_EMPLOYEE_PRIORITY.md
+@@ -37,7 +37,7 @@ D1–D4共同属于第一优先级，顺序为依赖安排，不是把主动性
+ 公共接口/状态归属：沿用 BotDirectory、原 Session/任务账本、employees.sqlite、原 owner API；企业权威保持原模块。
+ 本次迁移状态：仅更新交付决策，不迁移员工数据或企业配置。
+ 验证命令与层级：文档相对链接、优先级一致性、git diff --check；纯文档不触发业务测试或发布。
+-未完成项：D1–D5逐项收口；系统Goal工具上一实查为paused且无恢复/改写接口，用户已明确要求继续执行；不以文档状态冒充工具状态改变。
++未完成项：D1–D5逐项收口；旧Goal已按用户明确确认清除；新D1–D5目标已由create_goal建立并由get_goal核验active。
+ 
+ ## 可复用实施指令
+ 
+diff --git a/docs/prd/DIGITAL_EMPLOYEE_DELIVERY.md b/docs/prd/DIGITAL_EMPLOYEE_DELIVERY.md
+index 6c2f07c..178b6e1 100644
+--- a/docs/prd/DIGITAL_EMPLOYEE_DELIVERY.md
++++ b/docs/prd/DIGITAL_EMPLOYEE_DELIVERY.md
+@@ -90,3 +90,7 @@
+ ## M4 受控主动AI交付
+ 
+ HBT-003已从确定性通知/待办延伸到明确批准的真实AI消费：固定Bot/现有受管根会话/任务/目标/模型、批准nonce、预算预检与最终网关、人工优先、部分产物保留、UNKNOWN不重放与负责人核对。251/233回归、11 UI、真实硬杀和53项副本回滚已通过，实际3080接入。实现/边界详见 EMPLOYEE_PROACTIVE_AI_M4.md；M5与真实供应商/员工业务验收继续。
++
++## 日常优先增量：local-owner 主动执行
++
++D1的4个静态资源已从固定main406277c加载，HTTP200，117个无关运行文件保持，94sessions/0running/4bots/revision40，无重启/模型调用。新日常Goal已实查active。D4新增local-owner准入与回执策略，共用原规则队列/AgentLoop/Native工具和工作/交付组件，不需企业登记，不改企业策略。当前最终源码/隔离验收/运行加载边界见 `../implementation/LOCAL_PROACTIVE_EXECUTION.md` 与 `evidence/local-proactive/VERIFICATION.txt`，D2/D3/D5仍继续，不以该切片关闭总目标。
+diff --git a/docs/prd/GOAL_TRACKER.md b/docs/prd/GOAL_TRACKER.md
+index 3a67314..5811cdc 100644
+--- a/docs/prd/GOAL_TRACKER.md
++++ b/docs/prd/GOAL_TRACKER.md
+@@ -4,10 +4,10 @@
+ 
+ 用户已确认：**先完成日常使用、主动性与可靠执行、员工连续性、工作与交付，再做企业相关模块。企业模块保持当前现状。**
+ 
+-当前实施以 [日常数字员工交付计划](DAILY_EMPLOYEE_PRIORITY.md) D1–D5 为准；下文原 M1–M5 编号与验收历史保留，原顺序不再作为企业前置依赖。复用已有本地能力，企业组织/共享同步/集中授权网关等不新增、不迁移、不启用。用户已要求继续推进；系统 Goal 上一实查为 paused，工具无恢复或改写接口，文档不伪报切换成功。
++当前实施以 [日常数字员工交付计划](DAILY_EMPLOYEE_PRIORITY.md) D1–D5 为准；下文原 M1–M5 编号与验收历史保留，原顺序不再作为企业前置依赖。复用已有本地能力，企业组织/共享同步/集中授权网关等不新增、不迁移、不启用。用户已要求继续推进；旧暂停目标经用户确认清除后，新日常目标已由 create_goal 建立并由 get_goal 核验 active。
+ 
+ 
+-建立日期：2026-11-16。执行决策：日常优先，用户已要求继续；系统 Goal 上一实查 paused。实施模型：GPT-6.1 Sol。
++建立日期：2026-11-16。执行决策：日常优先，用户已要求继续；系统 Goal 已重建并实查 active。实施模型：GPT-6.1 Sol。
+ 
+ 本文件对应用户明确提出的“制定目标完整推进”，不把单个阶段交付当成总目标完成。
+ 
+diff --git a/evidence/daily-work/DEPLOYMENT.json b/evidence/daily-work/DEPLOYMENT.json
+new file mode 100644
+index 0000000..49d6058
+--- /dev/null
++++ b/evidence/daily-work/DEPLOYMENT.json
+@@ -0,0 +1,33 @@
++{
++  "status": "PASS",
++  "sourceCommit": "406277c1c6f3f892b5c2218911971927e8cef4d1",
++  "files": [
++    {
++      "name": "employee-center.js",
++      "before": "a0dd6885411186102e67c791321165c8141167f18d5f069acb6f271ee1e7fc92",
++      "after": "507cdf30352a243f9aa994fc1a4c9b324ce23b63f1d83b66cc548a70f81943c5"
++    },
++    {
++      "name": "employee-experience.js",
++      "before": "b9cad89f9842cf3d9156ca8f9e8e05da4d967fc18fa0ec6d7e0098cb7f33aec0",
++      "after": "0de3c7a337fad6f1d1a21bd30f6c0432c2be43372e25e6f0e38990c5e6d0c76d"
++    },
++    {
++      "name": "employee-experience-model.js",
++      "before": "f0fa346283b1c647852dfeac2b2469ff739d8984d209a46e651b96cc4dab4509",
++      "after": "a4c2422e9d1be8d9e247f4fbeba9d248e6e32f1042d541b9b2014887efc098b5"
++    },
++    {
++      "name": "employee-experience.css",
++      "before": "409f644bc4af8af26c3602f3faff100f450b1d9ec07151e6e5afb4985a87ebac",
++      "after": "d014d0ac484e5a00274caa84ff1d59478c7fa60366b2ac9fc999461c1606fb67"
++    }
++  ],
++  "unrelatedRuntimeFilesUnchanged": 117,
++  "probeBefore": "RUNTIME sessions=94 running=0 bots=4 revision=40 http=200 contract=2",
++  "probeAfter": "RUNTIME sessions=94 running=0 bots=4 revision=40 http=200 contract=2",
++  "restarted": false,
++  "modelCalls": 0,
++  "enterpriseConfigurationChanges": 0,
++  "backup": "E:\\Workspace\\naumi-desktop\\runtime\\daily-work-load-1794927189230"
++}
+diff --git a/evidence/daily-work/DEPLOYMENT.log b/evidence/daily-work/DEPLOYMENT.log
+new file mode 100644
+index 0000000..b32e553
+--- /dev/null
++++ b/evidence/daily-work/DEPLOYMENT.log
+@@ -0,0 +1 @@
++DAILY_LOADED files=4 assets_http=200 unrelated=117 restart=0 model_calls=0 enterprise_changes=0
+diff --git a/plugins/naumi-enterprise/assets/employee-activity-panel.js b/plugins/naumi-enterprise/assets/employee-activity-panel.js
+index a66efb4..4586782 100644
+--- a/plugins/naumi-enterprise/assets/employee-activity-panel.js
++++ b/plugins/naumi-enterprise/assets/employee-activity-panel.js
+@@ -1,5 +1,5 @@
+ const states={working:'执行中',waiting_user:'等待用户',waiting_dependency:'等待依赖',model_unavailable:'模型不可达',blocked:'受阻',fault:'执行异常',idle:'空闲',unknown:'执行器待核验'};
+-const errors={ACT_CONFLICT:'规则已更新，请刷新',ACT_ACTION_LIMIT:'已达到规则执行上限',EMP_SECRET_PATTERN:'内容含凭证格式，请移除',WORK_GOAL_NOT_FOUND:'目标已变化，请重新选择',ACT_INVALID_REQUEST:'请检查规则字段',ACT_AUTH_REQUIRED:'请重新登录工作空间',ACT_AI_NOT_CONFIGURED:'请先配置企业模型与执行准入',ACT_AI_MANAGED_SESSION_REQUIRED:'请选择此员工已绑定的受管会话',ACT_AI_MODEL_SELECTION_CHANGED:'请在原模型位置选择批准的企业模型',ACT_AI_CONFLICT:'执行记录已更新，请刷新',ACT_AI_EXECUTOR_UNRESOLVED:'请先核对原执行器',ACT_AI_MODEL_UNRESOLVED:'请先核对模型请求',ACT_AI_REVIEW_REQUIRED:'此记录需要核对',ACT_AI_NOT_UNKNOWN:'此记录没有待核对结果'};
++const errors={ACT_AI_LOCAL_GUARD_REQUIRED:'本地执行器尚未就绪',ACT_AI_LOCAL_BOT_REQUIRED:'请选择当前员工的会话',ACT_AI_LOCAL_ROOT_REQUIRED:'请先打开员工的日常会话',ACT_AI_LOCAL_MANAGED_SESSION_DENIED:'企业受管会话保持原授权方式',ACT_AI_LOCAL_TOOL_UNAVAILABLE:'可用工具已变化，请重新保存规则',ACT_AI_LOCAL_TOOL_UNRESOLVED:'上次工具结果需要核对',ACT_AI_LOCAL_MODEL_UNRESOLVED:'上次模型请求需要核对',ACT_CONFLICT:'规则已更新，请刷新',ACT_ACTION_LIMIT:'已达到规则执行上限',EMP_SECRET_PATTERN:'内容含凭证格式，请移除',WORK_GOAL_NOT_FOUND:'目标已变化，请重新选择',ACT_INVALID_REQUEST:'请检查规则字段',ACT_AUTH_REQUIRED:'请重新登录工作空间',ACT_AI_NOT_CONFIGURED:'请先配置企业模型与执行准入',ACT_AI_MANAGED_SESSION_REQUIRED:'请选择此员工已绑定的受管会话',ACT_AI_MODEL_SELECTION_CHANGED:'请在原模型位置选择批准的企业模型',ACT_AI_CONFLICT:'执行记录已更新，请刷新',ACT_AI_EXECUTOR_UNRESOLVED:'请先核对原执行器',ACT_AI_MODEL_UNRESOLVED:'请先核对模型请求',ACT_AI_REVIEW_REQUIRED:'此记录需要核对',ACT_AI_NOT_UNKNOWN:'此记录没有待核对结果'};
+ const clock=value=>value?new Date(value).toLocaleString('zh-CN',{hour12:false}):'—';
+ const minutes=value=>{const [h,m]=value.split(':').map(Number);return h*60+m;};
+ const hhmm=v=>String(Math.floor(v/60)).padStart(2,'0')+':'+String(v%60).padStart(2,'0');
+@@ -8,22 +8,25 @@ export function createEmployeeActivityPanel(React,{fetcher=(...args)=>fetch(...a
+   const input=(label,props)=>h('label',{className:'emp-field'},h('span',null,label),h('input',props));
+   const select=(label,value,onChange,options)=>h('label',{className:'emp-field'},h('span',null,label),h('select',{'aria-label':label,value,onChange:e=>onChange(e.target.value)},options.map(([value,label])=>h('option',{key:value,value},label))));
+   const badge=(text,tone='')=>h('span',{className:'emp-badge '+tone},text);
+-  function RuleForm({rule,onSave,onCancel,busy,goals,targets=[]}){
+-    const c=rule?.config,[f,set]=useState({title:c?.title??'',trigger:c?.trigger.kind??'every',seconds:c?.trigger.seconds??3600,at:c?.trigger.at?new Date(Date.parse(c.trigger.at)-new Date(c.trigger.at).getTimezoneOffset()*60000).toISOString().slice(0,16):'',goalId:c?.trigger.goalId??'',action:c?.action.kind??'notify',text:c?.action.text??'',goalTitle:c?.action.title??'',description:c?.action.description??'',criteria:c?.action.criteria?.join('\n')??'',timeZone:c?.workWindow.timeZone??Intl.DateTimeFormat().resolvedOptions().timeZone,days:c?.workWindow.days??[1,2,3,4,5],start:hhmm(c?.workWindow.startMinute??540),end:hhmm(c?.workWindow.endMinute??1080),cooldown:c?.cooldownSeconds??3600,maxActions:c?.maxActions??20,sessionId:c?.action.sessionId??targets[0]?.sessionId??'',aiGoalId:c?.action.goalId??goals[0]?.id??'',model:c?.action.model??targets[0]?.selection?.model??'',prompt:c?.action.prompt??'',maxModelRequests:c?.action.maxModelRequests??4,maxSeconds:c?.action.maxSeconds??300});
++  function RuleForm({rule,onSave,onCancel,busy,goals,targets=[],localTargets=[],localOnly=false}){
++    const c=rule?.config,choices=localOnly?localTargets:targets,[f,set]=useState({title:c?.title??'',trigger:c?.trigger.kind??'every',seconds:c?.trigger.seconds??3600,at:c?.trigger.at?new Date(Date.parse(c.trigger.at)-new Date(c.trigger.at).getTimezoneOffset()*60000).toISOString().slice(0,16):'',goalId:c?.trigger.goalId??'',action:c?.action.kind??(localOnly?'run_local_agent':'notify'),text:c?.action.text??'',goalTitle:c?.action.title??'',description:c?.action.description??'',criteria:c?.action.criteria?.join('\n')??'',timeZone:c?.workWindow.timeZone??Intl.DateTimeFormat().resolvedOptions().timeZone,days:c?.workWindow.days??[1,2,3,4,5],start:hhmm(c?.workWindow.startMinute??540),end:hhmm(c?.workWindow.endMinute??1080),cooldown:c?.cooldownSeconds??3600,maxActions:c?.maxActions??(localOnly?3:20),sessionId:c?.action.sessionId??choices[0]?.sessionId??'',aiGoalId:c?.action.goalId??goals[0]?.id??'',model:c?.action.model??choices[0]?.selection?.model??'',prompt:c?.action.prompt??'',maxModelRequests:c?.action.maxModelRequests??4,maxSeconds:c?.action.maxSeconds??300,maxToolCalls:c?.action.maxToolCalls??20});
+     const field=(key,props={})=>({value:f[key],onChange:e=>set({...f,[key]:e.target.value}),disabled:busy,...props});
+-    return h('form',{className:'emp-rule-form',onSubmit:e=>{e.preventDefault();onSave({title:f.title,trigger:f.trigger==='every'?{kind:'every',seconds:Number(f.seconds)}:f.trigger==='at'?{kind:'at',at:new Date(f.at).toISOString()}:{kind:'goal_due',goalId:f.goalId||null},action:f.action==='run_agent'?{kind:'run_agent',sessionId:f.sessionId,taskId:targets.find(t=>t.sessionId===f.sessionId)?.taskId??c?.action.taskId,goalId:f.aiGoalId,model:f.model,prompt:f.prompt,maxModelRequests:Number(f.maxModelRequests),maxSeconds:Number(f.maxSeconds)}:f.action==='notify'?{kind:'notify',text:f.text}:{kind:'queue_goal',title:f.goalTitle,description:f.description,criteria:f.criteria.split('\n').map(s=>s.trim()).filter(Boolean)},workWindow:{timeZone:f.timeZone,days:f.days,startMinute:minutes(f.start),endMinute:minutes(f.end)},cooldownSeconds:Number(f.cooldown),maxActions:Number(f.maxActions)});}},
++    return h('form',{className:'emp-rule-form',onSubmit:e=>{e.preventDefault();onSave({title:f.title,trigger:f.trigger==='every'?{kind:'every',seconds:Number(f.seconds)}:f.trigger==='at'?{kind:'at',at:new Date(f.at).toISOString()}:{kind:'goal_due',goalId:f.goalId||null},action:f.action==='run_local_agent'?{kind:'run_local_agent',sessionId:f.sessionId,goalId:f.aiGoalId,...localTargets.find(t=>t.sessionId===f.sessionId)?.selection,allowedTools:c?.action.kind==='run_local_agent'?c.action.allowedTools:(localTargets.find(t=>t.sessionId===f.sessionId)?.allowedTools??[]),prompt:f.prompt,maxModelRequests:Number(f.maxModelRequests),maxSeconds:Number(f.maxSeconds),maxToolCalls:Number(f.maxToolCalls)}:f.action==='run_agent'?{kind:'run_agent',sessionId:f.sessionId,taskId:targets.find(t=>t.sessionId===f.sessionId)?.taskId??c?.action.taskId,goalId:f.aiGoalId,model:f.model,prompt:f.prompt,maxModelRequests:Number(f.maxModelRequests),maxSeconds:Number(f.maxSeconds)}:f.action==='notify'?{kind:'notify',text:f.text}:{kind:'queue_goal',title:f.goalTitle,description:f.description,criteria:f.criteria.split('\n').map(s=>s.trim()).filter(Boolean)},workWindow:{timeZone:f.timeZone,days:f.days,startMinute:minutes(f.start),endMinute:minutes(f.end)},cooldownSeconds:Number(f.cooldown),maxActions:Number(f.maxActions)});}},
+       input('规则名称',field('title',{required:true,maxLength:120})),
+-      h('div',{className:'emp-two-fields'},select('触发方式',f.trigger,v=>set({...f,trigger:v}),[['every','固定间隔'],['at','指定时间'],['goal_due','目标到期']]),f.trigger==='every'?input('间隔（秒）',field('seconds',{type:'number',min:60,max:2592000,required:true})):f.trigger==='at'?input('触发时间',field('at',{type:'datetime-local',required:true})):select('目标范围',f.goalId,v=>set({...f,goalId:v}),[['','本员工全部目标'],...goals.map(g=>[g.id,g.title])])),
+-      select('行动',f.action,v=>set({...f,action:v}),[['notify','本地通知'],['queue_goal','加入工作队列'],['run_agent','AI 执行']]),
++      h('div',{className:'emp-two-fields'},select('触发方式',f.trigger,v=>set({...f,trigger:v}),[['every','固定间隔'],['at','指定时间'],['goal_due','目标到期']]),f.trigger==='every'?localOnly?input('间隔（分钟）',{value:Number(f.seconds)/60,onChange:e=>set({...f,seconds:Number(e.target.value)*60}),type:'number',min:1,max:43200,required:true,disabled:busy}):input('间隔（秒）',field('seconds',{type:'number',min:60,max:2592000,required:true})):f.trigger==='at'?input('触发时间',field('at',{type:'datetime-local',required:true})):select('目标范围',f.goalId,v=>set({...f,goalId:v}),[['','本员工全部目标'],...goals.map(g=>[g.id,g.title])])),
++      select('行动',f.action,v=>set({...f,action:v}),[['notify','本地通知'],['queue_goal','加入工作队列'],...(localOnly?[['run_local_agent','处理工作目标']]:[['run_agent','AI 执行']])]),
++      f.action==='run_local_agent'?h(React.Fragment,null,localTargets.length>1&&select('工作会话',f.sessionId,v=>set({...f,sessionId:v,model:localTargets.find(t=>t.sessionId===v)?.selection?.model??''}),localTargets.map((t,i)=>[t.sessionId,'会话 '+(i+1)])),select('工作目标',f.aiGoalId,v=>set({...f,aiGoalId:v}),[['','请选择'],...goals.filter(g=>['planned','in_progress'].includes(g.status)).map(g=>[g.id,g.title])]),h('label',{className:'emp-field'},h('span',null,'执行指令'),h('textarea',field('prompt',{required:true,maxLength:4000,rows:3}))),!localTargets.length&&h('p',{role:'status'},'请先打开员工会话')):
+       f.action==='run_agent'?h(React.Fragment,null,select('执行会话',f.sessionId,v=>set({...f,sessionId:v,model:targets.find(t=>t.sessionId===v)?.selection?.model??''}),[['','请选择'],...targets.map(t=>[t.sessionId,t.sessionId+' · '+t.taskId.slice(0,8)])]),select('工作目标',f.aiGoalId,v=>set({...f,aiGoalId:v}),[['','请选择'],...goals.filter(g=>['planned','in_progress'].includes(g.status)).map(g=>[g.id,g.title])]),h('div',{className:'emp-ai-model'},h('span',null,'批准模型'),h('code',null,'naumi-enterprise / ',f.model||'未选择')),h('label',{className:'emp-field'},h('span',null,'执行指令'),h('textarea',field('prompt',{required:true,maxLength:4000,rows:3}))),h('div',{className:'emp-two-fields'},input('单次模型请求上限',field('maxModelRequests',{type:'number',min:1,max:20,required:true})),input('单次执行秒数',field('maxSeconds',{type:'number',min:10,max:3600,required:true})))):f.action==='notify'?input('通知内容',field('text',{required:true,maxLength:1000})):h(React.Fragment,null,input('新目标名称',field('goalTitle',{required:true,maxLength:120})),input('工作说明',field('description',{maxLength:4000})),h('label',{className:'emp-field'},h('span',null,'验收条件（每行一项）'),h('textarea',field('criteria',{required:true,maxLength:10000,rows:3})))),
+-      h('div',{className:'emp-two-fields'},input('工作时区',field('timeZone',{required:true,maxLength:100})),h('fieldset',{className:'emp-weekdays'},h('legend',null,'工作日'),['一','二','三','四','五','六','日'].map((day,i)=>h('label',{key:day},h('input',{type:'checkbox',checked:f.days.includes(i+1),disabled:busy,onChange:e=>set({...f,days:e.target.checked?[...f.days,i+1]:f.days.filter(d=>d!==i+1)})}),day)))),
++      h('div',{className:'emp-two-fields'},!localOnly&&input('工作时区',field('timeZone',{required:true,maxLength:100})),h('fieldset',{className:'emp-weekdays'},h('legend',null,'工作日'),['一','二','三','四','五','六','日'].map((day,i)=>h('label',{key:day},h('input',{type:'checkbox',checked:f.days.includes(i+1),disabled:busy,onChange:e=>set({...f,days:e.target.checked?[...f.days,i+1]:f.days.filter(d=>d!==i+1)})}),day)))),
+       h('div',{className:'emp-two-fields'},input('开始',field('start',{type:'time',required:true})),input('结束',field('end',{type:'text',inputMode:'numeric',pattern:'([01][0-9]|2[0-3]):[0-5][0-9]|24:00',required:true}))),
+-      h('div',{className:'emp-two-fields'},input('冷却（秒）',field('cooldown',{type:'number',min:60,max:2592000,required:true})),input('累计行动上限',field('maxActions',{type:'number',min:1,max:1000,required:true}))),
+-      h('footer',{className:'emp-form-footer'},h('button',{type:'button',disabled:busy,onClick:onCancel},'取消'),h('button',{type:'submit',className:'primary',disabled:busy||!f.days.length||minutes(f.start)>=minutes(f.end)||f.action==='run_agent'&&(!f.sessionId||!f.aiGoalId||!f.model)},'保存为停用规则')));
++      h('div',{className:'emp-two-fields'},localOnly?input('最短间隔（分钟）',{value:Number(f.cooldown)/60,onChange:e=>set({...f,cooldown:Number(e.target.value)*60}),type:'number',min:1,max:43200,required:true,disabled:busy}):input('冷却（秒）',field('cooldown',{type:'number',min:60,max:2592000,required:true})),input(localOnly?'最多执行次数':'累计行动上限',field('maxActions',{type:'number',min:1,max:1000,required:true}))),
++      h('footer',{className:'emp-form-footer'},h('button',{type:'button',disabled:busy,onClick:onCancel},'取消'),h('button',{type:'submit',className:'primary',disabled:busy||!f.days.length||minutes(f.start)>=minutes(f.end)||['run_agent','run_local_agent'].includes(f.action)&&(!f.sessionId||!f.aiGoalId||!f.model)},'保存为停用规则')));
+   }
+-  return function ActivityPanel({botId,writeable=true,goals=[]}){
++  return function ActivityPanel({botId,writeable=true,goals=[],localOnly=false,onWorkChanged}){
+     const [data,setData]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[edit,setEdit]=useState(null),[refresh,setRefresh]=useState(0),[review,setReview]=useState(null),[reviewReason,setReviewReason]=useState(''),[confirmed,setConfirmed]=useState(false);
+-    const current=useRef(botId),flight=useRef(false),pending=useRef(new Map());current.current=botId;
++    const current=useRef(botId),flight=useRef(false),pending=useRef(new Map()),workChanged=useRef(onWorkChanged);current.current=botId;workChanged.current=onWorkChanged;
++    const deliveryRevision=JSON.stringify((data?.proactive?.jobs??[]).map(j=>[j.id,j.state,j.artifactIds??[]]));
++    useEffect(()=>{if(localOnly&&(data?.proactive?.jobs??[]).some(j=>(j.artifactIds?.length??0)>0))workChanged.current?.();},[botId,deliveryRevision]);
+     async function request(body,signal){
+       const r=await fetcher('/naumi/employee-activity'+(body?'':'?'+new URLSearchParams({botId})),{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',headers:body?{'Content-Type':'application/json','x-naumi-employee-activity':'1'}:{},...(body?{body:JSON.stringify({botId,...body})}:{}),signal:signal??AbortSignal.timeout(15000)});
+       let value;try{value=await r.json();}catch{throw Error('ACT_INVALID_RESPONSE');}if(!r.ok){const e=Error(r.status===401?'ACT_AUTH_REQUIRED':value.error??'ACT_REQUEST_FAILED');e.status=r.status;throw e;}return value;
+@@ -33,19 +36,19 @@ export function createEmployeeActivityPanel(React,{fetcher=(...args)=>fetch(...a
+     async function command(body){if(flight.current||!writeable)return;flight.current=true;setBusy(true);const id=botId,key=JSON.stringify([id,body]);let operationId=pending.current.get(key);if(!operationId){operationId=crypto.randomUUID();pending.current.set(key,operationId);}try{await request({...body,operationId});pending.current.delete(key);if(current.current===id){setEdit(null);setRefresh(v=>v+1);}return true;}catch(e){if(e.status&&e.status<500)pending.current.delete(key);if(current.current===id)setError(errors[e.message]??e.message);return false;}finally{flight.current=false;if(current.current===id)setBusy(false);}}
+     const yes=value=>badge(value===true?'是':value===false?'否':'未核验',value===true?'green':value===false?'amber':'');
+     return h('div',{className:'emp-activity','data-employee-activity':true},
+-      h('div',{className:'emp-section-heading'},h('h2',null,'运行与能力'),h('button',{type:'button',disabled:busy,onClick:()=>setRefresh(v=>v+1)},'刷新运行状态')),
++      h('div',{className:'emp-section-heading'},h('h2',null,localOnly?'主动工作':'运行与能力'),h('div',{className:'emp-inline'},localOnly&&h('button',{type:'button',className:'primary',disabled:busy||!writeable,onClick:()=>setEdit({id:'new'})},'新增规则'),h('button',{type:'button',disabled:busy,onClick:()=>setRefresh(v=>v+1)},localOnly?'刷新':'刷新运行状态'))),
+       error&&h('p',{className:'emp-error',role:'alert'},error),
+       data&&h(React.Fragment,null,
+-        h('section',{className:'emp-activity-summary'},h('div',null,h('span',null,'巡检'),badge(data.scheduler.error?'巡检异常':data.scheduler.clockRollback?'时钟回拨':data.scheduler.stale?'待核验':'正常',data.scheduler.error||data.scheduler.clockRollback||data.scheduler.stale?'amber':'green')),h('div',null,h('span',null,'最后进展'),h('time',null,clock(data.observation.progress?.at))),h('div',null,h('span',null,'采样时间'),h('time',null,clock(data.scheduler.sampledAt)))),
+-        data.observation.sessions.length>0&&h('section',{className:'emp-activity-sessions'},data.observation.sessions.map(s=>h('article',{key:s.sessionId},h('div',{className:'emp-inline'},h('code',null,s.sessionId),badge(states[s.workState]??s.workState,s.workState==='fault'||s.noProgress?'amber':''),s.noProgress&&badge('待核验进展','amber')),s.report?.note&&h('p',null,s.report.note),s.report&&h('span',null,'Agent 报告 · ',clock(s.report.reportedAt)),h('time',null,'会话进展 ',clock(s.lastProgressAt))))),
+-        h('div',{className:'emp-capability-scroll'},h('table',{className:'emp-capability-table'},h('thead',null,h('tr',null,['能力','已内置','已连接','已授权','健康','核验时间'].map(s=>h('th',{key:s},s)))),h('tbody',null,data.capabilities.records.map(c=>h('tr',{key:c.id,title:c.reasonCode},h('th',null,({desktop:'桌面操作',browser:'内置浏览器',dingtalk:'钉钉 CLI',enterprise:'企业数据'})[c.id]??c.id,c.stale&&badge('过期','amber')),h('td',null,yes(c.installed)),h('td',null,yes(c.connected)),h('td',null,yes(c.authorized)),h('td',null,yes(c.healthy)),h('td',null,h('time',null,clock(c.lastChecked)))))))),
+-        h('div',{className:'emp-section-heading'},h('h2',null,'主动规则'),h('button',{type:'button',className:'primary',disabled:busy||!writeable,onClick:()=>setEdit({id:'new'})},'新增规则')),
+-        edit&&h(RuleForm,{key:edit.id,rule:edit.id==='new'?null:edit,goals,targets:data.proactive?.targets??[],busy,onCancel:()=>setEdit(null),onSave:config=>command(edit.id==='new'?{action:'rule_create',config}:{action:'rule_update',ruleId:edit.id,expectedRevision:edit.revision,config})}),
+-        h('div',{className:'emp-rule-list'},data.rules.map(r=>h('article',{key:r.id},h('div',null,h('h3',null,r.config.title),h('div',{className:'emp-inline'},badge(r.enabled?'已启用':'已停用',r.enabled?'green':''),h('span',null,r.config.action.kind==='notify'?'本地通知':r.config.action.kind==='run_agent'?'AI 执行':'加入工作队列'),h('span',null,r.actionCount,' / ',r.config.maxActions)),h('time',null,'最近执行 ',clock(r.lastActionAt))),h('div',{className:'emp-inline'},h('button',{type:'button',disabled:busy||!writeable,onClick:()=>setEdit(r)},'编辑'),h('button',{type:'button',disabled:busy||!writeable||!r.enabled&&r.actionCount>=r.config.maxActions,onClick:()=>command({action:'rule_enable',ruleId:r.id,expectedRevision:r.revision,enabled:!r.enabled})},r.enabled?'停用':'确认启用'))))),
+-        (data.proactive?.jobs.length??0)>0&&h('section',{className:'emp-ai-jobs','data-proactive-jobs':true},h('h2',null,'主动执行'),data.proactive.jobs.map(j=>h('article',{key:j.id},h('header',{className:'emp-section-heading'},h('strong',null,j.ruleTitle??data.rules.find(r=>r.id===j.ruleId)?.config.title??'AI 工作'),badge(({queued:'已入队',waiting_session:'等待会话',waiting_permission:'等待授权',waiting_dependency:'等待依赖',waiting_budget:'等待预算',running:'执行中',stopping:'正在停止',settling:'核对回执',unknown:'结果待核对',awaiting_review:'等待审阅',failed:'执行未完成',cancelled:'已停止',expired:'已过期',reviewed_stopped:'已核对停止'})[j.state]??j.state)),h('div',{className:'emp-inline'},h('span',null,'模型请求 ',j.modelRequests,' / ',j.action.maxModelRequests),h('span',null,'交付 ',j.deliveryIds?.length??0),h('time',null,clock(j.startedAt??j.createdAt))),j.reason&&h('code',{className:'emp-ai-reason'},j.reason),h('details',null,h('summary',null,'执行回执'),h('code',null,j.id),h('code',null,j.action.sessionId),h('code',null,j.action.taskId),...(j.receipts??[]).map(r=>h('div',{key:r.requestId,className:'emp-inline'},h('code',null,r.requestId),h('span',null,r.state))),...(j.deliveryIds??[]).map(id=>h('code',{key:id},id))),h('div',{className:'emp-inline'},!['unknown','awaiting_review','failed','cancelled','expired','reviewed_stopped'].includes(j.state)&&h('button',{type:'button',disabled:busy||!writeable,onClick:()=>command({action:'ai_job_cancel',jobId:j.id,expectedRevision:j.revision})},'停止此执行'),j.state==='unknown'&&h('button',{type:'button',disabled:busy||!writeable,onClick:()=>{setReview(j);setReviewReason('');setConfirmed(false);}},'核对主动执行'))))),
++        !localOnly&&h('section',{className:'emp-activity-summary'},h('div',null,h('span',null,'巡检'),badge(data.scheduler.error?'巡检异常':data.scheduler.clockRollback?'时钟回拨':data.scheduler.stale?'待核验':'正常',data.scheduler.error||data.scheduler.clockRollback||data.scheduler.stale?'amber':'green')),h('div',null,h('span',null,'最后进展'),h('time',null,clock(data.observation.progress?.at))),h('div',null,h('span',null,'采样时间'),h('time',null,clock(data.scheduler.sampledAt)))),
++        !localOnly&&data.observation.sessions.length>0&&h('section',{className:'emp-activity-sessions'},data.observation.sessions.map(s=>h('article',{key:s.sessionId},h('div',{className:'emp-inline'},h('code',null,s.sessionId),badge(states[s.workState]??s.workState,s.workState==='fault'||s.noProgress?'amber':''),s.noProgress&&badge('待核验进展','amber')),s.report?.note&&h('p',null,s.report.note),s.report&&h('span',null,'Agent 报告 · ',clock(s.report.reportedAt)),h('time',null,'会话进展 ',clock(s.lastProgressAt))))),
++        !localOnly&&h('div',{className:'emp-capability-scroll'},h('table',{className:'emp-capability-table'},h('thead',null,h('tr',null,['能力','已内置','已连接','已授权','健康','核验时间'].map(s=>h('th',{key:s},s)))),h('tbody',null,data.capabilities.records.map(c=>h('tr',{key:c.id,title:c.reasonCode},h('th',null,({desktop:'桌面操作',browser:'内置浏览器',dingtalk:'钉钉 CLI',enterprise:'企业数据'})[c.id]??c.id,c.stale&&badge('过期','amber')),h('td',null,yes(c.installed)),h('td',null,yes(c.connected)),h('td',null,yes(c.authorized)),h('td',null,yes(c.healthy)),h('td',null,h('time',null,clock(c.lastChecked)))))))),
++        !localOnly&&h('div',{className:'emp-section-heading'},h('h2',null,'主动规则'),h('button',{type:'button',className:'primary',disabled:busy||!writeable,onClick:()=>setEdit({id:'new'})},'新增规则')),
++        edit&&h(RuleForm,{key:edit.id,rule:edit.id==='new'?null:edit,goals,targets:data.proactive?.targets??[],localTargets:data.proactive?.localTargets??[],localOnly,busy,onCancel:()=>setEdit(null),onSave:config=>command(edit.id==='new'?{action:'rule_create',config}:{action:'rule_update',ruleId:edit.id,expectedRevision:edit.revision,config})}),
++        h('div',{className:'emp-rule-list'},data.rules.filter(r=>!localOnly||r.config.action.kind!=='run_agent').map(r=>h('article',{key:r.id},h('div',null,h('h3',null,r.config.title),h('div',{className:'emp-inline'},badge(r.enabled?'已启用':'已停用',r.enabled?'green':''),h('span',null,r.config.action.kind==='notify'?'本地通知':['run_agent','run_local_agent'].includes(r.config.action.kind)?'AI 执行':'加入工作队列'),h('span',null,r.actionCount,' / ',r.config.maxActions)),h('time',null,'最近执行 ',clock(r.lastActionAt))),h('div',{className:'emp-inline'},h('button',{type:'button',disabled:busy||!writeable,onClick:()=>setEdit(r)},'编辑'),h('button',{type:'button',disabled:busy||!writeable||!r.enabled&&r.actionCount>=r.config.maxActions,onClick:()=>command({action:'rule_enable',ruleId:r.id,expectedRevision:r.revision,enabled:!r.enabled})},r.enabled?'停用':'确认启用'))))),
++        (data.proactive?.jobs.length??0)>0&&h('section',{className:'emp-ai-jobs','data-proactive-jobs':true},h('h2',null,'主动执行'),data.proactive.jobs.filter(j=>!localOnly||j.action.kind==='run_local_agent').map(j=>h('article',{key:j.id},h('header',{className:'emp-section-heading'},h('strong',null,j.ruleTitle??data.rules.find(r=>r.id===j.ruleId)?.config.title??'AI 工作'),badge(({queued:'已入队',waiting_session:'等待会话',waiting_permission:'等待授权',waiting_dependency:'等待依赖',waiting_budget:'等待预算',running:'执行中',stopping:'正在停止',settling:'核对回执',unknown:'结果待核对',awaiting_review:'等待审阅',failed:'执行未完成',cancelled:'已停止',expired:'已过期',reviewed_stopped:'已核对停止'})[j.state]??j.state)),h('div',{className:'emp-inline'},!localOnly&&h('span',null,'模型请求 ',j.modelRequests,' / ',j.action.maxModelRequests),h('span',null,'交付 ',j.deliveryIds?.length??0),h('time',null,clock(j.startedAt??j.createdAt))),j.reason&&h('code',{className:'emp-ai-reason'},j.reason),!localOnly&&h('details',null,h('summary',null,'执行回执'),h('code',null,j.id),h('code',null,j.action.sessionId),h('code',null,j.action.taskId),...(j.receipts??[]).map(r=>h('div',{key:r.requestId,className:'emp-inline'},h('code',null,r.requestId),h('span',null,r.state))),...(j.deliveryIds??[]).map(id=>h('code',{key:id},id))),h('div',{className:'emp-inline'},!['unknown','awaiting_review','failed','cancelled','expired','reviewed_stopped'].includes(j.state)&&h('button',{type:'button',disabled:busy||!writeable,onClick:()=>command({action:'ai_job_cancel',jobId:j.id,expectedRevision:j.revision})},'停止此执行'),j.state==='unknown'&&h('button',{type:'button',disabled:busy||!writeable,onClick:()=>{setReview(j);setReviewReason('');setConfirmed(false);}},'核对主动执行'))))),
+         review&&h('form',{className:'emp-ai-review',onSubmit:e=>{e.preventDefault();void command({action:'ai_job_resolve',jobId:review.id,expectedRevision:review.revision,confirmedStopped:true,reason:reviewReason}).then(ok=>{if(ok)setReview(null);});}},h('h3',null,'核对主动执行'),input('主动执行核对记录',{value:reviewReason,onChange:e=>setReviewReason(e.target.value),required:true,minLength:6,maxLength:1000,disabled:busy}),h('label',{className:'emp-lock'},h('input',{type:'checkbox',checked:confirmed,onChange:e=>setConfirmed(e.target.checked),disabled:busy}),'原执行器与模型请求已核对停止'),h('div',{className:'emp-inline'},h('button',{type:'button',onClick:()=>setReview(null),disabled:busy},'取消核对'),h('button',{type:'submit',disabled:busy||!confirmed||reviewReason.trim().length<6},'确认核对停止'))),
+         data.notifications.some(n=>!n.readAt)&&h('section',{className:'emp-activity-notifications'},h('h2',null,'通知'),data.notifications.filter(n=>!n.readAt).map(n=>h('article',{key:n.id},h('div',null,h('p',null,n.text),h('time',null,clock(n.createdAt))),h('button',{type:'button',disabled:busy||!writeable,onClick:()=>command({action:'notification_read',notificationId:n.id,expectedRevision:n.revision})},'标为已读')))),
+-        data.runs.length>0&&h('section',{className:'emp-activity-runs'},h('h2',null,'触发记录'),data.runs.map(r=>h('article',{key:r.id},h('strong',null,data.rules.find(rule=>rule.id===r.ruleId)?.config.title??'规则'),h('span',null,r.action==='notify'?'已通知':r.action==='run_agent'?'AI 已入队':'已入队'),h('time',null,clock(r.createdAt)))))
++        !localOnly&&data.runs.length>0&&h('section',{className:'emp-activity-runs'},h('h2',null,'触发记录'),data.runs.map(r=>h('article',{key:r.id},h('strong',null,data.rules.find(rule=>rule.id===r.ruleId)?.config.title??'规则'),h('span',null,r.action==='notify'?'已通知':r.action==='run_agent'?'AI 已入队':'已入队'),h('time',null,clock(r.createdAt)))))
+       ));
+   };
+ }
+diff --git a/plugins/naumi-enterprise/assets/employee-center.js b/plugins/naumi-enterprise/assets/employee-center.js
+index 1b84189..f1d9ce0 100644
+--- a/plugins/naumi-enterprise/assets/employee-center.js
++++ b/plugins/naumi-enterprise/assets/employee-center.js
+@@ -109,6 +109,7 @@ export function createEmployeeCenter(React,{client=createEmployeeClient(),workOn
+             data.work.goals.length?h('div',{className:'emp-goals'},data.work.goals.map(g=>h('article',{key:g.id,className:'emp-goal-card'},h('div',{className:'emp-card-meta'},badge(g.kind==='milestone'?'里程碑':'目标'),badge(GOAL_STATUS[g.status]),h('span',null,['普通','重要','高','紧急'][g.priority])),h('h3',null,g.title),g.description&&h('p',null,g.description),h('ul',null,g.criteria.map((c,i)=>h('li',{key:i},c))),g.dueAt&&h('p',{className:'emp-subtle'},'截止 ',time(g.dueAt)),g.parentId&&h('p',{className:'emp-subtle'},'上级 ',data.work.goals.find(x=>x.id===g.parentId)?.title),g.dependencies.length>0&&h('p',{className:'emp-subtle'},'依赖 ',g.dependencies.map(id=>data.work.goals.find(x=>x.id===id)?.title??id).join('、')),
+               !['completed','cancelled'].includes(g.status)&&h('div',{className:'emp-card-actions'},h('select',{'aria-label':g.title+'状态',value:g.status,disabled:busy||!writeable,onChange:e=>run({action:'goal_update',goalId:g.id,expectedRevision:g.revision,patch:{status:e.target.value}},{work:true,close:false})},Object.entries(GOAL_STATUS).map(([v,s])=>h('option',{key:v,value:v},s))),button('编辑目标',()=>setDialog({type:'goal',goal:g}),{disabled:busy||!writeable}),button('添加交付',()=>setDialog({type:'delivery',goalId:g.id}),{disabled:busy||!writeable}))))):h('p',{className:'emp-empty'},'暂无工作目标'),
+             h('div',{className:'emp-section-heading'},h('h2',null,'交付与验收'),badge(data.work.deliveries.length)),data.work.deliveries.length?h('div',{className:'emp-deliveries'},data.work.deliveries.map(d=>h('button',{type:'button',key:d.id,className:'emp-delivery-row',onClick:()=>openDelivery(d.id)},h('span',null,h('strong',null,d.title),h('span',null,data.work.goals.find(g=>g.id===d.goalId)?.title??'目标',d.executionStatus!=='not_linked'?' · 执行：'+d.executionStatus:'')),h('span',null,'v',d.version),badge(DELIVERY_STATUS[d.businessStatus]),h('span',null,'→')))):h('p',{className:'emp-empty'},'暂无交付'))),
++          workOnly&&h(Activity,{key:'daily-activity-'+botId,botId,writeable,goals:data.work.goals,localOnly:true,onWorkChanged:()=>void load()}),
+           tab==='history'&&h(React.Fragment,null,h('div',{className:'emp-section-heading'},h('h2',null,'成长记录'),button('导出员工数据',async()=>{try{const value=await client.employee(botId,'export');const blob=new Blob([JSON.stringify(value,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=selected.name+'-员工数据.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e){setError(errorLabel(e));}})),data.history.length?h('div',{className:'emp-timeline'},data.history.map(event=>h('article',{className:'emp-event',key:event.seq},h('div',{className:'emp-event-mark'}),h('div',null,h('div',{className:'emp-card-meta'},h('strong',null,({profile_update:'更新档案',profile_restore:'恢复档案',explicit_learning:'记录明确偏好',profile_candidate_accepted:'确认人物设定',memory_create:'新增记忆',memory_update:'更新记忆',goal_create:'创建目标',goal_update:'更新目标',delivery_create:'创建交付',delivery_revise:'更新交付版本',delivery_submit:'提交交付',delivery_accept:'验收通过',acceptance_learning_candidate:'形成复盘候选'})[event.action]??'工作记录'),h('span',null,time(event.occurredAt)),badge('v'+event.revision)),h('p',{className:'emp-subtle'},event.source.kind==='owner'?'本机所有者':event.source.kind==='user'?'用户明确指令':event.source.kind==='agent'?'执行 Agent':'会话候选'),h('details',null,h('summary',null,'查看记录'),h('pre',null,JSON.stringify(event.value,null,2))),event.type==='profile'&&button('查看差异 / 恢复',()=>setDialog({type:'restore',event}),{disabled:busy||!writeable}))))):h('p',{className:'emp-empty'},'暂无成长记录'),data.historyMore&&button('加载更早记录',async()=>{try{const id=botId,older=await client.employee(id,'timeline',{before:data.history.at(-1).seq});if(selection.current===id)setData(d=>({...d,history:[...d.history,...older.filter(e=>!d.history.some(old=>old.seq===e.seq))],historyMore:older.length===30}));}catch(e){setError(errorLabel(e));}},{disabled:busy}))),
+         !selected&&!loading&&h('p',{className:'emp-empty'},'先创建一个 Bot')),
+       dialog&&h(Dialog,{title:({memory:dialog.memory?'编辑记忆':'新增记忆',goal:dialog.goal?'编辑工作目标':'创建工作目标',delivery:dialog.delivery?'保存交付新版本':'添加交付',review:dialog.action==='accept'?'验收交付':'退回修改','delete-memory':'删除记忆',restore:'恢复人物设定','cancel-delivery':'取消交付'})[dialog.type],onClose:()=>{if(!busy)setDialog(null);}},
+diff --git a/plugins/naumi-enterprise/employee-activity-store.js b/plugins/naumi-enterprise/employee-activity-store.js
+index 4714d03..c45e784 100644
+--- a/plugins/naumi-enterprise/employee-activity-store.js
++++ b/plugins/naumi-enterprise/employee-activity-store.js
+@@ -13,6 +13,7 @@ const trigger=z.discriminatedUnion('kind',[
+ const action=z.discriminatedUnion('kind',[
+   z.object({kind:z.literal('notify'),text:z.string().trim().min(1).max(1000)}).strict(),
+   z.object({kind:z.literal('queue_goal'),title:z.string().trim().min(1).max(120),description:z.string().max(4000).default(''),criteria:z.array(z.string().trim().min(1).max(500)).min(1).max(20)}).strict(),
++  z.object({kind:z.literal('run_local_agent'),sessionId:id,goalId:id,provider:z.string().min(1).max(160),model:z.string().min(1).max(160),reasoningEffort:z.string().min(1).max(100).optional(),prompt:z.string().trim().min(1).max(4000),maxModelRequests:z.number().int().min(1).max(20),maxSeconds:z.number().int().min(10).max(3600),maxToolCalls:z.number().int().min(1).max(100),allowedTools:z.array(z.enum(['employee_profile','employee_memory_search','employee_work','employee_delivery_create','employee_delivery_revise','employee_delivery_submit','employee_activity_report','employee_capabilities','str_replace_editor'])).min(1).max(9).refine(v=>new Set(v).size===v.length)}).strict(),
+   z.object({kind:z.literal('run_agent'),sessionId:id,taskId:z.string().uuid(),goalId:id,model:z.string().min(1).max(80),prompt:z.string().trim().min(1).max(4000),maxModelRequests:z.number().int().min(1).max(20),maxSeconds:z.number().int().min(10).max(3600)}).strict(),
+ ]);
+ const window=z.object({timeZone:z.string().min(1).max(100).refine(v=>{try{new Intl.DateTimeFormat('en',{timeZone:v});return true;}catch{return false;}}),days:z.array(z.number().int().min(1).max(7)).min(1).max(7).refine(v=>new Set(v).size===v.length),startMinute:z.number().int().min(0).max(1439),endMinute:z.number().int().min(1).max(1440)}).strict().refine(v=>v.startMinute<v.endMinute,'Use an explicit non-overnight work window');
+@@ -57,7 +58,7 @@ export class EmployeeActivityStore{
+       return this.store.put({...r,config,configVersion:args.config?randomUUID():r.configVersion,enabled,revision:r.revision+1,approvedAt:enabled?time:null,approvalId:enabled?randomUUID():null,nextAt:this.next(config,Date.parse(time)),updatedAt:time},'proactive_rule',action,owner);
+     });
+   }
+-  validateScope(botId,config){if(config.trigger.kind==='goal_due'&&config.trigger.goalId)this.work.goal(botId,config.trigger.goalId);if(config.action.kind==='run_agent')this.work.goal(botId,config.action.goalId);}
++  validateScope(botId,config){if(config.trigger.kind==='goal_due'&&config.trigger.goalId)this.work.goal(botId,config.trigger.goalId);if(['run_agent','run_local_agent'].includes(config.action.kind))this.work.goal(botId,config.action.goalId);}
+   next(config,now){return config.trigger.kind==='every'?new Date(now+config.trigger.seconds*1000).toISOString():config.trigger.kind==='at'?config.trigger.at:null;}
+   occurrence(botId,r,now){
+     const t=r.config.trigger;
+@@ -73,7 +74,7 @@ export class EmployeeActivityStore{
+     let actions=0;
+     for(const botId of botIds)for(const rule of this.rules(botId)){
+       if(!rule.enabled||!rule.approvedAt||rule.actionCount>=rule.config.maxActions||!inWorkWindow(rule.config.workWindow,now))continue;
+-      if(rule.config.action.kind==='run_agent'&&this.store.entitiesOfType(botId,'proactive_ai').some(j=>j.ruleId===rule.id&&!['awaiting_review','failed','cancelled','expired','reviewed_stopped'].includes(j.state)))continue;
++      if(['run_agent','run_local_agent'].includes(rule.config.action.kind)&&this.store.entitiesOfType(botId,'proactive_ai').some(j=>j.ruleId===rule.id&&!['awaiting_review','failed','cancelled','expired','reviewed_stopped'].includes(j.state)))continue;
+       for(const o of this.occurrence(botId,rule,now)){
+         const r=this.rule(botId,rule.id);if(!r.enabled||r.revision!==rule.revision||r.actionCount>=r.config.maxActions)break;
+         if(r.lastActionAt&&now-Date.parse(r.lastActionAt)<r.config.cooldownSeconds*1000)break;
+@@ -83,9 +84,9 @@ export class EmployeeActivityStore{
+           // Re-read under BEGIN IMMEDIATE. Two processes cannot commit the same occurrence twice.
+           const live=this.rule(botId,r.id);if(live.revision!==r.revision||!live.enabled)fail('ACT_CONFLICT');
+           if(this.store.entitiesOfType(botId,'proactive_run').length>=10000)fail('ACT_RUN_CAPACITY');
+-          const time=this.store.now(),effectId=(r.config.action.kind==='notify'?'notification-':r.config.action.kind==='run_agent'?'ai-job-':'goal-')+key([receiptId,'effect']);
++          const time=this.store.now(),effectId=(r.config.action.kind==='notify'?'notification-':['run_agent','run_local_agent'].includes(r.config.action.kind)?'ai-job-':'goal-')+key([receiptId,'effect']);
+           if(r.config.action.kind==='notify')this.store.put({id:effectId,botId,revision:1,text:r.config.action.text,ruleId:r.id,sourceGoalId:o.goalId??null,readAt:null,createdAt:time},'notification','rule_notification',system);
+-          else if(r.config.action.kind==='run_agent'){
++          else if(['run_agent','run_local_agent'].includes(r.config.action.kind)){
+             if(this.store.entitiesOfType(botId,'proactive_ai').length>=10000)fail('ACT_AI_CAPACITY');
+             this.store.put({id:effectId,botId,revision:1,ruleId:r.id,ruleTitle:r.config.title,configVersion:r.configVersion,approvedAt:r.approvedAt,approvalId:r.approvalId,sourceRunId:receiptId,action:r.config.action,workWindow:r.config.workWindow,state:'queued',reason:null,modelRequestIds:[],modelRequests:0,messageId:null,turn:null,createdAt:time,updatedAt:time},'proactive_ai','ai_queued',{kind:'owner',note:'Explicitly approved AI rule; queued is not execution or business acceptance'});
+           }
+diff --git a/plugins/naumi-enterprise/employee-activity.js b/plugins/naumi-enterprise/employee-activity.js
+index e0c8a54..2514690 100644
+--- a/plugins/naumi-enterprise/employee-activity.js
++++ b/plugins/naumi-enterprise/employee-activity.js
+@@ -33,7 +33,7 @@ export function installEmployeeActivity(scope,directory,store,service,{sync,inte
+   };
+   const read=botId=>({domain:'local-owner',scheduler:{...value,modelCalls:0,externalActions:0,stale:!value.sampledAt||Date.now()-Date.parse(value.sampledAt)>intervalMs*3},proactive:proactive.engine.view(botId),rules:activity.rules(botId),runs:activity.runs(botId),notifications:activity.notifications(botId),observation:observation.read(botId),capabilities:capabilities.read(botId)});
+   scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/employee-activity',handler:async(req,res)=>{
+-    res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Naumi-Activity','1');
++    res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Naumi-Activity','1');res.setHeader('X-Naumi-Local-Proactive','1');
+     const admission=scope.connection.admit(req);if('rejection'in admission){res.writeHead(admission.rejection).end();return;}if(admission.peer.principal.kind!=='owner'){res.writeHead(403).end();return;}
+     const send=(code,value)=>{if(!res.destroyed)res.writeHead(code,{'Content-Type':'application/json; charset=utf-8'}).end(JSON.stringify(value));};
+     try{
+diff --git a/plugins/naumi-enterprise/employee-local-proactive.js b/plugins/naumi-enterprise/employee-local-proactive.js
+new file mode 100644
+index 0000000..48c4d95
+--- /dev/null
++++ b/plugins/naumi-enterprise/employee-local-proactive.js
+@@ -0,0 +1,96 @@
++import {randomUUID} from 'node:crypto';
++import {LlmError} from '@deepseek-ai/dsh-llm';
++
++export const isLocalAction=action=>action?.kind==='run_local_agent';
++const TYPES=['local_proactive_model','local_proactive_tool'];
++const READ_ONLY=new Set(['employee_profile','employee_memory_search','employee_work','employee_capabilities','employee_activity_report']);
++const fail=code=>{throw Error(code);};
++const actor={kind:'owner',note:'Explicit local-owner proactive policy; not enterprise authorization or financial settlement'};
++
++/** Thin local policy/receipt adapter for the shared proactive consumer. No scheduler or Agent driver. */
++export class LocalProactivePolicy{
++  constructor(engine){
++    this.engine=engine;this.store=engine.store;this.inflight=new Map();
++    this.store.db.exec("CREATE INDEX IF NOT EXISTS employee_local_job_receipts ON entities(bot_id,type,json_extract(json,'$.jobId'))");
++    for(const type of TYPES)for(const row of this.rows(type).filter(r=>r.state==='running'))this.save({...row,state:'unknown',endedAt:this.store.now()},type,'local_recover');
++  }
++  configured(){return typeof this.engine.ctx.tools?.guard==='function'&&typeof this.engine.ctx.tools?.schemas==='function';}
++  rows(type,botId,jobId){return jobId?this.store.db.prepare("SELECT json FROM entities WHERE bot_id=? AND type=? AND json_extract(json,'$.jobId')=?").all(botId,type,jobId).map(r=>JSON.parse(r.json)):botId?this.store.entitiesOfType(botId,type):this.store.db.prepare('SELECT json FROM entities WHERE type=?').all(type).map(r=>JSON.parse(r.json));}
++  save(row,type,action){return this.store.mutate(row.botId,'local:'+randomUUID(),action,{id:row.id,state:row.state},actor,()=>this.store.put({...row,revision:(row.revision??0)+1,updatedAt:this.store.now()},type,action,actor));}
++  targets(botId){
++    if(!this.configured())return [];
++    return this.engine.ctx.agents.list().filter(agent=>this.engine.directory.forSession(agent.id)?.id===botId&&this.engine.rootId(agent)===agent.id&&!this.engine.sync?.runtimeGate?.binding(agent.id))
++      .map(agent=>({sessionId:agent.id,selection:agent.model.current()??null,allowedTools:this.engine.ctx.tools.schemas(agent).map(t=>t.name).filter(n=>['employee_profile','employee_memory_search','employee_work','employee_delivery_create','employee_delivery_revise','employee_delivery_submit','employee_activity_report','employee_capabilities','str_replace_editor'].includes(n))})).filter(t=>t.selection&&t.selection.provider!=='naumi-enterprise');
++  }
++  validate(botId,action){
++    if(!this.configured())fail('ACT_AI_LOCAL_GUARD_REQUIRED');
++    const bot=this.engine.directory.forSession(action.sessionId),agent=this.engine.ctx.agents.get(action.sessionId);
++    if(!bot||bot.id!==botId||bot.status!=='active')fail('ACT_AI_LOCAL_BOT_REQUIRED');
++    if(this.engine.sync?.runtimeGate?.binding(action.sessionId)||action.provider==='naumi-enterprise')fail('ACT_AI_LOCAL_MANAGED_SESSION_DENIED');
++    if(!agent||this.engine.rootId(agent)!==agent.id)fail('ACT_AI_LOCAL_ROOT_REQUIRED');
++    const selected=agent.model.current();if(!this.sameModel(action,selected))fail('ACT_AI_MODEL_SELECTION_CHANGED');
++    this.engine.work.goal(botId,action.goalId);
++    const available=new Set(this.engine.ctx.tools.schemas(agent).map(t=>t.name));
++    if(action.allowedTools.some(t=>!available.has(t)))fail('ACT_AI_LOCAL_TOOL_UNAVAILABLE');
++  }
++  sameModel(action,selected){return selected?.provider===action.provider&&selected?.model===action.model&&selected?.reasoningEffort===action.reasoningEffort;}
++  check(job,agent,{selection}={}){
++    if(!this.configured())return 'ACT_AI_LOCAL_GUARD_REQUIRED';
++    if(this.engine.sync?.runtimeGate?.binding(job.action.sessionId)||job.action.provider==='naumi-enterprise')return 'ACT_AI_LOCAL_MANAGED_SESSION_DENIED';
++    if(agent&&this.engine.rootId(agent)!==job.action.sessionId)return 'ACT_AI_LOCAL_ROOT_REQUIRED';
++    if(agent&&!this.sameModel(job.action,agent.model.current()))return 'ACT_AI_MODEL_SELECTION_CHANGED';
++    if(selection&&(selection.provider!==job.action.provider||selection.model!==job.action.model))return 'ACT_AI_MODEL_SELECTION_CHANGED';
++    if(this.rows('local_proactive_tool',job.botId,job.id).some(r=>r.jobId===job.id&&(r.state==='unknown'||r.state==='running'&&!this.inflight.has(r.id))&&!r.resolution))return 'ACT_AI_LOCAL_TOOL_UNRESOLVED';
++    if(this.rows('local_proactive_model',job.botId,job.id).some(r=>r.jobId===job.id&&r.state==='unknown'&&!r.resolution))return 'ACT_AI_LOCAL_MODEL_UNRESOLVED';
++    return null;
++  }
++  guard(exec,job){
++    if(!job.action.allowedTools.includes(exec.name))return 'ACT_AI_LOCAL_TOOL_NOT_APPROVED';
++    const calls=this.rows('local_proactive_tool',job.botId,job.id).filter(r=>r.jobId===job.id).length;
++    if(calls>=job.action.maxToolCalls)return 'ACT_AI_LOCAL_TOOL_LIMIT';
++  }
++  async *stream(agent,options,next,entry){
++    const e=this.engine,job=e.job(entry.botId,entry.id),denial=entry.reason??e.check(job,agent,{running:true,selection:options});
++    if(denial)throw new LlmError(denial,'ACT_AI_ADMISSION_DENIED');
++    const id='local-model-'+randomUUID();let row;
++    try{
++      row=this.store.mutate(job.botId,id,'local_model_start',{jobId:job.id,requestId:id},actor,()=>{
++        const current=e.job(job.botId,job.id),reason=entry.reason??e.check(current,agent,{running:true,selection:options});if(reason)fail(reason);
++        if(current.modelRequests>=current.action.maxModelRequests)fail('ACT_AI_REQUEST_LIMIT');
++        this.store.put({...current,revision:current.revision+1,modelRequests:current.modelRequests+1,modelRequestIds:[...current.modelRequestIds,id],updatedAt:this.store.now()},'proactive_ai','ai_model_dispatch',actor);
++        return this.store.put({id,botId:job.botId,jobId:job.id,sessionId:agent.id,revision:1,state:'running',usage:null,usageStatus:'unknown',startedAt:this.store.now()},'local_proactive_model','local_model_start',actor);
++      });
++    }catch(error){e.volatile.add(job.action.sessionId);e.stop(entry,'ACT_AI_STORAGE_UNRESOLVED');throw error;}
++    this.inflight.set(id,entry);let finish=false,usage=null;
++    try{
++      for await(const chunk of next()){
++        const reason=entry.reason??e.check(e.job(job.botId,job.id),agent,{running:true,selection:options});if(reason)throw new LlmError(reason,'ACT_AI_ADMISSION_DENIED');
++        if(chunk.type==='usage'&&Number.isSafeInteger(chunk.usage.inputTokens)&&chunk.usage.inputTokens>=0&&Number.isSafeInteger(chunk.usage.outputTokens)&&chunk.usage.outputTokens>=0)usage={inputTokens:chunk.usage.inputTokens,outputTokens:chunk.usage.outputTokens};
++        if(chunk.type==='finish'&&['stop','tool-calls','max-tokens'].includes(chunk.reason.kind))finish=true;
++        yield chunk;
++      }
++    }finally{
++      this.inflight.delete(id);try{this.save({...row,state:finish?'completed':'unknown',usage,usageStatus:usage?'reported':'unknown',endedAt:this.store.now()},'local_proactive_model','local_model_end');}catch{e.volatile.add(job.action.sessionId);e.stop(entry,'ACT_AI_STORAGE_UNRESOLVED');throw Error('ACT_AI_STORAGE_UNRESOLVED');}
++    }
++  }
++  async execute(exec,next,entry){
++    const e=this.engine,job=e.job(entry.botId,entry.id),denial=entry.reason??e.guard(exec);if(denial)fail(denial);
++    const id='local-tool-'+randomUUID();let row;try{row=this.store.mutate(job.botId,id,'local_tool_start',{jobId:job.id,callId:exec.callId},actor,()=>{
++      const current=e.job(job.botId,job.id),reason=entry.reason??e.guard(exec);if(reason)fail(reason);
++      return this.store.put({id,botId:job.botId,jobId:job.id,sessionId:exec.agent.id,callId:exec.callId,toolName:exec.name,revision:1,state:'running',startedAt:this.store.now()},'local_proactive_tool','local_tool_start',actor);
++    });
++    }catch(error){e.volatile.add(job.action.sessionId);e.stop(entry,'ACT_AI_STORAGE_UNRESOLVED');throw error;}
++    this.inflight.set(id,entry);let state='unknown';
++    try{const result=await next();state=entry.controller.signal.aborted?'unknown':result.isError?(READ_ONLY.has(exec.name)?'failed':'unknown'):result.value?.status==='unknown'?'unknown':'completed';return result;}
++    finally{this.inflight.delete(id);try{this.save({...row,state,endedAt:this.store.now()},'local_proactive_tool','local_tool_end');}catch{e.volatile.add(job.action.sessionId);e.stop(entry,'ACT_AI_STORAGE_UNRESOLVED');throw Error('ACT_AI_STORAGE_UNRESOLVED');}}
++  }
++  receipts(job){return TYPES.flatMap(type=>this.rows(type,job.botId,job.id).filter(r=>r.jobId===job.id).map(r=>({requestId:r.id,state:r.state,kind:type==='local_proactive_model'?'model':'tool',usage:r.usage??null,usageStatus:r.usageStatus??null,resolution:r.resolution??null})));}
++  assertResolvable(job){
++    const e=this.engine,agent=e.ctx.agents.get(job.action.sessionId);
++    if(agent&&!e.idle(agent)||[...this.inflight.values()].some(v=>v.id===job.id)||e.finishing.has(job.id))fail('ACT_AI_SESSION_BUSY');
++  }
++  resolve(job,reason){
++    this.assertResolvable(job);
++    for(const type of TYPES)for(const row of this.rows(type,job.botId,job.id).filter(r=>r.jobId===job.id&&['running','unknown'].includes(r.state)&&!r.resolution))this.store.put({...row,revision:row.revision+1,resolution:{confirmedStopped:true,reason,at:this.store.now(),kind:'local-owner-confirmation'},updatedAt:this.store.now()},type,'local_owner_resolve',actor);
++  }
++}
+diff --git a/plugins/naumi-enterprise/employee-proactive-ai.js b/plugins/naumi-enterprise/employee-proactive-ai.js
+index 1975906..9b9ea6d 100644
+--- a/plugins/naumi-enterprise/employee-proactive-ai.js
++++ b/plugins/naumi-enterprise/employee-proactive-ai.js
+@@ -5,6 +5,7 @@ import {EmployeeWorkStore} from './employee-work-store.js';
+ import {inWorkWindow} from './employee-activity-store.js';
+ import {assertPublicText} from './employee-store.js';
+ import {createBotTaskRuntime} from './bot-task-runtime.js';
++import {LocalProactivePolicy,isLocalAction} from './employee-local-proactive.js';
+ 
+ const id=z.string().min(1).max(200),terminal=new Set(['awaiting_review','failed','cancelled','expired','reviewed_stopped']);
+ export const aiCommands=z.discriminatedUnion('action',[
+@@ -21,6 +22,7 @@ export class EmployeeProactiveAi{
+     Object.assign(this,{ctx,directory,store,activity,sync});this.work=new EmployeeWorkStore(store);
+     this.active=new Map();this.retired=new WeakMap();this.reservedSessions=new Set();this.flights=new Map();this.finishing=new Map();this.volatile=new Set();this.retryAt=new Map();this.shutdown=new AbortController();this.closed=false;
+     for(const row of this.rows().filter(j=>['starting','running','stopping','settling'].includes(j.state)))this.change(row,{state:'unknown',reason:'ACT_AI_PROCESS_INTERRUPTED'},'ai_recover');
++    this.local=new LocalProactivePolicy(this);
+     if(sync?.models){if(sync.models.proactive)fail('ACT_AI_ALREADY_INSTALLED');sync.models.proactive=this;}
+   }
+   now(){return this.store.clock().getTime();}
+@@ -28,11 +30,12 @@ export class EmployeeProactiveAi{
+   job(botId,jobId){const j=this.store.entity(botId,jobId);if(!j||!jobId.startsWith('ai-job-'))fail('ACT_AI_JOB_NOT_FOUND');return j;}
+   change(j,patch,action){return this.store.mutate(j.botId,'ai:'+randomUUID(),action,{jobId:j.id,patch},actor,()=>{const live=this.job(j.botId,j.id);return this.store.put({...live,...patch,revision:live.revision+1,updatedAt:this.store.now()},'proactive_ai',action,actor);});}
+   configured(){return !!this.sync?.runtimeGate&&!!this.sync?.models;}
+-  rootId(agent){return this.sync?.runtimeGate?.contextSync(agent)?.sessionId??agent.id;}
++  rootId(agent){return this.sync?.runtimeGate?.contextSync(agent)?.sessionId??this.ctx.agentTeams?.tryMembership?.(agent)?.root?.id??agent.id;}
+   entry(agent){return this.active.get(this.rootId(agent))??this.retired.get(agent);}
+   idle(agent){return agent?.status==='idle'&&!agent.inbox.nextTurn.length&&!agent.inbox.nextStep.length;}
+   validApproval(j){const r=this.activity.rule(j.botId,j.ruleId);return r.configVersion===j.configVersion&&r.approvalId===j.approvalId&&!!r.approvalId;}
+   validate(botId,config){
++    if(isLocalAction(config.action))return this.local.validate(botId,config.action);
+     if(config.action.kind!=='run_agent')return;
+     if(!this.configured())fail('ACT_AI_NOT_CONFIGURED');
+     const a=config.action,b=this.sync.runtimeGate.binding(a.sessionId);if(!b||b.botId!==botId||b.taskId!==a.taskId||b.state==='stopped')fail('ACT_AI_MANAGED_SESSION_REQUIRED');
+@@ -49,6 +52,7 @@ export class EmployeeProactiveAi{
+     if(running&&now-Date.parse(j.startedAt)>=j.action.maxSeconds*1000)return 'ACT_AI_TIME_LIMIT';
+     const goal=this.work.goal(j.botId,j.action.goalId);if(!['planned','in_progress'].includes(goal.status))return 'ACT_AI_GOAL_NOT_ACTIVE';
+     if(goal.dependencies.some(id=>this.work.goal(j.botId,id).status!=='completed'))return 'ACT_AI_WAITING_DEPENDENCY';
++    if(isLocalAction(j.action))return this.local.check(j,agent,{selection});
+     const b=this.sync?.runtimeGate?.binding(j.action.sessionId);if(!b||b.botId!==j.botId||b.taskId!==j.action.taskId)return 'ACT_AI_MANAGED_SESSION_REQUIRED';
+     if(b.unknown||this.sync.runtimeGate.volatileUnknown.has(b.sessionId))return 'ACT_AI_EXECUTOR_UNRESOLVED';
+     const selected=selection??agent?.model.current();if(selected&&(selected.provider!=='naumi-enterprise'||selected.model!==j.action.model))return 'ACT_AI_MODEL_SELECTION_CHANGED';
+@@ -64,6 +68,7 @@ export class EmployeeProactiveAi{
+   }
+   guard(exec){
+     const entry=this.entry(exec.agent);if(!entry)return;const j=this.job(entry.botId,entry.id),denial=entry.reason??this.check(j,exec.agent,{running:true});if(denial)return denial;
++    if(isLocalAction(j.action)){const localDenial=this.local.guard(exec,j);if(localDenial)return localDenial;}
+     if(/^employee_enterprise_(claim|upload|submit)$/.test(exec.name)&&exec.arguments?.taskId&&exec.arguments.taskId!==j.action.taskId)return 'ACT_AI_TASK_SCOPE_CHANGED';
+     if(exec.name==='employee_delivery_create'&&exec.arguments?.goalId!==j.action.goalId)return 'ACT_AI_GOAL_SCOPE_CHANGED';
+     if(['employee_delivery_revise','employee_delivery_submit'].includes(exec.name)&&this.work.delivery(j.botId,exec.arguments?.deliveryId).goalId!==j.action.goalId)return 'ACT_AI_GOAL_SCOPE_CHANGED';
+@@ -76,6 +81,7 @@ export class EmployeeProactiveAi{
+   }
+   waiting(j,state,reason){if(j.state!==state||j.reason!==reason)this.change(j,{state,reason},'ai_wait');this.retryAt.set(j.id,this.now()+15000);}
+   async budget(j){
++    if(isLocalAction(j.action))return;
+     let value=await this.sync.models.credential(j.botId,j.action.taskId,{signal:this.shutdown.signal}),b;
+     try{b=await this.sync.models.gateway(value,'/budget',{signal:this.shutdown.signal});}catch(e){if(publicCode(e)!=='MODEL_POLICY_STALE')throw e;value=await this.sync.models.credential(j.botId,j.action.taskId,{force:true,signal:this.shutdown.signal});b=await this.sync.models.gateway(value,'/budget',{signal:this.shutdown.signal});}
+     const route=value.models.find(m=>m.id===j.action.model);if(!route)fail('MODEL_ROUTE_NOT_AUTHORIZED');
+@@ -91,7 +97,7 @@ export class EmployeeProactiveAi{
+       if(!this.idle(agent)){this.waiting(j,'waiting_session','ACT_AI_USER_PRIORITY');return;}
+       await this.budget(j);j=this.job(j.botId,j.id);if(!['queued','waiting_session','waiting_dependency','waiting_permission','waiting_budget'].includes(j.state))return;
+       const changed=this.check(j,agent);if(changed){this.waiting(j,'waiting_permission',changed);return;}if(!this.idle(agent)){this.waiting(j,'waiting_session','ACT_AI_USER_PRIORITY');return;}
+-      const goal=this.work.goal(j.botId,j.action.goalId),message=freezeMessage({id:randomUUID(),role:'user',source:{kind:'schedule'},content:[{type:'text',text:'Owner-approved Naumi proactive work. This scheduled task is not a new human preference or a permission grant. Follow existing system/tool permissions; work only on the bound enterprise task and local goal. Save real work using existing employee delivery tools. Never self-accept or claim business completion.\n'+JSON.stringify({jobId:j.id,taskId:j.action.taskId,goalId:goal.id,title:goal.title,description:goal.description,criteria:goal.criteria,instruction:j.action.prompt,maxModelRequests:j.action.maxModelRequests,maxSeconds:j.action.maxSeconds})}]}),done=deferred();
++      const goal=this.work.goal(j.botId,j.action.goalId),message=freezeMessage({id:randomUUID(),role:'user',source:{kind:'schedule'},content:[{type:'text',text:'Owner-approved Naumi proactive work. This scheduled task is not a new human preference or a permission grant. Follow existing system/tool permissions; work only on the explicitly bound goal and scope. Save real work using existing employee delivery tools. Never self-accept or claim business completion.\n'+JSON.stringify({jobId:j.id,scope:isLocalAction(j.action)?'local-owner':'enterprise-managed',taskId:j.action.taskId,goalId:goal.id,title:goal.title,description:goal.description,criteria:goal.criteria,instruction:j.action.prompt,maxModelRequests:j.action.maxModelRequests,maxSeconds:j.action.maxSeconds})}]}),done=deferred();
+       j=this.store.mutate(j.botId,'ai:start:'+j.id+':'+randomUUID(),'ai_start',{jobId:j.id},actor,()=>{
+         const live=this.job(j.botId,j.id);if(!['queued','waiting_session','waiting_dependency','waiting_permission','waiting_budget'].includes(live.state))fail('ACT_AI_CONFLICT');
+         const reason=this.check(live,agent);if(reason)fail(reason);if(!this.idle(agent))fail('ACT_AI_USER_PRIORITY');
+@@ -109,7 +115,7 @@ export class EmployeeProactiveAi{
+       const e=JSON.parse(row.json);if(e.source?.kind==='agent'&&e.source.sessionId===j.action.sessionId&&e.value.goalId===j.action.goalId){ids.add(e.entityId);for(const id of e.value.artifactIds??[])artifacts.add(id);}
+     }return {deliveryIds:[...ids],artifactIds:[...artifacts]};
+   }
+-  async receipts(j){if(!j.modelRequestIds.length)return [];const value=await this.sync.models.credential(j.botId,j.action.taskId,{signal:this.shutdown.signal});return Promise.all(j.modelRequestIds.map(id=>this.sync.models.gateway(value,'/receipt?id='+id,{signal:this.shutdown.signal})));}
++  async receipts(j){if(isLocalAction(j.action))return this.local.receipts(j);if(!j.modelRequestIds.length)return [];const value=await this.sync.models.credential(j.botId,j.action.taskId,{signal:this.shutdown.signal});return Promise.all(j.modelRequestIds.map(id=>this.sync.models.gateway(value,'/receipt?id='+id,{signal:this.shutdown.signal})));}
+   finish(entry,end){
+     if(this.finishing.has(entry.id))return this.finishing.get(entry.id);entry.controller.abort(Error('ACT_AI_TURN_ENDED'));
+     for(const agent of this.ctx.agents.list())if(agent.id!==entry.sessionId&&this.rootId(agent)===entry.sessionId){this.retired.set(agent,entry);agent.cancel({kind:'hook',reason:'ACT_AI_TURN_ENDED'},{keepInbox:true});}
+@@ -117,17 +123,17 @@ export class EmployeeProactiveAi{
+     const flight=(async()=>{
+       let j=this.job(entry.botId,entry.id);try{
+         j=this.change(j,{state:'settling',turn:entry.turn,endKind:end.kind},'ai_settling');await this.ctx.sessions.flush(entry.agent.session);
+-        let receipts=[],unresolved=false;try{receipts=await this.receipts(j);unresolved=receipts.some(r=>!['completed','rejected','charged_ceiling'].includes(r.state));}catch{unresolved=j.modelRequestIds.length>0;}
+-        const b=this.sync.runtimeGate.binding(entry.sessionId);unresolved||=!!b?.unknown||this.sync.runtimeGate.volatileUnknown.has(entry.sessionId)||this.volatile.has(entry.sessionId);
++        let receipts=[],unresolved=false;try{receipts=await this.receipts(j);unresolved=receipts.some(r=>!['completed','rejected','charged_ceiling','failed'].includes(r.state)&&!r.resolution);}catch{unresolved=j.modelRequestIds.length>0;}
++        if(isLocalAction(j.action))unresolved||=this.volatile.has(entry.sessionId);else{const b=this.sync.runtimeGate.binding(entry.sessionId);unresolved||=!!b?.unknown||this.sync.runtimeGate.volatileUnknown.has(entry.sessionId)||this.volatile.has(entry.sessionId);}
+         const events=entry.agent.session.snapshotEvents(),answer=events.findLast(e=>e.type==='assistant/message'&&e.data.turn===entry.turn&&!e.data.message.toolCalls?.length),success=end.kind==='completed'&&!entry.reason&&j.modelRequests>0&&receipts.every(r=>r.state==='completed')&&!!answer;
+         const state=unresolved?'unknown':success?'awaiting_review':entry.reason&&/USER_PRIORITY|OWNER_CANCEL|APPROVAL_REVOKED|STOPPING/.test(entry.reason)?'cancelled':'failed';
+-        this.change(j,{state,reason:unresolved?'ACT_AI_RESULT_UNRESOLVED':entry.reason??(success?null:publicCode(end.error??{message:'ACT_AI_TURN_'+end.kind.toUpperCase()})),...this.artifacts(j),assistantEvent:answer?{sessionId:entry.sessionId,seq:answer.seq,turn:entry.turn}:null,receipts:receipts.map(r=>({requestId:r.requestId,state:r.state,chargedCostMicros:r.chargedCostMicros})),endedAt:this.store.now()},'ai_settled');
++        this.change(j,{state,reason:unresolved?'ACT_AI_RESULT_UNRESOLVED':entry.reason??(success?null:publicCode(end.error??{message:'ACT_AI_TURN_'+end.kind.toUpperCase()})),...this.artifacts(j),assistantEvent:answer?{sessionId:entry.sessionId,seq:answer.seq,turn:entry.turn}:null,receipts:receipts.map(r=>({requestId:r.requestId,state:r.state,...isLocalAction(j.action)?{kind:r.kind,usage:r.usage,usageStatus:r.usageStatus,resolution:r.resolution}:{chargedCostMicros:r.chargedCostMicros}})),endedAt:this.store.now()},'ai_settled');
+       }catch{this.volatile.add(entry.sessionId);try{this.change(j,{state:'unknown',reason:'ACT_AI_STORAGE_UNRESOLVED'},'ai_settle_failed');}catch{this.ctx.logger.warn('ACT_AI_STORAGE_UNRESOLVED');}}
+     })().finally(()=>{entry.done.resolve();this.finishing.delete(entry.id);});this.finishing.set(entry.id,flight);return flight;
+   }
+   tick(){
+     if(this.closed)return;for(const entry of this.active.values()){const j=this.job(entry.botId,entry.id),denial=this.check(j,entry.agent,{running:true});if(denial)this.stop(entry,denial);}
+-    if(!this.configured())return;
++    if(!this.configured()&&!this.local.configured())return;
+     for(const j of this.rows().sort((a,b)=>a.createdAt.localeCompare(b.createdAt))){
+       if(terminal.has(j.state)||['unknown','running','stopping','settling'].includes(j.state))continue;
+       if(!this.validApproval(j)){this.change(j,{state:'cancelled',reason:'ACT_AI_APPROVAL_REVOKED'},'ai_cancel_stale');continue;}
+@@ -142,20 +148,21 @@ export class EmployeeProactiveAi{
+     const j=this.job(p.botId,p.jobId);if(j.revision!==p.expectedRevision)fail('ACT_AI_CONFLICT');
+     if(p.action==='ai_job_resolve'){
+       assertPublicText(p.reason);if(j.state!=='unknown')fail('ACT_AI_NOT_UNKNOWN');if(this.active.has(j.action.sessionId))fail('ACT_AI_SESSION_BUSY');
++      if(isLocalAction(j.action))this.local.assertResolvable(j);else{
+       const b=this.sync.runtimeGate.binding(j.action.sessionId);if(b?.unknown||this.sync.runtimeGate.volatileUnknown.has(j.action.sessionId))fail('ACT_AI_EXECUTOR_UNRESOLVED');
+-      const receipts=await this.receipts(j);if(receipts.some(r=>!['completed','rejected','charged_ceiling'].includes(r.state)))fail('ACT_AI_MODEL_UNRESOLVED');
++      const receipts=await this.receipts(j);if(receipts.some(r=>!['completed','rejected','charged_ceiling'].includes(r.state)))fail('ACT_AI_MODEL_UNRESOLVED');}
+     }else if(terminal.has(j.state)||j.state==='unknown')fail('ACT_AI_REVIEW_REQUIRED');
+-    const result=this.store.mutate(j.botId,p.operationId,p.action,p,actor,()=>{const live=this.job(j.botId,j.id);if(live.revision!==p.expectedRevision)fail('ACT_AI_CONFLICT');return this.store.put({...live,revision:live.revision+1,state:p.action==='ai_job_resolve'?'reviewed_stopped':this.active.has(j.action.sessionId)?'stopping':'cancelled',reason:p.action==='ai_job_resolve'?p.reason:'ACT_AI_OWNER_CANCEL',updatedAt:this.store.now()},'proactive_ai',p.action,actor);});
++    const result=this.store.mutate(j.botId,p.operationId,p.action,p,actor,()=>{const live=this.job(j.botId,j.id);if(live.revision!==p.expectedRevision)fail('ACT_AI_CONFLICT');if(p.action==='ai_job_resolve'&&isLocalAction(live.action))this.local.resolve(live,p.reason);return this.store.put({...live,revision:live.revision+1,state:p.action==='ai_job_resolve'?'reviewed_stopped':this.active.has(j.action.sessionId)?'stopping':'cancelled',reason:p.action==='ai_job_resolve'?p.reason:'ACT_AI_OWNER_CANCEL',updatedAt:this.store.now()},'proactive_ai',p.action,actor);});
+     if(p.action==='ai_job_resolve')this.volatile.delete(j.action.sessionId);else{const entry=this.active.get(j.action.sessionId);if(entry?.id===j.id)this.stop(entry,'ACT_AI_OWNER_CANCEL');}return result;
+   }
+-  view(botId){return {configured:this.configured(),jobs:this.rows(botId).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,50),targets:this.sync?.runtimeGate?.bindings(botId).filter(b=>b.state!=='stopped').map(b=>({sessionId:b.sessionId,taskId:b.taskId,state:b.state,selection:this.ctx.agents.get(b.sessionId)?.model.current()??null}))??[]};}
++  view(botId){return {configured:this.configured(),localConfigured:this.local.configured(),localTargets:this.local.targets(botId),jobs:this.rows(botId).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,50),targets:this.sync?.runtimeGate?.bindings(botId).filter(b=>b.state!=='stopped').map(b=>({sessionId:b.sessionId,taskId:b.taskId,state:b.state,selection:this.ctx.agents.get(b.sessionId)?.model.current()??null}))??[]};}
+   async close(){this.closed=true;this.shutdown.abort(Error('ACT_AI_STOPPING'));for(const e of this.active.values())this.stop(e,'ACT_AI_STOPPING');await Promise.allSettled([...this.flights.values(),...this.finishing.values()]);await this.loader?.close();if(this.sync?.models?.proactive===this)delete this.sync.models.proactive;}
+ }
+ 
+ export function installProactiveAi(scope,directory,store,activity,sync,{intervalMs=1000}={}){
+   const engine=new EmployeeProactiveAi({ctx:scope,directory,store,activity,sync});
+   if(engine.configured()&&typeof scope.tools.guard!=='function')fail('ACT_AI_TOOL_GUARD_REQUIRED');
+-  const guard=engine.configured()?scope.tools.guard(exec=>engine.guard(exec)):()=>{};
++  const guard=typeof scope.tools.guard==='function'?scope.tools.guard(exec=>engine.guard(exec)):()=>{};
+   const loaderHost=scope.inject(['agentPresets','agents','agentTeams','agentDefaultModel','sessions','sessionPersistence'],ctx=>{engine.loader=createBotTaskRuntime(ctx);});
+   scope.on('agent/created',({agent})=>engine.cleanInbox(agent));for(const agent of scope.agents.list())engine.cleanInbox(agent);
+   scope.on('agent/inbox/inserted',({agent,message})=>{
+@@ -170,8 +177,9 @@ export function installProactiveAi(scope,directory,store,activity,sync,{interval
+   scope.on('agent/inbox/claimed',({agent,message,turn})=>{const e=engine.entry(agent);if(e&&agent.id===e.sessionId&&message.id===e.messageId){e.turn=turn;try{engine.change(engine.job(e.botId,e.id),{turn},'ai_turn_claimed');}catch{engine.volatile.add(e.sessionId);engine.stop(e,'ACT_AI_STORAGE_UNRESOLVED');}}});
+   scope.on('session/event',(session,event)=>{const e=engine.active.get(session.id);if(e&&event.type==='turn/end'&&event.data.turn===e.turn)void engine.finish(e,event.data.reason);});
+   scope.on('agent/pre-step',async(payload,next)=>{const e=engine.entry(payload.agent);if(!e)return next();const j=engine.job(e.botId,e.id),denial=e.reason??engine.check(j,payload.agent,{running:true,selection:payload.modelSelection});if(denial||j.modelRequests>=j.action.maxModelRequests){engine.stop(e,denial??'ACT_AI_REQUEST_LIMIT');return {kind:'reject'};}const decision=await next();const after=engine.check(engine.job(e.botId,e.id),payload.agent,{running:true,selection:payload.modelSelection});if(after){engine.stop(e,after);return {kind:'reject'};}return decision;});
+-  scope.on('tools/execute',async(exec,next)=>{const e=engine.entry(exec.agent);if(!e)return next();const before=exec.signal;exec.signal=AbortSignal.any([before,e.controller.signal]);try{return await next();}finally{exec.signal=before;}});
+-  scope.on('llm/stream',async function*(options,next){const agent=options.sessionId?scope.agents.get(options.sessionId):null,e=agent?engine.entry(agent):null;if(!e)return yield* next();if(!isAgentLoopRequest(options))throw new LlmError('ACT_AI_AUXILIARY_MODEL_DENIED','ACT_AI_AUXILIARY_MODEL_DENIED');const check=()=>{const reason=e.reason??engine.check(engine.job(e.botId,e.id),agent,{running:true,selection:options});if(reason)throw new LlmError(reason,'ACT_AI_ADMISSION_DENIED');};check();for await(const chunk of next()){check();yield chunk;}});
++  scope.on('tools/execute',async(exec,next)=>{const e=engine.entry(exec.agent);if(!e)return next();const before=exec.signal;exec.signal=AbortSignal.any([before,e.controller.signal]);try{return isLocalAction(engine.job(e.botId,e.id).action)?await engine.local.execute(exec,next,e):await next();}finally{exec.signal=before;}});
++  scope.on('llm/stream',async function*(options,next){const agent=options.sessionId?scope.agents.get(options.sessionId):null,e=agent?engine.entry(agent):null;if(!e)return yield* next();if(!isAgentLoopRequest(options))throw new LlmError('ACT_AI_AUXILIARY_MODEL_DENIED','ACT_AI_AUXILIARY_MODEL_DENIED');const check=()=>{const reason=e.reason??engine.check(engine.job(e.botId,e.id),agent,{running:true,selection:options});if(reason)throw new LlmError(reason,'ACT_AI_ADMISSION_DENIED');};check();if(isLocalAction(engine.job(e.botId,e.id).action))return yield* engine.local.stream(agent,options,next,e);for await(const chunk of next()){check();yield chunk;}});
++  scope.on('agent/request-error',async(payload,next)=>{const entry=engine.entry(payload.agent);if(entry&&isLocalAction(engine.job(entry.botId,entry.id).action)){engine.stop(entry,'ACT_AI_LOCAL_MODEL_UNRESOLVED');return;}return next();});
+   const timer=setInterval(()=>{try{engine.tick();}catch{scope.logger.warn('ACT_AI_SCAN_FAILED');}},intervalMs);timer.unref?.();
+   return {engine,async close(){clearInterval(timer);await engine.close();guard();await loaderHost.dispose();}};
+ }
+diff --git a/plugins/naumi-enterprise/package.json b/plugins/naumi-enterprise/package.json
+index a189b6e..ac67a88 100644
+--- a/plugins/naumi-enterprise/package.json
++++ b/plugins/naumi-enterprise/package.json
+@@ -55,6 +55,7 @@
+     "employee-models.js",
+     "employee-observation.js",
+     "employee-proactive-ai.js",
++    "employee-local-proactive.js",
+     "employee-runtime-gate.js",
+     "employee-runtime-policy.js",
+     "dingtalk-skills",
+@@ -76,7 +77,11 @@
+     "im-platforms.js",
+     "im-adapters",
+     "model-reasoning.js",
+-    "official-reasoning-specs.json"
++    "official-reasoning-specs.json",
++    "blender.js",
++    "blender-runtime.js",
++    "blender-bridge",
++    "blender-skills"
+   ],
+   "dsh": {
+     "bundle": {
+@@ -113,6 +118,7 @@
+     "@deepseek-ai/dsh-schedule": "0.2.2-rc.1",
+     "@deepseek-ai/dsh-skill-filesystem": "0.2.2-rc.1",
+     "@deepseek-ai/dsh-tool-executor-native": "0.2.2-rc.1",
+-    "@earendil-works/pi-ai": "1.5.2"
++    "@earendil-works/pi-ai": "1.5.2",
++    "@modelcontextprotocol/server": "2.2.0"
+   }
+ }
+diff --git a/scripts/deploy-local-proactive.mjs b/scripts/deploy-local-proactive.mjs
+new file mode 100644
+index 0000000..135e939
+--- /dev/null
++++ b/scripts/deploy-local-proactive.mjs
+@@ -0,0 +1,43 @@
++// Narrow main-only runtime delta. No account enrollment, provider calls, or task writes.
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';import {DatabaseSync} from 'node:sqlite';import {botLiveApi} from './bot-live-api.mjs';
++const root=process.cwd(),mode=process.argv[2]??'prepare',runtime=path.resolve(process.argv[3]??root),baseline='406277c1c6f3f892b5c2218911971927e8cef4d1';
++const installed=path.join(runtime,'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise'),backup=path.join(runtime,'runtime/local-proactive-load-'+randomUUID()),out=path.join(root,'evidence/local-proactive');
++const files=['employee-proactive-ai.js','employee-activity-store.js','employee-activity.js','employee-local-proactive.js','assets/employee-activity-panel.js','assets/employee-center.js','package.json'];
++const read=p=>fs.readFileSync(p),sha=v=>createHash('sha256').update(v).digest('hex'),norm=v=>v.toString().replaceAll('\r\n','\n');
++const inventory=()=>Object.fromEntries(fs.readdirSync(installed,{recursive:true}).filter(f=>fs.statSync(path.join(installed,f)).isFile()).map(f=>[f.replaceAll('\\','/'),sha(read(path.join(installed,f)))]));
++const sourceCommit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
++fs.mkdirSync(backup,{recursive:true});fs.mkdirSync(out,{recursive:true});const original=inventory(),rows=[];
++for(const file of files){const target=path.join(installed,file),before=fs.existsSync(target)?read(target):null,source=read(path.join(root,'plugins/naumi-enterprise',file));let after=source;assert.equal(norm(source),norm(execFileSync('git',['show',sourceCommit+':plugins/naumi-enterprise/'+file])),'SOURCE_NOT_COMMITTED '+file);
++ if(file==='employee-local-proactive.js')assert.equal(before,null,'LOCAL_MODULE_ALREADY_PRESENT');else if(file==='package.json'){assert(before,'RUNTIME_PACKAGE_MISSING');const pkg=JSON.parse(before);assert(!pkg.files.includes('employee-local-proactive.js'));pkg.files.push('employee-local-proactive.js');after=Buffer.from(JSON.stringify(pkg,null,2)+'\n');JSON.parse(after.toString());}else{assert(before,'RUNTIME_FILE_MISSING '+file);assert.equal(norm(before),norm(execFileSync('git',['show',baseline+':plugins/naumi-enterprise/'+file])),'RUNTIME_DRIFT '+file);}
++ for(const[kind,bytes]of[['before',before],['after',after]])if(bytes){const p=path.join(backup,kind,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);}
++ rows.push({file,beforeSHA256:before?sha(before):null,afterSHA256:sha(after)});
++}
++fs.writeFileSync(path.join(backup,'manifest.json'),JSON.stringify({baseline,rows},null,2));
++if(mode==='prepare'){console.log('LOCAL_PROACTIVE_PREPARED files=7 host_client=UNCHANGED backup='+backup);process.exit(0);}assert.equal(mode,'apply');
++assert.equal(execFileSync('git',['branch','--show-current'],{encoding:'utf8'}).trim(),'main');const unrelatedTracked=execFileSync('git',['diff','HEAD','--name-only','-z'],{encoding:'utf8'}).split('\0').filter(Boolean);assert(unrelatedTracked.every(f=>!files.map(p=>'plugins/naumi-enterprise/'+p).includes(f)),'TASK_SOURCE_DIRTY');
++const untracked=execFileSync('git',['ls-files','--others','--exclude-standard','-z'],{encoding:'utf8'}).split('\0').filter(f=>f&&!f.startsWith('evidence/local-proactive/')),untrackedHashes=Object.fromEntries(untracked.map(f=>[f,sha(read(path.join(root,f)))]));
++const api=await botLiveApi(runtime),sessions=await api.rpc('session/list',{_request:{}}),bots=await api.json('/naumi/bots'),tasks=await api.json('/naumi/bot-tasks'),models=sha(JSON.stringify(await api.json('/naumi/model-connections')));
++assert(!sessions.items.some(s=>s.running),'RUNNING_SESSIONS');assert(!tasks.tasks.some(t=>['queued','starting','running','waiting'].includes(t.status)),'ACTIVE_TASKS');
++const groupRows=()=>{const db=new DatabaseSync(path.join(runtime,'.dsh/naumi/bot-groups.sqlite'),{readOnly:true});try{const rows=Object.fromEntries(['rooms','members','posts','replies','post_context','room_name_operations'].map(t=>[t,db.prepare('SELECT * FROM '+t+' ORDER BY rowid').all()]));assert(!rows.replies.some(r=>['queued','starting','sent'].includes(r.state)),'GROUP_BUSY');return sha(JSON.stringify(rows));}finally{db.close();}};
++const groupsBefore=groupRows(),employees=async api=>Object.fromEntries(await Promise.all(bots.bots.map(async b=>{const {exportedAt,...v}=await api.json('/naumi/employees?view=export&botId='+encodeURIComponent(b.id));return[b.id,sha(JSON.stringify(v))];}))),employeesBefore=await employees(api);
++const protectedPaths=['.dsh/.credentials.yaml','.dsh/cordis.patch.yml','.dsh/profiles/web/package.json','.dsh/profiles/web/cordis.yml','.dsh/profiles/web/cordis.patch.yml','.dsh/naumi/bots.json','.dsh/naumi/bot-tasks.json','config/local.json','node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'];
++for(const f of fs.readdirSync(path.join(runtime,'.dsh/sessions'),{recursive:true}))if(path.basename(f)==='session.v4.jsonl.zstd')protectedPaths.push('.dsh/sessions/'+f);
++const protectedBefore=Object.fromEntries(protectedPaths.filter(f=>fs.existsSync(path.join(runtime,f))).map(f=>[f,sha(read(path.join(runtime,f)))]));
++const shell=name=>{const r=spawnSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-File',path.join(runtime,name)],{windowsHide:true,stdio:'ignore',timeout:150000});assert.equal(r.status,0,'SERVICE_COMMAND '+name);};
++const atomic=(p,bytes)=>{fs.mkdirSync(path.dirname(p),{recursive:true});const tmp=p+'.'+randomUUID()+'.tmp';fs.writeFileSync(tmp,bytes);fs.renameSync(tmp,p);};let complete=false;
++try{
++ shell('Stop-Naumi.ps1');for(const[f,h]of Object.entries(protectedBefore))assert.equal(sha(read(path.join(runtime,f))),h,'PRELOAD_DATA_DRIFT '+f);
++ for(const r of rows){const p=path.join(installed,r.file);if(r.beforeSHA256)assert.equal(sha(read(p)),r.beforeSHA256,'PRELOAD_RUNTIME_DRIFT');else assert(!fs.existsSync(p));}
++ for(const r of rows)atomic(path.join(installed,r.file),read(path.join(backup,'after',r.file)));shell('Start-Naumi.ps1');
++ const loaded=await botLiveApi(runtime),afterSessions=await loaded.rpc('session/list',{_request:{}});assert(!afterSessions.items.some(s=>s.running));assert.equal(afterSessions.items.length,sessions.items.length);
++ for(const f of ['employee-activity-panel.js','employee-center.js'])assert.equal((await loaded.request('/naumi/assets/'+f)).status,200);const localHeaders=await loaded.request('/naumi/employee-activity?botId='+encodeURIComponent(bots.bots[0].id));assert.equal(localHeaders.status,200);assert.equal(localHeaders.headers.get('x-naumi-local-proactive'),'1');for(const bot of bots.bots){const v=await loaded.json('/naumi/employee-activity?botId='+encodeURIComponent(bot.id));assert(v.proactive.localConfigured);assert(!v.rules.some(r=>r.config.action.kind==='run_local_agent'&&r.enabled),'UNEXPECTED_LOCAL_RULE_ENABLED');}
++ assert.deepEqual(await loaded.json('/naumi/bots'),bots);assert.deepEqual(await loaded.json('/naumi/bot-tasks'),tasks);assert.equal(sha(JSON.stringify(await loaded.json('/naumi/model-connections'))),models);assert.deepEqual(await employees(loaded),employeesBefore);assert.equal(groupRows(),groupsBefore);
++ const after=inventory();for(const r of rows)assert.equal(after[r.file],r.afterSHA256);for(const[f,h]of Object.entries(original))if(!files.includes(f))assert.equal(after[f],h,'UNRELATED_RUNTIME '+f);
++ for(const[f,h]of Object.entries(protectedBefore))assert.equal(sha(read(path.join(runtime,f))),h,'PROTECTED_DATA '+f);for(const[f,h]of Object.entries(untrackedHashes))assert.equal(sha(read(path.join(root,f))),h,'OTHER_EVIDENCE_CHANGED '+f);
++ fs.writeFileSync(path.join(out,'DEPLOYMENT.json'),JSON.stringify({status:'PASS',sourceCommit,files:rows,backup,http:200,sessions:afterSessions.items.length,running:0,bots:bots.bots.length,revision:bots.revision,automaticLocalRulesEnabled:false,enterpriseConfigurationChanges:0,modelCalls:0,modelGroupsUnchanged:true,employeeExportsUnchanged:true,taskAndGroupRowsUnchanged:true,protectedFilesUnchanged:Object.keys(protectedBefore).length,unrelatedRuntimeUnchanged:Object.keys(original).filter(f=>!files.includes(f)).length,otherUntrackedFilesPreserved:untracked.length,unrelatedTrackedEditsNotTouched:unrelatedTracked,nativeComposerUnchanged:true,packageChange:"append_employee-local-proactive.js_only"},null,2)+'\n');
++ complete=true;console.log('LOCAL_PROACTIVE_LOADED files=7 http=200 running=0 models=UNCHANGED employees=UNCHANGED tasks=UNCHANGED groups=UNCHANGED account_data=UNCHANGED model_calls=0');
++}finally{if(!complete){
++ const dataFile=path.join(runtime,'.dsh/naumi/bots.json'),expected=protectedBefore['.dsh/naumi/bots.json'];
++ if(expected&&sha(read(dataFile))!==expected)console.error('LOCAL_PROACTIVE_LOAD_INCOMPLETE new_directory_metadata=RETAINED compatible_reader=RETAINED backup='+backup);
++ else{try{shell('Stop-Naumi.ps1');}catch{}for(const r of rows){const p=path.join(installed,r.file);if(r.beforeSHA256)atomic(p,read(path.join(backup,'before',r.file)));else if(fs.existsSync(p))fs.unlinkSync(p);}shell('Start-Naumi.ps1');console.error('LOCAL_PROACTIVE_LOAD_FAILED runtime=RESTORED backup='+backup);}
++}}
+diff --git a/scripts/package-local-proactive.mjs b/scripts/package-local-proactive.mjs
+new file mode 100644
+index 0000000..4c00461
+--- /dev/null
++++ b/scripts/package-local-proactive.mjs
+@@ -0,0 +1,11 @@
++import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';
++const root=process.cwd(),out=path.join(root,'evidence/local-proactive'),baseline='406277c1c6f3f892b5c2218911971927e8cef4d1';
++const paths=[".gitattributes", "docs/prd/DAILY_EMPLOYEE_PRIORITY.md", "docs/prd/GOAL_TRACKER.md", "docs/prd/DIGITAL_EMPLOYEE_DELIVERY.md", "docs/implementation/LOCAL_PROACTIVE_DESIGN.md", "docs/implementation/LOCAL_PROACTIVE_EXECUTION.md", "plugins/naumi-enterprise/employee-proactive-ai.js", "plugins/naumi-enterprise/employee-activity-store.js", "plugins/naumi-enterprise/employee-activity.js", "plugins/naumi-enterprise/employee-local-proactive.js", "plugins/naumi-enterprise/assets/employee-activity-panel.js", "plugins/naumi-enterprise/assets/employee-center.js", "plugins/naumi-enterprise/package.json", "tests/naumi-daily-work.test.mjs", "scripts/verify-daily-work-ui.mjs", "tests/helpers/local-proactive-host.mjs", "tests/naumi-local-proactive.test.mjs", "scripts/verify-local-proactive-ui.mjs", "scripts/verify-local-proactive-kill.mjs", "scripts/package-local-proactive.mjs", "scripts/deploy-local-proactive.mjs", "evidence/daily-work/DEPLOYMENT.json", "evidence/daily-work/DEPLOYMENT.log"];
++const hash=b=>createHash('sha256').update(b).digest('hex'),manifest={baseline,entries:[]};
++for(const file of paths){const original=path.join(out,'original',file);let before=null;if(fs.existsSync(original))before=fs.readFileSync(original);else{try{before=execFileSync('git',['show',baseline+':'+file],{stdio:['ignore','pipe','ignore']});}catch{}if(before){fs.mkdirSync(path.dirname(original),{recursive:true});fs.writeFileSync(original,before);}}const bytes=fs.readFileSync(path.join(root,file));manifest.entries.push({path:file,original:before?hash(before):null,modified:hash(bytes)});}
++fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
++fs.writeFileSync(path.join(out,'ROLLBACK.sh'),`#!/usr/bin/env bash\nset -euo pipefail\nHERE="$(cd "$(dirname "$0")" && pwd)"\nnode - "$1" "$HERE" <<'NODE'\nconst fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');const target=path.resolve(process.argv[2]),out=path.resolve(process.argv[3]);if(!fs.existsSync(path.join(target,'.naumi-local-proactive-rollback-copy')))throw Error('MARKED_COPY_REQUIRED');if(target===path.resolve(out,'../..'))throw Error('SOURCE_TARGET_REJECTED');const m=JSON.parse(fs.readFileSync(path.join(out,'manifest.json'))),hash=b=>crypto.createHash('sha256').update(b).digest('hex');for(const e of m.entries){const file=path.resolve(target,e.path);if(!file.startsWith(target+path.sep))throw Error('INVALID_TARGET');if(fs.existsSync(file)&&hash(fs.readFileSync(file))!==e.modified)throw Error('COPY_CHANGED '+e.path);if(e.original){const bytes=fs.readFileSync(path.join(out,'original',e.path));if(hash(bytes)!==e.original)throw Error('ORIGINAL_CHANGED');fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,bytes);}else if(fs.existsSync(file))fs.unlinkSync(file);}for(const e of m.entries){const file=path.join(target,e.path);if(e.original?hash(fs.readFileSync(file))!==e.original:fs.existsSync(file))throw Error('RESTORE_FAILED');}console.log('ROLLBACK_SOURCE originals='+m.entries.filter(e=>e.original).length+' new_removed='+m.entries.filter(e=>!e.original).length+' hashes=PASS live_data=UNTOUCHED');\nNODE\n`);
++const patch=execFileSync('git',['diff',baseline,'--binary','--',...paths]);fs.writeFileSync(path.join(out,'DIFF_FILE.patch'),patch);if(!patch.length)throw Error('NO_TASK_CHANGES');
++execFileSync('python',['-X','utf8','-c',"import json,zipfile,pathlib; r=pathlib.Path('.'); o=r/'evidence/local-proactive'; m=json.loads((o/'manifest.json').read_text()); z=zipfile.ZipFile(o/'MODIFIED_FILE.zip','w',zipfile.ZIP_DEFLATED); [z.write(r/e['path'],e['path']) for e in m['entries']]; z.close(); z=zipfile.ZipFile(o/'MODIFIED_FILE.zip'); assert z.testzip() is None; print('ZIP entries='+str(len(z.namelist()))+' CRC=PASS')"],{stdio:'inherit'});
++if(process.argv.includes('--rollback-test')){const copy=path.join(root,'runtime/local-proactive-source-rollback-final-3');if(fs.existsSync(copy))throw Error('COPY_ALREADY_EXISTS');fs.mkdirSync(copy,{recursive:true});fs.writeFileSync(path.join(copy,'.naumi-local-proactive-rollback-copy'),'source-only');for(const dir of ['plugins','tests'])fs.cpSync(path.join(root,dir),path.join(copy,dir),{recursive:true});fs.copyFileSync(path.join(root,'package.json'),path.join(copy,'package.json'));for(const e of manifest.entries){const dest=path.join(copy,e.path);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(path.join(root,e.path),dest);}fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');fs.mkdirSync(path.join(copy,'desktop'));fs.cpSync(path.join(root,'services'),path.join(copy,'services'),{recursive:true});for(const dir of ['app','installer','scripts'])fs.cpSync(path.join(root,'desktop',dir),path.join(copy,'desktop',dir),{recursive:true});fs.symlinkSync(path.join(root,'desktop/node_modules'),path.join(copy,'desktop/node_modules'),'junction');const r=spawnSync('D:/DEV/Git/bin/bash.exe',[path.join(out,'ROLLBACK.sh'),copy],{encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK.log'),r.stdout+r.stderr);if(r.status!==0)throw Error('ROLLBACK_FAILED '+r.stdout+r.stderr);console.log(r.stdout.trim());const t=spawnSync(process.execPath,['--test','tests/naumi-proactive-ai.test.mjs','tests/naumi-employee-activity.test.mjs'],{cwd:copy,encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK_TESTS.log'),t.stdout+t.stderr);if(t.status!==0)throw Error('ROLLBACK_TESTS_FAILED '+t.stdout);console.log('ROLLBACK tests=35 pass=35 fail=0 exit=0');}
++for(const e of manifest.entries)if(hash(fs.readFileSync(path.join(root,e.path)))!==e.modified)throw Error('MODIFIED_SOURCE_CHANGED');console.log('ARTIFACTS paths='+paths.length+' modified=RETAINED enterprise=UNCHANGED');
+diff --git a/scripts/verify-daily-work-ui.mjs b/scripts/verify-daily-work-ui.mjs
+index d2395eb..8799db6 100644
+--- a/scripts/verify-daily-work-ui.mjs
++++ b/scripts/verify-daily-work-ui.mjs
+@@ -18,7 +18,7 @@ try{
+  await page.goto(launch);await page.locator('.naumi-navigation-switch').waitFor();await page.locator('.naumi-navigation-switch button').nth(1).click();
+  const open=async()=>{await page.getByRole('button',{name:'日常助手的设置',exact:true}).click();await page.getByRole('menuitem',{name:'工作与交付',exact:true}).click();await page.locator('[data-daily-work]').waitFor();await page.getByRole('button',{name:'创建目标',exact:true}).waitFor();};
+  await open();check('ordinary_menu_opens_shared_work_component_without_enterprise_role',await page.locator('[data-daily-work]').isVisible());
+- let workOpen=true;page.on('request',req=>{if(workOpen&&/\/naumi\/(?:workspace|employee-(?:sync|enterprise|runtime|models|activity))/.test(req.url()))businessRequests.push(req.url());});
++ let workOpen=true;page.on('request',req=>{if(workOpen&&/\/naumi\/(?:workspace|employee-(?:sync|enterprise|runtime|models))/.test(req.url()))businessRequests.push(req.url());});
+  let work=page.locator('[data-daily-work]');check('advanced_roster_tabs_heartbeat_and_ids_absent',!(await work.innerText()).match(/高级管理|心跳|运行会话|设备登记|同步配置|本地版本|修改档案/)&&await work.locator('.emp-roster,.emp-tabs').count()===0);
+  let dropGoal=true,retryId;await page.route('**/naumi/employee-work',async route=>{if(route.request().method()==='POST'){const body=route.request().postDataJSON();if(body.action==='goal_create'){if(dropGoal){dropGoal=false;retryId=body.operationId;await route.fetch();await route.abort('failed');return;}check('lost_goal_receipt_reuses_operation_id',retryId===body.operationId);}}await route.continue();});await work.getByRole('button',{name:'创建目标',exact:true}).click();let modal=page.getByRole('dialog',{name:'创建工作目标',exact:true});await modal.getByLabel('目标名称').fill('提交活动方案');await modal.getByLabel('验收条件（每行一项）').fill('来源可核验\n有明确行动清单');await modal.getByRole('button',{name:'创建目标',exact:true}).click();await modal.getByRole('alert').waitFor();check('failed_goal_submit_keeps_draft',await modal.getByLabel('目标名称').inputValue()==='提交活动方案');await modal.getByRole('button',{name:'创建目标',exact:true}).click();await modal.waitFor({state:'hidden'});await page.unroute('**/naumi/employee-work');await work.getByRole('heading',{name:'提交活动方案',exact:true}).waitFor();check('goal_created_through_real_owner_http', (await call('/naumi/employee-work?botId='+bot.id)).goals.length===1);
+  await work.getByRole('button',{name:'编辑目标',exact:true}).click();modal=page.getByRole('dialog',{name:'编辑工作目标',exact:true});await modal.getByLabel('工作说明').fill('保留当前草稿');let g=(await call('/naumi/employee-work?botId='+bot.id)).goals[0];const concurrent=await fetch(base+'/naumi/employee-work',{method:'POST',headers:{...headers,'x-naumi-employee-work':'1'},body:JSON.stringify({action:'goal_update',botId:bot.id,goalId:g.id,expectedRevision:g.revision,operationId:randomUUID(),patch:{description:'另一个页面已保存'}})});assert.equal(concurrent.status,200);await modal.getByRole('button',{name:'保存目标',exact:true}).click();await modal.getByRole('alert').waitFor();check('conflict_preserves_draft_without_overwriting',await modal.getByLabel('工作说明').inputValue()==='保留当前草稿'&&(await call('/naumi/employee-work?botId='+bot.id)).goals[0].description==='另一个页面已保存');await modal.getByRole('button',{name:'关闭弹窗',exact:true}).click();
+diff --git a/scripts/verify-local-proactive-kill.mjs b/scripts/verify-local-proactive-kill.mjs
+new file mode 100644
+index 0000000..91da643
+--- /dev/null
++++ b/scripts/verify-local-proactive-kill.mjs
+@@ -0,0 +1,17 @@
++import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import assert from 'node:assert/strict';import {spawn} from 'node:child_process';
++import {localProactiveHost} from '../tests/helpers/local-proactive-host.mjs';
++import {EmployeeStore} from '../plugins/naumi-enterprise/employee-store.js';import {BotDirectory} from '../plugins/naumi-enterprise/bots.js';import {EmployeeActivityStore} from '../plugins/naumi-enterprise/employee-activity-store.js';import {EmployeeProactiveAi} from '../plugins/naumi-enterprise/employee-proactive-ai.js';
++if(process.argv.includes('--child')){
++ const f=await localProactiveHost();f.mode('hang');f.enable(f.rule());f.advance(61000);f.tick();await f.waitFor(()=>f.calls===1);console.log('LOCAL_KILL_READY '+JSON.stringify({dir:f.dir,botId:f.bot.id,jobId:f.engine.rows(f.bot.id)[0].id,calls:f.calls}));await new Promise(()=>{});
++}else{
++ const out=path.resolve('evidence/local-proactive');fs.mkdirSync(out,{recursive:true});const child=spawn(process.execPath,[path.resolve('scripts/verify-local-proactive-kill.mjs'),'--child'],{cwd:process.cwd(),stdio:['ignore','pipe','pipe'],windowsHide:true});let text='',errors='',receipt;
++ child.stdout.on('data',b=>text+=b);child.stderr.on('data',b=>errors+=b);try{
++ const end=Date.now()+15000;while(Date.now()<end){const match=text.match(/LOCAL_KILL_READY (\{[^\n]+\})/);if(match){receipt=JSON.parse(match[1]);break;}if(child.exitCode!==null)throw Error('CHILD_EARLY_EXIT '+errors);await new Promise(r=>setTimeout(r,20));}assert(receipt,'CHILD_READY_TIMEOUT '+errors);
++ child.kill('SIGKILL');await new Promise(r=>child.exitCode!==null||child.signalCode!==null?r():child.once('close',r));assert.notEqual(child.exitCode,0);
++ const store=new EmployeeStore(path.join(receipt.dir,'employees.sqlite')),directory=new BotDirectory(path.join(receipt.dir,'bots.json')),activity=new EmployeeActivityStore(store);const initial=store.entity(receipt.botId,receipt.jobId);assert.equal(initial.state,'running');store.clock=()=>new Date(Date.parse(initial.startedAt)+120000);
++ let dispatches=0;const ctx={tools:{guard:()=>()=>{},schemas:()=>[]},agents:{list:()=>[],get:()=>undefined},agentTeams:{tryMembership:()=>undefined},logger:{warn:()=>{}}};const engine=new EmployeeProactiveAi({ctx,directory,store,activity});engine.loader={ensure:async()=>{dispatches++;throw Error('UNEXPECTED_REPLAY');},close:async()=>{}};
++ assert.equal(engine.job(receipt.botId,receipt.jobId).state,'unknown');assert(engine.local.receipts(initial).every(r=>r.state==='unknown'));activity.tick([receipt.botId]);engine.tick();await new Promise(r=>setTimeout(r,30));assert.equal(dispatches,0);assert.equal(engine.rows(receipt.botId).length,1);
++ const job=engine.job(receipt.botId,receipt.jobId);await engine.command({action:'ai_job_resolve',botId:receipt.botId,jobId:job.id,expectedRevision:job.revision,operationId:'post-kill-owner-confirmed',confirmedStopped:true,reason:'原测试进程已强杀并核对停止，无外部副作用'});assert.equal(engine.job(receipt.botId,job.id).state,'reviewed_stopped');assert(engine.local.receipts(initial).every(r=>r.state==='unknown'&&r.resolution));await engine.close();store.close();await directory.close();
++ fs.writeFileSync(path.join(out,'KILL_RECOVERY.json'),JSON.stringify({status:'PASS',childExitCode:child.exitCode,childSignalCode:child.signalCode,modelCallsBeforeKill:receipt.calls,unknownAfterRestart:true,noReplay:dispatches===0,ownerReconciliation:'reviewed_stopped',originalUnknownPreserved:true,realEmployeeWrites:0},null,2)+'\n');console.log('KILL_RECOVERY model_calls=1 restarted_unknown=PASS replay=0 owner_confirmation=PASS original_unknown=PRESERVED');
++ }finally{if(child.exitCode===null&&child.signalCode===null){child.kill('SIGKILL');await new Promise(r=>child.once('close',r));}fs.writeFileSync(path.join(out,'KILL_CHILD.log'),text+errors);if(receipt?.dir){const target=path.resolve(receipt.dir);assert(target.startsWith(path.resolve(os.tmpdir())+path.sep)&&path.basename(target).startsWith('naumi-local-ai-'));fs.rmSync(target,{recursive:true,force:true});}}
++}
+diff --git a/scripts/verify-local-proactive-ui.mjs b/scripts/verify-local-proactive-ui.mjs
+new file mode 100644
+index 0000000..2e36b88
+--- /dev/null
++++ b/scripts/verify-local-proactive-ui.mjs
+@@ -0,0 +1,28 @@
++// Full isolated Harness, native Agent tool execution, SQLite/HTTP and real React shell.
++// The only inference endpoint is this script's deterministic loopback SSE fixture.
++import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';import {spawn} from 'node:child_process';import {stringify} from 'yaml';import {chromium} from '../desktop/node_modules/playwright/index.mjs';
++const root=process.cwd(),out=path.join(root,'evidence/local-proactive'),temp=path.join(root,'runtime/local-proactive-'+randomUUID()),home=path.join(temp,'home'),profile=path.join(home,'profiles/web');fs.mkdirSync(path.join(profile,'node_modules/@naumi'),{recursive:true});fs.mkdirSync(out,{recursive:true});
++for(const [name,folder]of [['dsh-enterprise','naumi-enterprise'],['dsh-ui-layout','naumi-ui-layout'],['dsh-sidebar-browser','naumi-sidebar-browser']])fs.symlinkSync(path.join(root,'plugins',folder),path.join(profile,'node_modules/@naumi',name),'junction');fs.symlinkSync(path.join(root,'node_modules/@deepseek-ai'),path.join(profile,'node_modules/@deepseek-ai'),'junction');
++fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'naumi-daily-work-fixture',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}}));
++let goalId;const requests=[];const upstream=http.createServer(async(req,res)=>{let raw='';for await(const part of req)raw+=part;const body=JSON.parse(raw);requests.push({model:body.model});const after=body.messages.at(-1)?.role==='tool',delta=after?{role:'assistant',content:'已保存本地交付，等待审核。'}:{role:'assistant',tool_calls:[{index:0,id:'local-draft-call',type:'function',function:{name:'employee_delivery_create',arguments:JSON.stringify({goalId,title:'主动分析交付',fileName:'主动分析.md',content:'# 主动分析\n实际本地交付内容',operationId:'local-ui-draft-once'})}}]};res.writeHead(200,{'Content-Type':'text/event-stream'});for(const chunk of [{choices:[{index:0,delta,finish_reason:null}]},{choices:[{index:0,delta:{},finish_reason:after?'stop':'tool_calls'}],usage:{prompt_tokens:12,completion_tokens:3,total_tokens:15}}])res.write('data: '+JSON.stringify({id:'local-'+requests.length,object:'chat.completion.chunk',created:1,model:body.model,...chunk})+'\n\n');res.end('data: [DONE]\n\n');});await new Promise(r=>upstream.listen(0,'127.0.0.1',r));
++fs.writeFileSync(path.join(home,'cordis.patch.yml'),stringify([{id:'ui-theme',config:{preference:'light'}},{id:'agent-default-model',config:{provider:'fixture',model:'fixture-model'}}]));fs.writeFileSync(path.join(profile,'cordis.patch.yml'),stringify([{id:'ui-settings-general',config:{welcomeNoticeVersion:'2026-09-28.1'}},{id:'llm-pi-ai',config:{providers:{fixture:{displayName:'隔离测试连接',api:'openai-completions',baseURL:'http://127.0.0.1:'+upstream.address().port+'/v1',apiKeyEnv:'NAUMI_MANAGEMENT_FIXTURE_KEY',models:[{id:'fixture-model',name:'同一模型',contextWindow:128000,maxTokens:2048,reasoningEfforts:false}]}}}}]));
++const sock=http.createServer();await new Promise(r=>sock.listen(0,'127.0.0.1',r));const port=sock.address().port;await new Promise(r=>sock.close(r));const base='http://127.0.0.1:'+port,child=spawn(process.execPath,[path.join(root,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'web','--host','127.0.0.1','--port',String(port),'--no-open'],{cwd:root,env:{...process.env,DSH_HOME:home,DSH_TELEMETRY_MODE:'DISABLED',NAUMI_MANAGEMENT_FIXTURE_KEY:'local-fixture-only'},windowsHide:true});let output='',browser;child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);const checks=[];const check=(name,value)=>{assert(value,name);checks.push(name);console.log('LOCAL_UI_PASS '+name);};
++
++try{
++ let launch;for(let i=0;i<180;i++){launch=output.match(new RegExp(base.replaceAll('.','\\.')+'/?\\?token=[A-Za-z0-9_~.%-]+'))?.[0];if(launch)break;if(child.exitCode!==null)throw Error('HOST_BOOT_FAILED');await new Promise(r=>setTimeout(r,300));}assert(launch,'HOST_BOOT_TIMEOUT');
++ const exchange=await fetch(launch,{redirect:'manual'}),cookie=exchange.headers.getSetCookie().map(s=>s.split(';')[0]).join('; '),headers={cookie,'Content-Type':'application/json','x-naumi-bots':'1',origin:base};
++ const call=async(url,body)=>{const r=await fetch(base+url,{headers,...body?{method:'POST',body:JSON.stringify(body)}:{}}),v=await r.json();assert(r.ok,JSON.stringify(v));return v;};const rpc=async(method,args)=>{const v=await call('/api/'+method,{type:'client-request',rpcId:randomUUID(),method,payload:{args}});assert(v.result?.ok,JSON.stringify(v));return v.result.value;};
++ const cwd=path.join(temp,'workspace');fs.mkdirSync(cwd);const workspace=await rpc('workspace/create',{request:{path:cwd}}),bot=await call('/naumi/bots',{action:'create-primary',requestId:randomUUID(),expectedRevision:0,name:'主动工作助手',workspaceId:workspace.workspace.workspaceId});
++ const create=await fetch(base+'/naumi/employee-work',{method:'POST',headers:{...headers,'x-naumi-employee-work':'1'},body:JSON.stringify({action:'goal_create',botId:bot.id,operationId:randomUUID(),title:'整理本地分析',criteria:['提供可审核的成果']})});assert.equal(create.status,200);goalId=(await create.json()).id;
++ browser=await chromium.launch({headless:true,channel:'chrome'});const context=await browser.newContext({viewport:{width:1360,height:960},colorScheme:'light',timezoneId:'UTC'}),page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(15000);
++ await page.route('**/naumi/workspace',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'ENTERPRISE_NOT_CONNECTED'})}));await page.goto(launch,{waitUntil:'domcontentloaded'});await page.locator('.naumi-navigation-switch').waitFor();await page.locator('.naumi-navigation-switch button').nth(1).click();await page.getByRole('button',{name:'主动工作助手的设置',exact:true}).click();await page.getByRole('menuitem',{name:'工作与交付',exact:true}).click();const work=page.locator('[data-daily-work]'),activity=work.locator('[data-employee-activity]');await activity.getByRole('heading',{name:'主动工作',exact:true}).waitFor();
++ check('ordinary_daily_local_entry_without_enterprise',await activity.isVisible());check('internal_console_not_exposed',!(await activity.innerText()).match(/运行与能力|采样时间|设备登记|执行器|naumi-enterprise|预算|fencing/));
++ await activity.getByRole('button',{name:'新增规则',exact:true}).click();const form=activity.locator('.emp-rule-form');await form.getByLabel('规则名称').fill('整理今天的分析');await form.getByLabel('触发方式').selectOption('at');const at=new Date(Date.now()-60000).toISOString().slice(0,16);await form.getByLabel('触发时间').fill(at);await form.getByLabel('执行指令').fill('根据目标与已有记忆形成分析稿，保存交付等待审核');for(const box of await form.locator('.emp-weekdays input').all())await box.check();await form.getByLabel('开始',{exact:true}).fill('00:00');await form.getByLabel('结束',{exact:true}).fill('24:00');await form.getByLabel('最多执行次数').fill('1');
++ check('local_approval_form_hides_enterprise_session_ids',!(await form.innerText()).match(/受管|taskId|session-|批准模型|设备|网关/));await form.getByRole('button',{name:'保存为停用规则',exact:true}).click();await form.waitFor({state:'hidden'});let state=await call('/naumi/employee-activity?botId='+bot.id);check('save_is_disabled_and_zero_inference',state.rules.length===1&&!state.rules[0].enabled&&requests.length===0);check('local_scope_has_no_enterprise_task_or_credentials',state.rules[0].config.action.kind==='run_local_agent'&&!('taskId' in state.rules[0].config.action)&&!('tenantId' in state.rules[0].config.action));await activity.getByRole('button',{name:'确认启用',exact:true}).click();
++ const deadline=Date.now()+90000;while(Date.now()<deadline){state=await call('/naumi/employee-activity?botId='+bot.id);if(state.proactive.jobs.some(j=>j.state==='awaiting_review'))break;await new Promise(r=>setTimeout(r,1000));}const job=state.proactive.jobs[0];if(!job||job.state!=='awaiting_review'){fs.writeFileSync(path.join(out,'UI_STATE.json'),JSON.stringify({state,requests},null,2));throw Error('LOCAL_JOB_NOT_READY '+(job?.reason??'no occurrence'));}check('approved_rule_executes_original_agent_and_native_tools',job.modelRequests===2&&requests.length===2&&job.deliveryIds.length===1);check('one_shot_no_storm_and_no_enterprise_registration',state.rules[0].actionCount===1&&!state.rules[0].enabled);
++ const summary=await call('/naumi/employee-work?botId='+bot.id),details=await call('/naumi/employee-work?botId='+bot.id+'&view=delivery&deliveryId='+job.deliveryIds[0]);check('immutable_draft_not_self_accepted',details.businessStatus==='draft'&&details.currentContent.includes('实际本地交付内容')&&summary.goals[0].status==='planned');check('native_model_choice_preserved',state.proactive.localTargets.some(t=>t.selection.provider==='fixture'&&t.selection.model==='fixture-model'));
++ await work.locator('.emp-delivery-row').waitFor({timeout:45000});check('new_work_refreshes_into_daily_delivery_list',await work.locator('.emp-delivery-row').count()===1);
++ const previous=state.rules[0],strict={...previous.config,action:{...previous.config.action,allowedTools:['employee_delivery_create'],maxToolCalls:1,maxModelRequests:2}};const stricter=await fetch(base+'/naumi/employee-activity',{method:'POST',headers:{...headers,'x-naumi-employee-activity':'1'},body:JSON.stringify({action:'rule_update',botId:bot.id,ruleId:previous.id,expectedRevision:previous.revision,operationId:randomUUID(),config:strict})});assert.equal(stricter.status,200);await activity.getByRole('button',{name:'刷新',exact:true}).click();await activity.getByRole('button',{name:'编辑',exact:true}).click();const edit=activity.locator('.emp-rule-form');await edit.getByLabel('规则名称').fill('调整后的分析计划');await edit.getByRole('button',{name:'保存为停用规则',exact:true}).click();await edit.waitFor({state:'hidden'});const afterEdit=(await call('/naumi/employee-activity?botId='+bot.id)).rules[0];check('editing_keeps_stricter_tool_and_request_limits',afterEdit.config.action.maxToolCalls===1&&afterEdit.config.action.maxModelRequests===2&&JSON.stringify(afterEdit.config.action.allowedTools)==='["employee_delivery_create"]');check('editing_revokes_prior_approval_without_inference',!afterEdit.enabled&&!afterEdit.approvalId&&requests.length===2);
++ for(const width of [1360,580,360]){await page.setViewportSize({width,height:960});await work.locator('.emp-main').evaluate(el=>el.scrollTop=0);check('daily_local_layout_'+width,await work.evaluate(el=>el.scrollWidth<=el.clientWidth+2&&el.getBoundingClientRect().right<=innerWidth+1));await page.screenshot({path:path.join(out,'local-'+width+'.png'),animations:'disabled'});}check('no_page_errors',errors.length===0);
++ fs.writeFileSync(path.join(out,'UI_VERIFICATION.json'),JSON.stringify({status:'PASS',checks,errors,modelRequests:requests.length,upstream:'loopback SSE fixture via original PiAiAdapter',realSupplierCalls:0,enterpriseRegistration:false,tier:'independent actual Harness/native React/AgentLoop/Native tools/SQLite; no real account writes'},null,2)+'\n');console.log('LOCAL_UI checks='+checks.length+' errors=0 native_model_requests='+requests.length+' enterprise_registration=0');
++}catch(error){fs.writeFileSync(path.join(out,'UI_FAILURE.json'),JSON.stringify({error:error.message,checks},null,2));throw error;}finally{await browser?.close();child.kill();await new Promise(r=>child.exitCode!==null?r():child.once('close',r));upstream.closeAllConnections();await new Promise(r=>upstream.close(r));fs.writeFileSync(path.join(out,'HOST.log'),output.replace(/token=[A-Za-z0-9_~.%-]+/g,'token=REDACTED'));}
+diff --git a/tests/helpers/local-proactive-host.mjs b/tests/helpers/local-proactive-host.mjs
+new file mode 100644
+index 0000000..e6f9b8f
+--- /dev/null
++++ b/tests/helpers/local-proactive-host.mjs
+@@ -0,0 +1,31 @@
++import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import http from 'node:http';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';
++import {Context} from '@deepseek-ai/cordis';import Projections from '@deepseek-ai/dsh-session-projection';import Sessions,{SessionId} from '@deepseek-ai/dsh-session';import Prompt from '@deepseek-ai/dsh-system-prompt';import Tools,{defineTool} from '@deepseek-ai/dsh-tools';import Llm,{LlmAdapter,LlmError} from '@deepseek-ai/dsh-llm';import Agents from '@deepseek-ai/dsh-agent';import Loop from '@deepseek-ai/dsh-agent-loop';import * as Native from '@deepseek-ai/dsh-tool-executor-native';import * as Jsonl from '@deepseek-ai/dsh-session-persistence-jsonl';
++import {BotDirectory} from '../../plugins/naumi-enterprise/bots.js';import {EmployeeStore} from '../../plugins/naumi-enterprise/employee-store.js';import {EmployeeService} from '../../plugins/naumi-enterprise/employee-service.js';import {createEmployeeTools} from '../../plugins/naumi-enterprise/employees.js';import {EmployeeWorkService,createEmployeeWorkTools} from '../../plugins/naumi-enterprise/employee-work.js';import {installEmployeeActivity} from '../../plugins/naumi-enterprise/employee-activity.js';
++
++/** Actual AgentLoop/Native tools/SQLite, with NO enterprise sync, device registration or gateway. */
++export async function localProactiveHost(){
++ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-local-ai-')),ctx=new Context(),forks=[],handles=[],disposers=[],routes=new Map();let now=Date.now(),calls=0,modelMode='normal',toolCalls=0,toolHook=null,requestedTool=null,enterpriseRequests=0;
++ for(const [plugin,config]of [[Projections,{}],[Sessions,{}],[Jsonl,{root:path.join(dir,'sessions'),compression:'none'}],[Prompt,{}],[Llm,{}],[Tools,{}],[Native,{}],[Agents,{}],[Loop,{}]]){const h=ctx.plugin(plugin,config);await h;forks.push(h);}
++ class Adapter extends LlmAdapter{async *stream(options){calls++;options.signal?.throwIfAborted();if(modelMode==='hang')await new Promise((_,reject)=>options.signal.addEventListener('abort',()=>reject(new LlmError('cancelled','ABORTED')),{once:true}));if(modelMode==='error')throw new LlmError('unresolved upstream','TRANSPORT');
++   if(requestedTool&&(calls===1||modelMode==='repeat-tool')){const call={type:'tool-call',id:'call-'+randomUUID(),name:requestedTool.name,arguments:JSON.stringify(requestedTool.args)};yield {type:'block-start',index:0,blockType:'tool-call'};yield {type:'tool-call-delta',index:0,id:call.id,name:call.name,argumentsDelta:call.arguments};yield {type:'block-end',index:0,block:call};yield {type:'usage',usage:{inputTokens:12,outputTokens:3}};yield {type:'finish',reason:{kind:'tool-calls'}};return;}
++   yield {type:'block-start',index:0,blockType:'text'};yield {type:'text-delta',index:0,text:'本地主动分析结果'};yield {type:'block-end',index:0,block:{type:'text',text:'本地主动分析结果'}};if(modelMode==='truncated')throw new LlmError('stream ended without terminal','TRANSPORT');if(modelMode!=='no-usage')yield {type:'usage',usage:{inputTokens:12,outputTokens:3}};yield {type:'finish',reason:{kind:'stop'}};
++ }}
++ const adapter=ctx.llm.registerAdapter(['local-fixture'],new Adapter());
++ const member=agent=>{if(ctx.agents.get(agent?.id)!==agent)return;const root=agent.session.header.parentSession?ctx.agents.get(agent.session.header.parentSession)??agent:agent;return {root,role:root===agent?'lead':'member',id:root.id};};
++ const provider=ctx.plugin({name:'local-ai-edges',apply(scope){scope.provide('agentDefaultModel',{currentSelection:()=>({provider:'local-fixture',model:'local-model'})});scope.provide('agentPresets',{resolve:async()=>({id:'local-fixture'}),mount:async()=>{}});scope.provide('agentTeams',{tryMembership:member,membership:a=>{const m=member(a);if(!m)throw Error('TEAM_NOT_MEMBER');return m;}});scope.provide('connection',{admit:req=>req.headers.cookie==='fixture-owner'?{peer:{principal:{kind:'owner'}}}:req.headers.cookie==='fixture-guest'?{peer:{principal:{kind:'guest'}}}:{rejection:401}});scope.provide('webServer',{register:r=>{routes.set(r.path,r.handler);return()=>routes.delete(r.path);}});}});await provider;
++ async function create(parent){const h=await ctx.agents.create({sessionId:SessionId('session-'+randomUUID()),meta:{cwd:dir,...parent?{parentSession:parent.id,origin:'subagent',delegationDepth:1}:{}},...parent?{parentAgent:parent}:{},agentOptions:{provider:'local-fixture',model:'local-model'}});handles.push(h);return h.agent;}
++ const root=await create(),other=await create(),directory=new BotDirectory(path.join(dir,'bots.json')),bot=await directory.create({sessionId:root.id,cwd:dir},{name:'本地员工',purpose:'本地分析与交付',kind:'agent'}),store=new EmployeeStore(path.join(dir,'employees.sqlite'));store.clock=()=>new Date(now);
++ const service=new EmployeeService(ctx,directory,store),workService=new EmployeeWorkService({ctx,directory,store}),work=workService.work;
++ for(const tool of [...createEmployeeWorkTools(workService),...createEmployeeTools(service)])disposers.push(root.ctx.tools.register(tool));
++ for(const name of ['str_replace_editor','bot_dispatch'])disposers.push(root.ctx.tools.register(defineTool({name,description:'isolated '+name,parameters:{},output:{schema:{type:'json'},render:(_a,v)=>[{type:'text',text:JSON.stringify(v)}]},execute:async(_args,exec)=>{toolCalls++;return toolHook?toolHook(exec):{saved:true};}})));
++ let runtime;const host=ctx.plugin({name:'local-proactive-actual',inject:['agents','agentTeams','tools','systemPrompt','sessions','sessionPersistence','connection','webServer'],apply(scope){runtime=installEmployeeActivity(scope,directory,store,service,{intervalMs:1000000,proactiveOptions:{intervalMs:1000000},capabilities:{read:()=>({records:[]}),refresh:async()=>{},close:async()=>{}}});}});await host;
++ const server=http.createServer((req,res)=>{const handler=routes.get(new URL(req.url,'http://localhost').pathname);if(handler)return void handler(req,res);enterpriseRequests++;res.writeHead(503).end();});await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;
++ const goal=work.createGoal(bot.id,{operationId:randomUUID(),title:'完成资料分析',description:'根据已保存的目标与记忆整理交付',criteria:['提供可审核的结果']});
++ const config=(patch={})=>({title:'本地主动分析',trigger:{kind:'every',seconds:60},action:{kind:'run_local_agent',sessionId:root.id,goalId:goal.id,provider:'local-fixture',model:'local-model',prompt:'整理已有资料并保存交付草稿',maxModelRequests:4,maxSeconds:300,maxToolCalls:10,allowedTools:['employee_work','employee_profile','employee_memory_search','employee_delivery_create','employee_delivery_revise','employee_delivery_submit','str_replace_editor']},workWindow:{timeZone:'UTC',days:[1,2,3,4,5,6,7],startMinute:0,endMinute:1440},cooldownSeconds:60,maxActions:3,...patch});
++ const rule=(patch={})=>{const c=config(patch);runtime.proactive.validate(bot.id,c);return runtime.activity.command({action:'rule_create',botId:bot.id,operationId:randomUUID(),config:c});};
++ const enable=r=>{runtime.proactive.validate(bot.id,r.config);return runtime.activity.command({action:'rule_enable',botId:bot.id,ruleId:r.id,expectedRevision:r.revision,enabled:true,operationId:randomUUID()});};
++ const tick=()=>{runtime.tick();return runtime.proactive.rows(bot.id);};
++ const waitFor=async fn=>{const end=Date.now()+10000;while(!fn()&&Date.now()<end)await new Promise(r=>setTimeout(r,10));await new Promise(setImmediate);assert(fn(),'LOCAL_AI_TIMEOUT '+JSON.stringify(runtime.proactive.rows(bot.id)));};
++ return {ctx,dir,root,other,directory,bot,store,work,goal,activity:runtime.activity,engine:runtime.proactive,origin,create,config,rule,enable,tick,waitFor,get calls(){return calls;},get toolCalls(){return toolCalls;},get enterpriseRequests(){return enterpriseRequests;},advance(ms){now+=ms;},mode(value){modelMode=value;},tool(name='employee_delivery_create',args={goalId:goal.id,title:'分析交付',fileName:'分析.md',content:'实际Native工具保存的分析',operationId:randomUUID()}){requestedTool={name,args};},toolHook(value){toolHook=value;},async settled(){await waitFor(()=>runtime.proactive.rows(bot.id).length>0&&runtime.proactive.rows(bot.id).every(j=>!['queued','running','stopping','settling'].includes(j.state)));},
++ async cleanup(){await runtime.close();await host.dispose();for(const h of handles.reverse())await h.dispose();for(const d of disposers)d();store.close();await directory.close();adapter();await provider.dispose();for(const h of forks.reverse())await h.dispose();server.closeAllConnections();await new Promise(r=>server.close(r));assert(path.resolve(dir).startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(dir,{recursive:true,force:true});}};
++}
+diff --git a/tests/naumi-daily-work.test.mjs b/tests/naumi-daily-work.test.mjs
+index 4f7bc9f..63c9b2a 100644
+--- a/tests/naumi-daily-work.test.mjs
++++ b/tests/naumi-daily-work.test.mjs
+@@ -17,7 +17,7 @@ test('daily work reuses the existing Center and queries only local work for the
+  const Component=createEmployeeCenter(host.React,{client,workOnly:true,initialBotId:bot.id,onClose(){}});
+  host.render(Component);await host.flush();const tree=host.render(Component),all=nodes(tree);
+  assert.equal(tree.props['data-daily-work'],true);assert.equal(tree.props['data-employee-center'],undefined);assert.deepEqual(calls,[bot.id]);
+- assert(!all.some(n=>n.type==='aside'||n.type==='nav'));assert(!all.some(n=>typeof n.type==='function'&&/Enterprise|Sync|Runtime|Model|Activity/.test(n.type.name)));
++ assert(!all.some(n=>n.type==='aside'||n.type==='nav'));assert(!all.some(n=>typeof n.type==='function'&&/Enterprise|Sync|Runtime|Model/.test(n.type.name)));
+  assert(all.some(n=>n.type==='button'&&n.children.includes('创建目标')));assert(!JSON.stringify(tree).includes('其他员工'));
+ });
+ 
+diff --git a/tests/naumi-local-proactive.test.mjs b/tests/naumi-local-proactive.test.mjs
+new file mode 100644
+index 0000000..fd20d1c
+--- /dev/null
++++ b/tests/naumi-local-proactive.test.mjs
+@@ -0,0 +1,20 @@
++import test from 'node:test';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';import {createUserMessage} from '@deepseek-ai/dsh-llm';import {localProactiveHost} from './helpers/local-proactive-host.mjs';import {EmployeeProactiveAi} from '../plugins/naumi-enterprise/employee-proactive-ai.js';
++const done=f=>f.engine.rows(f.bot.id)[0];
++test('local owner opt-in executes real AgentLoop without enterprise device or gateway and retains native selection',async()=>{const f=await localProactiveHost();try{assert.equal(f.engine.configured(),false);assert.equal(f.engine.local.configured(),true);const r=f.rule();f.advance(61000);f.tick();assert.equal(f.calls,0);f.enable(r);f.advance(61000);f.tick();await f.settled();assert.equal(done(f).state,'awaiting_review');assert.equal(done(f).modelRequests,1);assert.equal(done(f).receipts[0].usage.inputTokens,12);assert.equal(f.calls,1);assert.equal(f.enterpriseRequests,0);assert.equal(f.work.goal(f.bot.id,f.goal.id).status,'planned');assert.deepEqual(f.root.model.current(),{provider:'local-fixture',model:'local-model'});}finally{await f.cleanup();}});
++test('local proactive Native delivery persists immutable draft and original goal, not self acceptance',async()=>{const f=await localProactiveHost();try{f.tool();f.enable(f.rule());f.advance(61000);f.tick();await f.settled();assert.equal(done(f).state,'awaiting_review');assert.equal(done(f).modelRequests,2);assert.equal(done(f).deliveryIds.length,1);const d=f.work.details(f.bot.id,done(f).deliveryIds[0]);assert.equal(d.currentContent,'实际Native工具保存的分析');assert.equal(d.businessStatus,'draft');assert.equal(d.reviews.length,0);assert.equal(f.enterpriseRequests,0);}finally{await f.cleanup();}});
++test('local request cap stops a tool loop with its real partial artifact retained',async()=>{const f=await localProactiveHost();try{f.tool();f.enable(f.rule({action:{...f.config().action,maxModelRequests:1}}));f.advance(61000);f.tick();await f.settled();assert.equal(f.calls,1);assert.equal(done(f).reason,'ACT_AI_REQUEST_LIMIT');assert.equal(done(f).artifactIds.length,1);}finally{await f.cleanup();}});
++test('local ambiguous model failure becomes UNKNOWN and never retries a provider attempt',async()=>{const f=await localProactiveHost();try{f.mode('truncated');f.enable(f.rule());f.advance(61000);f.tick();await f.settled();assert.equal(done(f).state,'unknown');assert.equal(done(f).receipts[0].state,'unknown');f.advance(600000);f.tick();await new Promise(r=>setTimeout(r,40));assert.equal(f.calls,1);}finally{await f.cleanup();}});
++test('missing usage is reported as unknown without inventing zero cost or enterprise settlement',async()=>{const f=await localProactiveHost();try{f.mode('no-usage');f.enable(f.rule());f.advance(61000);f.tick();await f.settled();assert.equal(done(f).state,'awaiting_review');assert.equal(done(f).receipts[0].usageStatus,'unknown');assert.equal(done(f).receipts[0].usage,null);assert(!('chargedCostMicros' in done(f).receipts[0]));}finally{await f.cleanup();}});
++test('human input cancels only local proactive turn, preserves exact user message, and freezes unknown replay',async()=>{const f=await localProactiveHost();try{f.mode('hang');f.enable(f.rule());f.advance(61000);f.tick();await f.waitFor(()=>f.calls===1);f.mode('normal');const m=createUserMessage({source:{kind:'user'},content:[{type:'text',text:'优先处理人工需求'}]});f.root.followup(m);await f.root.whenIdle();await f.settled();assert.equal(done(f).state,'unknown');assert(f.root.session.snapshotEvents().some(e=>e.type==='user/message'&&e.data.id===m.id));assert.equal(f.calls,2);f.advance(61000);f.tick();await new Promise(r=>setTimeout(r,30));assert.equal(f.calls,2);}finally{await f.cleanup();}});
++test('paused goal and model switch block local execution instead of selecting a replacement',async()=>{const f=await localProactiveHost();try{const r=f.enable(f.rule());f.work.updateGoal(f.bot.id,{goalId:f.goal.id,expectedRevision:1,operationId:randomUUID(),patch:{status:'paused'}});f.advance(61000);f.tick();await f.waitFor(()=>done(f)?.state==='waiting_permission');assert.equal(f.calls,0);assert.equal(done(f).reason,'ACT_AI_GOAL_NOT_ACTIVE');assert.throws(()=>f.engine.validate(f.bot.id,f.config({action:{...r.config.action,sessionId:f.other.id}})),/LOCAL_BOT_REQUIRED/);assert.throws(()=>f.engine.validate(f.bot.id,f.config({action:{...r.config.action,provider:'naumi-enterprise'}})),/LOCAL_MANAGED_SESSION_DENIED/);}finally{await f.cleanup();}});
++test('unapproved scope-changing tool is denied at native final guard without side effect',async()=>{const f=await localProactiveHost();try{f.tool('bot_dispatch',{});f.enable(f.rule());f.advance(61000);f.tick();await f.settled();assert.equal(f.toolCalls,0);assert.equal(f.engine.local.rows('local_proactive_tool',f.bot.id).length,0);}finally{await f.cleanup();}});
++test('local long-running approved tool is not mistaken for its own unresolved predecessor',async()=>{const f=await localProactiveHost();try{f.tool('str_replace_editor',{});f.toolHook(async exec=>{f.engine.tick();assert.equal(exec.signal.aborted,false);await new Promise(r=>setTimeout(r,25));return {saved:true};});f.enable(f.rule());f.advance(61000);f.tick();await f.settled();assert.equal(f.toolCalls,1);assert.equal(done(f).state,'awaiting_review');}finally{await f.cleanup();}});
++test('local wall time bound preserves unknown model receipt; reconciliation is explicit and does not replay',async()=>{const f=await localProactiveHost();try{f.mode('hang');f.enable(f.rule({action:{...f.config().action,maxSeconds:10}}));f.advance(61000);f.tick();await f.waitFor(()=>f.calls===1);f.advance(11000);f.engine.tick();await f.settled();assert.equal(done(f).state,'unknown');const j=done(f),p={action:'ai_job_resolve',botId:f.bot.id,jobId:j.id,expectedRevision:j.revision,operationId:randomUUID(),confirmedStopped:true,reason:'已人工核对原执行与供应商请求停止'};const r=await f.engine.command(p);assert.equal(r.state,'reviewed_stopped');assert.deepEqual(await f.engine.command(p),r);assert.equal(f.engine.local.receipts(j)[0].state,'unknown');assert.equal(f.engine.local.receipts(j)[0].resolution.kind,'local-owner-confirmation');assert.equal(f.calls,1);}finally{await f.cleanup();}});
++test('concurrent local consumers persist one invocation for the same occurrence',async()=>{const f=await localProactiveHost();try{f.enable(f.rule());f.advance(61000);f.activity.tick([f.bot.id]);const j=done(f);await Promise.all([f.engine.start(j),f.engine.start(j)]);assert.equal(f.calls,1);assert.equal(done(f).modelRequests,1);}finally{await f.cleanup();}});
++test('local model receipt storage failure prevents upstream and freezes automation',async()=>{const f=await localProactiveHost();try{f.store.beforeCommit=()=>{if(f.engine.rows(f.bot.id).some(j=>j.modelRequests>0))throw Error('local receipt injected failure');};f.enable(f.rule());f.advance(61000);f.tick();await f.settled();f.store.beforeCommit=null;assert.equal(f.calls,0);assert.equal(done(f).state,'unknown');}finally{f.store.beforeCommit=null;await f.cleanup();}});
++test('local owner HTTP accepts only exact scope and leaves enterprise actions unchanged',async()=>{const f=await localProactiveHost();try{const post=(config,headers={})=>fetch(f.origin+'/naumi/employee-activity',{method:'POST',headers:{cookie:'fixture-owner','Content-Type':'application/json','x-naumi-employee-activity':'1',...headers},body:JSON.stringify({action:'rule_create',botId:f.bot.id,operationId:randomUUID(),config})});assert.equal((await post(f.config(),{cookie:'fixture-guest'})).status,403);assert.equal((await post(f.config(),{origin:'https://wrong.invalid'})).status,403);assert.equal((await post(f.config({action:{...f.config().action,allowedTools:['bot_dispatch']}}))).status,400);assert.equal((await post(f.config({action:{...f.config().action,sessionId:f.other.id}}))).status,403);const r=await post(f.config());assert.equal(r.status,200);assert.equal((await r.json()).enabled,false);assert.equal(f.calls,0);assert.equal(f.enterpriseRequests,0);}finally{await f.cleanup();}});
++test('local tool ceiling is enforced again at final dispatch, not just in prompt text',async()=>{const f=await localProactiveHost();try{f.mode('repeat-tool');f.tool('str_replace_editor',{});f.enable(f.rule({action:{...f.config().action,maxToolCalls:1,maxModelRequests:3}}));f.advance(61000);f.tick();await f.settled();assert.equal(f.toolCalls,1);assert.equal(f.engine.local.rows('local_proactive_tool',f.bot.id).length,1);assert.equal(f.calls,3);}finally{await f.cleanup();}});
++test('positive unknown tool result freezes successor calls and keeps original side-effect receipt',async()=>{const f=await localProactiveHost();try{f.tool('str_replace_editor',{});f.toolHook(async()=>({status:'unknown'}));f.enable(f.rule());f.advance(61000);f.tick();await f.settled();assert.equal(done(f).state,'unknown');assert.equal(f.toolCalls,1);assert(done(f).receipts.some(r=>r.kind==='tool'&&r.state==='unknown'));f.advance(61000);f.tick();await new Promise(r=>setTimeout(r,30));assert.equal(f.toolCalls,1);assert.equal(f.calls,1);}finally{await f.cleanup();}});
++test('late native approval cannot execute a local tool after the owner disables its rule',async()=>{const f=await localProactiveHost();try{f.tool('str_replace_editor',{});const r=f.enable(f.rule()),unlisten=f.ctx.on('tools/pre-execute',async(exec,next)=>{if(exec.name==='str_replace_editor'){const current=f.activity.rule(f.bot.id,r.id);f.activity.command({action:'rule_enable',botId:f.bot.id,ruleId:r.id,expectedRevision:current.revision,enabled:false,operationId:randomUUID()});}return next();});f.advance(61000);f.tick();await f.settled();assert.equal(f.toolCalls,0);assert.notEqual(done(f).state,'awaiting_review');unlisten();}finally{await f.cleanup();}});
++test('reopen changes interrupted local models and tools to UNKNOWN without replaying or accepting',async()=>{const f=await localProactiveHost();try{f.enable(f.rule());f.advance(61000);f.activity.tick([f.bot.id]);const j=done(f);f.engine.change(j,{state:'running'},'fixture_interruption');for(const type of ['local_proactive_model','local_proactive_tool'])f.store.mutate(f.bot.id,randomUUID(),'fixture_receipt',{}, {kind:'owner'},()=>f.store.put({id:type+'-orphan',botId:f.bot.id,jobId:j.id,sessionId:f.root.id,revision:1,state:'running'},type,'fixture_receipt',{kind:'owner'}));const recovered=new EmployeeProactiveAi({ctx:f.ctx,directory:f.directory,store:f.store,activity:f.activity});assert.equal(recovered.rows(f.bot.id)[0].state,'unknown');assert(recovered.local.receipts(j).every(r=>r.state==='unknown'));recovered.tick();assert.equal(f.calls,0);assert.equal(f.work.goal(f.bot.id,f.goal.id).status,'planned');await recovered.close();}finally{await f.cleanup();}});
++test('owner reconciliation is one CAS transaction and storage failure restores both job and receipt',async()=>{const f=await localProactiveHost();try{f.mode('truncated');f.enable(f.rule());f.advance(61000);f.tick();await f.settled();const j=done(f),p={action:'ai_job_resolve',botId:f.bot.id,jobId:j.id,expectedRevision:j.revision,operationId:randomUUID(),confirmedStopped:true,reason:'已核对原请求停止，保留未知费用记录'};f.store.beforeCommit=()=>{if(f.engine.local.receipts(j).some(r=>r.resolution))throw Error('resolution transaction failure');};await assert.rejects(f.engine.command(p),/resolution transaction failure/);f.store.beforeCommit=null;assert.equal(done(f).revision,j.revision);assert.equal(done(f).state,'unknown');assert(f.engine.local.receipts(j).every(r=>!r.resolution));assert.equal((await f.engine.command(p)).state,'reviewed_stopped');assert.equal(f.calls,1);}finally{f.store.beforeCommit=null;await f.cleanup();}});
