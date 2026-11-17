@@ -26,7 +26,7 @@
   Pop $NaumiCanonicalTarget
   ${If} $NaumiCanonicalTarget == ""
     ${IfNot} ${Silent}
-      MessageBox MB_OK|MB_ICONEXCLAMATION "请选择完整的本机安装路径，再重试安装。"
+      MessageBox MB_OK|MB_ICONEXCLAMATION "安装位置无效或过长，请选择较短的完整本机路径，再重试安装。"
     ${EndIf}
     SetErrorLevel 43
     Quit

@@ -2,7 +2,7 @@
 // controls. No product registration, shortcuts, payload installation or user profiles.
 import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import{createRequire}from'node:module';import{fileURLToPath}from'node:url';import{execFileSync,spawnSync}from'node:child_process';
 const root=path.resolve(process.argv.find(x=>x.startsWith('--root='))?.slice(7)??fileURLToPath(new URL('../..',import.meta.url))),r=createRequire(import.meta.url),{getMakeNsisPath}=r('app-builder-lib/out/toolsets/windows.js'),tool=await getMakeNsisPath(),baseline=process.argv.includes('--baseline'),dir=path.join(root,'runtime/installer-path-regression'),q=s=>s.replaceAll('/','\\').replaceAll('$','$$');
-fs.mkdirSync(dir,{recursive:true});const exe=path.join(dir,'regression.exe'),receipt=path.join(dir,'receipt.txt'),parent=path.join(dir,'not-created');assert(!fs.existsSync(parent));
+fs.mkdirSync(dir,{recursive:true});const exe=path.join(dir,'regression.exe'),receipt=path.join(dir,'receipt.txt'),parent=path.win32.join(path.parse(root).root,'np35-uncreated');assert(!fs.existsSync(parent));
 const cases=[path.join(parent,'Naumi'),path.join(parent,'中文 空格','Naumi'),path.join(parent,'chosen-parent'),path.join(parent,'Naumi')+'\\'];
 const body=cases.map((input,i)=>`System::Call 'user32::CreateWindowExW(i 0,w "EDIT",w "${q(input)}",i 0,i 0,i 0,i 1,i 1,p 0,p 0,p 0,p 0)p.r0'
 StrCpy $NaumiPathField $0
@@ -11,7 +11,7 @@ Call NaumiInstallLeave
 FileWriteUTF16LE $9 "${i}=$INSTDIR$\\r$\\n"
 System::Call 'user32::DestroyWindow(p $NaumiPathField)'
 `).join('\n');
-const extra=baseline?'':[['relative','Naumi'],['drive-relative','E:Naumi'],['unc','\\\\server\\share\\Naumi'],['empty','']].map(([label,input])=>`Push "${q(input)}"
+const extra=baseline?'':[['relative','Naumi'],['drive-relative','E:Naumi'],['unc','\\\\server\\share\\Naumi'],['empty',''],['too-long','E:\\'+('x'.repeat(70))+'\\Naumi']].map(([label,input])=>`Push "${q(input)}"
 Call NaumiCanonicalPath
 Pop $0
 FileWriteUTF16LE $9 "invalid-${label}=$0$\\r$\\n"`).join('\n');
@@ -46,4 +46,4 @@ const run=spawnSync(exe,[],{windowsHide:true,encoding:'utf8',timeout:15000});ass
 const lines=fs.readFileSync(receipt,'utf16le').trim().split(/\r?\n/),values=Object.fromEntries(lines.map(line=>{const i=line.indexOf('=');return[line.slice(0,i),line.slice(i+1)];}));assert(!fs.existsSync(parent),'VALIDATION_CREATED_TARGET');
 if(baseline){assert.equal(values[0],'\\Naumi');console.log('BASELINE native_page_leave=FAIL selected_absolute_path='+cases[0]+' actual='+values[0]+' exit=1');process.exitCode=1;}
 else{for(const [i,input]of cases.entries()){const normalized=path.win32.normalize(input).replace(/\\$/,'');const expected=path.win32.basename(normalized).toLowerCase()==='naumi'?normalized:path.win32.join(normalized,'Naumi');assert.equal(values[i],expected,'PATH_'+i);}
-for(const key of Object.keys(values).filter(k=>k.startsWith('invalid-')))assert.equal(values[key],'',key);console.log('NATIVE_PATH cases=8 pass=8 invalid_rejected=4 new_parent=PASS unicode_spaces=PASS trailing_slash=PASS no_writes=PASS exit=0');}
+for(const key of Object.keys(values).filter(k=>k.startsWith('invalid-')))assert.equal(values[key],'',key);console.log('NATIVE_PATH cases=9 pass=9 invalid_rejected=5 new_parent=PASS unicode_spaces=PASS trailing_slash=PASS long_path=REJECTED no_writes=PASS exit=0');}
