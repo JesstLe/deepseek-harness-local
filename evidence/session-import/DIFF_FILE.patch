@@ -1,0 +1,527 @@
+diff --git a/.gitattributes b/.gitattributes
+index d470364..aff737e 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -328,3 +328,6 @@ plugins/naumi-enterprise/third-party/ds-bot-im/** -text
+ # Daily five closeout source-copy evidence and executable copy-only rollback.
+ /evidence/daily-five/** -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab,cr-at-eol
+ /evidence/daily-five/ROLLBACK.sh text eol=lf
++
++/evidence/session-import/DIFF_FILE.patch -text whitespace=-blank-at-eol
++/evidence/session-import/*.log -text whitespace=-blank-at-eol
+diff --git a/docs/implementation/SESSION_IMPORT.md b/docs/implementation/SESSION_IMPORT.md
+new file mode 100644
+index 0000000..5f6a640
+--- /dev/null
++++ b/docs/implementation/SESSION_IMPORT.md
+@@ -0,0 +1,57 @@
++# Codex / Claude 原生会话导入
++
++模块与职责：本线程独占 session-import*，host/client 仅安装和资产注册，package 仅 files 追加。协作线程已确认不再写这三个文件，保留其总览、工作区、版本清单。独立分支 codex/session-import-20261118；基线 main/origin/main c1552171c9090b720cae201969db75d6a8dd3394。迭代计数 1，源码待集中整合验收。
++
++公共接口、依赖方向、数据/状态/事务归属：本机只读来源 → 标准化快照 → 原生 Session / SessionPersistence 写 handle → Workspace.attachSession → 原生 UIWorkspace.openSession。不直接创建伪 JSONL，不建立平行聊天或 Agent 执行器。Naumi 当前模型、权限和输入器继续负责新消息；历史工具仅文本证据，不执行。来源日志、凭据、Bot、任务、企业数据均不迁移。
++
++调研：Codex response_item 与 event_msg 双重记录同一对话，只取前者，避免重复；session_meta 提供 ID/CWD。Claude user/assistant 通过 uuid/parentUuid 选择最新主分支，sidechain/subagents 不混入。api-request-blob/config/密钥和隐藏思考不导入；附件保留占位及计数，不自动访问文件/URL。已有 system/developer 不成为当前特权指令。扫描只读前2MiB元数据，按需流式读取最多512MiB源文件，标准化内容上限64MiB，尾部未完成行保留长度但不伪造完成消息。
++
++本次实现与迁移状态：开发中。默认读取 CODEX_HOME/sessions、archived_sessions，CLAUDE_CONFIG_DIR/projects，未设置时使用用户目录。仅标准根内常规 JSONL，跳过链接及子代理目录。用户选择已有 Naumi 工作区；不会因源 CWD 自动授权目录。
++
++验证命令、结果及证据层级：baseline `node --test tests/naumi-unified-chat.test.mjs tests/naumi-product-identity.test.mjs` 17/17，exit0。后续按完整模块集中测试，另验原生继续、重启、幂等、来源保护和副本回滚。
++
++未完成项与下一步：导入事务/收据、浅色原生入口、测试/隔离 UI、主线整合与运行加载。D5 最终安装包需包含本模块，既有0.3.6候选不据此改写为包含新功能。
++
++## 实现与可靠性
++
++已增加 owner-only `/naumi/session-import` discover/preview/import，意图头、同源、8KiB请求体及严格字段校验。前端在侧栏底部注册导入入口，两栏浅色预览，窄屏上下组合；不替换原图标/导航/模型位置。使用原生 `sessions.refresh()` 刷新权威目录后 `UIWorkspace.openSession`，继续使用原输入器及 Session 控制器，只有用户新发送才执行。
++
++原生 `Session.append` 生成合法事件和 surfaceOp，再由 SessionPersistence.create/open 的写 handle 单次批量 append/flush/close；Workspace.attachSession 完成工作区归属。没有把历史工具写成待执行 tool/call，也没有历史权限、旧模型、API key、system/developer 或 pending inbox。导入用户消息的 source 为 recall，而不是当前 owner 的新证据；历史助手 source 明示 imported-provider/transcript。line/sourceId/time → seq/messageId 映射留存在导入计划。
++
++每个 sourceId + 已选择工作区的规范路径有固定 Session ID、原生事件摘要、标准化快照摘要、计划与收据；源路径不是请求输入。临时文件先fsync再独占发布计划。源变动必须重新预览；已导入后外部追加不覆盖 Naumi 会话，明确显示已导入快照/来源更新。计划、flush、attach 后中断可重试原计划，源后来更新/删除也能预览原快照并收口，不生成第二个 Session。外部改动目标前缀则拒绝，不覆盖历史。写 handle 持有期间原生单写者约束有效；初次JSONL materialize由现有后端实现。源码副本回滚不会删已导入的会话和来源，普通原生消息可继续读，旁车计划/收据应保留以便审计。
++
++预览每页最多100记录、每块最多16000字符，节选明确显示；完整支持文本仍进入原生历史，不以预览截断替代导入。最多512MiB源、64MiB标准化内容、16MiB单行；完整合法无换行尾行保留，非完整尾行只记录长度并要求确认。附件、未知记录、其他分支须显式确认；API请求blob/运行配置/隐藏思考不迁移，来源原文件仍在。当前仅标准JSONL支持，不宣称附件内容/所有历史版本协议均原样迁移。
++
++## 已执行验收与修正
++
++- 模块26/26，真实 Cordis + 原生JSONL持久化 + owner HTTP；计划/flush/attach中断、丢回包/并发、源变化/缺失、权限/工作区、损坏行、体积、分支、分页与摘要完整性。
++- 隔离实际 Harness/UI：17 checks、2 boots、native loopback模型1请求、真供应商0。重启前后历史工具/输入0自动执行；明确新输入才调用当前原生模型，历史文本和工具证据进入新请求。来源hash保持。
++- 本机仅只读格式核验：Codex 25,208,427字节/1461记录、Claude17,941,604字节/289记录，两个源hash保持；没有导入真实会话或读取凭据。
++- 首次module测试fixture误用Context.dispose、随后空seed自动追加end-seed未计入原生序列：修正为持有plugin disposer和无seed构建，失败日志保留。
++- UI首次发现Workspace observable方法需要保留this；随后发现原生目录未刷新导致unknown session。已通过公共 `sessions.refresh` 修正，不注入自造缓存或改私有状态。
++- 第一次全仓782/784：旧UI测试未扣除新面板白名单，且编辑器CRLF破坏字节断言。只更新精确允许的面板字符串并恢复LF，原导航SVG哈希不变；19项定向复核通过。截图检查发现390px按钮裁切，已改minmax(0,1fr)并增加真实按钮边界断言。
++
++## 运行加载设计
++
++实际安装的host/client/package包含较早可选模块，和main整份文件不一致。本切片不顺带加载身份、企业、钉钉或创作模块。`session-import-carrier.mjs`只在现有carrier精确插入安装/资产/入口/白名单，删除这些新增字节后必须等于原文件；package只追加两个新后端文件且其他字段语义相同。先在隔离原生Harness验收这个真实carrier副本，再从main按固定源版本增量加载7文件。任何无关运行文件、模型组、员工导出、任务/群账本、权威会话日志、其他线程证据保持；他人日志只允许原字节前缀不变的末尾追加。真实运行仅只读discover，不创建导入会话、不发模型。
++
++## 复用接续指令
++
++```text
++继续SESSION_IMPORT：只读标准来源，复用SessionPersistence写handle和Workspace、sessions.refresh及原生UIWorkspace。
++不复制输入器，不自动执行历史工具，不转移旧模型/权限/API key，不把imported recall当作新的owner指令证据。
++保留计划/收据及来源指纹，丢回包或重启沿同一Session恢复；企业模块保持现状。
++先读本模块证据中的未完成项，从固定main构建包含所有D1-D4和导入的最终安装版再验安装/更新。
++```
++
++未完成项与下一步：整合最新主线后全仓、已安装carrier隔离验收、源码副本回滚、main合入及运行加载。最终安装包/真实供应商链路与业务文件版本精确绑定仍属整体Goal，不用本模块通过替代。
++
++副本回滚首次已恢复源码哈希，但测试副本漏复制原有scripts和启动脚本，导致原测试依赖不存在；已补齐副本依赖，失败PACKAGE_FIRST/ROLLBACK_TESTS_FIRST原样留证，未修改业务实现以绕过测试。
++
++## 集中验收收口
++
++同步记录：c155217基线 → 实现9b201e6 → 普通整合origin/main 8cb6b63得到efe6a55，后续仅补测试副本依赖/证据脚本。完整功能计数1；企业功能计数0。
++
++整合树全仓784/784（0 skip），源UI17项、实际已安装carrier的隔离UI17项均通过，分别2 boots/1 loopback请求/0真供应商。主模型位置、原SVG哈希与原输入器保持。源码副本回滚6原文件恢复/11新文件移除，原始17项测试通过，当前修改源文件仍保留。第二次副本测试漏desktop/package.json，同为副本依赖遗漏，已补齐，原失败日志保留。四件套及manifest记载精确命令与层级，最终主线和运行回执在VERIFICATION/DEPLOYMENT追加。
++
++当前本模块剩余：源码合入推送、7文件运行加载、四件套最终重开与清理。整体Goal继续active，后续审视D3文件快照/attempt与业务验收精确绑定、完整真实使用、最终新版本安装升级与更新分发；已公开0.3.6不是包括本模块的新版本。
+diff --git a/docs/prd/DAILY_EMPLOYEE_PRIORITY.md b/docs/prd/DAILY_EMPLOYEE_PRIORITY.md
+index 259d8e8..7cdc6c9 100644
+--- a/docs/prd/DAILY_EMPLOYEE_PRIORITY.md
++++ b/docs/prd/DAILY_EMPLOYEE_PRIORITY.md
+@@ -63,3 +63,7 @@ D1–D4共同属于第一优先级，顺序为依赖安排，不是把主动性
+ ## D3 目标—任务—交付接续
+ 
+ 已确认工作目标通过workGoalId/workGoalRevision绑定原bot_dispatch，任务保留最初目标快照与显式更新历史；精确受托Session向源目标保存交付，未赋予跨员工记忆/目标管理权。日常页复用原TaskCard续办/停止/文件预览与原交付审核表单，owner确认后才验收；返工沿原task/Session形成新版本与当时验收条件。具体源码/主线/隔离壳/加载状态以[实现记录](../implementation/WORK_GOAL_TASK_LINKS.md)与evidence/work-goal-task-links为准。Codex/Claude导入和包含本切片的最终安装/更新分发仍继续。
++
++## 日常体验：Codex / Claude 会话导入
++
++导入标准本机JSONL，预览后保存新的原生Naumi Session并使用原输入器继续；固定工作区、指纹计划/收据防重复，历史工具不重放，运行配置/权限/密钥不继承。真实来源只读核验、隔离原生UI与重启继续分别记证，不导入现存业务会话。实现和当前剩余门槛见[会话导入记录](../implementation/SESSION_IMPORT.md)。发布候选必须包含本模块及最新目标关联后，再完成整体D5，不把先前0.3.6候选视为含未打包新功能；企业模块继续冻结。
+diff --git a/plugins/naumi-enterprise/assets/session-import.css b/plugins/naumi-enterprise/assets/session-import.css
+new file mode 100644
+index 0000000..025f387
+--- /dev/null
++++ b/plugins/naumi-enterprise/assets/session-import.css
+@@ -0,0 +1 @@
++.nsi{height:100%;min-width:0;display:flex;flex-direction:column;padding:28px 32px 20px;background:#f9fafc;color:#263248;color-scheme:light;font-size:13px}.nsi *{box-sizing:border-box}.nsi-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:23px}.nsi h1{margin:0;font-size:25px;font-weight:650;letter-spacing:-.8px}.nsi button,.nsi select,.nsi input{font:inherit}.nsi button{cursor:pointer;transition:background .14s;border:1px solid #e3e7ee;background:white;color:#58677d;padding:8px 13px;border-radius:8px}.nsi button:hover:not(:disabled){background:#f0f4fa}.nsi button:disabled{opacity:.5;cursor:default}.nsi :is(button,select,input):focus-visible{outline:3px solid #c9d9ff;outline-offset:2px}.nsi-layout{display:grid;grid-template-columns:minmax(230px,30%) minmax(0,1fr);min-height:0;flex:1;border:1px solid #e5e9f0;border-radius:14px;overflow:hidden;background:white;box-shadow:0 7px 30px #223c6005}.nsi-sources{min-width:0;min-height:0;display:flex;flex-direction:column;border-right:1px solid #ebedf3;background:#fcfdff}.nsi-filters{display:flex;gap:4px;margin:18px 16px 13px;padding:4px;background:#edf1f7;border-radius:9px}.nsi-filters button{flex:1;padding:7px 5px;background:none;border-color:transparent;font-size:12px}.nsi-filters button[aria-pressed=true]{background:white;box-shadow:0 1px 5px #24385012;color:#263a64}.nsi-search{border:1px solid #e5e9f0;border-radius:8px;margin:0 16px 14px;width:calc(100% - 32px);background:white;min-height:36px;padding:8px 11px;color:#43536c}.nsi-list{overflow:auto;min-height:0;flex:1;padding:0 8px 12px;scrollbar-width:thin}.nsi button.nsi-source{display:block;width:100%;text-align:left;border:1px solid transparent;border-radius:9px;padding:13px;margin-bottom:3px;min-width:0;background:transparent}.nsi button.nsi-source[aria-pressed=true]{background:#edf3ff;border-color:#dce7ff}.nsi-source>div{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:10px;color:#96a0b1}.nsi-provider{font-size:10px;letter-spacing:.25px;color:#4c6ac0;background:#f0f3fc;border-radius:4px;padding:2px 6px}.nsi-provider[data-provider=claude]{color:#aa7456;background:#faf1eb}.nsi-source strong{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin:9px 0 6px;font-size:12px;font-weight:550;line-height:1.6;color:#34425a;overflow-wrap:anywhere}.nsi-cwd{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:#98a3b3;font-size:10px}.nsi-preview{display:flex;flex-direction:column;min-width:0;min-height:0}.nsi-preview-head{padding:24px 27px 20px;border-bottom:1px solid #eef1f6}.nsi h2{margin:0 0 11px;font-size:17px;line-height:1.5;letter-spacing:-.3px;font-weight:600;overflow-wrap:anywhere}.nsi-facts{display:flex;gap:14px;flex-wrap:wrap;color:#8e9bae;font-size:11px}.nsi-messages{overflow:auto;flex:1;min-height:0;padding:22px 27px;scrollbar-width:thin}.nsi-message{margin-bottom:25px}.nsi-message>header{display:flex;align-items:center;gap:12px;color:#71839b;font-size:11px;font-weight:600;margin-bottom:9px}.nsi-message time{color:#a7b0bf;font-size:10px;font-weight:400}.nsi-message pre{font:inherit;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.85;margin:0;padding:12px 15px;border:1px solid #edf0f5;border-radius:10px;background:#fcfdff;color:#45536b}.nsi-message[data-role=user] pre{background:#f2f6ff;border-color:#e9effa}.nsi-message details{margin:7px 0;color:#8996ab;font-size:11px}.nsi-message summary{cursor:pointer;padding:7px 0}.nsi-message details pre{font-family:ui-monospace,Consolas,monospace;font-size:11px;max-height:300px;overflow:auto}.nsi-import{border-top:1px solid #ebeff5;padding:17px 24px;display:flex;align-items:end;gap:12px;flex-wrap:wrap;background:#fff}.nsi-target{flex:1;min-width:130px}.nsi-target label{display:flex;flex-direction:column;gap:7px;color:#93a0b2;font-size:11px}.nsi-target select{height:36px;border:1px solid #e3e9f2;background:white;color:#4c5e7b;border-radius:7px;padding:5px 9px;width:100%}.nsi button.nsi-primary{background:#3768e9;border-color:#3768e9;color:white;min-height:36px;padding:8px 18px}.nsi button.nsi-primary:hover:not(:disabled){background:#2e5ed8}.nsi-ack{width:100%;color:#a47c50;font-size:11px;line-height:1.6;display:flex;align-items:start;gap:6px;flex-wrap:wrap}.nsi-ack input{margin-top:2px}.nsi-empty{display:grid;place-content:center;flex:1;min-height:110px;color:#9da8b9;font-size:12px;padding:24px;text-align:center}.nsi-more{display:block;margin:12px auto;font-size:11px}.nsi-error,.nsi-warning{color:#b3765b;background:#fff5ef;border-radius:8px;padding:11px 14px;font-size:12px;margin-bottom:14px}.nsi-warning{font-size:11px;margin:9px}.nsi-entry{display:flex;align-items:center;gap:8px;background:none;border:0;border-radius:7px;color:#8390a3;padding:8px;cursor:pointer}.nsi-entry:hover{background:#edf2fb;color:#456dc7}.nsi-entry span{font-size:11px}@media(max-width:740px){.nsi{padding:18px 14px 12px}.nsi-head{margin-bottom:16px}.nsi-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:210px minmax(220px,1fr)}.nsi-sources{border-right:0;border-bottom:1px solid #e5e9f0}.nsi-filters{margin:10px 12px 7px}.nsi-search{margin:0 12px 7px;width:calc(100% - 24px)}.nsi-list{display:flex;gap:6px;overflow-x:auto}.nsi button.nsi-source{min-width:190px;width:190px;flex-shrink:0}.nsi-source strong{-webkit-line-clamp:1;margin:5px 0}.nsi-source time{display:none}.nsi-preview-head{padding:15px 17px}.nsi-messages{padding:16px}.nsi-import{padding:12px 16px}.nsi h2{font-size:15px}.nsi h1{font-size:22px}}
+diff --git a/plugins/naumi-enterprise/assets/session-import.js b/plugins/naumi-enterprise/assets/session-import.js
+new file mode 100644
+index 0000000..5b86f73
+--- /dev/null
++++ b/plugins/naumi-enterprise/assets/session-import.js
+@@ -0,0 +1,17 @@
++export const SESSION_IMPORT_PANEL='naumi-session-import';
++const errors={IMPORT_SOURCE_CHANGED:'来源已更新，请重新预览',IMPORT_PENDING_SNAPSHOT_CHANGED:'上次导入尚未收口，请先核对原快照',IMPORT_ACKNOWLEDGEMENT_REQUIRED:'请确认快照范围',IMPORT_NO_MESSAGES:'这个日志没有可导入的对话',IMPORT_SOURCE_TOO_LARGE:'源日志超过 512 MB',IMPORT_HISTORY_TOO_LARGE:'会话正文超过 64 MB',IMPORT_WORKSPACE_NOT_FOUND:'请选择可用工作区',IMPORT_OWNER_REQUIRED:'请重新连接 Naumi',IMPORT_SESSION_CONFLICT:'目标会话已有不同内容，原记录已保留',IMPORT_PLAN_INTEGRITY:'本地导入记录校验未通过',IMPORT_SESSION_MISSING:'已导入的会话已被移除，原日志仍保留'};
++async function request(body,signal){const r=await fetch('/naumi/session-import',{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json','x-naumi-import':'1'},body:JSON.stringify(body),signal}),v=await r.json();if(!r.ok)throw Error(errors[v.error]??(/IMPORT_INVALID_JSON_LINE_/.test(v.error)?'源日志包含损坏行，原文件未修改':'读取或导入未完成，请重试'));return v;}
++export function installSessionImportUI(ctx,React){return ctx.inject(['slots','layout','workspaces','uiWorkspace','sessions'],scope=>{const h=React.createElement,{useState,useEffect,useRef,useSyncExternalStore}=React,wsSubscribe=fn=>scope.workspaces.list.subscribe(fn),wsSnapshot=()=>scope.workspaces.list.getSnapshot();
++ function ImportPage(){const [items,setItems]=useState([]),[next,setNext]=useState(null),[provider,setProvider]=useState('all'),[query,setQuery]=useState(''),[sourceId,setSourceId]=useState(null),[preview,setPreview]=useState(null),[error,setError]=useState(''),[loading,setLoading]=useState(false),[busy,setBusy]=useState(false),[ack,setAck]=useState(false),[workspaceId,setWorkspace]=useState(''),[epoch,setEpoch]=useState(0),[warning,setWarning]=useState(false);const flight=useRef(false),generation=useRef(0),catalog=useSyncExternalStore(wsSubscribe,wsSnapshot,wsSnapshot),workspaces=catalog.items;
++  useEffect(()=>{if(!workspaceId&&workspaces.length)setWorkspace(workspaces[0].workspaceId);},[workspaces,workspaceId]);
++  useEffect(()=>{const ac=new AbortController();setLoading(true);setError('');request({action:'discover'},ac.signal).then(v=>{setItems(v.items);setNext(v.nextOffset);setWarning(v.warnings.length>0);}).catch(e=>{if(!ac.signal.aborted)setError(e.message);}).finally(()=>{if(!ac.signal.aborted)setLoading(false);});return()=>ac.abort();},[epoch]);
++  useEffect(()=>{const ac=new AbortController(),g=++generation.current;setPreview(null);setAck(false);if(sourceId)request({action:'preview',sourceId,workspaceId:workspaceId||undefined},ac.signal).then(v=>{if(g===generation.current)setPreview(v);}).catch(e=>{if(!ac.signal.aborted)setError(e.message);});return()=>ac.abort();},[sourceId,workspaceId,epoch]);
++  const more=async()=>{if(flight.current)return;flight.current=true;setLoading(true);try{const v=await request({action:'discover',offset:next});setItems(a=>[...new Map([...a,...v.items].map(x=>[x.id,x])).values()]);setNext(v.nextOffset);}catch(e){setError(e.message);}finally{flight.current=false;setLoading(false);}};
++  const moreMessages=async()=>{if(flight.current||!preview)return;flight.current=true;setBusy(true);const g=generation.current;try{const v=await request({action:'preview',sourceId,workspaceId:workspaceId||undefined,offset:preview.nextOffset});if(g!==generation.current)return;if(v.fingerprint!==preview.fingerprint)throw Error('来源已更新，请重新预览');setPreview(p=>({...v,messages:[...p.messages,...v.messages]}));}catch(e){setError(e.message);}finally{flight.current=false;setBusy(false);}};
++  const run=async()=>{if(flight.current||!preview||!workspaceId)return;flight.current=true;setBusy(true);setError('');try{const result=await request({action:'import',sourceId,fingerprint:preview.fingerprint,workspaceId,acknowledgePartial:ack});await scope.sessions.refresh();if(!scope.sessions.list.getSnapshot().byId[result.sessionId])throw Error('会话已保存，目录刷新未完成，请重试');scope.layout.beginNavigation?.();scope.uiWorkspace.openSession(result.sessionId);}catch(e){setError(e.message);}finally{flight.current=false;setBusy(false);}};
++  const shown=items.filter(i=>(provider==='all'||i.provider===provider)&&(!query||[i.title,i.cwd,i.sourceSessionId].join(' ').toLocaleLowerCase().includes(query.toLocaleLowerCase()))),partial=preview&&(preview.incompleteTailBytes||preview.stats.attachments||preview.stats.unsupported||preview.stats.offBranch);
++  return h('main',{className:'nsi','aria-label':'导入会话'},h('header',{className:'nsi-head'},h('h1',null,'导入会话'),h('button',{disabled:busy||loading,onClick:()=>{setError('');setEpoch(n=>n+1);}},'刷新')),error&&h('div',{className:'nsi-error',role:'alert'},error),h('div',{className:'nsi-layout'},h('aside',{className:'nsi-sources'},h('div',{className:'nsi-filters'},...['all','codex','claude'].map(id=>h('button',{key:id,'aria-pressed':provider===id,onClick:()=>setProvider(id)},id==='all'?'全部':id==='codex'?'Codex':'Claude'))),h('input',{className:'nsi-search','aria-label':'搜索本机会话',placeholder:'搜索会话',value:query,onChange:e=>setQuery(e.target.value)}),h('div',{className:'nsi-list'},...shown.map(item=>h('button',{key:item.id,className:'nsi-source','aria-pressed':sourceId===item.id,disabled:busy||item.unreadable,onClick:()=>{setError('');setSourceId(item.id);}},h('div',null,h('span',{className:'nsi-provider','data-provider':item.provider},item.provider==='codex'?'Codex':'Claude'),h('time',null,new Date(item.modifiedAt).toLocaleDateString())),h('strong',null,item.title),h('span',{className:'nsi-cwd',title:item.cwd},item.cwd||'未记录目录'))),!shown.length&&h('div',{className:'nsi-empty',role:'status'},loading?'正在扫描…':'没有匹配的本机会话'),next!==null&&h('button',{className:'nsi-more',disabled:loading||busy,onClick:more},loading?'读取中…':'更多会话'),warning&&h('div',{className:'nsi-warning'},'部分目录未读取，请刷新重试'))),h('section',{className:'nsi-preview'},!preview?h('div',{className:'nsi-empty',role:'status'},sourceId?'正在读取会话…':'选择一个会话'):h(React.Fragment,null,h('div',{className:'nsi-preview-head'},h('div',null,h('h2',null,preview.title),h('div',{className:'nsi-facts'},preview.snapshotStatus==='imported'&&h('span',null,'已导入快照'),preview.snapshotStatus==='pending'&&h('span',null,'恢复上次导入'),preview.sourceStatus==='changed'&&h('span',null,'来源已有后续更新'),preview.sourceStatus==='unavailable'&&h('span',null,'原来源暂不可读'),h('span',null,preview.provider==='codex'?'Codex':'Claude'),h('span',null,preview.messageCount+' 条记录'),preview.stats.reasoning>0&&h('span',null,'隐藏思考未导入'),preview.stats.metadata>0&&h('span',null,'运行配置未继承')))),h('div',{className:'nsi-messages'},...preview.messages.map((m,i)=>h('article',{key:m.line+':'+i,className:'nsi-message','data-role':m.role},h('header',null,m.role==='user'?'用户':'助手',h('time',null,m.time?new Date(m.time).toLocaleString():'')),...m.blocks.map((b,j)=>b.kind==='tool-call'||b.kind==='tool-result'?h('details',{key:j},h('summary',null,b.kind==='tool-call'?'历史工具 · '+b.name:'历史结果'+(b.isError?' · 错误':'')),h('pre',null,b.text),b.previewTruncated&&h('span',null,'预览节选 · 原文 '+b.sourceChars+' 字符')):h('div',{key:j},h('pre',{'data-kind':b.kind},b.text),b.previewTruncated&&h('span',null,'预览节选 · 原文 '+b.sourceChars+' 字符'))))),preview.nextOffset!==null&&h('button',{className:'nsi-more',disabled:busy,onClick:moreMessages},'更多记录')),h('footer',{className:'nsi-import'},partial?h('label',{className:'nsi-ack'},h('input',{type:'checkbox',checked:ack,disabled:busy,onChange:e=>setAck(e.target.checked)}),'确认快照：',preview.stats.attachments>0?`附件占位 ${preview.stats.attachments}；`:'',preview.stats.offBranch>0?`其他分支未导入 ${preview.stats.offBranch}；`:'',preview.stats.unsupported>0?`不支持记录 ${preview.stats.unsupported}；`:'',preview.incompleteTailBytes>0?`未完成尾行 ${preview.incompleteTailBytes} 字节；`:''):null,h('div',{className:'nsi-target'},h('label',null,'导入到',h('select',{'aria-label':'导入到工作区',disabled:busy,value:workspaceId,onChange:e=>setWorkspace(e.target.value)},h('option',{value:''},'选择工作区'),...workspaces.map(w=>h('option',{key:w.workspaceId,value:w.workspaceId},w.title??w.path))))),h('button',{className:'nsi-primary',disabled:busy||!workspaceId||!!partial&&!ack,onClick:run},busy?'导入中…':preview.snapshotStatus==='imported'?'打开会话':preview.snapshotStatus==='pending'?'恢复并继续':'导入并继续'))))));
++ }
++ function Entry({wide}){return h('button',{className:'nsi-entry',type:'button','aria-label':'导入会话',title:'导入会话',onClick:()=>scope.layout.selectPanel(SESSION_IMPORT_PANEL)},h('svg',{width:16,height:16,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.6,'aria-hidden':true},h('path',{d:'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5'})),wide&&h('span',null,'导入会话'));}
++ const panel=scope.slots.inject('main',()=>scope.slots.register({name:'main',key:SESSION_IMPORT_PANEL},ImportPage)),entry=scope.slots.inject('sidebar.footer.action',()=>scope.slots.register({name:'sidebar.footer.action',id:'naumi-session-import',order:80},Entry));return()=>{entry?.();panel?.();};
++});}
+diff --git a/plugins/naumi-enterprise/client.js b/plugins/naumi-enterprise/client.js
+index 04afdf1..dabd5a3 100644
+--- a/plugins/naumi-enterprise/client.js
++++ b/plugins/naumi-enterprise/client.js
+@@ -1,5 +1,6 @@
+ /** Async presentation-only module; the original enterprise app below stays intact. */
+ function installNaumiContextUI(ctx,React,createPortal,Icon){
++  ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/session-import.js').then(m=>{if(!closed)dispose=m.installSessionImportUI(ctx,React);}).catch(e=>console.error('Naumi session import:',e));return()=>{closed=true;dispose?.();};});
+   ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/creation-settings.js').then(m=>{if(!closed)dispose=m.installCreationUI(ctx,React);}).catch(e=>console.error('Naumi creation:',e));return()=>{closed=true;dispose?.();};});
+   ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/bot-overview.js').then(module=>{if(!closed)dispose=module.installBotOverviewUI(ctx,React);});return()=>{closed=true;dispose?.();};});
+   ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/blender-settings.js').then(m=>{if(!closed)dispose=m.installBlenderUI(ctx,React);}).catch(e=>console.error('Naumi Blender:',e));return()=>{closed=true;dispose?.();};});
+@@ -175,7 +176,7 @@ window.__ModuleLoader__.load({id:'@naumi/dsh-enterprise',factory(require){
+       for(const [id]of PANELS)yield ctx.slots.register({name:'main',key:id},()=>h(Page,{page:id}));
+       yield ctx.slots.register({name:'main',key:'naumi-conversation',children:{'naumi.group.controls':{kind:'single',scope:'session'}}},props=>h(React.Suspense,{fallback:null},h(BotGroups,{native:props})));
+       yield ctx.slots.inject('sidebar.panellist',function*(){for(const [id,label,icon]of PANELS)yield ctx.slots.register({name:'sidebar.panellist',id,order:-100+PANELS.findIndex(x=>x[0]===id),label:()=>label},()=>h(Icon,{name:icon}));});
+-      const known=new Set([...PANELS.map(x=>x[0]),'naumi-conversation','naumi-bot-overview']);
++      const known=new Set([...PANELS.map(x=>x[0]),'naumi-conversation','naumi-bot-overview','naumi-session-import']);
+       const previous=sessionStorage.getItem('naumi.activePanel');
+       const saved=previous==='naumi-bot-groups'?'naumi-conversation':previous;
+       const hash=new URLSearchParams(location.hash.slice(1));
+diff --git a/plugins/naumi-enterprise/host.js b/plugins/naumi-enterprise/host.js
+index eb4e911..d1a90fe 100644
+--- a/plugins/naumi-enterprise/host.js
++++ b/plugins/naumi-enterprise/host.js
+@@ -1,3 +1,4 @@
++import {installSessionImport} from './session-import.js';
+ import {installCreation} from './creation.js';
+ import {installBlender} from './blender.js';
+ import {installPluginMarket} from './plugin-market.js';
+@@ -17,6 +18,7 @@ export const inject=['webServer','connection'];
+ /** Supported plugin routes, index branding and an authenticated read-only business adapter. */
+ export function apply(ctx,config) {
+   installDesktopIdentity(ctx);
++  installSessionImport(ctx);
+   installModelConnections(ctx);
+   installPluginMarket(ctx);
+   installAgentDesktop(ctx);
+@@ -30,6 +32,8 @@ export function apply(ctx,config) {
+   installBots(ctx,{collaborationOrigin});
+   const designOrigin=validateOrigin(config.designOrigin);
+   const assets=new Map([['employee-enterprise-work.js','text/javascript; charset=utf-8'],['employee-memory-maintenance.js','text/javascript; charset=utf-8'],['employee-sync-panel.js','text/javascript; charset=utf-8'],['employee-center.js','text/javascript; charset=utf-8'],['employee-center-model.js','text/javascript; charset=utf-8'],['employee-center.css','text/css; charset=utf-8'],['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml'],['browser-client.js','text/javascript; charset=utf-8'],['browser-native-client.js','text/javascript; charset=utf-8'],['browser-native.css','text/css; charset=utf-8'],['browser-scheduler.js','text/javascript; charset=utf-8'],['browser.css','text/css; charset=utf-8'],['team-panel.css','text/css; charset=utf-8'],['team-panel.js','text/javascript; charset=utf-8'],['team-panel-model.js','text/javascript; charset=utf-8'],['bot-sidebar.js','text/javascript; charset=utf-8'],['bot-sidebar-model.js','text/javascript; charset=utf-8'],['bot-sidebar.css','text/css; charset=utf-8']]);
++  assets.set('session-import.js','text/javascript; charset=utf-8');
++  assets.set('session-import.css','text/css; charset=utf-8');
+   assets.set('bot-overview.js','text/javascript; charset=utf-8');
+   assets.set('bot-overview.css','text/css; charset=utf-8');
+   assets.set('product-copy-keys.js','text/javascript; charset=utf-8');
+@@ -91,7 +95,7 @@ export function apply(ctx,config) {
+   }}));
+   ctx.on('webserver/index-inject',table=>{
+     table.push({kind:'global',name:'__NAUMI__',value:{collaborationOrigin,designOrigin,version:'0.3.0',product:'Naumi',productVersion:PRODUCT_VERSION}});
+-    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/bot-groups.css"><link rel="stylesheet" href="/naumi/assets/primary-bot.css"><link rel="stylesheet" href="/naumi/assets/bot-overview.css"><link rel="stylesheet" href="/naumi/assets/plugin-market.css"><link rel="stylesheet" href="/naumi/assets/desktop-updates.css">'});
++    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/bot-groups.css"><link rel="stylesheet" href="/naumi/assets/primary-bot.css"><link rel="stylesheet" href="/naumi/assets/bot-overview.css"><link rel="stylesheet" href="/naumi/assets/session-import.css"><link rel="stylesheet" href="/naumi/assets/plugin-market.css"><link rel="stylesheet" href="/naumi/assets/desktop-updates.css">'});
+     table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/product-identity.css"><link rel="stylesheet" href="/naumi/assets/model-connections.css"><link rel="stylesheet" href="/naumi/assets/im-settings.css"><link rel="stylesheet" href="/naumi/assets/blender-settings.css"><link rel="stylesheet" href="/naumi/assets/employee-center.css"><link rel="stylesheet" href="/naumi/assets/employee-experience.css"><link rel="stylesheet" href="/naumi/assets/browser.css"><link rel="stylesheet" href="/naumi/assets/browser-native.css"><link rel="stylesheet" href="/naumi/assets/team-panel.css"><link rel="stylesheet" href="/naumi/assets/bot-sidebar.css"><link rel="stylesheet" href="/naumi/assets/bot-task.css"><link rel="stylesheet" href="/naumi/assets/bot-avatar.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
+   });
+   ctx.effect(()=>ctx.webServer.tapIndex(html=>html.replace(/<title>[^<]*<\/title>/i,'<title>Naumi</title>').replace(/<link[^>]+rel="(?:shortcut )?icon"[^>]*href="(?!\/naumi\/)[^"]*"[^>]*>/g,'')));
+diff --git a/plugins/naumi-enterprise/package.json b/plugins/naumi-enterprise/package.json
+index b9dde2f..4f06e81 100644
+--- a/plugins/naumi-enterprise/package.json
++++ b/plugins/naumi-enterprise/package.json
+@@ -12,6 +12,8 @@
+   },
+   "files": [
+     "host.js",
++    "session-import.js",
++    "session-import-source.js",
+     "domain.js",
+     "client.js",
+     "assets",
+diff --git a/plugins/naumi-enterprise/session-import-source.js b/plugins/naumi-enterprise/session-import-source.js
+new file mode 100644
+index 0000000..f8f6621
+--- /dev/null
++++ b/plugins/naumi-enterprise/session-import-source.js
+@@ -0,0 +1,65 @@
++import fs from 'node:fs/promises';
++import path from 'node:path';
++import os from 'node:os';
++import {createHash} from 'node:crypto';
++export const digest=value=>createHash('sha256').update(value).digest('hex');
++export function importError(code,status=400){throw Object.assign(Error('IMPORT_'+code),{status});}
++const inside=(root,file)=>{const r=path.relative(root,file);return r!==''&&r!=='..'&&!r.startsWith('..'+path.sep)&&!path.isAbsolute(r);};
++export function defaultImportRoots(){const codex=process.env.CODEX_HOME||path.join(os.homedir(),'.codex'),claude=process.env.CLAUDE_CONFIG_DIR||path.join(os.homedir(),'.claude');return [{provider:'codex',path:path.join(codex,'sessions')},{provider:'codex',path:path.join(codex,'archived_sessions')},{provider:'claude',path:path.join(claude,'projects')}];}
++/** Discovery reads bounded metadata only. IDs resolve exclusively to regular JSONL files under known roots. */
++export class ImportSources{
++ constructor(roots=defaultImportRoots()){this.roots=roots;this.files=new Map();}
++ async scan(){const files=[],warnings=[];let visited=0;
++  for(const spec of this.roots){let root;try{root=await fs.realpath(spec.path);}catch(e){if(e.code!=='ENOENT')warnings.push({provider:spec.provider,code:'ROOT_UNREADABLE'});continue;}
++   const walk=async(dir,depth)=>{if(depth>5)return;let entries;try{entries=await fs.readdir(dir,{withFileTypes:true});}catch{warnings.push({provider:spec.provider,code:'DIRECTORY_UNREADABLE'});return;}
++    for(const e of entries){if(++visited>30000){warnings.push({code:'DISCOVERY_LIMIT'});return;}if(e.isSymbolicLink())continue;const file=path.join(dir,e.name);if(e.isDirectory()){if(!['subagents','node_modules','.git'].includes(e.name))await walk(file,depth+1);continue;}if(!e.isFile()||!e.name.endsWith('.jsonl'))continue;
++     const real=await fs.realpath(file);if(!inside(root,real))continue;const stat=await fs.stat(real),id=digest(spec.provider+'\0'+real),row={id,provider:spec.provider,root,file:real,sizeBytes:stat.size,modifiedAt:stat.mtime.toISOString()};files.push(row);
++    }};await walk(root,0);
++  }
++  files.sort((a,b)=>b.modifiedAt.localeCompare(a.modifiedAt));this.files=new Map(files.map(f=>[f.id,f]));return{items:files,warnings};
++ }
++ async resolve(id){if(!/^[a-f0-9]{64}$/.test(id??''))importError('SOURCE_NOT_FOUND',404);if(!this.files.has(id))await this.scan();const row=this.files.get(id);if(!row)importError('SOURCE_NOT_FOUND',404);const real=await fs.realpath(row.file).catch(()=>null);if(!real||!inside(row.root,real)||real!==row.file||(await fs.lstat(row.file)).isSymbolicLink())importError('SOURCE_CHANGED',409);return row;}
++ async metadata(row){let handle;try{handle=await fs.open(row.file,'r');const buffer=Buffer.alloc(Math.min(row.sizeBytes,2*1024*1024)),{bytesRead}=await handle.read(buffer,0,buffer.length,0);let title='',sourceSessionId='',cwd='';for(const l of buffer.subarray(0,bytesRead).toString('utf8').split('\n')){let o;try{o=JSON.parse(l);}catch{continue;}if(row.provider==='codex'&&o.type==='session_meta'){sourceSessionId=o.payload?.id??o.payload?.session_id??'';cwd=o.payload?.cwd??'';}else if(row.provider==='claude'){sourceSessionId||=o.sessionId??'';cwd||=o.cwd??'';}
++    const m=row.provider==='codex'&&o.type==='response_item'?o.payload:row.provider==='claude'&&o.type==='user'?o.message:null;if(!title&&m?.role==='user'){title=typeof m.content==='string'?m.content:m.content?.filter(b=>['text','input_text'].includes(b.type)).map(b=>b.text).join(' ');title=String(title??'').replace(/\s+/g,' ').trim().slice(0,72);if(title)break;}}
++   return {id:row.id,provider:row.provider,sizeBytes:row.sizeBytes,modifiedAt:row.modifiedAt,title:title||path.basename(row.file,'.jsonl').slice(0,72),sourceSessionId,cwd};
++  }catch{return{id:row.id,provider:row.provider,sizeBytes:row.sizeBytes,modifiedAt:row.modifiedAt,title:'读取失败',unreadable:true};}finally{await handle?.close();}}
++}
++/** Only transcript fields enter normalized history; config, request blobs and encrypted reasoning never do. */
++function blocks(content,stats){if(typeof content==='string')return[{kind:'text',text:content}];const out=[];
++ for(const b of Array.isArray(content)?content:[]){if(!b||typeof b!=='object'){stats.unsupported++;continue;}
++  if(['text','input_text','output_text'].includes(b.type)&&typeof b.text==='string')out.push({kind:'text',text:b.text});
++  else if(b.type==='tool_use')out.push({kind:'tool-call',id:String(b.id??''),name:String(b.name??''),text:typeof b.input==='string'?b.input:JSON.stringify(b.input??{})});
++  else if(b.type==='tool_result'){const inner=blocks(b.content,stats);out.push({kind:'tool-result',id:String(b.tool_use_id??''),isError:b.is_error===true,text:inner.map(x=>x.text??'['+x.kind+']').join('\n')});}
++  else if(['thinking','redacted_thinking','reasoning'].includes(b.type))stats.reasoning++;
++  else{stats.attachments++;out.push({kind:'attachment',mediaType:String(b.type??'unknown'),text:'[历史附件：'+String(b.type??'unknown')+'，未读取本地文件或远端资源]'});}
++ }return out;}
++export async function readImportSnapshot(row,{maxBytes=512*1024*1024,maxHistoryBytes=64*1024*1024}={}){
++ const handle=await fs.open(row.file,'r');let snapshotBytes=0,tail=Buffer.alloc(0),lineNumber=0,completeBytes=0,historyBytes=0;const hash=createHash('sha256'),records=[],nodes=new Map(),stats={metadata:0,reasoning:0,attachments:0,unsupported:0,offBranch:0},meta={sourceSessionId:'',cwd:'',startedAt:''};let leaf=null;
++ const add=(o,role,content,id)=>{const b=blocks(content,stats);if(!b.length)return;const item={sourceId:String(id??'line-'+lineNumber),line:lineNumber,time:String(o.timestamp??''),role,blocks:b};historyBytes+=Buffer.byteLength(JSON.stringify(item));if(historyBytes>maxHistoryBytes)importError('HISTORY_TOO_LARGE',413);records.push(item);};
++ const parse=line=>{lineNumber++;let o;try{o=JSON.parse(line.toString('utf8'));}catch{importError('INVALID_JSON_LINE_'+lineNumber);}if(!o||typeof o!=='object')importError('INVALID_RECORD');
++  if(row.provider==='codex'){const p=o.payload;if(o.type==='session_meta'){meta.sourceSessionId=String(p?.id??p?.session_id??'');meta.cwd=String(p?.cwd??'');meta.startedAt=String(o.timestamp??'');return;}
++   if(o.type==='response_item'&&p){if(p.type==='message'&&['user','assistant'].includes(p.role))add(o,p.role,p.content,p.id);
++    else if(['function_call','custom_tool_call'].includes(p.type))add(o,'assistant',[{type:'tool_use',id:p.call_id,name:p.name,input:p.arguments??p.input??''}],p.id??p.call_id);
++    else if(['function_call_output','custom_tool_call_output'].includes(p.type))add(o,'assistant',[{type:'tool_result',tool_use_id:p.call_id,content:typeof p.output==='string'?p.output:JSON.stringify(p.output??'')}],p.id??p.call_id);
++    else if(p.type==='reasoning')stats.reasoning++;else if(p.type==='message'&&['system','developer'].includes(p.role))stats.metadata++;else stats.unsupported++;
++   }else if(o.type==='compacted'&&typeof p?.message==='string')add(o,'assistant','[来源压缩摘要]\n'+p.message,'compacted-'+lineNumber);else stats.metadata++;
++  }else{
++   meta.sourceSessionId||=String(o.sessionId??'');meta.cwd||=String(o.cwd??'');meta.startedAt||=String(o.timestamp??'');
++   if(o.uuid&&!o.isSidechain){if(nodes.has(o.uuid))importError('DUPLICATE_SOURCE_ID');nodes.set(o.uuid,{parent:o.parentUuid??null,line:lineNumber});if(['user','assistant'].includes(o.type))leaf=o.uuid;}
++   if(o.isSidechain){stats.offBranch++;return;}if(['user','assistant'].includes(o.type)&&o.message){if(!['user','assistant'].includes(o.message.role??o.type))importError('INVALID_ROLE');add(o,o.message.role??o.type,o.message.content,o.uuid);}
++   else stats.metadata++;
++  }};
++ try{const before=await handle.stat();if(!before.isFile())importError('NOT_REGULAR_FILE');snapshotBytes=before.size;if(snapshotBytes>maxBytes)importError('SOURCE_TOO_LARGE',413);let offset=0;
++  while(offset<snapshotBytes){const b=Buffer.alloc(Math.min(256*1024,snapshotBytes-offset)),{bytesRead}=await handle.read(b,0,b.length,offset);if(!bytesRead)importError('SOURCE_CHANGED',409);offset+=bytesRead;hash.update(b.subarray(0,bytesRead));tail=Buffer.concat([tail,b.subarray(0,bytesRead)]);let start=0,end;
++   while((end=tail.indexOf(10,start))>=0){const line=tail.subarray(start,end);completeBytes+=end-start+1;if(line.toString('utf8').trim())parse(line);start=end+1;}tail=tail.subarray(start);if(tail.length>16*1024*1024)importError('LINE_TOO_LARGE',413);
++  }
++  if(tail.length){let complete=false;try{JSON.parse(tail.toString('utf8'));complete=true;}catch{}if(complete){parse(tail);completeBytes+=tail.length;tail=Buffer.alloc(0);}}
++  const after=await handle.stat();if(after.size<snapshotBytes||after.ino!==before.ino)importError('SOURCE_CHANGED',409);
++ }finally{await handle.close();}
++ let messages=records;
++ if(row.provider==='claude'&&leaf){const chain=new Set(),seen=new Set();let current=leaf;while(current&&nodes.has(current)){if(seen.has(current))importError('SOURCE_BRANCH_CYCLE');seen.add(current);const n=nodes.get(current);chain.add(n.line);current=n.parent;}
++  messages=records.filter(r=>chain.has(r.line));stats.offBranch+=records.length-messages.length;
++ }
++ if(!meta.sourceSessionId)importError('SOURCE_ID_MISSING');if(!messages.length)importError('NO_MESSAGES');const title=(messages.find(m=>m.role==='user')?.blocks.filter(b=>b.kind==='text').map(b=>b.text).join(' ')||'导入会话').replace(/\s+/g,' ').trim().slice(0,72);
++ return{version:1,provider:row.provider,sourceId:row.id,...meta,title,fingerprint:hash.digest('hex'),snapshotBytes,completeBytes,incompleteTailBytes:tail.length,stats,messages};
++}
+diff --git a/plugins/naumi-enterprise/session-import.js b/plugins/naumi-enterprise/session-import.js
+new file mode 100644
+index 0000000..d01181d
+--- /dev/null
++++ b/plugins/naumi-enterprise/session-import.js
+@@ -0,0 +1,66 @@
++import fs from 'node:fs/promises';
++import path from 'node:path';
++import os from 'node:os';
++import {randomUUID} from 'node:crypto';
++import {Session,SessionId} from '@deepseek-ai/dsh-session';
++import {createUserMessage,createAssistantMessage} from '@deepseek-ai/dsh-llm';
++import {ImportSources,readImportSnapshot,digest,importError} from './session-import-source.js';
++
++async function readJSON(file){try{return JSON.parse(await fs.readFile(file,'utf8'));}catch(e){if(e.code==='ENOENT')return null;throw e;}}
++/** Durable no-clobber publication; an interrupted temporary file is never a committed plan. */
++async function publish(file,value,{exclusive=false}={}){await fs.mkdir(path.dirname(file),{recursive:true});const tmp=file+'.'+randomUUID()+'.tmp',h=await fs.open(tmp,'wx',0o600);try{await h.writeFile(JSON.stringify(value));await h.sync();}finally{await h.close();}try{if(exclusive)await fs.link(tmp,file);else await fs.rename(tmp,file);}finally{await fs.unlink(tmp).catch(()=>{});}}
++const toolText=b=>b.kind==='tool-call'?'[历史工具调用 '+b.name+' / '+b.id+']\n'+b.text:b.kind==='tool-result'?'[历史工具结果 '+b.id+(b.isError?' / error':'')+']\n'+b.text:b.text;
++export function importSessionPlan(snapshot,sessionId,cwd){
++ const minimal=Session.create(SessionId(sessionId)),session=Session.create(SessionId(sessionId),undefined,{...minimal.header,cwd}),events=[],mapping=[];const append=(...args)=>{const e=session.append(...args);events.push(e);return e;};
++ append('session/title',{title:snapshot.title,messageSeqs:[],source:{kind:'user'}});
++ append('user/message',createUserMessage({source:{kind:'naumi-session-import',form:'recall'},content:[{type:'text',text:`[${snapshot.provider} 历史会话；历史工具仅为记录，不代表当前工具、权限或待执行请求。来源 ${snapshot.sourceSessionId}，快照 ${snapshot.fingerprint}。]`}]}),{surfaceOp:'append'});
++ let turn=0;
++ for(const m of snapshot.messages){const content=[{type:'text',text:m.blocks.map(toolText).join('\n\n')}];let e;
++  if(m.role==='user')e=append('user/message',createUserMessage({source:{kind:'naumi-session-import',form:'recall'},content}),{surfaceOp:'append'});
++  else{turn++;append('turn/start',{turn});append('step/start',{turn,step:1});e=append('assistant/message',{turn,step:1,message:createAssistantMessage({source:{provider:'imported-'+snapshot.provider,model:'transcript'},content}),stream:[]},{surfaceOp:'append'});append('step/end',{turn,step:1});append('turn/end',{turn,reason:{kind:'completed'}});}
++  mapping.push({sourceId:m.sourceId,line:m.line,time:m.time,seq:e.seq,messageId:m.role==='user'?e.data.id:e.data.message.id});
++ }
++ return{version:1,sessionId,header:session.header,events,mapping,snapshot,snapshotDigest:digest(JSON.stringify(snapshot)),eventsDigest:digest(JSON.stringify(events))};
++}
++export class SessionImporter{
++ constructor({ctx,home=process.env.DSH_HOME??path.join(os.homedir(),'.dsh'),sources=new ImportSources(),fault=()=>{}}){this.ctx=ctx;this.sources=sources;this.root=path.join(home,'naumi','session-import');this.tail=Promise.resolve();this.fault=fault;}
++ async discover({offset=0,limit=40}={}){if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>100)importError('INVALID_PAGE');const {items,warnings}=await this.sources.scan();return{items:await Promise.all(items.slice(offset,offset+limit).map(x=>this.sources.metadata(x))),total:items.length,offset,nextOffset:offset+limit<items.length?offset+limit:null,warnings};}
++ workspace(workspaceId){const w=this.ctx.workspaceRegistry.get(workspaceId);if(!w)importError('WORKSPACE_NOT_FOUND',404);return w;}
++ key(sourceId,workspace){if(!/^[a-f0-9]{64}$/.test(sourceId??''))importError('SOURCE_NOT_FOUND',404);return digest(sourceId+'\0'+workspace.path);}
++ validate(plan,key,workspaceId,workspace){if(plan.key!==key||plan.workspaceId!==workspaceId||plan.header.cwd!==workspace.path||plan.eventsDigest!==digest(JSON.stringify(plan.events))||plan.snapshotDigest!==digest(JSON.stringify(plan.snapshot)))importError('PLAN_INTEGRITY',409);}
++ async preview({sourceId,workspaceId,offset=0,limit=80}){if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>100)importError('INVALID_PAGE');let s,status='source',sourceStatus='unchanged';
++  if(workspaceId){const w=this.workspace(workspaceId),key=this.key(sourceId,w),dir=path.join(this.root,key),plan=await readJSON(path.join(dir,'plan.json'));if(plan){this.validate(plan,key,workspaceId,w);s=plan.snapshot;status=await readJSON(path.join(dir,'receipt.json'))?'imported':'pending';}}
++  if(!s)s=await readImportSnapshot(await this.sources.resolve(sourceId));else{try{const current=await readImportSnapshot(await this.sources.resolve(sourceId));if(current.fingerprint!==s.fingerprint)sourceStatus='changed';}catch{sourceStatus='unavailable';}}
++  const messages=s.messages.slice(offset,offset+limit).map(m=>({...m,blocks:m.blocks.map(b=>b.text?.length>16000?{...b,text:b.text.slice(0,16000),previewTruncated:true,sourceChars:b.text.length}:b)}));
++  return{...s,snapshotStatus:status,sourceStatus,messages,messageCount:s.messages.length,offset,nextOffset:offset+limit<s.messages.length?offset+limit:null};}
++ perform(input){const run=this.tail.then(()=>this.import(input));this.tail=run.catch(()=>{});return run;}
++ async import({sourceId,fingerprint,workspaceId,acknowledgePartial=false}){
++  if(!/^[a-f0-9]{64}$/.test(fingerprint??''))importError('PREVIEW_REQUIRED');const workspace=this.workspace(workspaceId),key=this.key(sourceId,workspace),dir=path.join(this.root,key),planFile=path.join(dir,'plan.json'),receiptFile=path.join(dir,'receipt.json');
++  let plan=await readJSON(planFile);const receipt=await readJSON(receiptFile);
++  if(receipt){if(!plan)importError('PLAN_INTEGRITY',409);this.validate(plan,key,workspaceId,workspace);if(receipt.sessionId!==plan.sessionId||receipt.fingerprint!==plan.snapshot.fingerprint)importError('PLAN_INTEGRITY',409);if(!await this.ctx.sessionPersistence.stat(SessionId(receipt.sessionId)))importError('SESSION_MISSING',409);return{...receipt,existing:true,sourceChanged:fingerprint!==receipt.fingerprint};}
++  if(!plan){const snapshot=await readImportSnapshot(await this.sources.resolve(sourceId));if(snapshot.fingerprint!==fingerprint)importError('SOURCE_CHANGED',409);if((snapshot.incompleteTailBytes||snapshot.stats.attachments||snapshot.stats.unsupported||snapshot.stats.offBranch)&&acknowledgePartial!==true)importError('ACKNOWLEDGEMENT_REQUIRED',409);
++   plan=importSessionPlan(snapshot,'naumi-import-'+key.slice(0,40),workspace.path);plan.key=key;plan.workspaceId=workspaceId;try{await publish(planFile,plan,{exclusive:true});}catch(e){if(e.code!=='EEXIST')throw e;plan=await readJSON(planFile);}
++  }
++  this.validate(plan,key,workspaceId,workspace);
++  if(plan.snapshot.fingerprint!==fingerprint)importError('PENDING_SNAPSHOT_CHANGED',409);await this.fault('after-plan',plan);
++  const sid=SessionId(plan.sessionId);let h;
++  try{const stored=await this.ctx.sessionPersistence.stat(sid);h=stored?await this.ctx.sessionPersistence.open(sid,'write'):await this.ctx.sessionPersistence.create(plan.header);
++   if(h.header.cwd!==workspace.path)importError('SESSION_CONFLICT',409);const read=await h.read(),prefix=read.events;
++   if(prefix.length>plan.events.length||prefix.some((e,i)=>JSON.stringify(e)!==JSON.stringify(plan.events[i])))importError('SESSION_CONFLICT',409);
++   if(prefix.length<plan.events.length)await h.append(plan.events.slice(prefix.length));await h.flush();await this.fault('after-flush',plan);
++  }finally{await h?.close();}
++  await this.workspace(workspaceId).attachSession(sid);await this.fault('after-attach',plan);
++  const result={version:1,sessionId:sid,workspaceId,sourceId,provider:plan.snapshot.provider,sourceSessionId:plan.snapshot.sourceSessionId,fingerprint:plan.snapshot.fingerprint,messageCount:plan.snapshot.messages.length,importedAt:new Date().toISOString()};await publish(receiptFile,result);return{...result,existing:false,sourceChanged:false};
++ }
++}
++export function installSessionImport(ctx,options={}){return ctx.inject(['sessionPersistence','workspaceRegistry'],scope=>{
++ const importer=new SessionImporter({ctx:scope,...options});scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/session-import',handler:async(req,res)=>{
++  res.setHeader('Content-Type','application/json; charset=utf-8');res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Naumi-Session-Import','1');const send=(status,body)=>res.writeHead(status).end(JSON.stringify(body));
++  try{const a=scope.connection.admit(req);if('rejection'in a){send(a.rejection,{error:'IMPORT_OWNER_REQUIRED'});return;}if(a.peer.principal.kind!=='owner')importError('OWNER_REQUIRED',403);
++   if(req.method!=='POST'){res.setHeader('Allow','POST');importError('METHOD',405);}if(req.headers['x-naumi-import']!=='1'||req.headers.origin&&![`http://${req.headers.host}`,`https://${req.headers.host}`].includes(req.headers.origin))importError('SAME_ORIGIN_REQUIRED',403);
++   let size=0;const chunks=[];for await(const b of req){size+=b.length;if(size>8192)importError('REQUEST_TOO_LARGE',413);chunks.push(b);}let v;try{v=JSON.parse(Buffer.concat(chunks));}catch{importError('INVALID_REQUEST');}
++   if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).some(k=>!['action','sourceId','fingerprint','workspaceId','acknowledgePartial','offset','limit'].includes(k)))importError('INVALID_REQUEST');
++   if(v.action==='discover')send(200,await importer.discover(v));else if(v.action==='preview')send(200,await importer.preview(v));else if(v.action==='import')send(200,await importer.perform(v));else importError('INVALID_ACTION');
++  }catch(e){if(!res.headersSent)send(e.status??500,{error:/^IMPORT_[A-Z_0-9]+$/.test(e.message)?e.message:'IMPORT_UNAVAILABLE'});}
++ }}));scope.effect(()=>async()=>{await importer.tail;});
++});}
+diff --git a/scripts/deploy-session-import.mjs b/scripts/deploy-session-import.mjs
+new file mode 100644
+index 0000000..d1d0614
+--- /dev/null
++++ b/scripts/deploy-session-import.mjs
+@@ -0,0 +1,47 @@
++// Narrow main-only runtime delta. No account enrollment, provider calls, or task writes.
++import {sessionImportCarrier} from './session-import-carrier.mjs';
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';import {DatabaseSync} from 'node:sqlite';import {botLiveApi} from './bot-live-api.mjs';
++const root=process.cwd(),mode=process.argv[2]??'prepare',runtime=path.resolve(process.argv[3]??root),baseline='c1552171c9090b720cae201969db75d6a8dd3394';
++const installed=path.join(runtime,'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise'),backup=path.join(runtime,'runtime/session-import-load-'+randomUUID()),out=path.join(root,'evidence/session-import');
++const files=['session-import.js','session-import-source.js','assets/session-import.js','assets/session-import.css','host.js','client.js','package.json'];
++const read=p=>fs.readFileSync(p),sha=v=>createHash('sha256').update(v).digest('hex'),norm=v=>v.toString().replaceAll('\r\n','\n');
++const inventory=()=>Object.fromEntries(fs.readdirSync(installed,{recursive:true}).filter(f=>fs.statSync(path.join(installed,f)).isFile()).map(f=>[f.replaceAll('\\','/'),sha(read(path.join(installed,f)))]));
++const sourceCommit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
++fs.mkdirSync(backup,{recursive:true});fs.mkdirSync(out,{recursive:true});const original=inventory(),rows=[];
++const delta=sessionImportCarrier(installed,path.join(root,'plugins/naumi-enterprise'));
++for(const file of files){const target=path.join(installed,file),before=fs.existsSync(target)?read(target):null,source=read(path.join(root,'plugins/naumi-enterprise',file)),after=delta.get(file);assert.equal(norm(source),norm(execFileSync('git',['show',sourceCommit+':plugins/naumi-enterprise/'+file])),'SOURCE_NOT_COMMITTED '+file);
++ for(const[kind,bytes]of[['before',before],['after',after]])if(bytes){const p=path.join(backup,kind,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);}
++ rows.push({file,beforeSHA256:before?sha(before):null,afterSHA256:sha(after),carrier:['host.js','client.js','package.json'].includes(file)});
++}
++const candidate=path.join(backup,'candidate');fs.cpSync(installed,candidate,{recursive:true,filter:p=>!path.relative(installed,p).split(path.sep).includes('node_modules')});
++for(const [file,bytes]of delta){const p=path.join(candidate,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);}
++fs.writeFileSync(path.join(backup,'manifest.json'),JSON.stringify({baseline,sourceCommit,candidate,rows},null,2));
++if(mode==='prepare'){console.log('SESSION_IMPORT_PREPARED files=7 host_client=THIN_DELTA backup='+backup+' candidate='+candidate);process.exit(0);}assert.equal(mode,'apply');
++assert.equal(execFileSync('git',['branch','--show-current'],{encoding:'utf8'}).trim(),'main');const unrelatedTracked=execFileSync('git',['diff','HEAD','--name-only','-z'],{encoding:'utf8'}).split('\0').filter(Boolean);assert(unrelatedTracked.every(f=>!files.map(p=>'plugins/naumi-enterprise/'+p).includes(f)),'TASK_SOURCE_DIRTY');
++const untracked=execFileSync('git',['ls-files','--others','--exclude-standard','-z'],{encoding:'utf8'}).split('\0').filter(f=>f&&!f.startsWith('evidence/session-import/')),untrackedHashes=Object.fromEntries(untracked.map(f=>[f,sha(read(path.join(root,f)))]));
++const untrackedSizes=Object.fromEntries(Object.keys(untrackedHashes).map(f=>[f,read(path.join(root,f)).length]));const appendedEvidence=[];
++const api=await botLiveApi(runtime),sessions=await api.rpc('session/list',{_request:{}}),bots=await api.json('/naumi/bots'),tasks=await api.json('/naumi/bot-tasks'),models=sha(JSON.stringify(await api.json('/naumi/model-connections')));
++assert(!sessions.items.some(s=>s.running),'RUNNING_SESSIONS');assert(!tasks.tasks.some(t=>['queued','starting','running','waiting'].includes(t.status)),'ACTIVE_TASKS');
++const groupRows=()=>{const db=new DatabaseSync(path.join(runtime,'.dsh/naumi/bot-groups.sqlite'),{readOnly:true});try{const rows=Object.fromEntries(['rooms','members','posts','replies','post_context','room_name_operations'].map(t=>[t,db.prepare('SELECT * FROM '+t+' ORDER BY rowid').all()]));assert(!rows.replies.some(r=>['queued','starting','sent'].includes(r.state)),'GROUP_BUSY');return sha(JSON.stringify(rows));}finally{db.close();}};
++const groupsBefore=groupRows(),employees=async api=>Object.fromEntries(await Promise.all(bots.bots.map(async b=>{const {exportedAt,...v}=await api.json('/naumi/employees?view=export&botId='+encodeURIComponent(b.id));return[b.id,sha(JSON.stringify(v))];}))),employeesBefore=await employees(api);
++const protectedPaths=['.dsh/.credentials.yaml','.dsh/cordis.patch.yml','.dsh/profiles/web/package.json','.dsh/profiles/web/cordis.yml','.dsh/profiles/web/cordis.patch.yml','.dsh/naumi/bots.json','.dsh/naumi/bot-tasks.json','config/local.json','node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'];
++for(const f of fs.readdirSync(path.join(runtime,'.dsh/sessions'),{recursive:true}))if(path.basename(f)==='session.v4.jsonl.zstd')protectedPaths.push('.dsh/sessions/'+f);
++const protectedBefore=Object.fromEntries(protectedPaths.filter(f=>fs.existsSync(path.join(runtime,f))).map(f=>[f,sha(read(path.join(runtime,f)))]));
++const shell=name=>{const r=spawnSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-File',path.join(runtime,name)],{windowsHide:true,stdio:'ignore',timeout:150000});assert.equal(r.status,0,'SERVICE_COMMAND '+name);};
++const atomic=(p,bytes)=>{fs.mkdirSync(path.dirname(p),{recursive:true});const tmp=p+'.'+randomUUID()+'.tmp';fs.writeFileSync(tmp,bytes);fs.renameSync(tmp,p);};let complete=false;
++try{
++ shell('Stop-Naumi.ps1');for(const[f,h]of Object.entries(protectedBefore))assert.equal(sha(read(path.join(runtime,f))),h,'PRELOAD_DATA_DRIFT '+f);
++ for(const r of rows){const p=path.join(installed,r.file);if(r.beforeSHA256)assert.equal(sha(read(p)),r.beforeSHA256,'PRELOAD_RUNTIME_DRIFT');else assert(!fs.existsSync(p));}
++ for(const r of rows)atomic(path.join(installed,r.file),read(path.join(backup,'after',r.file)));shell('Start-Naumi.ps1');
++ const loaded=await botLiveApi(runtime),afterSessions=await loaded.rpc('session/list',{_request:{}});assert(!afterSessions.items.some(s=>s.running));assert.equal(afterSessions.items.length,sessions.items.length);
++ for(const f of ['session-import.js','session-import.css'])assert.equal((await loaded.request('/naumi/assets/'+f)).status,200);const contract=await loaded.request('/naumi/session-import',{method:'POST',headers:{'Content-Type':'application/json','x-naumi-import':'1'},body:JSON.stringify({action:'discover',limit:1})});assert.equal(contract.status,200);assert.equal(contract.headers.get('x-naumi-session-import'),'1');const discovery=await contract.json();assert(Array.isArray(discovery.items));assert(!fs.existsSync(path.join(runtime,'.dsh/naumi/session-import')),'UNEXPECTED_REAL_IMPORT');
++ assert.deepEqual(await loaded.json('/naumi/bots'),bots);assert.deepEqual(await loaded.json('/naumi/bot-tasks'),tasks);assert.equal(sha(JSON.stringify(await loaded.json('/naumi/model-connections'))),models);assert.deepEqual(await employees(loaded),employeesBefore);assert.equal(groupRows(),groupsBefore);
++ const after=inventory();for(const r of rows)assert.equal(after[r.file],r.afterSHA256);for(const[f,h]of Object.entries(original))if(!files.includes(f))assert.equal(after[f],h,'UNRELATED_RUNTIME '+f);
++ for(const[f,h]of Object.entries(protectedBefore))assert.equal(sha(read(path.join(runtime,f))),h,'PROTECTED_DATA '+f);for(const[f,h]of Object.entries(untrackedHashes)){const bytes=read(path.join(root,f));if(sha(bytes)!==h){assert(bytes.length>=untrackedSizes[f]&&sha(bytes.subarray(0,untrackedSizes[f]))===h,'OTHER_EVIDENCE_OVERWRITTEN '+f);appendedEvidence.push({file:f,oldBytesPreserved:untrackedSizes[f],appendedBytes:bytes.length-untrackedSizes[f]});}}
++ fs.writeFileSync(path.join(out,'DEPLOYMENT.json'),JSON.stringify({status:'PASS',sourceCommit,files:rows,backup,http:200,sessions:afterSessions.items.length,running:0,bots:bots.bots.length,revision:bots.revision,importedRealSessions:0,sourceLogWrites:0,enterpriseConfigurationChanges:0,modelCalls:0,modelGroupsUnchanged:true,employeeExportsUnchanged:true,employeeExportComparison:"all_fields_except_exportedAt",taskAndGroupRowsUnchanged:true,protectedFilesUnchanged:Object.keys(protectedBefore).length,unrelatedRuntimeUnchanged:Object.keys(original).filter(f=>!files.includes(f)).length,otherUntrackedFilesPreserved:untracked.length,otherUntrackedAppendOnly:appendedEvidence,unrelatedTrackedEditsNotTouched:unrelatedTracked,nativeComposerUnchanged:true,packageChange:"FILES_APPEND_ONLY",hostClientChange:"reversible exact thin additions over existing installed carrier"},null,2)+'\n');
++ complete=true;console.log('SESSION_IMPORT_LOADED files=7 http=200 running=0 models=UNCHANGED employees=UNCHANGED tasks=UNCHANGED groups=UNCHANGED account_data=UNCHANGED model_calls=0');
++}finally{if(!complete){
++ const dataFile=path.join(runtime,'.dsh/naumi/bots.json'),expected=protectedBefore['.dsh/naumi/bots.json'];
++ const taskLedger='.dsh/naumi/bot-tasks.json',taskExpected=protectedBefore[taskLedger];if(expected&&sha(read(dataFile))!==expected||taskExpected&&sha(read(path.join(runtime,taskLedger)))!==taskExpected)console.error('SESSION_IMPORT_LOAD_INCOMPLETE new_authoritative_data=RETAINED compatible_reader=RETAINED backup='+backup);
++ else{try{shell('Stop-Naumi.ps1');}catch{}for(const r of rows){const p=path.join(installed,r.file);if(r.beforeSHA256)atomic(p,read(path.join(backup,'before',r.file)));else if(fs.existsSync(p))fs.unlinkSync(p);}shell('Start-Naumi.ps1');console.error('SESSION_IMPORT_LOAD_FAILED runtime=RESTORED backup='+backup);}
++}}
+diff --git a/scripts/package-session-import.mjs b/scripts/package-session-import.mjs
+new file mode 100644
+index 0000000..f3e7124
+--- /dev/null
++++ b/scripts/package-session-import.mjs
+@@ -0,0 +1,11 @@
++import fs from 'node:fs';import path from 'node:path';import {createHash,randomUUID} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';
++const root=process.cwd(),out=path.join(root,'evidence/session-import'),baseline='c1552171c9090b720cae201969db75d6a8dd3394';
++const paths=[".gitattributes", "docs/implementation/SESSION_IMPORT.md", "docs/prd/DAILY_EMPLOYEE_PRIORITY.md", "plugins/naumi-enterprise/host.js", "plugins/naumi-enterprise/client.js", "plugins/naumi-enterprise/package.json", "plugins/naumi-enterprise/session-import.js", "plugins/naumi-enterprise/session-import-source.js", "plugins/naumi-enterprise/assets/session-import.js", "plugins/naumi-enterprise/assets/session-import.css", "tests/naumi-session-import.test.mjs", "tests/helpers/session-import-fixture.mjs", "tests/naumi-context-ui.test.mjs", "scripts/verify-session-import-ui.mjs", "scripts/session-import-carrier.mjs", "scripts/deploy-session-import.mjs", "scripts/package-session-import.mjs"];
++const hash=b=>createHash('sha256').update(b).digest('hex'),manifest={baseline,entries:[]};
++for(const file of paths){const original=path.join(out,'original',file);let before=null;if(fs.existsSync(original))before=fs.readFileSync(original);else{try{before=execFileSync('git',['show',baseline+':'+file],{stdio:['ignore','pipe','ignore']});}catch{}if(before){fs.mkdirSync(path.dirname(original),{recursive:true});fs.writeFileSync(original,before);}}const bytes=fs.readFileSync(path.join(root,file));manifest.entries.push({path:file,original:before?hash(before):null,modified:hash(bytes)});}
++fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
++fs.writeFileSync(path.join(out,'ROLLBACK.sh'),`#!/usr/bin/env bash\nset -euo pipefail\nHERE="$(cd "$(dirname "$0")" && pwd)"\nnode - "$1" "$HERE" <<'NODE'\nconst fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');const target=path.resolve(process.argv[2]),out=path.resolve(process.argv[3]);if(!fs.existsSync(path.join(target,'.naumi-session-import-rollback-copy')))throw Error('MARKED_COPY_REQUIRED');if(target===path.resolve(out,'../..'))throw Error('SOURCE_TARGET_REJECTED');const m=JSON.parse(fs.readFileSync(path.join(out,'manifest.json'))),hash=b=>crypto.createHash('sha256').update(b).digest('hex');for(const e of m.entries){const file=path.resolve(target,e.path);if(!file.startsWith(target+path.sep))throw Error('INVALID_TARGET');if(fs.existsSync(file)&&hash(fs.readFileSync(file))!==e.modified)throw Error('COPY_CHANGED '+e.path);if(e.original){const bytes=fs.readFileSync(path.join(out,'original',e.path));if(hash(bytes)!==e.original)throw Error('ORIGINAL_CHANGED');fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,bytes);}else if(fs.existsSync(file))fs.unlinkSync(file);}for(const e of m.entries){const file=path.join(target,e.path);if(e.original?hash(fs.readFileSync(file))!==e.original:fs.existsSync(file))throw Error('RESTORE_FAILED');}console.log('ROLLBACK_SOURCE originals='+m.entries.filter(e=>e.original).length+' new_removed='+m.entries.filter(e=>!e.original).length+' hashes=PASS live_data=UNTOUCHED');\nNODE\n`);
++const patch=execFileSync('git',['diff',baseline,'--binary','--',...paths]);fs.writeFileSync(path.join(out,'DIFF_FILE.patch'),patch);if(!patch.length)throw Error('NO_TASK_CHANGES');
++execFileSync('python',['-X','utf8','-c',"import json,zipfile,pathlib; r=pathlib.Path('.'); o=r/'evidence/session-import'; m=json.loads((o/'manifest.json').read_text()); z=zipfile.ZipFile(o/'MODIFIED_FILE.zip','w',zipfile.ZIP_DEFLATED); [z.write(r/e['path'],e['path']) for e in m['entries']]; z.close(); z=zipfile.ZipFile(o/'MODIFIED_FILE.zip'); assert z.testzip() is None; print('ZIP entries='+str(len(z.namelist()))+' CRC=PASS')"],{stdio:'inherit'});
++if(process.argv.includes('--rollback-test')){const copy=path.join(root,'runtime/session-import-source-rollback-'+randomUUID());if(fs.existsSync(copy))throw Error('COPY_ALREADY_EXISTS');fs.mkdirSync(copy,{recursive:true});fs.writeFileSync(path.join(copy,'.naumi-session-import-rollback-copy'),'source-only');for(const dir of ['plugins','tests','scripts'])fs.cpSync(path.join(root,dir),path.join(copy,dir),{recursive:true});fs.copyFileSync(path.join(root,'package.json'),path.join(copy,'package.json'));for(const f of ['Start-Naumi.ps1','Stop-Naumi.ps1','Start-NaumiDesktop.ps1'])fs.copyFileSync(path.join(root,f),path.join(copy,f));for(const e of manifest.entries){const dest=path.join(copy,e.path);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(path.join(root,e.path),dest);}fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');fs.mkdirSync(path.join(copy,'desktop'));fs.copyFileSync(path.join(root,'desktop/package.json'),path.join(copy,'desktop/package.json'));fs.cpSync(path.join(root,'services'),path.join(copy,'services'),{recursive:true});for(const dir of ['app','installer','scripts'])fs.cpSync(path.join(root,'desktop',dir),path.join(copy,'desktop',dir),{recursive:true});fs.symlinkSync(path.join(root,'desktop/node_modules'),path.join(copy,'desktop/node_modules'),'junction');const r=spawnSync('D:/DEV/Git/bin/bash.exe',[path.join(out,'ROLLBACK.sh'),copy],{encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK.log'),r.stdout+r.stderr);if(r.status!==0)throw Error('ROLLBACK_FAILED '+r.stdout+r.stderr);console.log(r.stdout.trim());const t=spawnSync(process.execPath,['--test','tests/naumi-unified-chat.test.mjs','tests/naumi-product-identity.test.mjs'],{cwd:copy,encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK_TESTS.log'),t.stdout+t.stderr);if(t.status!==0)throw Error('ROLLBACK_TESTS_FAILED '+t.stdout);console.log('ROLLBACK tests=17 pass=17 fail=0 exit=0');}
++for(const e of manifest.entries)if(hash(fs.readFileSync(path.join(root,e.path)))!==e.modified)throw Error('MODIFIED_SOURCE_CHANGED');console.log('ARTIFACTS paths='+paths.length+' modified=RETAINED enterprise=UNCHANGED');
+diff --git a/scripts/session-import-carrier.mjs b/scripts/session-import-carrier.mjs
+new file mode 100644
+index 0000000..cb1cd4f
+--- /dev/null
++++ b/scripts/session-import-carrier.mjs
+@@ -0,0 +1,10 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';
++const once=(s,from,to)=>{assert.equal(s.split(from).length,2,'CARRIER_ANCHOR '+from);return s.replace(from,to);};
++/** The installed carrier has older optional modules. Add only this slice; never overwrite it with main. */
++export function sessionImportCarrier(installed,source){const rows=new Map();
++ for(const name of ['session-import.js','session-import-source.js','assets/session-import.js','assets/session-import.css']){assert(!fs.existsSync(path.join(installed,name)),'IMPORT_ALREADY_INSTALLED');rows.set(name,fs.readFileSync(path.join(source,name)));}
++ const oldHost=fs.readFileSync(path.join(installed,'host.js'),'utf8');assert(!oldHost.includes('installSessionImport'));let host="import {installSessionImport} from './session-import.js';\n"+oldHost;host=once(host,'export function apply(ctx,config) {','export function apply(ctx,config) {\n  installSessionImport(ctx);');host=once(host,"  assets.set('bot-overview.js'","  assets.set('session-import.js','text/javascript; charset=utf-8');\n  assets.set('session-import.css','text/css; charset=utf-8');\n  assets.set('bot-overview.js'");host=once(host,'<link rel="stylesheet" href="/naumi/assets/bot-overview.css">','<link rel="stylesheet" href="/naumi/assets/bot-overview.css"><link rel="stylesheet" href="/naumi/assets/session-import.css">');
++ assert.equal(host.replace("import {installSessionImport} from './session-import.js';\n",'').replace('\n  installSessionImport(ctx);','').replace("  assets.set('session-import.js','text/javascript; charset=utf-8');\n  assets.set('session-import.css','text/css; charset=utf-8');\n",'').replace('<link rel="stylesheet" href="/naumi/assets/session-import.css">',''),oldHost);rows.set('host.js',Buffer.from(host));
++ const oldClient=fs.readFileSync(path.join(installed,'client.js'),'utf8'),addition=fs.readFileSync(path.join(source,'client.js'),'utf8').split('\n').find(s=>s.includes("import('/naumi/assets/session-import.js')"));assert(addition);assert(!oldClient.includes("'/naumi/assets/session-import.js'"));let client=once(oldClient,'function installNaumiContextUI(ctx,React,createPortal,Icon){','function installNaumiContextUI(ctx,React,createPortal,Icon){\n'+addition);client=once(client,"'naumi-conversation','naumi-bot-overview'","'naumi-conversation','naumi-bot-overview','naumi-session-import'");assert.equal(client.replace('\n'+addition,'').replace(",'naumi-session-import'",''),oldClient);rows.set('client.js',Buffer.from(client));
++ const pkg=JSON.parse(fs.readFileSync(path.join(installed,'package.json'))),before=structuredClone(pkg);for(const f of ['session-import.js','session-import-source.js']){assert(!pkg.files.includes(f));pkg.files.push(f);}assert.deepEqual({...pkg,files:before.files},before);rows.set('package.json',Buffer.from(JSON.stringify(pkg,null,2)+'\n'));return rows;
++}
+diff --git a/scripts/verify-session-import-ui.mjs b/scripts/verify-session-import-ui.mjs
+new file mode 100644
+index 0000000..558db50
+--- /dev/null
++++ b/scripts/verify-session-import-ui.mjs
+@@ -0,0 +1,30 @@
++// Isolated actual Harness, persistence, native dock and model adapter; deterministic loopback upstream.
++import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';import {spawn} from 'node:child_process';import {stringify} from 'yaml';import {chromium} from '../desktop/node_modules/playwright/index.mjs';
++import {writeImportSources} from '../tests/helpers/session-import-fixture.mjs';import {digest} from '../plugins/naumi-enterprise/session-import-source.js';
++const root=process.cwd(),out=process.env.NAUMI_IMPORT_EVIDENCE?path.resolve(process.env.NAUMI_IMPORT_EVIDENCE):path.join(root,'evidence/session-import'),temp=path.join(root,'runtime/session-import-'+randomUUID()),home=path.join(temp,'home'),profile=path.join(home,'profiles/web');fs.mkdirSync(path.join(profile,'node_modules/@naumi'),{recursive:true});fs.mkdirSync(out,{recursive:true});const fixtures=writeImportSources(temp),sourceHashes=Object.fromEntries([fixtures.a,fixtures.b].map(f=>[f,digest(fs.readFileSync(f))]));
++for(const[name,folder]of [['dsh-enterprise','naumi-enterprise'],['dsh-ui-layout','naumi-ui-layout'],['dsh-sidebar-browser','naumi-sidebar-browser']])fs.symlinkSync(folder==='naumi-enterprise'&&process.env.NAUMI_IMPORT_PLUGIN_ROOT?path.resolve(process.env.NAUMI_IMPORT_PLUGIN_ROOT):path.join(root,'plugins',folder),path.join(profile,'node_modules/@naumi',name),'junction');fs.symlinkSync(path.join(root,'node_modules/@deepseek-ai'),path.join(profile,'node_modules/@deepseek-ai'),'junction');
++fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'naumi-session-import-fixture',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}}));const requests=[];
++const upstream=http.createServer(async(req,res)=>{let raw='';for await(const p of req)raw+=p;const b=JSON.parse(raw);requests.push(b);res.writeHead(200,{'Content-Type':'text/event-stream'});for(const c of [{choices:[{index:0,delta:{role:'assistant',content:'已在 Naumi 延续原方案，保留此前来源。'},finish_reason:null}]},{choices:[{index:0,delta:{},finish_reason:'stop'}],usage:{prompt_tokens:40,completion_tokens:12,total_tokens:52}}])res.write('data: '+JSON.stringify({id:'import-'+requests.length,object:'chat.completion.chunk',created:1,model:b.model,...c})+'\n\n');res.end('data: [DONE]\n\n');});await new Promise(r=>upstream.listen(0,'127.0.0.1',r));
++fs.writeFileSync(path.join(home,'cordis.patch.yml'),stringify([{id:'ui-theme',config:{preference:'light'}},{id:'agent-default-model',config:{provider:'fixture',model:'fixture-model'}}]));fs.writeFileSync(path.join(profile,'cordis.patch.yml'),stringify([{id:'ui-settings-general',config:{welcomeNoticeVersion:'2026-09-28.1'}},{id:'llm-pi-ai',config:{providers:{fixture:{displayName:'隔离测试连接',api:'openai-completions',baseURL:'http://127.0.0.1:'+upstream.address().port+'/v1',apiKeyEnv:'NAUMI_MANAGEMENT_FIXTURE_KEY',models:[{id:'fixture-model',name:'同一模型',contextWindow:128000,maxTokens:2048,reasoningEfforts:false}]}}}}]));
++const socket=http.createServer();await new Promise(r=>socket.listen(0,'127.0.0.1',r));const port=socket.address().port;await new Promise(r=>socket.close(r));const base='http://127.0.0.1:'+port;let child,output='',browser,launch,cookie,currentPage;const logs=[],checks=[];const check=(name,value)=>{assert(value,name);checks.push(name);console.log('IMPORT_UI_PASS '+name);};
++const boot=async()=>{output='';child=spawn(process.execPath,[path.join(root,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'web','--host','127.0.0.1','--port',String(port),'--no-open'],{cwd:root,env:{...process.env,DSH_HOME:home,CODEX_HOME:path.join(temp,'codex'),CLAUDE_CONFIG_DIR:path.join(temp,'claude'),DSH_TELEMETRY_MODE:'DISABLED',NAUMI_MANAGEMENT_FIXTURE_KEY:'local-fixture-only'},windowsHide:true});child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);launch=null;for(let i=0;i<400;i++){launch=output.match(new RegExp(base.replaceAll('.','\\.')+'/?\\?token=[A-Za-z0-9_~.%-]+'))?.[0];if(launch)break;if(child.exitCode!==null)throw Error('HOST_BOOT_FAILED');await new Promise(r=>setTimeout(r,300));}assert(launch,'HOST_BOOT_TIMEOUT');const r=await fetch(launch,{redirect:'manual'});cookie=r.headers.getSetCookie().map(x=>x.split(';')[0]).join('; ');};
++const stop=async()=>{if(child&&child.exitCode===null){child.kill();await new Promise(r=>child.once('close',r));}logs.push(output.replace(/token=[A-Za-z0-9_~.%-]+/g,'token=REDACTED'));};
++const call=async(url,body,extra={})=>{const r=await fetch(base+url,{method:body?'POST':'GET',headers:{cookie,'Content-Type':'application/json',origin:base,...extra},...body?{body:JSON.stringify(body)}:{}}),v=await r.json();assert(r.ok,JSON.stringify(v));return v;},imp=v=>call('/naumi/session-import',v,{'x-naumi-import':'1'}),rpc=async(method,args)=>{const v=await call('/api/'+method,{type:'client-request',rpcId:randomUUID(),method,payload:{args}});assert(v.result?.ok,JSON.stringify(v));return v.result.value;};
++try{await boot();
++ const denied=await fetch(base+'/naumi/session-import',{method:'POST',headers:{'Content-Type':'application/json','x-naumi-import':'1'},body:'{"action":"discover"}'});check('unauthenticated_source_access_denied',denied.status===401||denied.status===403);
++ const csrf=await fetch(base+'/naumi/session-import',{method:'POST',headers:{cookie,'Content-Type':'application/json',origin:'https://different.invalid','x-naumi-import':'1'},body:'{"action":"discover"}'});check('cross_origin_import_denied',csrf.status===403);
++ const missing=await fetch(base+'/naumi/session-import',{method:'POST',headers:{cookie,'Content-Type':'application/json'},body:'{"action":"discover"}'});check('missing_intent_header_denied',missing.status===403);
++ const bad=await fetch(base+'/naumi/session-import',{method:'POST',headers:{cookie,'Content-Type':'application/json','x-naumi-import':'1'},body:'{"action":"preview","sourceId":"../config.toml"}'});check('arbitrary_paths_not_readable',bad.status===404);
++ const cwd=path.join(temp,'workspace');fs.mkdirSync(cwd);const w=await rpc('workspace/create',{request:{path:cwd}}),workspaceId=w.workspace.workspaceId,rows=await imp({action:'discover'}),codex=rows.items.find(r=>r.provider==='codex'),claude=rows.items.find(r=>r.provider==='claude');check('both_sources_discovered_without_credential_access',rows.total===2&&codex.sourceSessionId==='codex-fixture-session'&&claude.sourceSessionId==='claude-fixture-session');
++ browser=await chromium.launch({headless:true,channel:'chrome'});const context=await browser.newContext({viewport:{width:1360,height:960},colorScheme:'light'}),page=await context.newPage(),errors=[];currentPage=page;page.on('pageerror',e=>{errors.push(e.message);console.log('PAGE_ERROR '+e.message);});page.on('console',m=>{if(m.type()==='error')console.log('PAGE_CONSOLE '+m.text());});page.setDefaultTimeout(25000);await page.route('**/naumi/workspace',r=>r.fulfill({status:503,contentType:'application/json',body:'{"error":"ENTERPRISE_NOT_CONNECTED"}'}));await page.goto(launch,{waitUntil:'domcontentloaded'});await page.getByRole('button',{name:'导入会话',exact:true}).click();const panel=page.getByRole('main',{name:'导入会话',exact:true});await panel.getByRole('button').filter({hasText:'整理活动方案'}).click();await panel.getByRole('heading',{name:'整理活动方案，先保留来源'}).waitFor();check('preview_preserves_text_without_execution',requests.length===0&&await panel.getByText('原会话方案已整理，待补充核验。',{exact:true}).isVisible());
++ for(const width of [1360,390]){await page.setViewportSize({width,height:960});check('light_responsive_layout_'+width,await panel.evaluate(e=>e.scrollWidth<=e.clientWidth+2&&e.getBoundingClientRect().right<=innerWidth+1&&getComputedStyle(e).colorScheme==='light'&&[...e.querySelectorAll('.nsi-preview,.nsi-preview button,.nsi-preview select')].every(x=>x.getBoundingClientRect().right<=innerWidth+1)));await page.screenshot({path:path.join(out,'import-'+width+'.png'),animations:'disabled'});}await page.setViewportSize({width:1360,height:960});
++ let lost=false,sid;await page.route('**/naumi/session-import',async route=>{const v=route.request().postDataJSON();if(v.action==='import'&&!lost){lost=true;const r=await route.fetch();sid=(await r.json()).sessionId;await route.abort('failed');return;}await route.continue();});await panel.getByRole('button',{name:'导入并继续',exact:true}).click();await panel.getByRole('alert').waitFor();await panel.getByRole('button',{name:'导入并继续',exact:true}).click();await panel.waitFor({state:'hidden'});await page.unroute('**/naumi/session-import');await page.locator('[contenteditable="true"]').first().waitFor();check('lost_import_response_retries_same_session_and_native_dock',lost&&!!sid&&requests.length===0);
++ const s=await rpc('session/events',{request:{address:{kind:'session',sessionId:sid},maxMessages:100}});check('import_is_a_real_native_session',JSON.stringify(s).includes('原会话方案已整理')&&!(await rpc('session/list',{_request:{}})).items.some(s=>s.running));
++ const cp=await imp({action:'preview',sourceId:claude.id,workspaceId});check('unsupported_attachment_and_other_branches_disclosed',cp.stats.attachments===1&&cp.stats.offBranch===2);const cr=await imp({action:'import',sourceId:claude.id,fingerprint:cp.fingerprint,workspaceId,acknowledgePartial:true});check('second_provider_import_has_separate_identity',cr.sessionId!==sid&&requests.length===0);
++ await context.close();await stop();await boot();check('restart_does_not_replay_historical_tools_or_pending_input',requests.length===0&&!fs.existsSync(path.join(cwd,'never-replay.txt')));
++ const resumed=await imp({action:'import',sourceId:codex.id,fingerprint:(await imp({action:'preview',sourceId:codex.id,workspaceId})).fingerprint,workspaceId});check('restart_returns_original_receipt',resumed.sessionId===sid&&resumed.existing);
++ const p2=await browser.newPage({viewport:{width:1360,height:960}});p2.on('pageerror',e=>errors.push(e.message));await p2.route('**/naumi/workspace',r=>r.fulfill({status:503,contentType:'application/json',body:'{"error":"ENTERPRISE_NOT_CONNECTED"}'}));await p2.goto(launch,{waitUntil:'domcontentloaded'});await p2.getByRole('button',{name:'导入会话',exact:true}).click();const second=p2.getByRole('main',{name:'导入会话',exact:true});await second.getByRole('button').filter({hasText:'整理活动方案'}).click();await second.getByRole('button',{name:'打开会话',exact:true}).click();const dock=p2.locator('[contenteditable="true"]').first();await dock.waitFor();await dock.fill('在 Naumi 接着完善活动方案，沿用刚才的来源。');await dock.press('Enter');await p2.getByText('已在 Naumi 延续原方案，保留此前来源。',{exact:true}).first().waitFor({timeout:45000});
++ check('explicit_new_message_runs_current_native_model_only',requests.length===1&&requests[0].model==='fixture-model');const body=JSON.stringify(requests[0]);check('original_history_reaches_model_as_evidence_not_replayed_tools',body.includes('原会话方案已整理')&&body.includes('original tool output')&&!requests[0].messages.some(m=>m.tool_calls?.length)&&!body.includes('DO_NOT_IMPORT_PRIVILEGED'));
++ check('source_logs_unchanged_and_no_page_errors',Object.entries(sourceHashes).every(([f,h])=>digest(fs.readFileSync(f))===h)&&errors.length===0);await p2.screenshot({path:path.join(out,'import-native-continue.png'),animations:'disabled'});
++ fs.writeFileSync(path.join(out,'UI_VERIFICATION.json'),JSON.stringify({status:'PASS',checks,errors,boots:2,nativeSessions:[sid,cr.sessionId],nativeModelRequests:requests.length,realSupplierCalls:0,sourceHashesUnchanged:true,upstreamModel:requests[0].model,tier:'isolated real Harness/SessionPersistence/Workspace/native dock/React/adapter with deterministic loopback inference'},null,2)+'\n');console.log('IMPORT_UI checks='+checks.length+' boots=2 native_model_requests='+requests.length+' real_supplier_calls=0 source_hashes=UNCHANGED');
++}catch(e){await currentPage?.screenshot({path:path.join(out,'import-failure.png')}).catch(()=>{});const text=await currentPage?.locator('body').innerText().catch(()=> '');fs.writeFileSync(path.join(out,'UI_FAILURE.json'),JSON.stringify({error:e.message,checks,text},null,2));console.log(text);throw e;}finally{await browser?.close();await stop();upstream.closeAllConnections();await new Promise(r=>upstream.close(r));fs.writeFileSync(path.join(out,'HOST.log'),logs.join('\n---BOOT---\n'));}
+diff --git a/tests/helpers/session-import-fixture.mjs b/tests/helpers/session-import-fixture.mjs
+new file mode 100644
+index 0000000..75bd501
+--- /dev/null
++++ b/tests/helpers/session-import-fixture.mjs
+@@ -0,0 +1,23 @@
++import fs from 'node:fs';import path from 'node:path';
++export const codexRecords=()=>[
++ {type:'session_meta',payload:{id:'codex-fixture-session',cwd:'SOURCE_WORKSPACE',base_instructions:'DO_NOT_IMPORT_PRIVILEGED'}},
++ {type:'response_item',timestamp:'2026-11-18T00:00:00Z',payload:{type:'message',id:'u1',role:'user',content:[{type:'input_text',text:'整理活动方案，先保留来源'}]}},
++ {type:'event_msg',payload:{type:'user_message',message:'整理活动方案，先保留来源'}},
++ {type:'response_item',payload:{type:'message',id:'sys',role:'developer',content:[{type:'input_text',text:'DO_NOT_IMPORT_PRIVILEGED'}]}},
++ {type:'response_item',payload:{type:'reasoning',encrypted_content:'DO_NOT_IMPORT_ENCRYPTED',summary:[]}},
++ {type:'response_item',payload:{type:'function_call',call_id:'call1',name:'write_file',arguments:'{"path":"never-replay.txt"}'}},
++ {type:'response_item',payload:{type:'function_call_output',call_id:'call1',output:'original tool output'}},
++ {type:'response_item',payload:{type:'message',id:'a1',role:'assistant',content:[{type:'output_text',text:'原会话方案已整理，待补充核验。'}]}},
++ {type:'turn_context',payload:{approval_policy:'never',model:'old-paid-model',sandbox_policy:{type:'danger-full-access'}}},
++];
++export const claudeRecords=()=>[
++ {type:'user',uuid:'root',parentUuid:null,sessionId:'claude-fixture-session',cwd:'OLD_CWD',message:{role:'user',content:'保留 Claude 活动草案'}},
++ {type:'assistant',uuid:'old',parentUuid:'root',sessionId:'claude-fixture-session',message:{role:'assistant',content:[{type:'text',text:'废弃分支'}]}},
++ {type:'assistant',uuid:'a',parentUuid:'root',sessionId:'claude-fixture-session',message:{role:'assistant',content:[{type:'thinking',thinking:'PRIVATE_THOUGHT'},{type:'text',text:'Claude 主分支方案'},{type:'tool_use',id:'c1',name:'read_file',input:{path:'original.txt'}}]}},
++ {type:'user',uuid:'tool',parentUuid:'a',sessionId:'claude-fixture-session',message:{role:'user',content:[{type:'tool_result',tool_use_id:'c1',content:'历史文件正文',is_error:true}]}},
++ {type:'assistant',uuid:'side',parentUuid:'tool',isSidechain:true,sessionId:'claude-fixture-session',message:{role:'assistant',content:'其他代理私有内容'}},
++ {type:'system',uuid:'bridge',parentUuid:'tool',sessionId:'claude-fixture-session',subtype:'notice',content:'DO_NOT_IMPORT_PRIVILEGED'},
++ {type:'user',uuid:'img',parentUuid:'bridge',sessionId:'claude-fixture-session',message:{role:'user',content:[{type:'text',text:'请继续完善'},{type:'image',source:{type:'url',url:'https://not-to-be-fetched.invalid/image.png'}}]}},
++ {type:'api-request-blob',sessionId:'claude-fixture-session',message:{role:'system',content:'DO_NOT_IMPORT_REQUEST_BLOB'}},
++];
++export function writeImportSources(root){const codex=path.join(root,'codex/sessions/2026/11/18'),claude=path.join(root,'claude/projects/project');fs.mkdirSync(codex,{recursive:true});fs.mkdirSync(claude,{recursive:true});const a=path.join(codex,'rollout.jsonl'),b=path.join(claude,'session.jsonl');fs.writeFileSync(a,codexRecords().map(JSON.stringify).join('\n')+'\n');fs.writeFileSync(b,claudeRecords().map(JSON.stringify).join('\n')+'\n');return{a,b,roots:[{provider:'codex',path:path.join(root,'codex/sessions')},{provider:'claude',path:path.join(root,'claude/projects')}]};}
+diff --git a/tests/naumi-context-ui.test.mjs b/tests/naumi-context-ui.test.mjs
+index 1d86e79..440baf9 100644
+--- a/tests/naumi-context-ui.test.mjs
++++ b/tests/naumi-context-ui.test.mjs
+@@ -52,7 +52,7 @@ test('preexisting enterprise front-end remains byte-equivalent apart from declar
+  assert(source.includes(migration));
+  const identityHelper=source.slice(source.indexOf('    function IdentityAccount(){'),source.indexOf('    function DesignGrid()'));
+  assert(identityHelper.includes('if(!identity)return null;'));assert(identityHelper.includes('value.available'));assert.equal(source.split(',h(IdentityAccount)').length,2);
+- const restored=source.slice(start).replace(identityHelper,'').replace(',h(IdentityAccount)','').replace(desktopAction,'').replace(lazy,'').replace(privatePanel,'').replace("const known=new Set([...PANELS.map(x=>x[0]),'naumi-conversation','naumi-bot-overview']);","const known=new Set(PANELS.map(x=>x[0]));").replace(migration,"      const saved=sessionStorage.getItem('naumi.activePanel');").split('\n').filter(line=>!line.includes("void import('/naumi/assets/browser-client.js')")).join('\n').replace("    installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);\n",'');
++ const restored=source.slice(start).replace(identityHelper,'').replace(',h(IdentityAccount)','').replace(desktopAction,'').replace(lazy,'').replace(privatePanel,'').replace("const known=new Set([...PANELS.map(x=>x[0]),'naumi-conversation','naumi-bot-overview','naumi-session-import']);","const known=new Set(PANELS.map(x=>x[0]));").replace(migration,"      const saved=sessionStorage.getItem('naumi.activePanel');").split('\n').filter(line=>!line.includes("void import('/naumi/assets/browser-client.js')")).join('\n').replace("    installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);\n",'');
+  assert.equal(restored.replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'));
+ });
+ test('team presentation has no direct credential, model, permission or persistence writes',()=>{
+diff --git a/tests/naumi-session-import.test.mjs b/tests/naumi-session-import.test.mjs
+new file mode 100644
+index 0000000..7f1a228
+--- /dev/null
++++ b/tests/naumi-session-import.test.mjs
+@@ -0,0 +1,30 @@
++import http from 'node:http';import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
++import {Context} from '@deepseek-ai/cordis';import SessionStore,{Session} from '@deepseek-ai/dsh-session';import * as persistence from '@deepseek-ai/dsh-session-persistence-jsonl';
++import {ImportSources,readImportSnapshot,digest} from '../plugins/naumi-enterprise/session-import-source.js';import {SessionImporter,importSessionPlan,installSessionImport} from '../plugins/naumi-enterprise/session-import.js';import {writeImportSources,codexRecords} from './helpers/session-import-fixture.mjs';
++async function fixture(){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-import-')),sourcesData=writeImportSources(dir),ctx=new Context();const sm=ctx.plugin(SessionStore),pm=ctx.plugin(persistence,{root:path.join(dir,'sessions')});await pm.await();const sources=new ImportSources(sourcesData.roots),members=new Set(),workspace={id:'w1',path:dir,async attachSession(id){members.add(id);}};const services={sessionPersistence:ctx.sessionPersistence,workspaceRegistry:{get:id=>id==='w1'?workspace:undefined}},importer=new SessionImporter({ctx:services,home:dir,sources});const rows=(await importer.discover()).items;return{dir,ctx,...sourcesData,sources,services,importer,rows,members,async cleanup(){await pm.dispose();await sm.dispose();assert(dir.startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(dir,{recursive:true,force:true});}};}
++const input=async(f,provider='codex')=>{const sourceId=f.rows.find(r=>r.provider===provider).id,p=await f.importer.preview({sourceId});return{sourceId,fingerprint:p.fingerprint,workspaceId:'w1',acknowledgePartial:true};};
++test('discovery reads supported transcripts only and exposes no config or credentials',async()=>{const f=await fixture();try{fs.writeFileSync(path.join(f.dir,'codex/config.toml'),'DO_NOT_READ_KEY');const rows=await f.importer.discover();assert.equal(rows.items.length,2);assert(rows.items.every(r=>r.sourceSessionId&&r.id.length===64));assert(!JSON.stringify(rows).includes('DO_NOT_READ'));await assert.rejects(f.sources.resolve('../config.toml'),/SOURCE_NOT_FOUND/);await assert.rejects(f.importer.discover({limit:1000}),/INVALID_PAGE/);}finally{await f.cleanup();}});
++test('Codex imports response_item once, preserves tool evidence and excludes privileged/config/encrypted records',async()=>{const f=await fixture();try{const p=await f.importer.preview({sourceId:f.rows.find(r=>r.provider==='codex').id});assert.equal(p.messageCount,4);assert.equal(p.messages[0].sourceId,'u1');assert.equal(p.messages[1].blocks[0].kind,'tool-call');assert.equal(p.messages[2].blocks[0].text,'original tool output');assert.equal(p.stats.reasoning,1);assert(!JSON.stringify(p).includes('DO_NOT_IMPORT'));assert(!JSON.stringify(p).includes('danger-full-access'));}finally{await f.cleanup();}});
++test('Claude follows latest parentUuid branch through system bridge, omits sidechains/request blobs and marks attachments',async()=>{const f=await fixture();try{const p=await f.importer.preview({sourceId:f.rows.find(r=>r.provider==='claude').id});assert.deepEqual(p.messages.map(m=>m.sourceId),['root','a','tool','img']);assert.equal(p.stats.offBranch,2);assert.equal(p.stats.attachments,1);assert.equal(p.stats.reasoning,1);assert.equal(p.messages[2].blocks[0].isError,true);assert(!JSON.stringify(p).includes('DO_NOT_IMPORT'));assert(!JSON.stringify(p).includes('PRIVATE_THOUGHT'));assert(!JSON.stringify(p).includes('not-to-be-fetched'));}finally{await f.cleanup();}});
++test('snapshot keeps incomplete UTF8 tail explicit and protects the original hash',async()=>{const f=await fixture();try{fs.appendFileSync(f.a,'{"type":"response_item","text":"尾行');const before=digest(fs.readFileSync(f.a)),p=await f.importer.preview({sourceId:f.rows.find(r=>r.provider==='codex').id});assert(p.incompleteTailBytes>0);assert.equal(p.fingerprint,before);assert.equal(p.completeBytes+p.incompleteTailBytes,p.snapshotBytes);assert.equal(digest(fs.readFileSync(f.a)),before);await assert.rejects(f.importer.perform({...await input(f),acknowledgePartial:false}),/ACKNOWLEDGEMENT_REQUIRED/);}finally{await f.cleanup();}});
++test('malformed complete line rejects instead of silently dropping history',async()=>{const f=await fixture();try{fs.appendFileSync(f.a,'not-json\n');await assert.rejects(f.importer.preview({sourceId:f.rows.find(r=>r.provider==='codex').id}),/INVALID_JSON_LINE_/);assert.equal((await f.ctx.sessionPersistence.list()).length,0);}finally{await f.cleanup();}});
++test('empty transcript and missing source identity reject explicitly',async()=>{const f=await fixture();try{fs.writeFileSync(f.a,JSON.stringify(codexRecords()[0])+'\n');await assert.rejects(f.importer.preview({sourceId:f.rows.find(r=>r.provider==='codex').id}),/NO_MESSAGES/);fs.writeFileSync(f.a,JSON.stringify(codexRecords()[1])+'\n');await assert.rejects(f.importer.preview({sourceId:f.rows.find(r=>r.provider==='codex').id}),/SOURCE_ID_MISSING/);}finally{await f.cleanup();}});
++test('size budgets reject before importing and source remains unchanged',async()=>{const f=await fixture();try{const row=await f.sources.resolve(f.rows.find(r=>r.provider==='codex').id);await assert.rejects(readImportSnapshot(row,{maxBytes:10}),/SOURCE_TOO_LARGE/);await assert.rejects(readImportSnapshot(row,{maxHistoryBytes:10}),/HISTORY_TOO_LARGE/);}finally{await f.cleanup();}});
++test('native durable import has no pending inbox, tool calls, model selection, permissions or Bot authority',async()=>{const f=await fixture();try{const before=digest(fs.readFileSync(f.a)),r=await f.importer.perform(await input(f));assert(f.members.has(r.sessionId));const h=await f.ctx.sessionPersistence.open(r.sessionId,'read');try{const {events}=await h.read(),restored=Session.create(r.sessionId,events,h.header);assert.equal(restored.deriveMessages().length,5);assert(events.every(e=>!['model/selection','permission/preset','sandbox/mode','approval/policy','tool/call','agent/inbox/spliced','request/header'].includes(e.type)));assert(restored.deriveMessages().every(m=>!m.content.some(b=>b.type==='tool-call')));assert(events.filter(e=>e.type==='user/message').every(e=>e.data.source.kind==='naumi-session-import'));assert(events.filter(e=>e.type==='turn/start').length===events.filter(e=>e.type==='turn/end').length);}finally{await h.close();}assert.equal(digest(fs.readFileSync(f.a)),before);}finally{await f.cleanup();}});
++test('parallel and lost-response retries return one persisted native Session',async()=>{const f=await fixture();try{const v=await input(f),results=await Promise.all(Array.from({length:5},()=>f.importer.perform(v)));assert.equal(new Set(results.map(r=>r.sessionId)).size,1);assert.equal((await f.ctx.sessionPersistence.list()).length,1);assert.equal(results.filter(r=>r.existing).length,4);const next=new SessionImporter({ctx:f.services,home:f.dir,sources:new ImportSources(f.roots)});assert.equal((await next.perform(v)).sessionId,results[0].sessionId);}finally{await f.cleanup();}});
++for(const point of ['after-plan','after-flush','after-attach'])test('restart/retry recovers '+point+' without duplicate history',async()=>{const f=await fixture();try{const v=await input(f);f.importer.fault=p=>{if(p===point)throw Error('SIMULATED_CRASH');};await assert.rejects(f.importer.perform(v),/SIMULATED_CRASH/);const next=new SessionImporter({ctx:f.services,home:f.dir,sources:new ImportSources(f.roots)}),r=await next.perform(v),h=await f.ctx.sessionPersistence.open(r.sessionId,'read');try{assert.equal((await h.read()).events.filter(e=>e.type==='user/message').length,2);}finally{await h.close();}assert.equal((await f.ctx.sessionPersistence.list()).length,1);}finally{await f.cleanup();}});
++test('preview fingerprint blocks changed source; later source growth never silently replaces an imported session',async()=>{const f=await fixture();try{const v=await input(f);fs.appendFileSync(f.a,JSON.stringify({type:'event_msg',payload:{type:'progress'}})+'\n');await assert.rejects(f.importer.perform(v),/SOURCE_CHANGED/);const updated=await input(f),first=await f.importer.perform(updated);fs.appendFileSync(f.a,JSON.stringify(codexRecords()[1])+'\n');const newer=await input(f),again=await f.importer.perform(newer);assert.equal(again.sessionId,first.sessionId);assert(again.existing&&again.sourceChanged);assert.equal((await f.ctx.sessionPersistence.list()).length,1);}finally{await f.cleanup();}});
++test('workspace validation precedes persistence and original cwd is not adopted',async()=>{const f=await fixture();try{const v=await input(f);await assert.rejects(f.importer.perform({...v,workspaceId:'missing'}),/WORKSPACE_NOT_FOUND/);assert.equal((await f.ctx.sessionPersistence.list()).length,0);const r=await f.importer.perform(v);assert.equal((await f.ctx.sessionPersistence.stat(r.sessionId)).header.cwd,f.dir);}finally{await f.cleanup();}});
++test('tampered pending plan is retained and rejected without creating a session',async()=>{const f=await fixture();try{const v=await input(f);f.importer.fault=()=>{throw Error('STOP');};await assert.rejects(f.importer.perform(v),/STOP/);const root=path.join(f.dir,'naumi/session-import'),file=path.join(root,fs.readdirSync(root)[0],'plan.json'),plan=JSON.parse(fs.readFileSync(file));plan.events[0].data.title='tampered';fs.writeFileSync(file,JSON.stringify(plan));f.importer.fault=()=>{};await assert.rejects(f.importer.perform(v),/PLAN_INTEGRITY/);assert.equal((await f.ctx.sessionPersistence.list()).length,0);}finally{await f.cleanup();}});
++test('native event plans preserve exact supported text and explicit source sequence mapping',async()=>{const f=await fixture();try{const row=await f.sources.resolve(f.rows.find(r=>r.provider==='codex').id),snapshot=await readImportSnapshot(row),plan=importSessionPlan(snapshot,'test-source-map',f.dir),native=Session.create(plan.sessionId,plan.events,plan.header);assert.equal(plan.mapping.length,4);assert(native.deriveMessages().some(m=>m.content.some(b=>b.type==='text'&&b.text==='整理活动方案，先保留来源')));assert.equal(plan.mapping[0].sourceId,'u1');assert.equal(plan.events[plan.mapping[0].seq].data.id,plan.mapping[0].messageId);}finally{await f.cleanup();}});
++test('registered entry reuses native navigation; no parallel input, global interception or enterprise API',()=>{const dir='plugins/naumi-enterprise/',ui=fs.readFileSync(dir+'assets/session-import.js','utf8'),host=fs.readFileSync(dir+'host.js','utf8'),client=fs.readFileSync(dir+'client.js','utf8'),pkg=JSON.parse(fs.readFileSync(dir+'package.json'));assert(ui.includes('scope.uiWorkspace.openSession(result.sessionId)'));assert(ui.includes("name:'sidebar.footer.action'"));assert(!/contenteditable|session\/prompt|\.prototype\.|\/api\/management/.test(ui));assert(host.includes("assets.set('bot-overview.js'"));assert(client.includes("'naumi-bot-overview','naumi-session-import'"));assert(pkg.files.includes('bot-file-versions.js')&&pkg.files.includes('bot-deliverables.js')&&pkg.files.includes('session-import-source.js'));});
++test('pending snapshot is previewable after source growth or removal and resumes its exact prior prefix',async()=>{const f=await fixture();try{const v=await input(f);f.importer.fault=p=>{if(p==='after-plan')throw Error('STOP');};await assert.rejects(f.importer.perform(v),/STOP/);fs.appendFileSync(f.a,JSON.stringify(codexRecords()[1])+'\n');let p=await f.importer.preview({sourceId:v.sourceId,workspaceId:'w1'});assert.equal(p.snapshotStatus,'pending');assert.equal(p.sourceStatus,'changed');assert.equal(p.fingerprint,v.fingerprint);fs.unlinkSync(f.a);p=await f.importer.preview({sourceId:v.sourceId,workspaceId:'w1'});assert.equal(p.sourceStatus,'unavailable');f.importer.fault=()=>{};const r=await f.importer.perform(v);assert.equal(r.messageCount,4);assert.equal((await f.ctx.sessionPersistence.list()).length,1);}finally{await f.cleanup();}});
++test('existing imported snapshot stays distinguishable from externally updated source in preview',async()=>{const f=await fixture();try{const v=await input(f);await f.importer.perform(v);fs.appendFileSync(f.a,JSON.stringify(codexRecords()[1])+'\n');const p=await f.importer.preview({sourceId:v.sourceId,workspaceId:'w1'});assert.equal(p.snapshotStatus,'imported');assert.equal(p.sourceStatus,'changed');assert.equal(p.messageCount,4);assert.equal(p.fingerprint,v.fingerprint);}finally{await f.cleanup();}});
++test('valid final JSON without newline is preserved rather than mistaken for a torn tail',async()=>{const f=await fixture();try{fs.writeFileSync(f.a,codexRecords().map(JSON.stringify).join('\n'));const p=await f.importer.preview({sourceId:f.rows.find(r=>r.provider==='codex').id});assert.equal(p.incompleteTailBytes,0);assert.equal(p.completeBytes,p.snapshotBytes);assert.equal(p.messageCount,4);}finally{await f.cleanup();}});
++test('unknown response payload is visible in unsupported counts and requires acknowledgement',async()=>{const f=await fixture();try{fs.appendFileSync(f.a,JSON.stringify({type:'response_item',payload:{type:'future-message'}})+'\n');const v=await input(f),p=await f.importer.preview({sourceId:v.sourceId});assert.equal(p.stats.unsupported,1);await assert.rejects(f.importer.perform({...v,acknowledgePartial:false}),/ACKNOWLEDGEMENT_REQUIRED/);}finally{await f.cleanup();}});
++test('same source can be imported into a separately selected workspace without borrowing original permissions',async()=>{const f=await fixture();try{const v=await input(f),a=await f.importer.perform(v),other=path.join(f.dir,'other');fs.mkdirSync(other);const old=f.services.workspaceRegistry.get;f.services.workspaceRegistry.get=id=>id==='w2'?{path:other,attachSession:async()=>{}}:old(id);const b=await f.importer.perform({...v,workspaceId:'w2'});assert.notEqual(a.sessionId,b.sessionId);assert.equal((await f.ctx.sessionPersistence.stat(b.sessionId)).header.cwd,other);}finally{await f.cleanup();}});
++test('paging never changes source order or claims hidden records were rendered',async()=>{const f=await fixture();try{const sourceId=f.rows.find(r=>r.provider==='codex').id,a=await f.importer.preview({sourceId,limit:2}),b=await f.importer.preview({sourceId,offset:a.nextOffset,limit:2});assert.equal(a.messageCount,4);assert.equal(a.nextOffset,2);assert.equal(b.nextOffset,null);assert.deepEqual([...a.messages,...b.messages].map(m=>m.line),[2,6,7,8]);await assert.rejects(f.importer.preview({sourceId,offset:-1}),/INVALID_PAGE/);}finally{await f.cleanup();}});
++
++test('owner HTTP route rejects guest, missing intent, foreign origin, oversized and malformed requests before source access',async()=>{const f=await fixture(),routes=new Map();let principal={kind:'owner'};const p=f.ctx.plugin({name:'import-route-services',apply(scope){scope.provide('workspaceRegistry',f.services.workspaceRegistry);scope.provide('connection',{admit:()=>({peer:{principal}})});scope.provide('webServer',{register:r=>{routes.set(r.path,r.handler);return()=>routes.delete(r.path);}});}}),h=f.ctx.plugin({name:'import-route',inject:['webServer','connection'],apply(scope){installSessionImport(scope,{home:f.dir,sources:f.sources});}});await h.await();const server=http.createServer((req,res)=>void routes.get('/naumi/session-import')(req,res));await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port,call=(body,headers={},method='POST')=>fetch(base+'/naumi/session-import',{method,headers:{'Content-Type':'application/json','x-naumi-import':'1',origin:base,...headers},...method==='POST'?{body:typeof body==='string'?body:JSON.stringify(body)}:{}});try{principal={kind:'guest'};assert.equal((await call({action:'discover'})).status,403);principal={kind:'owner'};assert.equal((await call({action:'discover'},{'x-naumi-import':''})).status,403);assert.equal((await call({action:'discover'},{origin:'https://wrong.invalid'})).status,403);assert.equal((await call({}, {},'GET')).status,405);assert.equal((await call('x'.repeat(9000))).status,413);assert.equal((await call('not-json')).status,400);assert.equal((await call({action:'discover',path:'C:/private'})).status,400);assert.equal((await call({action:'discover'})).status,200);assert.equal((await f.ctx.sessionPersistence.list()).length,0);}finally{server.closeAllConnections();await new Promise(r=>server.close(r));await h.dispose();await p.dispose();await f.cleanup();}});
++test('source discovery skips directory junctions and subagent logs',async()=>{const f=await fixture();try{const inside=path.join(f.dir,'codex/sessions'),external=path.join(f.dir,'external');fs.mkdirSync(external);fs.writeFileSync(path.join(external,'hidden.jsonl'),codexRecords().map(JSON.stringify).join('\n')+'\n');fs.symlinkSync(external,path.join(inside,'escape'),'junction');const sub=path.join(f.dir,'claude/projects/project/subagents');fs.mkdirSync(sub);fs.writeFileSync(path.join(sub,'agent.jsonl'),'{}\n');assert.equal((await f.importer.discover()).total,2);fs.unlinkSync(path.join(inside,'escape'));}finally{await f.cleanup();}});
++test('bounded preview marks excerpts but native import keeps the entire supported text',async()=>{const f=await fixture();try{const records=codexRecords();records[1].payload.content[0].text='长文本'.repeat(10000);fs.writeFileSync(f.a,records.map(JSON.stringify).join('\n')+'\n');const sourceId=f.rows.find(r=>r.provider==='codex').id,p=await f.importer.preview({sourceId});assert(p.messages[0].blocks[0].previewTruncated);assert.equal(p.messages[0].blocks[0].text.length,16000);assert.equal(p.messages[0].blocks[0].sourceChars,30000);const r=await f.importer.perform({sourceId,fingerprint:p.fingerprint,workspaceId:'w1'}),h=await f.ctx.sessionPersistence.open(r.sessionId,'read');try{assert.equal((await h.read()).events.find(e=>e.type==='user/message'&&e.data.content[0].text.startsWith('长文本')).data.content[0].text.length,30000);}finally{await h.close();}}finally{await f.cleanup();}});
