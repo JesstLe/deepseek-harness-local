@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {spawn} from 'node:child_process';
@@ -8,7 +9,7 @@ import {stringify} from 'yaml';
 import {chromium} from '../desktop/node_modules/playwright/index.mjs';
 import {BotDirectory} from '../plugins/naumi-enterprise/bots.js';
 
-const root=process.cwd(),out=process.env.IM_EVIDENCE??'E:/tmp/naumi-im-gateway-20261117',temporary=path.join(out,'ui-fixture-'+randomUUID()),home=path.join(temporary,'home'),profile=path.join(home,'profiles/web');
+const root=process.cwd(),out=process.env.IM_EVIDENCE??'E:/tmp/naumi-im-gateway-20261117',temporary=path.join(os.tmpdir(),'naumi-im-ui-fixture-'+randomUUID()),home=path.join(temporary,'home'),profile=path.join(home,'profiles/web');
 fs.mkdirSync(path.join(profile,'node_modules/@naumi'),{recursive:true});
 for(const[name,folder]of [['dsh-enterprise','naumi-enterprise'],['dsh-ui-layout','naumi-ui-layout'],['dsh-sidebar-browser','naumi-sidebar-browser']])fs.symlinkSync(path.join(root,'plugins',folder),path.join(profile,'node_modules/@naumi',name),'junction');
 fs.symlinkSync(path.join(root,'node_modules/@deepseek-ai'),path.join(profile,'node_modules/@deepseek-ai'),'junction');
