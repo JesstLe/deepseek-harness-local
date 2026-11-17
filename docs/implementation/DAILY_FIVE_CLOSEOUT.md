@@ -42,3 +42,7 @@ BotDirectory / 原生 Session、BotTaskStore、原生标题事件和工作区服
 - UI_FINAL.log：真实原生Harness与确定性本机SSE，12/12；改名持久化、1360/580/360宽度、原生编辑器、切换草稿保持、明确新建仅1 Session、0页面异常。截图已打开检查。
 - 首次并行全仓733项729通过：两项受客户端工作副本CRLF和新面板白名单期望影响，统一原字节LF并更新精确白名单还原断言；另两项为Windows夹具清理/短超时，在集中串行复测58/58中通过。原失败记录保留。
 - 准备0.3.6候选：仅desktop版本、锁文件根版本、product-version和用户更新日志；后续固定main构建。钉钉延期继续有效。
+
+- FULL_FINAL.log：`node --test --test-concurrency=1 tests/*.test.mjs desktop/tests/*.test.cjs`，733/733，exit0，154.4秒。
+- 再同步def82a3，合并点f89029b；新增上游变化仅自然目标证据与Cloud部署脚本。LATEST_MAIN_RECHECK.log集中56/56，exit0。D3/D4文件与工具/确认接口全部保留。
+- 加载协调：D3已释放，PID7416/101sessions/0running；D2使用独立profile/随机端口，不占3080。本任务即将main整合，再做只读prepare，运行时仍未加载。
