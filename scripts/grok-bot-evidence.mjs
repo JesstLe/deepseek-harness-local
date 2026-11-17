@@ -1,0 +1,12 @@
+import fs from 'node:fs';import path from 'node:path';import {execFileSync} from 'node:child_process';import {createHash} from 'node:crypto';
+const root=process.cwd(),out=path.join(root,'evidence/grok-bot'),base='9a730ed23356d783b494cd6a45e566b08bd36605',sha=b=>createHash('sha256').update(b).digest('hex');
+let originals=JSON.parse(fs.readFileSync(path.join(out,'original-manifest.json'),'utf8'));
+if(!originals.some(r=>r.path==='.gitattributes')){const data=execFileSync('git',['show',base+':.gitattributes']);fs.writeFileSync(path.join(out,'original/.gitattributes'),data);originals.push({path:'.gitattributes',sha256:sha(data)});fs.writeFileSync(path.join(out,'original-manifest.json'),JSON.stringify(originals,null,2)+'\n');}
+const files=execFileSync('git',['diff',base,'--name-only'],{encoding:'utf8'}).trim().split(/\r?\n/).filter(f=>f==='.gitattributes'||f==='docs/implementation/BOT_APPEARANCE.md'||f.startsWith('plugins/naumi-enterprise/')||/^(scripts\/(build|verify)-grok-bot.*\.mjs|scripts\/grok-bot-evidence\.mjs|tests\/naumi-bot-appearance.test.mjs|tests\/naumi-employee-experience.test.mjs)$/.test(f));
+const rows=files.map(file=>({path:file,originalSHA256:originals.find(r=>r.path===file)?.sha256??null,modifiedSHA256:sha(fs.readFileSync(file))}));
+for(const row of rows)if(row.originalSHA256)fs.readFileSync(path.join(out,'original',row.path));
+fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify({base,files:rows},null,2)+'\n');
+fs.writeFileSync(path.join(out,'DIFF_FILE.patch'),execFileSync('git',['diff',base,'--','.gitattributes','plugins/naumi-enterprise','tests/naumi-bot-appearance.test.mjs','tests/naumi-employee-experience.test.mjs','scripts/build-grok-bot-preview.mjs','scripts/verify-grok-bot-ui.mjs','scripts/verify-grok-bot-shell.mjs','docs/implementation/BOT_APPEARANCE.md']));
+const stage=path.join(out,'package-copy');fs.mkdirSync(stage,{recursive:true});for(const row of rows.filter(r=>r.path.startsWith('plugins/'))){const target=path.join(stage,row.path);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(row.path,target);}
+execFileSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-Command',`Compress-Archive -Path '${stage.replaceAll("'","''")}/*' -DestinationPath '${path.join(out,'MODIFIED_FILE.zip').replaceAll("'","''")}' -Force`],{stdio:'inherit'});
+console.log('PACKAGE source_files='+rows.length+' plugin_files='+rows.filter(r=>r.path.startsWith('plugins/')).length+' zip=MODIFIED_FILE.zip diff=DIFF_FILE.patch');

@@ -8,7 +8,7 @@
 
 - 本轮依据用户附件图一的八个角色，不沿用上一版圆团 / 豆荚设计。
 - 参考项目 `https://github.com/tycoding/grok-ball`，固定 SHA `de368ce3acdc5a70e871ee46ebbe8f60b11d3d6a`。已阅读该仓库 AGENTS、SKILL、JS / TS SDK 与 LICENSE。
-- 引擎 `assets/grok-ball.js` 原样保存，SHA-256 `72960b6398032d45c8e4ca4386dfb2a9b6f286d67af0d3c2692dcffeab273fbb`；MIT 版权与来源清单位于 `third-party/grok-ball/`。
+- 引擎 `assets/grok-ball.js` 原样保存，SHA-256 `d03f37f261da2e22e55e9b0fa40dcdab62f0a6c6dd419632a088a7c4c9bb79fa`；MIT 版权与来源清单位于 `third-party/grok-ball/`。
 - 源基线 `20c91f5611d38ba1495f4e9851851017e6e618f8`，独立分支 `codex/grok-bot-20261117` / 工作树 `E:/Workspace/naumi-grok-bot`；模块迭代计数 1。
 
 ## 公共接口、依赖方向、状态与事务归属
