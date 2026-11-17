@@ -1,0 +1,13 @@
+import fs from 'node:fs';
+import vm from 'node:vm';
+import assert from 'node:assert/strict';
+const root=process.argv[2]??'.',mode=process.argv[3]??'modified';
+const s=fs.readFileSync(root+'/plugins/naumi-sidebar-browser/client.js','utf8');
+const expr=s.match(/const initialUrl = \(0, react.useRef\)\(([^\n]+)\);/)[1];
+const target=s.match(/function currentBrowserTarget\(state\) \{[\s\S]*?\n\s*\}/)[0];
+const read=(url,state)=>vm.runInNewContext(target+';'+expr,{tab:{navigation:{params:url===undefined?undefined:{url}}},initial:{current:state}});
+const saved={index:0,entries:[{url:'https://example.com/saved'}]};
+const values={fresh:read(undefined,undefined)??null,emptyCheckpoint:read(undefined,{index:-1,entries:[]})??null,explicit:read('https://example.com/task',undefined),saved:read(undefined,saved)??null,explicitBlank:read('about:blank',undefined),savedExplicit:read('https://example.com/task',saved)};
+assert.equal(values.fresh,mode==='modified'?'https://baidu.com':null);
+assert.equal(values.emptyCheckpoint,values.fresh);assert.equal(values.explicit,'https://example.com/task');assert.equal(values.saved,null);assert.equal(values.explicitBlank,'about:blank');assert.equal(values.savedExplicit,values.explicit);
+console.log(JSON.stringify(values));

@@ -20,7 +20,7 @@ test('unloading the upstream browser preserves Naumi styles, including preloaded
 test('own style teardown and repeated materialization do not leak or disappear',()=>{
  const d=styleDocument();for(let i=0;i<5;i++){d.load(built);d.load(built);assert.equal(d.tags.length,1);d.dispose(owner);assert.equal(d.tags.length,0);}d.load(built);assert.equal(d.tags.length,1);
 });
-test('CSS content and browser logic remain upstream-identical apart from four product bindings',()=>{
- const restored=built.replace('id: "'+owner+'"','id: "'+oldOwner+'"').replace('const carrier = globalThis.naumiDesktop;','const carrier = globalThis.dshDesktop;').replace('const tagId = "'+owner+'/Browser.module.css";','const tagId = "'+oldOwner+'/Browser.module.css";').replace('tag.dataset.plugin = "'+owner+'";','tag.dataset.plugin = "'+oldOwner+'";');assert.equal(restored,upstream);
+test('CSS content and browser logic remain upstream-identical apart from four product bindings and the declared default page',()=>{
+ const restored=built.replace('id: "'+owner+'"','id: "'+oldOwner+'"').replace('const carrier = globalThis.naumiDesktop;','const carrier = globalThis.dshDesktop;').replace('const tagId = "'+owner+'/Browser.module.css";','const tagId = "'+oldOwner+'/Browser.module.css";').replace('tag.dataset.plugin = "'+owner+'";','tag.dataset.plugin = "'+oldOwner+'";');assert.equal(restored.replace("const initialUrl = (0, react.useRef)(tab.navigation.params?.url ?? (currentBrowserTarget(initial.current) === void 0 ? \"https://baidu.com\" : void 0));","const initialUrl = (0, react.useRef)(tab.navigation.params?.url);"),upstream);
  const a=styleDocument(),b=styleDocument();a.load(upstream);b.load(built);assert.equal(a.tags[0].textContent,b.tags[0].textContent);
 });
