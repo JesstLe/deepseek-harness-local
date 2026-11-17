@@ -1,3 +1,4 @@
+import {installCreation} from './creation.js';
 import {installBlender} from './blender.js';
 import {installPluginMarket} from './plugin-market.js';
 import {PRODUCT_VERSION} from './product-version.js';
@@ -20,6 +21,7 @@ export function apply(ctx,config) {
   installPluginMarket(ctx);
   installAgentDesktop(ctx);
   installBlender(ctx);
+  installCreation(ctx);
   installEgoBrowser(ctx);
   installDingTalk(ctx);
   installTeamProfile(ctx);
@@ -35,6 +37,7 @@ export function apply(ctx,config) {
   assets.set('desktop-updates.js','text/javascript; charset=utf-8');
   assets.set('desktop-updates.css','text/css; charset=utf-8');
   assets.set('product-identity.css','text/css; charset=utf-8');
+  assets.set('creation-settings.js','text/javascript; charset=utf-8');
   assets.set('blender-settings.js','text/javascript; charset=utf-8');
   assets.set('blender-settings.css','text/css; charset=utf-8');
   assets.set('model-connections.js','text/javascript; charset=utf-8');
