@@ -7,7 +7,11 @@ for file in sorted(P.glob('INDEX*.json')):
  for row in snapshot['sources']:
   if row.get('status')==200:records[row['name']]=row
 for name,url in [('kimi-coding-readable','https://www.kimi.com/code/docs/en/'),('kimi-chat','https://platform.kimi.ai/docs/api/chat.md')]:
- b=(P/(name+'.txt')).read_bytes();records[name]={'name':name,'url':url,'finalUrl':url,'sha256':hashlib.sha256(b).hexdigest()}
+ archive=ROOT/'evidence/official-model-specs/OFFICIAL_SOURCES.zip'
+ if not os.environ.get('NAUMI_SPEC_SOURCE_DIR') and archive.exists():
+  with zipfile.ZipFile(archive) as z:b=z.read('sources/'+name+'.txt')
+ else:b=(P/(name+'.txt')).read_bytes()
+ records[name]={'name':name,'url':url,'finalUrl':url,'sha256':hashlib.sha256(b).hexdigest()}
 MODELS={}
 def text(name):return (P/(name+'.txt')).read_text(encoding='utf-8')
 def raw(name):
@@ -70,4 +74,4 @@ for line in text('doubao-md').splitlines():
  if c and o:add(m[1],'ByteDance Doubao',tokens(c[1]),tokens(o[1]),'doubao-md',input=['text','image'],contextLabel=c[1],outputLabel=o[1],precision='documented-unit')
 assert len(MODELS)>=60,len(MODELS)
 payload={'version':1,'updatedAt':CHECKED_AT,'unitPolicy':'Exact numeric tokens where published. K/M-only labels use conservative decimal normalization; original labels and precision retained. Synchronous/default API limits only; beta/batch/long-decode increases excluded. Availability and subscription quotas are not inferred from specifications.','models':list(MODELS.values())}
-target=Path(os.environ.get('NAUMI_SPEC_OUTPUT',ROOT/'plugins/naumi-enterprise/official-model-specs.json'));target.write_text(json.dumps(payload,ensure_ascii=False,indent=2)+'\n',encoding='utf8');(P.parent/'SOURCE_MANIFEST.json').write_text(json.dumps([r for r in records.values() if r['finalUrl'] in {u for m in MODELS.values() for u in [m['source'],m.get('outputSource')]}],ensure_ascii=False,indent=2)+'\n',encoding='utf8');print('OFFICIAL_CATALOG models='+str(len(MODELS))+' providers='+str(len(set(x['provider'] for x in MODELS.values())))+' source_hashes=retained');print(json.dumps({p:sum(x['provider']==p for x in MODELS.values()) for p in sorted(set(x['provider'] for x in MODELS.values()))},ensure_ascii=False))
+target=Path(os.environ.get('NAUMI_SPEC_OUTPUT',ROOT/'plugins/naumi-enterprise/official-model-specs.json'));target.write_text(json.dumps(payload,ensure_ascii=False,indent=2)+'\n',encoding='utf8',newline='\n');(P.parent/'SOURCE_MANIFEST.json').write_text(json.dumps([r for r in records.values() if r['finalUrl'] in {u for m in MODELS.values() for u in [m['source'],m.get('outputSource')]}],ensure_ascii=False,indent=2)+'\n',encoding='utf8',newline='\n');print('OFFICIAL_CATALOG models='+str(len(MODELS))+' providers='+str(len(set(x['provider'] for x in MODELS.values())))+' source_hashes=retained');print(json.dumps({p:sum(x['provider']==p for x in MODELS.values()) for p in sorted(set(x['provider'] for x in MODELS.values()))},ensure_ascii=False))

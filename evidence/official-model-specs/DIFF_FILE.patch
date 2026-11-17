@@ -1,9 +1,9 @@
 diff --git a/docs/implementation/OFFICIAL_MODEL_SPECS.md b/docs/implementation/OFFICIAL_MODEL_SPECS.md
 new file mode 100644
-index 0000000..8e04cfc
+index 0000000..7a9427b
 --- /dev/null
 +++ b/docs/implementation/OFFICIAL_MODEL_SPECS.md
-@@ -0,0 +1,35 @@
+@@ -0,0 +1,39 @@
 +# 官方模型参数与可配置预算
 +
 +日期：2026-11-17。负责人：本任务。基线8995df9da41b6a36483a1b84277396892968d69c；独立分支codex/official-model-specs-20261117，工作树E:/Workspace/naumi-official-model-specs。功能迭代1。
@@ -39,6 +39,10 @@ index 0000000..8e04cfc
 +主线同步与集中验收：8995df9 → origin/main 318cfbb → task 19d7673，保留安装器/产品版本并行改动。定向42/42、实际设置UI/HTTP16/16、副本27/27通过；首轮全量473项中原桌面进程夹具FIXTURE_EXIT失败保留，单模块31项复测通过；整合最新主线后482/482通过，未修改桌面生命周期代码。功能迭代仍为1。
 +
 +实际校准发现并修正settings规范化问题：value投影包含默认input/compat，整数组写回会物化隐式字段。已清理76个新增隐式字段、保留预算；校准改为仅写两个数值叶子，普通保存从user原始模型元数据继承。增加两项回归与真实YAML断言，定向44/44、UI17/17、最终全量484/484通过；原失败与修复证据保留。
++
++最终本机接入：已校准8组38条中的36条，未核验2条不动；5条套餐限制保留现有上下文。6个运行文件接入（package仅追加2文件）、其他文件hash保持，凭据及默认模型不变；配置私有副本原字节恢复与实际修改保留通过。76会话/0运行/3 Bot；重复校准0变更、revision不变。部署回执对应修正主线ed5653e；未发真实供应商推理和本任务安装包发布。维护脚本只在开发端使用Python3/beautifulsoup4，员工安装包读取静态JSON，不依赖Python。
++
++维护复现补充：Git检出会规范化可读来源的换行，来源摘要固定读取OFFICIAL_SOURCES.zip中的原始归档字节；生成JSON强制LF。python -X utf8 scripts/verify-model-spec-repro.py已在无忽略raw文件的干净checkout验证86条目录与SOURCE_MANIFEST字节不变，四件套再次核验通过；本修正不改模型数值或运行配置。
 diff --git a/plugins/naumi-enterprise/assets/model-connections.css b/plugins/naumi-enterprise/assets/model-connections.css
 index e4dbaa7..6492114 100644
 --- a/plugins/naumi-enterprise/assets/model-connections.css
@@ -1560,10 +1564,10 @@ index 24d1d8f..580542b 100644
      "bundle": {
 diff --git a/scripts/build-official-model-specs.py b/scripts/build-official-model-specs.py
 new file mode 100644
-index 0000000..1d876f8
+index 0000000..8076b21
 --- /dev/null
 +++ b/scripts/build-official-model-specs.py
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,77 @@
 +from pathlib import Path
 +import json,re,hashlib,datetime,os,zipfile
 +from bs4 import BeautifulSoup
@@ -1573,7 +1577,11 @@ index 0000000..1d876f8
 + for row in snapshot['sources']:
 +  if row.get('status')==200:records[row['name']]=row
 +for name,url in [('kimi-coding-readable','https://www.kimi.com/code/docs/en/'),('kimi-chat','https://platform.kimi.ai/docs/api/chat.md')]:
-+ b=(P/(name+'.txt')).read_bytes();records[name]={'name':name,'url':url,'finalUrl':url,'sha256':hashlib.sha256(b).hexdigest()}
++ archive=ROOT/'evidence/official-model-specs/OFFICIAL_SOURCES.zip'
++ if not os.environ.get('NAUMI_SPEC_SOURCE_DIR') and archive.exists():
++  with zipfile.ZipFile(archive) as z:b=z.read('sources/'+name+'.txt')
++ else:b=(P/(name+'.txt')).read_bytes()
++ records[name]={'name':name,'url':url,'finalUrl':url,'sha256':hashlib.sha256(b).hexdigest()}
 +MODELS={}
 +def text(name):return (P/(name+'.txt')).read_text(encoding='utf-8')
 +def raw(name):
@@ -1636,7 +1644,7 @@ index 0000000..1d876f8
 + if c and o:add(m[1],'ByteDance Doubao',tokens(c[1]),tokens(o[1]),'doubao-md',input=['text','image'],contextLabel=c[1],outputLabel=o[1],precision='documented-unit')
 +assert len(MODELS)>=60,len(MODELS)
 +payload={'version':1,'updatedAt':CHECKED_AT,'unitPolicy':'Exact numeric tokens where published. K/M-only labels use conservative decimal normalization; original labels and precision retained. Synchronous/default API limits only; beta/batch/long-decode increases excluded. Availability and subscription quotas are not inferred from specifications.','models':list(MODELS.values())}
-+target=Path(os.environ.get('NAUMI_SPEC_OUTPUT',ROOT/'plugins/naumi-enterprise/official-model-specs.json'));target.write_text(json.dumps(payload,ensure_ascii=False,indent=2)+'\n',encoding='utf8');(P.parent/'SOURCE_MANIFEST.json').write_text(json.dumps([r for r in records.values() if r['finalUrl'] in {u for m in MODELS.values() for u in [m['source'],m.get('outputSource')]}],ensure_ascii=False,indent=2)+'\n',encoding='utf8');print('OFFICIAL_CATALOG models='+str(len(MODELS))+' providers='+str(len(set(x['provider'] for x in MODELS.values())))+' source_hashes=retained');print(json.dumps({p:sum(x['provider']==p for x in MODELS.values()) for p in sorted(set(x['provider'] for x in MODELS.values()))},ensure_ascii=False))
++target=Path(os.environ.get('NAUMI_SPEC_OUTPUT',ROOT/'plugins/naumi-enterprise/official-model-specs.json'));target.write_text(json.dumps(payload,ensure_ascii=False,indent=2)+'\n',encoding='utf8',newline='\n');(P.parent/'SOURCE_MANIFEST.json').write_text(json.dumps([r for r in records.values() if r['finalUrl'] in {u for m in MODELS.values() for u in [m['source'],m.get('outputSource')]}],ensure_ascii=False,indent=2)+'\n',encoding='utf8',newline='\n');print('OFFICIAL_CATALOG models='+str(len(MODELS))+' providers='+str(len(set(x['provider'] for x in MODELS.values())))+' source_hashes=retained');print(json.dumps({p:sum(x['provider']==p for x in MODELS.values()) for p in sorted(set(x['provider'] for x in MODELS.values()))},ensure_ascii=False))
 diff --git a/scripts/deploy-official-model-specs.mjs b/scripts/deploy-official-model-specs.mjs
 new file mode 100644
 index 0000000..6f83963
@@ -1713,6 +1721,24 @@ index 0000000..bb6064e
 +++ b/scripts/reopen-official-model-specs.mjs
 @@ -0,0 +1 @@
 +import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash} from 'node:crypto';import {execFileSync} from 'node:child_process';const e='evidence/official-model-specs',hash=b=>createHash('sha256').update(b).digest('hex'),rows=JSON.parse(fs.readFileSync(e+'/hashes.json'));for(const r of rows){assert.equal(hash(fs.readFileSync(r.file)),r.modifiedSHA256);assert.equal(hash(fs.readFileSync(path.join(e,'modified',r.file))),r.modifiedSHA256);if(r.originalSHA256)assert.equal(hash(fs.readFileSync(path.join(e,'original',r.file))),r.originalSHA256);}for(const name of ['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh'])assert(fs.readFileSync(e+'/'+name).length);execFileSync('D:/DEV/Git/bin/bash.exe',['-n',e+'/ROLLBACK.sh']);execFileSync('python',['-X','utf8','-c',`import zipfile; z=zipfile.ZipFile('${e}/MODIFIED_FILE.zip'); assert z.testzip() is None; s=zipfile.ZipFile('${e}/OFFICIAL_SOURCES.zip'); assert s.testzip() is None`]);console.log('REOPEN artifacts=4 source_hashes=PASS originals=PASS source_archive=PASS rollback=PASS');
+diff --git a/scripts/verify-model-spec-repro.py b/scripts/verify-model-spec-repro.py
+new file mode 100644
+index 0000000..61053bc
+--- /dev/null
++++ b/scripts/verify-model-spec-repro.py
+@@ -0,0 +1,12 @@
++"""Prove a checkout rebuild is byte-identical, including archived source hashes."""
++from pathlib import Path
++import subprocess,sys
++ROOT=Path(__file__).resolve().parents[1]
++files=[ROOT/'plugins/naumi-enterprise/official-model-specs.json',ROOT/'evidence/official-model-specs/SOURCE_MANIFEST.json'];before=[f.read_bytes() for f in files]
++try:
++ subprocess.run([sys.executable,'-X','utf8',str(ROOT/'scripts/refresh-official-model-specs.py')],cwd=ROOT,check=True)
++ assert all(f.read_bytes()==b for f,b in zip(files,before)),'Official catalog rebuild drifted'
++ print('CATALOG_REPRO models=86 source_hashes=stable newline=LF outputs=unchanged')
++finally:
++ for f,b in zip(files,before):
++  if f.read_bytes()!=b:f.write_bytes(b)
 diff --git a/scripts/verify-official-model-specs.mjs b/scripts/verify-official-model-specs.mjs
 new file mode 100644
 index 0000000..ac33a9d
