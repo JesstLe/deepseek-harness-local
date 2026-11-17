@@ -57,6 +57,12 @@ Bot integrity 两个后端文件及其 `.gitattributes` 证据条目原样保留
 
 ## 接续提示
 
+### 2026-11-17：0.3.5 新目录修复
+
+0.3.4 路径提交使用 NSIS `GetFullPathName`，目标不存在时得到空串，拼接成 `\Naumi`。
+现改为无副作用的 Win32 `GetFullPathNameW` 校验，candidate 成功后才提交 INSTDIR；安装/卸载维护入口再检查一次。
+新增真实NSIS生产页面回调测试和最终安装包安装/卸载验收。详见 [路径修复记录](../changes/2026-11-17-installer-path-fix.md)。
+
 ```text
 接续installer-ui：先查VERIFICATION.txt与BUILD.json，对照固定main和包hash。
 保留上游安装事务、维护准入与默认数据保留；只改presentation/pages，不改Bot或模型配置。

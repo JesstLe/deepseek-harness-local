@@ -19,8 +19,10 @@ Var NaumiPage
 !ifndef BUILD_UNINSTALLER
 Var NaumiPathField
 Var NaumiRunCheck
+Var NaumiCandidatePath
 !endif
 Var NaumiAction
+Var NaumiCanonicalTarget
 
 !macro NaumiHideChrome ID
   GetDlgItem $0 $HWNDPARENT ${ID}
@@ -192,7 +194,78 @@ Function ${PREFIX}${EVENT}
 FunctionEnd
 !macroend
 
+; Stack contract: path -> canonical drive-absolute path, or empty on rejection.
+; Preserve scratch registers and never create a directory during validation.
+!macro NaumiPathFunctions PREFIX
+Function ${PREFIX}NaumiCanonicalPath
+  Exch $R0
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  StrCpy $0 $R0 1 1
+  StrCpy $1 $R0 1 2
+  ${If} $0 != ":"
+  ${OrIf} $1 != "\"
+    Goto naumi_path_invalid
+  ${EndIf}
+  System::Call 'shlwapi::PathGetDriveNumberW(w "$R0")i.r1'
+  ${If} $1 < 0
+    Goto naumi_path_invalid
+  ${EndIf}
+  StrLen $3 $R0
+  StrCpy $1 2
+  naumi_path_chars:
+    ${If} $1 >= $3
+      Goto naumi_path_resolve
+    ${EndIf}
+    StrCpy $2 $R0 1 $1
+    ${If} $2 == "*"
+    ${OrIf} $2 == "?"
+    ${OrIf} $2 == "<"
+    ${OrIf} $2 == ">"
+    ${OrIf} $2 == "|"
+    ${OrIf} $2 == "$\""
+    ${OrIf} $2 == ":"
+      Goto naumi_path_invalid
+    ${EndIf}
+    IntOp $1 $1 + 1
+    Goto naumi_path_chars
+  naumi_path_resolve:
+  System::Call 'kernel32::GetFullPathNameW(w "$R0",i ${NSIS_MAX_STRLEN},w .r0,p 0)i.r1'
+  ${If} $1 == 0
+  ${OrIf} $1 >= ${NSIS_MAX_STRLEN}
+    Goto naumi_path_invalid
+  ${EndIf}
+  StrCpy $2 $0 1 1
+  StrCpy $3 $0 1 2
+  ${If} $2 != ":"
+  ${OrIf} $3 != "\"
+    Goto naumi_path_invalid
+  ${EndIf}
+  ; Ignore a trailing separator when checking the final Naumi directory name.
+  StrLen $1 $0
+  ${If} $1 > 3
+    StrCpy $2 $0 1 -1
+    ${If} $2 == "\"
+      StrCpy $0 $0 -1
+    ${EndIf}
+  ${EndIf}
+  StrCpy $R0 $0
+  Goto naumi_path_return
+  naumi_path_invalid:
+  StrCpy $R0 ""
+  naumi_path_return:
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+  Exch $R0
+FunctionEnd
+!macroend
+
 !macro NaumiInstallerFunctions
+!insertmacro NaumiPathFunctions ""
 !insertmacro NaumiFailure "" ".onInstFailed"
 !insertmacro NaumiFunctions "" "install"
 Function NaumiBrowse
@@ -222,24 +295,27 @@ Function NaumiInstall
   nsDialogs::Show
 FunctionEnd
 Function NaumiInstallLeave
-  ${NSD_GetText} $NaumiPathField $INSTDIR
-  StrLen $0 $INSTDIR
-  ${If} $0 < 4
-    MessageBox MB_OK|MB_ICONEXCLAMATION "请选择有效的安装位置。"
-    Abort
-  ${EndIf}
-  StrCpy $0 $INSTDIR 1 1
-  StrCpy $1 $INSTDIR 1 2
-  ${If} $0 != ":"
-  ${OrIf} $1 != "\"
+  ${NSD_GetText} $NaumiPathField $NaumiCandidatePath
+  Push $NaumiCandidatePath
+  Call NaumiCanonicalPath
+  Pop $NaumiCandidatePath
+  ${If} $NaumiCandidatePath == ""
     MessageBox MB_OK|MB_ICONEXCLAMATION "请选择完整的本机安装路径。"
     Abort
   ${EndIf}
-  GetFullPathName $INSTDIR "$INSTDIR"
-  ${GetFileName} "$INSTDIR" $0
+  ${GetFileName} "$NaumiCandidatePath" $0
   ${If} $0 != "Naumi"
-    StrCpy $INSTDIR "$INSTDIR\Naumi"
+    Push "$NaumiCandidatePath\Naumi"
+    Call NaumiCanonicalPath
+    Pop $NaumiCandidatePath
   ${EndIf}
+  ${If} $NaumiCandidatePath == ""
+    MessageBox MB_OK|MB_ICONEXCLAMATION "请选择完整的本机安装路径。"
+    Abort
+  ${EndIf}
+  ; Commit only a checked, nonempty, drive-absolute result. NSIS GetFullPathName
+  ; returns empty for a new directory; Win32 GetFullPathNameW does not require it.
+  StrCpy $INSTDIR $NaumiCandidatePath
 FunctionEnd
 Function NaumiDoneLeave
   ${NSD_GetState} $NaumiRunCheck $0
@@ -260,6 +336,7 @@ Function ${PREFIX}NaumiConfirm
 FunctionEnd
 !macroend
 !macro NaumiUninstallerFunctions
+!insertmacro NaumiPathFunctions "un."
 !insertmacro NaumiFailure "un." "onUninstFailed"
 !insertmacro NaumiFunctions "un." "uninstall"
 !insertmacro NaumiUninstallPage "un."

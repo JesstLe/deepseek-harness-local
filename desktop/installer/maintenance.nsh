@@ -16,6 +16,22 @@
   File /oname=enterprise.cjs "${NAUMI_HELPER_DIR}\enterprise.cjs"
 !macroend
 !macro customCheckAppRunning
+  ; Last admission guard before installed files are written, including /S and /D.
+  Push $INSTDIR
+  !ifdef BUILD_UNINSTALLER
+    Call un.NaumiCanonicalPath
+  !else
+    Call NaumiCanonicalPath
+  !endif
+  Pop $NaumiCanonicalTarget
+  ${If} $NaumiCanonicalTarget == ""
+    ${IfNot} ${Silent}
+      MessageBox MB_OK|MB_ICONEXCLAMATION "请选择完整的本机安装路径，再重试安装。"
+    ${EndIf}
+    SetErrorLevel 43
+    Quit
+  ${EndIf}
+  StrCpy $INSTDIR $NaumiCanonicalTarget
   !insertmacro NaumiExtractMaintenance
   Push $7
   Push $R8

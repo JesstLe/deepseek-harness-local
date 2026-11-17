@@ -1,0 +1,54 @@
+NAUMI INSTALLER PATH FIX / 0.3.5
+Changed branch: codex/installer-path-fix -> main
+Baseline SHA: 31d78709602b70b01629eec78d2ad6f3ec3bc716
+Integrated origin/main SHA: 483d48a5fb8374eee3225649f7514d339e1c97f5
+Changed fields: desktop version/lock/PRODUCT_VERSION 0.3.4 -> 0.3.5; NaumiInstallLeave candidate/canonical/commit path; NaumiCanonicalPath and un.NaumiCanonicalPath; customCheckAppRunning path guard exit43. Maintenance exit42, Logo and native install/uninstall engine retained.
+Source paths:14; original and modified SHA256 in manifest.json.
+
+ARTIFACTS
+E:/Workspace/naumi-desktop/evidence/installer-path-fix/MODIFIED_FILE.zip
+E:/Workspace/naumi-desktop/evidence/installer-path-fix/DIFF_FILE.patch
+E:/Workspace/naumi-desktop/evidence/installer-path-fix/VERIFICATION.txt
+E:/Workspace/naumi-desktop/evidence/installer-path-fix/ROLLBACK.sh
+
+BASELINE
+Command: node --test desktop/tests/installer-ui.test.cjs
+Input: original 0.3.4 installer static contracts.
+Literal result: tests 9 / pass 9 / fail 0
+Exit status:0. Output BASELINE.txt.
+Command: node desktop/scripts/verify-installer-path.mjs --baseline
+Input: original production NaumiInstallLeave; native EDIT controls; absolute, nonexistent installation directory.
+Literal result: BASELINE native_page_leave=FAIL selected_absolute_path=E:\Workspace\naumi-installer-path-fix\runtime\installer-path-regression\not-created\Naumi actual=\Naumi exit=1
+Exit status:1 (confirmed original defect).
+NSIS GetFullPathName gives an empty result for the new directory; GetFullPathNameW preserves the full new path. Outputs BASELINE_CALLBACK.txt and BASELINE_API.txt.
+
+MODIFIED
+Command: node --test --test-concurrency=1 tests/*.test.mjs desktop/tests/*.test.cjs
+Input: integrated main plus installer fix and controlled regression fixtures.
+Literal result:
+ℹ tests 556
+ℹ pass 556
+ℹ fail 0
+Exit status:0. Output INTEGRATED.txt. Pre-sync run MODIFIED.txt:555/555 exit0.
+Command: node desktop/scripts/verify-installer-path.mjs
+Input: production page-leave callback, native EDIT controls; new directory/Unicode and spaces/parent suffix/trailing separator, plus relative/drive-relative/UNC/empty rejection.
+Literal result: NATIVE_PATH cases=8 pass=8 invalid_rejected=4 new_parent=PASS unicode_spaces=PASS trailing_slash=PASS no_writes=PASS exit=0
+Exit status:0. Output MODIFIED_NATIVE.txt. Native receipt uses UTF16LE to preserve Unicode; initial UTF8 decoding was a test-tool encoding error and was corrected.
+Command: node desktop/scripts/verify-installer-ui.mjs
+Literal result: INSTALLER_UI_COMPILE fixture=PASS production_presentation=shared
+Exit status:0. Output COMPILE.txt.
+
+ROLLBACK
+Command: D:/DEV/Git/bin/bash.exe evidence/installer-path-fix/ROLLBACK.sh
+Input: a separate baseline source copy, overlay all14 modified paths, restore original/delete new paths, run baseline full suite and invoke native callback again.
+Literal result:
+ROLLBACK tests=554 pass=554 fail=0 exit=0
+RESTORED version=0.3.4 native_path_callback=baseline source_hashes=PASS
+CURRENT version=0.3.5 native_path_callback=fixed source=modified service3080=untouched
+Exit status:0. Outputs ROLLBACK.txt, ROLLBACK_COMMAND.txt, ROLLBACK_NATIVE.txt, ROLLBACK_RESULT.json.
+Restored behavior/status: second copy version0.3.4 retains original bug; native callback again returns actual=\Naumi with expected exit1. Current source remains0.3.5/fixed. No user installed rollback performed.
+First evidence run was invalidated by edits to its verifier while it ran; preserved in ROLLBACK_FIRST.txt. The final command above reran after the14 source hashes were frozen and passed.
+
+RELEASE PREPARATION
+Defective 0.3.4 marked prerelease and removed from Latest, without deleting assets or changing tag/binary. Stable Latest temporarily0.3.2 until0.3.5 publication.
+Build, real final-installer lifecycle and public release receipts are appended after fixed-main build. No employee install or user shortcut is adopted by the tests.
