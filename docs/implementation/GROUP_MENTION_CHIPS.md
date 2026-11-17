@@ -35,3 +35,5 @@
 集中全量：`node --test tests/*.test.mjs desktop/tests/*.test.cjs`，602/602 通过。最终 UI 29 项通过；原生表单内标签的 Avatar 尺寸已用更高特异性保持 24px，候选形象 32px，未影响其他区域。
 
 加载先等待真实生成结束（94 Sessions、0 running）才执行。服务重开后两个 Session 因正常 flush 追加了 82/80 字节，原逐文件整文件 hash 比较因此停止；已逐 zstd 帧证明旧文件 SHA256 对应完整字节前缀，原有事件未删改，校验器仅对 Session 追加开放此前缀证明，其余配置仍要求逐字节一致。
+
+任务公开投影会随 Session 标题/状态刷新而变化；持久任务账本已逐字节核验不变。运行验收分别记录 taskLedgerUnchanged 与 taskProjectionUnchanged，不用动态投影 hash 代替持久账本，也不声称投影完全不变。
