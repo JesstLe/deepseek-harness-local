@@ -1,5 +1,5 @@
 import fs from 'node:fs';import path from 'node:path';import {execFileSync} from 'node:child_process';import {createHash} from 'node:crypto';
-const root=process.cwd(),out=path.join(root,'evidence/grok-bot'),base='9a730ed23356d783b494cd6a45e566b08bd36605',sha=b=>createHash('sha256').update(b).digest('hex');
+const root=process.cwd(),out=path.join(root,'evidence/grok-bot'),base='23e0e033d81d8d485f2bd59b046264a942bb1e61',sha=b=>createHash('sha256').update(b).digest('hex');
 let originals=JSON.parse(fs.readFileSync(path.join(out,'original-manifest.json'),'utf8'));
 if(!originals.some(r=>r.path==='.gitattributes')){const data=execFileSync('git',['show',base+':.gitattributes']);fs.writeFileSync(path.join(out,'original/.gitattributes'),data);originals.push({path:'.gitattributes',sha256:sha(data)});fs.writeFileSync(path.join(out,'original-manifest.json'),JSON.stringify(originals,null,2)+'\n');}
 const files=execFileSync('git',['diff',base,'--name-only'],{encoding:'utf8'}).trim().split(/\r?\n/).filter(f=>f==='.gitattributes'||f==='docs/implementation/BOT_APPEARANCE.md'||f.startsWith('plugins/naumi-enterprise/')||/^(scripts\/(build|verify)-grok-bot.*\.mjs|scripts\/grok-bot-evidence\.mjs|tests\/naumi-bot-appearance.test.mjs|tests\/naumi-employee-experience.test.mjs)$/.test(f));

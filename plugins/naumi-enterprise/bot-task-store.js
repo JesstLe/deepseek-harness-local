@@ -13,7 +13,7 @@ const taskSchema=z.object({id,key:id,sourceBotId:id,sourceSessionId:id,targetBot
   profile:profileSchema,task:text,status:z.enum(TASK_STATES),revision:z.number().int().positive(),attempt:z.number().int().positive().max(100),
   messageId:id,lineage:z.array(id).min(2).max(5),parentTaskId:id.optional(),createdAt:stamp,updatedAt:stamp,
   output:z.enum(['text','files']).optional(),replyMode:z.enum(['background','wait']).optional(),delivery:deliveryCheck.optional(),
-  result:z.string().max(32000).optional(),progress:z.string().max(4000).optional(),error:id.optional()}).strict();
+  instruction:text.optional(),result:z.string().max(32000).optional(),progress:z.string().max(4000).optional(),error:id.optional()}).strict();
 const outboxSchema=z.object({id,taskId:id,key:z.string().min(1).max(400),messageId:id,fromSessionId:id,toSessionId:id,
   attempt:z.number().int().positive(),taskStatus:z.enum(TASK_STATES),kind:z.enum(['message','progress','blocked','result','status']),text,files:z.array(fileReference).max(8).optional(),delivered:z.boolean(),error:id.optional(),createdAt:stamp}).strict();
 const schema=z.object({version:z.literal(1),revision:z.number().int().nonnegative(),tasks:z.array(taskSchema).max(1000),outbox:z.array(outboxSchema).max(10000)}).strict().superRefine((doc,ctx)=>{

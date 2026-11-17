@@ -1,11 +1,13 @@
 import {naumiMonitorReadings,naumiPortalOptions,teamTaskGroups,teamSchedules,scheduleTime,scheduleToggleRequest,memberState,teamInitials,readEnvironment} from './team-panel-model.js';
-import {botCatalog,botForSession,botActivity} from './bot-sidebar-model.js';
 import {createBotAvatar} from './bot-avatar.js';
-import {taskActivity,employeeTaskState} from './bot-task-model.js';
+import {botCatalog,botForSession,botActivity} from './bot-sidebar-model.js';
+import {taskActivity,employeeTasks,employeeTaskState} from './bot-task-model.js';
+import {createBotTaskCard} from './bot-task-ui.js';
 
 /** A presentation adapter over native Team, Schedule and resource actions. */
 export function installTeamPanel(ctx,React,createPortal,Icon){
   const h=React.createElement,{useState,useEffect,useLayoutEffect,useMemo,useRef,useSyncExternalStore}=React,Avatar=createBotAvatar(React);
+  const activity=taskActivity(),BotTaskCard=createBotTaskCard({get uiWorkspace(){return ctx.get('uiWorkspace');},get sidebarRight(){return ctx.get('sidebarRight');},get layout(){return ctx.layout;}},React,activity);
   const docks=new Map(),listeners=new Map(),relocated=new WeakSet(),originals=new Map(),disposers=[];
   const register=dispose=>{if(typeof dispose==='function')disposers.push(dispose);};
   const getDock=(id,key)=>docks.get(id)?.[key]??null;
@@ -94,15 +96,15 @@ export function installTeamPanel(ctx,React,createPortal,Icon){
     const team=useSessions(s=>s.projectionsBySession[leadId]?.values.agentTeam);
     const profile=useSessions(s=>s.projectionsBySession[leadId]?.values.naumiTeamProfile);
     const catalogSource=botCatalog(),catalog=useSyncExternalStore(catalogSource.subscribe,catalogSource.getSnapshot,catalogSource.getSnapshot),bot=botForSession(catalog.bots,leadId);
-    const status=useSessionStatus(s=>s.get(sessionId));
-    const allSessions=useSessions(s=>s),allStatus=useSessionStatus(s=>s),activity=taskActivity(),jobs=useSyncExternalStore(activity.subscribe,activity.getSnapshot,activity.getSnapshot);
+    const jobs=useSyncExternalStore(activity.subscribe,activity.getSnapshot,activity.getSnapshot),botJobs=useMemo(()=>employeeTasks(bot,jobs.tasks),[bot,jobs.tasks]);
+    const status=useSessionStatus(s=>s.get(sessionId)),allSessions=useSessions(s=>s),allStatus=useSessionStatus(s=>s);
     const input=useInput(s=>s),stats=useProjection('sessionStats'),usage=useProjection('tokenUsage'),pressure=useProjection('contextPressure');
     const readings=naumiMonitorReadings(stats,usage,pressure),groups=useMemo(()=>teamTaskGroups(team),[team]);
-    const [geometry,setGeometry]=useState(null),[preference,setPreference]=useState(null),[files,setFiles]=useState([]),[error,setError]=useState(null),[tab,setTab]=useState('activity');
+    const [geometry,setGeometry]=useState(null),[preference,setPreference]=useState(null),[files,setFiles]=useState([]),[error,setError]=useState(null),[tab,setTab]=useState('activity'),[historyLimit,setHistoryLimit]=useState(10);
     const rootRef=useRef(null),toggleRef=useRef(null);
     const refs=useMemo(()=>Object.fromEntries(['team','children','preset','activity','usage'].map(key=>[key,node=>setDock(sessionId,key,node)])),[sessionId]);
     const room=(geometry?.width??0)>=780,open=preference??room,width=Math.min(344,Math.max(260,(geometry?.width??344)-20));
-    useEffect(()=>{setTab('activity');setError(null);},[leadId]);
+    useEffect(()=>{setTab('activity');setError(null);setHistoryLimit(10);},[leadId]);
     useLayoutEffect(()=>{
       const root=document.querySelector('[data-slot="main.conversation"] > div');if(!root)return;
       rootRef.current=root;root.dataset.naumiContextRoot='true';let scheduled=false,disposed=false;
@@ -126,13 +128,18 @@ export function installTeamPanel(ctx,React,createPortal,Icon){
       h('header',{className:'naumi-context-head'},h('span',null,'团队'),h('button',{type:'button',className:'naumi-context-icon','aria-label':'收起智能体团队',onClick:close},'×')),
       h('div',{className:'naumi-context-scroll'},
         h('section',{className:'naumi-team-identity'},bot?h(Avatar,{bot,className:'naumi-team-avatar',state:jobs.status==='ready'?employeeTaskState(bot,jobs.tasks,botActivity(bot,allSessions,allStatus)):botActivity(bot,allSessions,allStatus)}):h('div',{className:'naumi-team-avatar','aria-hidden':true},profile?.name?teamInitials(profile.name):h('img',{src:'/naumi/assets/symbol.svg',alt:'',width:32,height:32})),h('h2',{'data-team-name':true},name),
+          bot&&leadId!==bot.homeSessionId&&h('button',{type:'button',className:'naumi-bot-home naumi-text-action',onClick:()=>{try{ctx.layout.beginNavigation();ctx.get('uiWorkspace').openSession(bot.homeSessionId);}catch{setError('日常聊天暂未就绪');}}},'与',bot.name,'聊天'),
           h('details',{className:'naumi-team-roster',key:leadId},h('summary',null,h('span',{className:'naumi-team-faces','aria-hidden':true},members.slice(0,4).map(m=>h('span',{key:m.id},teamInitials(m.name)))),h('span',null,team?`${members.length} 位成员`:'成员待同步'),h('span',{className:'naumi-roster-chevron','aria-hidden':true},'⌄')),
             members.map(member=>h(Member,{key:member.id,member,sessionId,useSessions,useSessionStatus,onError:setError})),h('div',{className:'naumi-roster-actions'},h('div',{className:'naumi-team-native',ref:refs.team}),h('div',{className:'naumi-child-native',ref:refs.children})))),
         (team?.failure||profile?.failure)&&h('p',{className:'naumi-context-error',role:'alert'},team?.failure??profile.failure),
         h('div',{className:'naumi-team-tabs',role:'tablist','aria-label':'团队信息',onKeyDown:e=>{const kinds=['activity','library'],index=kinds.indexOf(tab);let next;if(e.key==='ArrowRight')next=kinds[(index+1)%2];if(e.key==='ArrowLeft')next=kinds[(index+1)%2];if(e.key==='Home')next=kinds[0];if(e.key==='End')next=kinds[1];if(next){e.preventDefault();setTab(next);document.getElementById(tabId(next))?.focus();}}},...['activity','library'].map(kind=>h('button',{key:kind,type:'button',role:'tab',id:tabId(kind),'aria-selected':tab===kind,'aria-controls':tabId(kind+'-panel'),tabIndex:tab===kind?0:-1,onClick:()=>setTab(kind)},kind==='activity'?'动态':'资料'))),
         h('div',{role:'tabpanel',id:tabId('activity-panel'),'aria-labelledby':tabId('activity'),hidden:tab!=='activity'},
-          h('section',{className:'naumi-context-section naumi-team-tasks'},h('div',{className:'naumi-context-heading'},h('h3',null,'当前任务'),groups.active.length>0&&h('span',{className:'naumi-count'},groups.active.length)),
-            groups.active.length?groups.active.map(task=>h(Task,{key:task.id,task,team,sessionId,onOpenMember:openMember})):h('p',{className:'naumi-context-empty'},team?'暂无进行中的任务':'读取中…')),
+          h('section',{className:'naumi-context-section naumi-team-tasks'},h('div',{className:'naumi-context-heading'},h('h3',null,'当前任务'),groups.active.length+botJobs.active.length>0&&h('span',{className:'naumi-count'},groups.active.length+botJobs.active.length)),
+            botJobs.active.map(task=>h(BotTaskCard,{key:'bot:'+task.id+':'+task.attempt,task,bots:catalog.bots})),
+            groups.active.map(task=>h(Task,{key:task.id,task,team,sessionId,onOpenMember:openMember})),
+            groups.active.length+botJobs.active.length===0&&h('p',{className:'naumi-context-empty'},bot?jobs.status==='ready'?'暂无进行中的任务':jobs.status==='error'?'任务状态同步失败':'读取中…':team?'暂无进行中的任务':'读取中…'),
+            bot&&jobs.status==='error'&&h('button',{type:'button',className:'naumi-text-action',onClick:()=>activity.refresh()},'刷新任务状态')),
+          botJobs.history.length>0&&h('details',{className:'naumi-completed-tasks naumi-bot-task-history'},h('summary',null,h('span',null,'任务记录'),h('span',null,botJobs.history.length),h('span',{'aria-hidden':true},'⌄')),botJobs.history.slice(0,historyLimit).map(task=>h(BotTaskCard,{key:'bot:'+task.id+':'+task.attempt,task,bots:catalog.bots})),botJobs.history.length>historyLimit&&h('button',{type:'button',className:'naumi-text-action',onClick:()=>setHistoryLimit(v=>v+10)},'更多记录')),
           groups.completed.length>0&&h('details',{className:'naumi-completed-tasks'},h('summary',null,h('span',null,'已完成'),h('span',null,groups.completed.length),h('span',{'aria-hidden':true},'⌄')),groups.completed.map(task=>h(Task,{key:task.id,task,team,sessionId,onOpenMember:openMember}))),
           h(Schedules,{key:leadId,leadId,useAccess}),h(Environment,{visible:open&&tab==='activity'})),
         h('div',{role:'tabpanel',id:tabId('library-panel'),'aria-labelledby':tabId('library'),hidden:tab!=='library'},
@@ -140,7 +147,7 @@ export function installTeamPanel(ctx,React,createPortal,Icon){
           h('section',{className:'naumi-context-section'},h('div',{className:'naumi-context-heading'},h('h3',null,'工作资料')),h('button',{type:'button',className:'naumi-resource-row',onClick:act(()=>ctx.get('sidebarRight').openTab('files'))},h(Icon,{name:'grid',size:17}),'工作区文件',h(Icon,{name:'arrow',size:13})),h('button',{type:'button',className:'naumi-resource-row',onClick:focusInput},h(Icon,{name:'link',size:17}),'本次引用',h('span',null,(input?.occurrences?.length??0)+(input?.attachmentIds?.length??0)))),
           h('section',{className:'naumi-context-section'},h('div',{className:'naumi-context-heading'},h('h3',null,'技能与工具')),h('button',{type:'button',className:'naumi-resource-row',onClick:()=>ctx.layout.selectPanel('plugins')},h(Icon,{name:'layers',size:17}),'插件与 MCP',h(Icon,{name:'arrow',size:13})))),
         error&&h('p',{className:'naumi-context-error',role:'alert'},error)),
-      h('footer',{className:'naumi-context-monitor'},h('details',{className:'naumi-run-details'},h('summary',null,h(Icon,{name:'clock',size:15}),h('span',null,'运行详情'),h('span',{className:'naumi-run-state','data-running':!!status?.running},runLabel(status)),h('span',{'aria-hidden':true},'⌄')),
+      h('footer',{className:'naumi-context-monitor'},h('details',{className:'naumi-run-details'},h('summary',null,h(Icon,{name:'clock',size:15}),h('span',null,bot?'会话运行详情':'运行详情'),h('span',{className:'naumi-run-state','data-running':!!status?.running},runLabel(status)),h('span',{'aria-hidden':true},'⌄')),
         h('div',{className:'naumi-run-body'},h('div',{className:'naumi-metrics'},...[[readings.speed===null?'—':Math.round(readings.speed),'tok/s','输出速度'],[short(readings.total),'tok','累计用量'],[readings.cache===null?'—':readings.cache<100&&Math.round(readings.cache)===100?'99.9':Math.round(readings.cache),'%','缓存命中']].map(([value,unit,label])=>h('div',{key:label},h('strong',null,value,value!=='—'&&h('small',null,unit)),h('span',null,label)))),
           h('div',{className:'naumi-context-capacity'},h('div',null,h('span',null,'上下文占用'),h('button',{type:'button',title:'查看原生上下文详情',onClick:act(()=>{const button=rootRef.current?.querySelector('.JObwrW_trigger');if(button)button.click();else throw Error('上下文详情尚未就绪');})},readings.context===null?'—':readings.context+'%')),h('div',{className:'naumi-capacity-track'},h('i',{style:{width:(readings.context??0)+'%'}}))),
           h('details',{className:'naumi-native-stat-details'},h('summary',null,'详细用量'),h('div',{ref:refs.activity}),h('div',{ref:refs.usage})),h('details',{className:'naumi-advanced'},h('summary',null,'运行设置'),h('div',{className:'naumi-preset-native',ref:refs.preset}))))));

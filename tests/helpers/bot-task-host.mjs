@@ -68,7 +68,7 @@ export async function botTaskHost(){
   const request=(body,{cookie='fixture-owner',originHeader=origin,method=body?'POST':'GET',header=true,url='/naumi/bot-tasks'}={})=>fetch(origin+url,{method,headers:{cookie,origin:originHeader,'Content-Type':'application/json',...(header?{'x-naumi-bot-tasks':'1'}:{})},...(body?{body:typeof body==='string'?body:JSON.stringify(body)}:{})});
   const complete=async(task,text='真实会话格式交付',beforeEnd=()=>{})=>{
     const agent=agents.get(task.targetSessionId),messages=[...agent.inbox.nextStep];
-    const turn=1;agent.session.append('turn/start',{turn});agent.session.append('agent/inbox/spliced',{target:'next-step',start:0,removedCount:messages.length,inserted:[]});agent.inbox.nextStep.splice(0);
+    const turn=(agent.session.snapshotEvents().findLast(e=>e.type==='turn/start')?.data.turn??0)+1;agent.session.append('turn/start',{turn});agent.session.append('agent/inbox/spliced',{target:'next-step',start:0,removedCount:messages.length,inserted:[]});agent.inbox.nextStep.splice(0);
     agent.session.append('step/start',{turn,step:1});for(const message of messages)agent.session.append('user/message',message,{surfaceOp:'append'});
     agent.session.append('assistant/message',{turn,step:1,message:createAssistantMessage({source:{kind:'model',provider:'fixture',model:'target-model'},content:[{type:'text',text}]})},{surfaceOp:'append'});
     await beforeEnd(agent,turn);

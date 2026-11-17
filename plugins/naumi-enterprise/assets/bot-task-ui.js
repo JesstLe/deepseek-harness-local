@@ -1,28 +1,45 @@
 import {taskActivity,taskDockRows,taskLabel,ACTIVE_TASKS,SETTLED_TASKS,filePreviewAddress,readTaskCardDismissals,dismissTaskCard,TASK_CARD_DISMISSALS_KEY} from './bot-task-model.js';
 import {botCatalog} from './bot-sidebar-model.js';
 
+export function createBotTaskCard(scope,React,activity=taskActivity()){
+  const h=React.createElement,{useState,useEffect,useRef}=React;
+  function TaskCard({task,bots,onDismiss,onExpanded}){
+    const [expanded,setExpanded]=useState(false),[detail,setDetail]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[note,setNote]=useState(''),[accepted,setAccepted]=useState(false),request=useRef(null);
+    useEffect(()=>{
+      if(!expanded)return;const abort=new AbortController();setError('');
+      void fetch('/naumi/bot-tasks?taskId='+encodeURIComponent(task.id),{credentials:'same-origin',cache:'no-store',signal:abort.signal}).then(async r=>{if(!r.ok)throw Error();const value=await r.json();if(!abort.signal.aborted)setDetail(value);}).catch(()=>{if(!abort.signal.aborted)setError('任务读取失败');});
+      return()=>abort.abort();
+    },[expanded,task.id,task.revision]);
+    const target=bots.find(b=>b.id===task.targetBotId),open=()=>{try{scope.layout?.beginNavigation?.();scope.uiWorkspace.openSession(task.targetSessionId);}catch{setError('任务会话暂未就绪');}};
+    const amend=async event=>{
+      event.preventDefault();const text=note.trim();if(busy||!text)return;setBusy(true);setError('');setAccepted(false);
+      if(request.current?.text!==text)request.current={text,key:'ui-continue-'+crypto.randomUUID()};
+      try{
+        const r=await fetch('/naumi/bot-tasks',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','x-naumi-bot-tasks':'1'},body:JSON.stringify({action:'continue',sourceSessionId:task.sourceSessionId,taskId:task.id,expectedRevision:task.revision,idempotencyKey:request.current.key,message:text})});
+        if(!r.ok){await activity.refresh();setError(r.status===409?'任务状态已更新，请重试这条补充':'补充未确认受理，请重试');return;}
+        setNote('');setAccepted(true);request.current=null;await activity.refresh();
+      }catch{setError('补充未确认受理，请重试');}finally{setBusy(false);}
+    };
+    const cancel=async()=>{
+      if(busy||!window.confirm('停止这项任务？'))return;setBusy(true);setError('');
+      try{const r=await fetch('/naumi/bot-tasks',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','x-naumi-bot-tasks':'1'},body:JSON.stringify({action:'cancel',sourceSessionId:task.sourceSessionId,taskId:task.id,expectedRevision:task.revision})});if(!r.ok)throw Error();await activity.refresh();}
+      catch{setError('操作未完成，请刷新任务后重试');}finally{setBusy(false);}
+    };
+    return h('article',{className:'naumi-background-task','data-task-id':task.id,'data-task-state':task.status},
+      h('div',{className:'nbt-heading'},h('span',{className:'nbt-state','aria-live':'polite'},h('span',{'aria-hidden':true,className:'nbt-dot'}),target?.name??'员工',' · ',taskLabel(task)),h('div',{className:'nbt-actions'},h('button',{type:'button',onClick:open,disabled:task.status==='queued','aria-label':'查看'+(target?.name??'员工')+'的任务会话'},'查看任务'),h('button',{type:'button',onClick:()=>{setExpanded(!expanded);onExpanded?.(task.id,!expanded);},'aria-expanded':expanded},expanded?'收起':'详情'),onDismiss&&SETTLED_TASKS.has(task.status)&&h('button',{type:'button',className:'nbt-dismiss',onClick:()=>onDismiss(task),'aria-label':'收起任务卡片',title:'收起任务卡片'},'×'))),
+      h('div',{className:'nbt-subject'},task.subject),
+      expanded&&h('div',{className:'nbt-detail'},task.progress&&h('p',null,task.progress),detail?.result&&h('pre',null,detail.result),detail?.delivery?.files?.map(f=>h('button',{type:'button',className:'nbt-file',key:f.sessionId+':'+f.seq+':'+f.index,onClick:()=>scope.sidebarRight.openResource(filePreviewAddress(f))},'↗ ',f.description??f.path.split(/[\\/]/).at(-1))),
+        (ACTIVE_TASKS.has(task.status)||task.status==='completed')&&h('form',{className:'nbt-amend',onSubmit:amend},h('textarea',{'aria-label':'补充这项任务',placeholder:'补充或修改这项任务…',value:note,onChange:e=>{setNote(e.target.value);setAccepted(false);},disabled:busy,maxLength:16000,rows:2}),h('button',{type:'submit',disabled:busy||!note.trim()},busy?'受理中…':task.status==='completed'?'继续修改':'补充要求'),accepted&&h('span',{role:'status'},'已受理')),
+        ACTIVE_TASKS.has(task.status)&&h('button',{type:'button',className:'nbt-cancel',onClick:cancel,disabled:busy},busy?'处理中…':'停止任务')),
+      error&&h('div',{className:'nbt-error',role:'alert'},error));
+  }
+  return TaskCard;
+}
+
 export function installBotTaskUI(ctx,React){
   return ctx.inject(['uiWorkspace','sidebarRight'],scope=>{
     const h=React.createElement,{useState,useEffect,useSyncExternalStore}=React,activity=taskActivity(),directory=botCatalog();
-    function TaskCard({task,bots,onDismiss,onExpanded}){
-      const [expanded,setExpanded]=useState(false),[detail,setDetail]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
-      useEffect(()=>{
-        if(!expanded)return;const abort=new AbortController();setError('');
-        void fetch('/naumi/bot-tasks?taskId='+encodeURIComponent(task.id),{credentials:'same-origin',cache:'no-store',signal:abort.signal}).then(async r=>{if(!r.ok)throw Error();const value=await r.json();if(!abort.signal.aborted)setDetail(value);}).catch(()=>{if(!abort.signal.aborted)setError('任务读取失败');});
-        return()=>abort.abort();
-      },[expanded,task.id,task.revision]);
-      const target=bots.find(b=>b.id===task.targetBotId),open=()=>scope.uiWorkspace.openSession(task.targetSessionId);
-      const cancel=async()=>{
-        if(busy||!window.confirm('停止这项任务？'))return;setBusy(true);setError('');
-        try{const r=await fetch('/naumi/bot-tasks',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','x-naumi-bot-tasks':'1'},body:JSON.stringify({action:'cancel',sourceSessionId:task.sourceSessionId,taskId:task.id,expectedRevision:task.revision})});if(!r.ok)throw Error();await activity.refresh();}
-        catch{setError('操作未完成，请刷新任务后重试');}finally{setBusy(false);}
-      };
-      return h('article',{className:'naumi-background-task','data-task-id':task.id,'data-task-state':task.status},
-        h('div',{className:'nbt-heading'},h('span',{className:'nbt-state','aria-live':'polite'},h('span',{'aria-hidden':true,className:'nbt-dot'}),target?.name??'员工',' · ',taskLabel(task)),h('div',{className:'nbt-actions'},h('button',{type:'button',onClick:open,'aria-label':'查看'+(target?.name??'员工')+'的任务会话'},'查看任务'),h('button',{type:'button',onClick:()=>{setExpanded(!expanded);onExpanded?.(task.id,!expanded);},'aria-expanded':expanded},expanded?'收起':'详情'),onDismiss&&SETTLED_TASKS.has(task.status)&&h('button',{type:'button',className:'nbt-dismiss',onClick:()=>onDismiss(task),'aria-label':'收起任务卡片',title:'收起任务卡片'},'×'))),
-        h('div',{className:'nbt-subject'},task.subject),
-        expanded&&h('div',{className:'nbt-detail'},task.progress&&h('p',null,task.progress),detail?.result&&h('pre',null,detail.result),detail?.delivery?.files?.map(f=>h('button',{type:'button',className:'nbt-file',key:f.sessionId+':'+f.seq+':'+f.index,onClick:()=>scope.sidebarRight.openResource(filePreviewAddress(f))},'↗ ',f.description??f.path.split(/[\\/]/).at(-1))),ACTIVE_TASKS.has(task.status)&&h('button',{type:'button',className:'nbt-cancel',onClick:cancel,disabled:busy},busy?'处理中…':'停止任务')),
-        error&&h('div',{className:'nbt-error',role:'alert'},error));
-    }
+    const TaskCard=createBotTaskCard(scope,React,activity);
     function TaskDock({sessionId,session}){
       const activeId=sessionId??session?.id;
       const state=useSyncExternalStore(activity.subscribe,activity.getSnapshot,activity.getSnapshot),catalog=useSyncExternalStore(directory.subscribe,directory.getSnapshot,directory.getSnapshot),[all,setAll]=useState(false),[showHistory,setShowHistory]=useState(false),[historyLimit,setHistoryLimit]=useState(10),[pinned,setPinned]=useState([]),[dismissed,setDismissed]=useState(()=>readTaskCardDismissals()),[,tick]=useState(0);

@@ -1,0 +1,53 @@
+EMPLOYEE RECEPTION AND TASK CONTINUITY — 2026-11-17
+Branch: codex/bot-task-continuity-20261117
+Baseline main/origin/main: c1fe9f0955f5d2344cbf3f7c6a2d2523fd2fa3b3
+Integrated upstream: 9a730ed23356d783b494cd6a45e566b08bd36605. Custom model connection host/client/package entries are preserved, not part of this module's runtime file set.
+Changed fields/branches: optional task.instruction; bot_task_continue / HTTP action=continue; completed->queued with attempt+1 and original task/targetSession retained; queued amendments wait for provisioning; Bot-wide current/history projection and stable reception navigation. Original task/model/workspace/permissions are unchanged.
+
+FINAL ARTIFACT PATHS
+MODIFIED_FILE: E:/Workspace/naumi-desktop/evidence/bot-task-continuity/MODIFIED_FILE.zip
+DIFF_FILE: E:/Workspace/naumi-desktop/evidence/bot-task-continuity/DIFF_FILE.patch
+VERIFICATION: E:/Workspace/naumi-desktop/evidence/bot-task-continuity/VERIFICATION.txt
+ROLLBACK: E:/Workspace/naumi-desktop/evidence/bot-task-continuity/ROLLBACK.sh
+20 explicitly listed source/test/script/doc paths; original bytes and SHA256 preserved in original/ and manifest.json.
+
+BASELINE
+Command: node scripts/verify-bot-task-continuity.mjs baseline
+Input: original service and UI model exports, with no completed-task continuation endpoint or employee-level task projection.
+Literal output: BASELINE completed_continue=ABSENT employee_task_view=SESSION_ONLY original_behavior=PASS
+Exit status: 0
+Baseline related modules: tests=50 pass=50 fail=0, exit=0, baseline-tests.log.
+
+MODIFIED
+Command: node scripts/verify-bot-task-continuity.mjs modified
+Input: original task completion, explicit same-task amendment, idempotent repeated acceptance and second completion.
+Literal output: MODIFIED same_task=1 same_session=1 attempt=2 duplicate_tasks=0 result=followup original_request=UNCHANGED
+Exit status: 0
+Command: node --test tests/*.test.mjs desktop/tests/*.test.cjs
+Result: module main baseline tests=400 pass=400 fail=0, exit=0, full-tests.log; after integrating upstream custom-model/browser work, tests=418 pass=418 fail=0, exit=0, integration-tests.log.
+Coverage includes CAS/idempotency/concurrent retries, queued feedback, restart, owner/origin, two real Session turns, direct human continuation, per-round file validation and preservation of old native file events.
+
+UI
+Command: node scripts/verify-bot-task-continuity-ui.mjs
+Input: actual Harness shell with seven candidate assets and controlled catalog/HTTP amendments, no actual model or task calls.
+Literal output: CONTINUITY_UI checks=16 errors=0 simulated_continues=3 model_calls=0 contexts_closed=1
+Exit status: 0
+Verified home plus employee-wide work, absence of false empty-state, one shared subscription, draft/CAS/retry identity, working-count navigation, return to reception, completed revision, 1000/580/360px, original model/menu.
+Synthetic-only current-task screenshot reopened and inspected. UI driver initially counted the shell's blank-bootstrap Session request as a task creation; corrected to compare actions against bootstrap baseline. Another driver selected a blank Session as a work target; now selects a real nonblank task Session. Responsive menu check restores desktop width. A real cold-catalog/initial-navigation race was also fixed: do not implicitly create a chat on a catalog miss; cancel superseded initialization navigation before explicit employee navigation.
+Two empty Sessions created by the earlier driver were individually checked blank/idle and archived: session-f3c338ab-d284-48f9-9087-0e2a90c0f337 and session-e8be556a-6151-4be9-adb9-b9ec34d877b5. No user work was stopped or removed. Failed driver outputs remain as separate logs; their private full-page screenshot is ignored.
+
+ROLLBACK
+Command: & 'D:/DEV/Git/bin/bash.exe' evidence/bot-task-continuity/ROLLBACK.sh E:/Workspace/naumi-desktop/.dsh/bot-task-continuity-rollback-copy-20261117
+Input: explicitly marked independent source copy; original and modified hashes verified before restore.
+Literal output: ROLLBACK_COPY restored=15 removed=5 hashes=PASS active_source=UNCHANGED
+Exit status: 0
+Command: node scripts/verify-bot-task-continuity.mjs rollback E:/Workspace/naumi-desktop/.dsh/bot-task-continuity-rollback-copy-20261117/plugins/naumi-enterprise
+Literal output: ROLLBACK completed_continue=ABSENT employee_task_view=SESSION_ONLY original_behavior=PASS
+Exit status: 0
+Restored behavior/status: original absence of completed-task continuation and Session-only task display in the copy. Active source and MODIFIED_FILE retain the new behavior. This is source-copy rollback, not an online strict-schema ledger downgrade; no Bot/task/file/Session ledger is deleted.
+
+INITIAL REGRESSION CORRECTION
+full-tests-initial.log: two old tool-count assertions still expected seven tools. Added bot_task_continue makes eight; assertions updated, all regressions passed afterward.
+
+LOAD / MODEL ACCEPTANCE
+Pending at pre-merge evidence snapshot: custom-model thread currently owns the coordinated restart window. No backend load, restart or actual model invocation by this task yet. Local load will update only three Bot backend modules and seven UI assets, preserving host/client/package and model settings. Actual-model verifier is prepared with a persisted no-blind-replay checkpoint and will run only after the window is released and running=0 is rechecked.
