@@ -40,10 +40,10 @@ index f5a7bf5..59ee260 100644
   }
 diff --git a/docs/implementation/DAILY_REAL_ACCEPTANCE.md b/docs/implementation/DAILY_REAL_ACCEPTANCE.md
 new file mode 100644
-index 0000000..5f34114
+index 0000000..b0f3c28
 --- /dev/null
 +++ b/docs/implementation/DAILY_REAL_ACCEPTANCE.md
-@@ -0,0 +1,23 @@
+@@ -0,0 +1,25 @@
 +# D1-D4 隔离真实使用验收
 +
 +模块与职责：本线程只新增真实模型验收runner/证据/文档；如实测发现缺口再最小修复原模块。基线 main/origin/main dd5ac377e3fc0806ba6bb668a94dd067234c1585，codex/daily-real-acceptance-20261118 独立worktree。企业/账户/安装器/现存任务不动；不启动代理或新线程。
@@ -67,6 +67,8 @@ index 0000000..5f34114
 +实现缺口与修复详见[工作区沙箱](MANAGED_WORKSPACE_SANDBOX.md)。新建工作区权限最小初始化、原生目标提议独立section；48定向与804全仓通过。原日志中.NET受限调用错误的stdout不是写入证据，最终真实Set-Content和跨目录/DACL负向测试才作为边界验收。
 +
 +未完成：真实模型仍创建额外3个补充文本artifact（文件集合和验收本身正确）；需收敛文件任务交付写入路径，保留历史不自动清理。当前实现待源码副本回滚/四件套/主线和必要实际加载；D5新版本安装包/更新分发仍未完成。企业配置/原模型组/真实业务保持现状。
++
++Main整合：源码f664243/80608d5已普通merge/push为aad2892。首次增量加载在期望header处失败，原因是部署脚本误将原有x-naumi-work-file-acceptance检查改名；源码模块实际没有该新header。脚本已自动恢复旧运行文件并重启，104sessions/0running/4bots/revision47/HTTP200保持。仅修正验收脚本header为原协议，原失败日志保留，未发模型或修改原任务/模型。后续实际成功加载状态以DEPLOYMENT.json/VERIFICATION最终追加为准；不能把此首次失败算成功。
 diff --git a/docs/implementation/MANAGED_WORKSPACE_SANDBOX.md b/docs/implementation/MANAGED_WORKSPACE_SANDBOX.md
 new file mode 100644
 index 0000000..497328c
@@ -257,7 +259,7 @@ index 0000000..6439e92
 +assert(passing,'PASSING_LIVE_CASE_REQUIRED');console.log('REAL_AUDIT passing_case='+passing+' failed_cases=RETAINED actual3080_writes=0');
 diff --git a/scripts/deploy-daily-real-acceptance.mjs b/scripts/deploy-daily-real-acceptance.mjs
 new file mode 100644
-index 0000000..0c0830e
+index 0000000..44d2d90
 --- /dev/null
 +++ b/scripts/deploy-daily-real-acceptance.mjs
 @@ -0,0 +1,44 @@
@@ -294,7 +296,7 @@ index 0000000..0c0830e
 + for(const r of rows){const p=path.join(installed,r.file);if(r.beforeSHA256)assert.equal(sha(read(p)),r.beforeSHA256,'PRELOAD_RUNTIME_DRIFT');else assert(!fs.existsSync(p));}
 + for(const r of rows)atomic(path.join(installed,r.file),read(path.join(backup,'after',r.file)));shell('Start-Naumi.ps1');
 + const loaded=await botLiveApi(runtime),afterSessions=await loaded.rpc('session/list',{_request:{}});assert(!afterSessions.items.some(s=>s.running));assert.equal(afterSessions.items.length,sessions.items.length);
-+ for(const bot of bots.bots){const r=await loaded.request('/naumi/employee-work?botId='+encodeURIComponent(bot.id));assert.equal(r.status,200);assert.equal(r.headers.get('x-naumi-daily-real-acceptance'),'1');assert(Array.isArray((await r.json()).fileDeliveryIssues));}
++ for(const bot of bots.bots){const r=await loaded.request('/naumi/employee-work?botId='+encodeURIComponent(bot.id));assert.equal(r.status,200);assert.equal(r.headers.get('x-naumi-work-file-acceptance'),'1');assert(Array.isArray((await r.json()).fileDeliveryIssues));}
 + assert.deepEqual(await loaded.json('/naumi/bots'),bots);assert.deepEqual(await loaded.json('/naumi/bot-tasks'),tasks);assert.equal(sha(JSON.stringify(await loaded.json('/naumi/model-connections'))),models);assert.deepEqual(await employees(loaded),employeesBefore);assert.equal(groupRows(),groupsBefore);
 + const after=inventory();for(const r of rows)assert.equal(after[r.file],r.afterSHA256);for(const[f,h]of Object.entries(original))if(!files.includes(f))assert.equal(after[f],h,'UNRELATED_RUNTIME '+f);
 + for(const[f,h]of Object.entries(protectedBefore))assert.equal(sha(read(path.join(runtime,f))),h,'PROTECTED_DATA '+f);for(const[f,h]of Object.entries(untrackedHashes)){const bytes=read(path.join(root,f));if(sha(bytes)!==h){assert(bytes.length>=untrackedSizes[f]&&sha(bytes.subarray(0,untrackedSizes[f]))===h,'OTHER_EVIDENCE_OVERWRITTEN '+f);appendedEvidence.push({file:f,oldBytesPreserved:untrackedSizes[f],appendedBytes:bytes.length-untrackedSizes[f]});}}
