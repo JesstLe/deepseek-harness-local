@@ -48,7 +48,9 @@ test('preexisting enterprise front-end remains byte-equivalent apart from declar
  const lazy="    const BotGroups=React.lazy(()=>import('/naumi/assets/bot-groups.js').then(module=>({default:module.createBotGroupsPage(ctx,React)}))\n      .catch(()=>({default:()=>h('p',{className:'naumi-page',role:'alert'},'群聊界面加载失败，请刷新页面。')})));\n";
  const grouped="      for(const [id]of PANELS)yield ctx.slots.register({name:'main',key:id},()=>id==='naumi-bot-groups'\n        ? h(React.Suspense,{fallback:h('p',{role:'status',className:'naumi-page'},'正在载入群聊…')},h(BotGroups)) : h(Page,{page:id}));";
  assert(source.includes(lazy));assert(source.includes(grouped));assert(source.includes("['naumi-bot-groups','Bot 群聊','chat'],"));
- const restored=source.slice(start).replace(desktopAction,'').replace(lazy,'').replace("['naumi-bot-groups','Bot 群聊','chat'],",'').replace(grouped,"      for(const [id]of PANELS)yield ctx.slots.register({name:'main',key:id},()=>h(Page,{page:id}));").split('\n').filter(line=>!line.includes("void import('/naumi/assets/browser-client.js')")).join('\n').replace("    installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);\n",'');
+ const identityHelper=source.slice(source.indexOf('    function IdentityAccount(){'),source.indexOf('    function DesignGrid()'));
+ assert(identityHelper.includes('if(!identity)return null;'));assert(identityHelper.includes('value.available'));assert.equal(source.split(',h(IdentityAccount)').length,2);
+ const restored=source.slice(start).replace(identityHelper,'').replace(',h(IdentityAccount)','').replace(desktopAction,'').replace(lazy,'').replace("['naumi-bot-groups','Bot 群聊','chat'],",'').replace(grouped,"      for(const [id]of PANELS)yield ctx.slots.register({name:'main',key:id},()=>h(Page,{page:id}));").split('\n').filter(line=>!line.includes("void import('/naumi/assets/browser-client.js')")).join('\n').replace("    installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);\n",'');
  assert.equal(restored.replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'));
 });
 test('team presentation has no direct credential, model, permission or persistence writes',()=>{

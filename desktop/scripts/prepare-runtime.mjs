@@ -21,9 +21,9 @@ export function runtimeInventory(target){
   walk(target);return files;
 }
 export function scanRuntimeInventory(files){
-  const forbidden=/(?:^|\/)(?:\.env(?:\..*)?|\.credentials[^/]*|cookies(?:\.sqlite)?|login data|local state|web data|employee[^/]*\.sqlite(?:-wal|-shm)?|sessions|logs|\.git|\.dsh|browser-profiles|enterprise-workspaces|naumi-desktop-bridge\.json|backend-link\.json|desktop-(?:instance|profile|profile-journal|backend|enterprise|workspaces|maintenance)\.json|device-private-key[^/]*|.*\.(?:pem|pfx|key))$/i;
+  const forbidden=/(?:^|\/)(?:\.env(?:\..*)?|\.credentials[^/]*|cookies(?:\.sqlite)?|login data|local state|web data|employee[^/]*\.sqlite(?:-wal|-shm)?|sessions|logs|\.git|\.dsh|browser-profiles|enterprise-workspaces|naumi-desktop-bridge\.json|backend-link\.json|naumi-identity\.json|identity-owner\.json|identity-profiles|desktop-(?:instance|profile|profile-journal|backend|enterprise|workspaces|maintenance)\.json|device-private-key[^/]*|.*\.(?:pem|pfx|key))$/i;
   // SDK source directories named sessions are code, not a copied employee session store.
-  for(const file of files)if(forbidden.test(file.path)||/^(?:sessions|logs|browser-profiles)\//i.test(file.path)||/(?:^|\/)(?:\.git|\.dsh|browser-profiles)\//i.test(file.path))throw Error('RUNTIME_PRIVATE_FILE '+file.path);
+  for(const file of files)if(forbidden.test(file.path)||/^(?:sessions|logs|browser-profiles)\//i.test(file.path)||/(?:^|\/)(?:\.git|\.dsh|browser-profiles|identity-profiles)\//i.test(file.path))throw Error('RUNTIME_PRIVATE_FILE '+file.path);
   return {files:files.length,forbiddenPaths:0};
 }
 export async function prepareRuntime({root=project,target=path.join(root,'runtime/desktop-backend'),archive=process.env.NAUMI_DINGTALK_ARCHIVE}={}){
