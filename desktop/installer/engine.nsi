@@ -88,8 +88,7 @@ Function .onInit
 FunctionEnd
 
 !ifndef BUILD_UNINSTALLER
-  !include "installUtil.nsh"
-  !include "${NAUMI_WIZARD_DIR}\upgrade-shortcuts.nsh"
+  !include "${NAUMI_WIZARD_DIR}\install-util.nsh"
 !endif
 
 Section "install" INSTALL_SECTION_ID
