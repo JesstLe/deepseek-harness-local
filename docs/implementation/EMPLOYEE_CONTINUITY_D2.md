@@ -33,3 +33,7 @@
 真实链路：13检查、10完整原生回合、22供应商请求、2宿主启动；不是loopback假模型。只使用既有选定分组的deepseek-flash与同组已配置deepseek-v4-pro，密钥只在环境/内存，不写fixture；原3组配置/凭据文件hash保持，0次3080请求。企业状态不变。两个隔离宿主已结束，没有新建生产员工或修改业务会话。
 
 主线同步def82a3→b65d506→8734f5a，保留daily-five三模块/0.3.6候选版本，未写协作文件。整合后全仓738/738、exit0，原主线728/728通过也保留；35模块、30副本回滚均exit0。旧风格冲突baseline可复现；副本恢复旧行为仍保留两条style并通过原30测试，当前源码保持修复。功能切片1。
+
+加载首轮：运行与数据核验通过，但peer的daily-five/BUILD.log正常追加触发过严的全文件hash门，源码自动恢复且exit1。已保留DEPLOYMENT_FIRST_FAILURE.log；加载脚本现验证所有原字节前缀hash、只允许末尾追加并记录路径/新增字节，覆盖或截断仍拒绝。不停止peer构建、不改其日志或工作树。加载源经402abe4→main5ffd5f7固定后重试；不是因观察超时或模型超时重放。
+
+最终运行加载：main5ffd5f7，2文件增量exit0，HTTP200，104sessions/0running/4bots/revision46。144无关运行文件、113权威数据配置hash保持，75其他未跟踪证据原字节保持，FINAL_STAGE.log正常追加109字节单列。原tasks/groups/员工export全字段（除exportedAt）/模型保持，0模型/登记/迁移。真实运行只读投影4Bots验证wrong_injected=0，未写数据。原生供应商fixture的4Sessions已筛选原始消息/工具/结束/模型/权限事件存入LIVE_NATIVE_EVENTS.json，略去thought和request headers，不涉及生产业务。窗口已释放；后续仅证据/清理。

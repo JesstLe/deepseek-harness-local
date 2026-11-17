@@ -12,10 +12,10 @@ index bf674f8..d0b630a 100644
 +/evidence/employee-continuity/ROLLBACK.sh text eol=lf
 diff --git a/docs/implementation/EMPLOYEE_CONTINUITY_D2.md b/docs/implementation/EMPLOYEE_CONTINUITY_D2.md
 new file mode 100644
-index 0000000..74e2642
+index 0000000..beb9205
 --- /dev/null
 +++ b/docs/implementation/EMPLOYEE_CONTINUITY_D2.md
-@@ -0,0 +1,35 @@
+@@ -0,0 +1,39 @@
 +# 日常员工连续性 D2
 +
 +模块与职责：主线程负责当前员工的身份/记忆/人物设定/明确遗忘跨会话、模型和重启的隔离验收与实际缺口修复。基线def82a3（接续46a0dc6，仅其他线程Cloud47部署脚本增量），独立codex/employee-continuity-acceptance，E:/Workspace/naumi-employee-continuity。企业模块保持不变；其他线程继续负责历史工作区迁移/总览/固定文件版本。
@@ -51,6 +51,10 @@ index 0000000..74e2642
 +真实链路：13检查、10完整原生回合、22供应商请求、2宿主启动；不是loopback假模型。只使用既有选定分组的deepseek-flash与同组已配置deepseek-v4-pro，密钥只在环境/内存，不写fixture；原3组配置/凭据文件hash保持，0次3080请求。企业状态不变。两个隔离宿主已结束，没有新建生产员工或修改业务会话。
 +
 +主线同步def82a3→b65d506→8734f5a，保留daily-five三模块/0.3.6候选版本，未写协作文件。整合后全仓738/738、exit0，原主线728/728通过也保留；35模块、30副本回滚均exit0。旧风格冲突baseline可复现；副本恢复旧行为仍保留两条style并通过原30测试，当前源码保持修复。功能切片1。
++
++加载首轮：运行与数据核验通过，但peer的daily-five/BUILD.log正常追加触发过严的全文件hash门，源码自动恢复且exit1。已保留DEPLOYMENT_FIRST_FAILURE.log；加载脚本现验证所有原字节前缀hash、只允许末尾追加并记录路径/新增字节，覆盖或截断仍拒绝。不停止peer构建、不改其日志或工作树。加载源经402abe4→main5ffd5f7固定后重试；不是因观察超时或模型超时重放。
++
++最终运行加载：main5ffd5f7，2文件增量exit0，HTTP200，104sessions/0running/4bots/revision46。144无关运行文件、113权威数据配置hash保持，75其他未跟踪证据原字节保持，FINAL_STAGE.log正常追加109字节单列。原tasks/groups/员工export全字段（除exportedAt）/模型保持，0模型/登记/迁移。真实运行只读投影4Bots验证wrong_injected=0，未写数据。原生供应商fixture的4Sessions已筛选原始消息/工具/结束/模型/权限事件存入LIVE_NATIVE_EVENTS.json，略去thought和request headers，不涉及生产业务。窗口已释放；后续仅证据/清理。
 diff --git a/docs/prd/DAILY_EMPLOYEE_PRIORITY.md b/docs/prd/DAILY_EMPLOYEE_PRIORITY.md
 index 470de7b..1d955cc 100644
 --- a/docs/prd/DAILY_EMPLOYEE_PRIORITY.md
@@ -106,10 +110,10 @@ index 9ed8fe1..a7df881 100644
    history(botId,{after=0,limit=50}={}){
 diff --git a/scripts/deploy-employee-continuity.mjs b/scripts/deploy-employee-continuity.mjs
 new file mode 100644
-index 0000000..0748438
+index 0000000..9250621
 --- /dev/null
 +++ b/scripts/deploy-employee-continuity.mjs
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,44 @@
 +// Narrow main-only runtime delta. No account enrollment, provider calls, or task writes.
 +import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';import {DatabaseSync} from 'node:sqlite';import {botLiveApi} from './bot-live-api.mjs';
 +const root=process.cwd(),mode=process.argv[2]??'prepare',runtime=path.resolve(process.argv[3]??root),baseline='def82a3d7c0b7a573daa82f16b6e1723b16961d5';
@@ -128,6 +132,7 @@ index 0000000..0748438
 +if(mode==='prepare'){console.log('EMPLOYEE_CONTINUITY_PREPARED files=2 host_client=UNCHANGED backup='+backup);process.exit(0);}assert.equal(mode,'apply');
 +assert.equal(execFileSync('git',['branch','--show-current'],{encoding:'utf8'}).trim(),'main');const unrelatedTracked=execFileSync('git',['diff','HEAD','--name-only','-z'],{encoding:'utf8'}).split('\0').filter(Boolean);assert(unrelatedTracked.every(f=>!files.map(p=>'plugins/naumi-enterprise/'+p).includes(f)),'TASK_SOURCE_DIRTY');
 +const untracked=execFileSync('git',['ls-files','--others','--exclude-standard','-z'],{encoding:'utf8'}).split('\0').filter(f=>f&&!f.startsWith('evidence/employee-continuity/')),untrackedHashes=Object.fromEntries(untracked.map(f=>[f,sha(read(path.join(root,f)))]));
++const untrackedSizes=Object.fromEntries(Object.keys(untrackedHashes).map(f=>[f,read(path.join(root,f)).length]));const appendedEvidence=[];
 +const api=await botLiveApi(runtime),sessions=await api.rpc('session/list',{_request:{}}),bots=await api.json('/naumi/bots'),tasks=await api.json('/naumi/bot-tasks'),models=sha(JSON.stringify(await api.json('/naumi/model-connections')));
 +assert(!sessions.items.some(s=>s.running),'RUNNING_SESSIONS');assert(!tasks.tasks.some(t=>['queued','starting','running','waiting'].includes(t.status)),'ACTIVE_TASKS');
 +const groupRows=()=>{const db=new DatabaseSync(path.join(runtime,'.dsh/naumi/bot-groups.sqlite'),{readOnly:true});try{const rows=Object.fromEntries(['rooms','members','posts','replies','post_context','room_name_operations'].map(t=>[t,db.prepare('SELECT * FROM '+t+' ORDER BY rowid').all()]));assert(!rows.replies.some(r=>['queued','starting','sent'].includes(r.state)),'GROUP_BUSY');return sha(JSON.stringify(rows));}finally{db.close();}};
@@ -145,8 +150,8 @@ index 0000000..0748438
 + for(const f of ['employee-center.js'])assert.equal((await loaded.request('/naumi/assets/'+f)).status,200);const workResponse=await loaded.request('/naumi/employee-work?botId='+encodeURIComponent(bots.bots[0].id));assert.equal(workResponse.status,200);assert.equal(workResponse.headers.get('x-naumi-goal-proposals'),'1');const centerSource=await (await loaded.request('/naumi/assets/employee-center.js')).text();assert(centerSource.includes("m.effective===false?'已替换'"));for(const bot of bots.bots){const v=await loaded.json('/naumi/employee-work?botId='+encodeURIComponent(bot.id));assert(Array.isArray(v.goalProposals),'PROPOSAL_READER_MISSING');}
 + assert.deepEqual(await loaded.json('/naumi/bots'),bots);assert.deepEqual(await loaded.json('/naumi/bot-tasks'),tasks);assert.equal(sha(JSON.stringify(await loaded.json('/naumi/model-connections'))),models);assert.deepEqual(await employees(loaded),employeesBefore);assert.equal(groupRows(),groupsBefore);
 + const after=inventory();for(const r of rows)assert.equal(after[r.file],r.afterSHA256);for(const[f,h]of Object.entries(original))if(!files.includes(f))assert.equal(after[f],h,'UNRELATED_RUNTIME '+f);
-+ for(const[f,h]of Object.entries(protectedBefore))assert.equal(sha(read(path.join(runtime,f))),h,'PROTECTED_DATA '+f);for(const[f,h]of Object.entries(untrackedHashes))assert.equal(sha(read(path.join(root,f))),h,'OTHER_EVIDENCE_CHANGED '+f);
-+ fs.writeFileSync(path.join(out,'DEPLOYMENT.json'),JSON.stringify({status:'PASS',sourceCommit,files:rows,backup,http:200,sessions:afterSessions.items.length,running:0,bots:bots.bots.length,revision:bots.revision,automaticGoalConfirmations:0,enterpriseConfigurationChanges:0,modelCalls:0,modelGroupsUnchanged:true,employeeExportsUnchanged:true,employeeExportComparison:"all_fields_except_exportedAt",taskAndGroupRowsUnchanged:true,protectedFilesUnchanged:Object.keys(protectedBefore).length,unrelatedRuntimeUnchanged:Object.keys(original).filter(f=>!files.includes(f)).length,otherUntrackedFilesPreserved:untracked.length,unrelatedTrackedEditsNotTouched:unrelatedTracked,nativeComposerUnchanged:true,packageChange:"UNCHANGED"},null,2)+'\n');
++ for(const[f,h]of Object.entries(protectedBefore))assert.equal(sha(read(path.join(runtime,f))),h,'PROTECTED_DATA '+f);for(const[f,h]of Object.entries(untrackedHashes)){const bytes=read(path.join(root,f));if(sha(bytes)!==h){assert(bytes.length>=untrackedSizes[f]&&sha(bytes.subarray(0,untrackedSizes[f]))===h,'OTHER_EVIDENCE_OVERWRITTEN '+f);appendedEvidence.push({file:f,oldBytesPreserved:untrackedSizes[f],appendedBytes:bytes.length-untrackedSizes[f]});}}
++ fs.writeFileSync(path.join(out,'DEPLOYMENT.json'),JSON.stringify({status:'PASS',sourceCommit,files:rows,backup,http:200,sessions:afterSessions.items.length,running:0,bots:bots.bots.length,revision:bots.revision,automaticGoalConfirmations:0,enterpriseConfigurationChanges:0,modelCalls:0,modelGroupsUnchanged:true,employeeExportsUnchanged:true,employeeExportComparison:"all_fields_except_exportedAt",taskAndGroupRowsUnchanged:true,protectedFilesUnchanged:Object.keys(protectedBefore).length,unrelatedRuntimeUnchanged:Object.keys(original).filter(f=>!files.includes(f)).length,otherUntrackedFilesPreserved:untracked.length,otherUntrackedAppendOnly:appendedEvidence,unrelatedTrackedEditsNotTouched:unrelatedTracked,nativeComposerUnchanged:true,packageChange:"UNCHANGED"},null,2)+'\n');
 + complete=true;console.log('EMPLOYEE_CONTINUITY_LOADED files=2 http=200 running=0 models=UNCHANGED employees=UNCHANGED tasks=UNCHANGED groups=UNCHANGED account_data=UNCHANGED model_calls=0');
 +}finally{if(!complete){
 + const dataFile=path.join(runtime,'.dsh/naumi/bots.json'),expected=protectedBefore['.dsh/naumi/bots.json'];
