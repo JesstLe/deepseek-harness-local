@@ -54,6 +54,23 @@ export async function validateFiles(ctx,session,files,signal){
   return [...out.values()];
 }
 
+export async function verifyHandoffFiles(ctx,snapshot,targetSessionId,refs,signal){
+  const target=await snapshot(targetSessionId);
+  if(!target)throw Error('BOT_HANDOFF_SESSION_MISSING');
+  const sources=new Map();
+  for(const ref of refs){
+    if(!sources.has(ref.sessionId))sources.set(ref.sessionId,await snapshot(ref.sessionId));
+    const source=sources.get(ref.sessionId);
+    const event=source?.events.find(e=>e.type==='deliverables/presented'&&e.seq===ref.seq&&e.data.turn===ref.turn);
+    const original=event?.data.files[ref.index];
+    if(!original||original.path!==ref.path)throw Error('BOT_HANDOFF_FILE_REFERENCE');
+    const [previous]=await validateFiles(ctx,{id:ref.sessionId,header:source.header},[original],signal).catch(()=>{throw Error('BOT_HANDOFF_FILE_UNAVAILABLE');});
+    if(ref.version===undefined||previous.version!==ref.version)throw Error('BOT_HANDOFF_FILE_STALE');
+    const [current]=await validateFiles(ctx,{id:targetSessionId,header:target.header},[original],signal).catch(()=>{throw Error('BOT_HANDOFF_FILE_SCOPE');});
+    if(path.relative(previous.path,current.path)||current.version!==previous.version)throw Error('BOT_HANDOFF_FILE_SCOPE');
+  }
+}
+
 export function registerFiles(session,turn,files,callId){
   const existing=session.snapshotEvents().find(e=>e.type==='deliverables/presented'&&e.data.callId===callId);
   if(existing){
