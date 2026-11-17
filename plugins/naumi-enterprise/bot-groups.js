@@ -6,10 +6,17 @@ import {BotGroupService} from './bot-group-service.js';
 const id = z.string().min(1).max(200);
 const requestId = z.uuid();
 const botIds = z.array(id).max(12).refine(ids => new Set(ids).size === ids.length);
+const attachment=z.discriminatedUnion('type',[
+  z.object({type:z.literal('file'),receiptId:id}).strict(),
+  z.object({type:z.literal('image'),mediaType:z.enum(['image/png','image/jpeg','image/webp','image/gif']),data:z.string().max(48000),name:z.string().max(255).optional()}).strict(),
+]);
 const commands = z.discriminatedUnion('action', [
   z.object({action:z.literal('create'),id:requestId,name:z.string().trim().min(1).max(80),
     botIds:botIds.refine(ids => ids.length >= 2),defaultBotId:id.nullable()}).strict(),
-  z.object({action:z.literal('post'),id:requestId,roomId:requestId,text:z.string().trim().min(1).max(8000),botIds}).strict(),
+  z.object({action:z.literal('post'),id:requestId,roomId:requestId,text:z.string().trim().max(8000),botIds,taskId:id.optional(),attachments:z.array(attachment).max(8).optional()}).strict()
+    .refine(v=>v.text.length>0||v.attachments?.length),
+  z.object({action:z.literal('prepare'),roomId:requestId}).strict(),
+  z.object({action:z.literal('interrupt'),roomId:requestId,replyId:requestId}).strict(),
 ]);
 
 export function installBotGroups(ctx, directory, getTasks) {
@@ -46,6 +53,7 @@ export function installBotGroups(ctx, directory, getTasks) {
     scope.effect(() => scope.webServer.register({kind:'exact',path:'/naumi/bot-groups',handler:async (req,res) => {
       res.setHeader('Cache-Control','private, no-store');
       res.setHeader('X-Content-Type-Options','nosniff');
+      res.setHeader('X-Naumi-Group-Collaboration','1');
       const admission = scope.connection.admit(req);
       if ('rejection' in admission) { res.writeHead(admission.rejection).end(); return; }
       if (admission.peer.principal.kind !== 'owner') { res.writeHead(403).end(); return; }
@@ -77,7 +85,21 @@ export function installBotGroups(ctx, directory, getTasks) {
         let input;
         try { input = commands.parse(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
         catch { send(400,{error:'BOT_GROUP_INVALID_REQUEST'}); return; }
-        send(input.action === 'create' ? 200 : 202, input.action === 'create' ? service.create(input) : service.post(input));
+        if(input.action==='create'){send(200,service.create(input));return;}
+        if(input.action==='prepare'){send(200,await service.prepare(input.roomId));return;}
+        if(input.action==='interrupt'){send(200,await service.interrupt(input.roomId,input.replyId));return;}
+        const requestAttachments=input.attachments??[];
+        if(store.hasPost(input.id)){
+          send(202,service.post({...input,attachments:[],requestAttachments}));return;
+        }
+        if(requestAttachments.length){
+          // Resolve receipts only in the actual native composer's Session, never
+          // accept a filesystem path or another Session's upload grant.
+          const {sessionId}=await service.prepare(input.roomId);
+          const prepared=await getTasks().runtime.admitGroupAttachments(sessionId,requestAttachments,input.id);
+          try{const value=service.post({...input,attachments:prepared.content,requestAttachments});prepared.commit();send(202,value);}
+          finally{prepared.dispose();}
+        }else send(202,service.post(input));
       } catch (error) {
         const code = /^BOT_GROUP_[A-Z_]+$/.test(error.message) ? error.message : 'BOT_GROUP_UNAVAILABLE';
         send(code === 'BOT_GROUP_CONFLICT' ? 409 : code === 'BOT_GROUP_NOT_FOUND' ? 404 : code === 'BOT_GROUP_UNAVAILABLE' ? 503 : 400,{error:code});

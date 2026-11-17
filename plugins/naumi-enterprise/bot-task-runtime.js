@@ -83,6 +83,20 @@ export function createBotTaskRuntime(ctx){
   });
   return {
     snapshot,profile,ensure,
+    async admitGroupAttachments(sessionId,parts,requestId){
+      const agent=ctx.agents.get(sessionId),uploads=ctx.get('fileUploads'),attachments=ctx.get('attachments');
+      if(!agent||!uploads||!attachments)throw Error('BOT_GROUP_ATTACHMENTS_UNAVAILABLE');
+      const receipts=[];
+      const resolved=parts.map(part=>{
+        if(part.type!=='file')return part;
+        const value=uploads.resolve(agent,part.receiptId);
+        if(!value)throw Error('BOT_GROUP_ATTACHMENT_NOT_STAGED');
+        receipts.push(part.receiptId);return value;
+      });
+      const content=await attachments.admitPromptContent(resolved);
+      const binding=uploads.bindPrompt(agent,receipts,requestId);
+      return {content,commit:()=>binding.commit(),dispose:()=>binding[Symbol.dispose]()};
+    },
     verifyHandoff:(sessionId,refs)=>verifyHandoffFiles(ctx,snapshot,sessionId,refs,AbortSignal.timeout(10000)),
     publishTurn:publish,
     async declare(sessionId,files,callId,signal){
@@ -116,11 +130,16 @@ export function createBotTaskRuntime(ctx){
     },
     isRunning:sessionId=>ctx.agents.get(sessionId)?.status==='running',
     async inspect(sessionId,messageId){const stored=await snapshot(sessionId);return stored?inspectBotMessage(stored.events,messageId,stored.live?.status==='running'):null;},
-    async deliver({sessionId,messageId,fromSessionId,fromUser=false,text,create=false,cwd,profile:config,mode='steer'}){
+    async deliver({sessionId,messageId,fromSessionId,fromUser=false,text,content=[],create=false,cwd,profile:config,mode='steer'}){
       const agent=await ensure(sessionId,{create,cwd,profile:config});
       const observed=await this.inspect(sessionId,messageId);
       const source=fromUser?{kind:'user'}:{kind:'agent-message',form:'relay',senderSessionId:fromSessionId};
-      const message=freezeMessage({id:messageId,role:'user',source,content:[{type:'text',text}]});
+      if(content.some(p=>p.type==='image')){
+        const current=agent.model.current(),llm=ctx.get('llm');
+        if(current&&llm){const model=await llm.resolveModelInfo(current.provider,current.model);
+          if(model.inputModalities&&!model.inputModalities.includes('image'))throw Error('BOT_GROUP_IMAGE_MODEL_UNSUPPORTED');}
+      }
+      const message=freezeMessage({id:messageId,role:'user',source,content:[...content,...text?[{type:'text',text}]:[]]});
       if(observed?.seen){
         // Resuming an idle Session does not itself wake a parked inbox. Requeue the SAME
         // still-pending identity synchronously; consumed or discarded input is never replayed.
@@ -137,6 +156,22 @@ export function createBotTaskRuntime(ctx){
     async cancel(sessionId){
       if(!ctx.agents.get(sessionId)&&!await ctx.sessionPersistence.stat(sessionId))return;
       const agent=await ensure(sessionId);agent.cancel({kind:'user'});await agent.whenIdle();await ctx.sessions.flush(agent.session);
+    },
+    async interrupt(sessionId,messageId){
+      const agent=ctx.agents.get(sessionId);if(!agent)return {interrupted:false};
+      const events=agent.session.snapshotEvents(),state=inspectBotMessage(events,messageId,agent.status==='running');
+      if(state.pending&&agent.inbox.remove(messageId)){await ctx.sessions.flush(agent.session);return {interrupted:true,removed:true};}
+      const active=events.findLast(e=>e.type==='turn/start')?.data.turn;
+      if(!state.consumed||state.end||state.turn!==active||agent.status!=='running')return {interrupted:false};
+      // Match this exact turn, and preserve later input/result inboxes. Waiting
+      // for whole-agent idle could accidentally wait for the next discussion.
+      let stop,timer;
+      const ended=new Promise((resolve,reject)=>{
+        stop=ctx.on('session/event',(session,event)=>{if(session.id===sessionId&&event.type==='turn/end'&&event.data.turn===active)resolve();});
+        timer=setTimeout(()=>reject(Error('BOT_GROUP_STOP_PENDING')),10000);
+      });
+      try{agent.cancel({kind:'user'},{keepInbox:true});await ended;await ctx.sessions.flush(agent.session);return {interrupted:true};}
+      finally{clearTimeout(timer);stop?.();}
     },
     async close(){closed=true;await Promise.allSettled([...deliveryLanes.values()]);await Promise.allSettled([...opening.values()]);await Promise.allSettled([...handles.values()].map(handle=>handle.dispose()));handles.clear();},
   };

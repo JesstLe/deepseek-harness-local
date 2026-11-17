@@ -36,6 +36,11 @@ export class BotGroupStore {
         CREATE INDEX IF NOT EXISTS replies_session ON replies (session_id, post_seq);
         PRAGMA user_version=1;
       `));
+      // Additive side table: the v1 reader tolerates it on source rollback.
+      this.db.exec(`CREATE TABLE IF NOT EXISTS post_context (
+        post_seq INTEGER PRIMARY KEY REFERENCES posts(seq), task_id TEXT,
+        attachments TEXT NOT NULL DEFAULT '[]', request_attachments TEXT NOT NULL DEFAULT '[]'
+      )`);
     } catch (error) {
       this.db.close();
       throw error;
@@ -83,19 +88,23 @@ export class BotGroupStore {
     });
   }
 
-  post({id, roomId, text, botIds}, route) {
+  post({id, roomId, text, botIds, taskId=null, attachments=[], requestAttachments=[]}, route) {
     return this.write(() => {
       const explicit = JSON.stringify(botIds);
       const existing = this.db.prepare(`SELECT id, seq, room_id AS roomId, text, explicit_bot_ids AS explicit
         FROM posts WHERE id=?`).get(id);
       if (existing) {
+        const context=this.postContext(existing.seq);
         if (existing.roomId !== roomId || existing.text !== text || existing.explicit !== explicit) fail('BOT_GROUP_CONFLICT');
+        if(context.taskId!==taskId||JSON.stringify(context.requestAttachments)!==JSON.stringify(requestAttachments))fail('BOT_GROUP_CONFLICT');
         return {id, seq:existing.seq};
       }
       const targets = route();
       const result = this.db.prepare('INSERT INTO posts (id, room_id, text, explicit_bot_ids, created_at) VALUES (?, ?, ?, ?, ?)')
         .run(id, roomId, text, explicit, timestamp());
       const seq = Number(result.lastInsertRowid);
+      if(taskId||attachments.length)this.db.prepare('INSERT INTO post_context VALUES (?, ?, ?, ?)')
+        .run(seq,taskId,JSON.stringify(attachments),JSON.stringify(requestAttachments));
       const add = this.db.prepare('INSERT INTO replies VALUES (?, ?, ?, ?, NULL, NULL, ?)');
       for (const target of targets) add.run(randomUUID(), seq, target.sessionId, 'queued', timestamp());
       return {id, seq};
@@ -112,7 +121,20 @@ export class BotGroupStore {
     const loadReplies = this.db.prepare(`SELECT r.id, m.bot_id AS botId, r.session_id AS sessionId,
       r.state, r.text, r.reason, r.updated_at AS updatedAt FROM replies r JOIN members m USING (session_id)
       WHERE post_seq=? ORDER BY m.position`);
-    return posts.map(post => ({...post, replies:loadReplies.all(post.seq)}));
+    return posts.map(post => {const context=this.postContext(post.seq);return {...post,
+      ...(context.taskId?{taskId:context.taskId}:{}),...(context.attachments.length?{attachments:context.attachments}:{}),replies:loadReplies.all(post.seq)};});
+  }
+
+  postContext(seq) {
+    const row=this.db.prepare('SELECT task_id, attachments, request_attachments FROM post_context WHERE post_seq=?').get(seq);
+    return {taskId:row?.task_id??null,attachments:JSON.parse(row?.attachments??'[]'),requestAttachments:JSON.parse(row?.request_attachments??'[]')};
+  }
+  hasPost(id){return !!this.db.prepare('SELECT 1 FROM posts WHERE id=?').get(id);}
+
+  reply(roomId,id) {
+    return this.db.prepare(`SELECT r.id,r.state,r.session_id AS sessionId,p.seq AS postSeq,m.bot_id AS botId
+      FROM replies r JOIN posts p ON p.seq=r.post_seq JOIN members m USING(session_id)
+      WHERE p.room_id=? AND r.id=?`).get(roomId,id);
   }
 
   history(roomId, {before = Number.MAX_SAFE_INTEGER, recentFrom, terms, references}) {

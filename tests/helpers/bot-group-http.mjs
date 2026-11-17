@@ -71,6 +71,6 @@ export async function botGroupHttpFixture() {
     events.emit('session/event',{id:receipt.input.sessionId},{type:'turn/end'});
   }
 
-  return {bots,agents,receipts,tasks,warnings,directory,call,finish,
+  return {bots,agents,receipts,tasks,warnings,directory,runtime,call,finish,
     async close() { for (const dispose of effects.reverse()) await dispose(); await rm(home,{recursive:true,force:true}); }};
 }
