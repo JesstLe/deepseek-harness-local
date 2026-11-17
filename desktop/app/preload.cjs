@@ -28,5 +28,6 @@ contextBridge.exposeInMainWorld('naumiDesktop',{
   openIdentity:()=>ipcRenderer.invoke('naumi:identity-open'),
   logoutIdentity:()=>ipcRenderer.invoke('naumi:identity-logout'),
   resumeIdentity:()=>ipcRenderer.invoke('naumi:identity-resume'),
+  cloud:value=>ipcRenderer.invoke('naumi:cloud',value),
   product:'Naumi'
 });

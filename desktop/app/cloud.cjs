@@ -1,0 +1,20 @@
+'use strict';
+const fs=require('node:fs'),path=require('node:path'),{randomUUID,createHash}=require('node:crypto');
+const {MarketSession}=require('./market.cjs'),{atomic}=require('./profile.cjs');
+const ROOT='/api/desktop-cloud/v1',digest=b=>createHash('sha256').update(b).digest('hex');
+function validateCloud(input){
+ if(!input||typeof input!=='object'||Object.keys(input).some(k=>!['endpoint','method','body'].includes(k))||typeof input.endpoint!=='string'||input.endpoint.length>2048)throw Error('CLOUD_REQUEST_FORBIDDEN');
+ const u=new URL(input.endpoint,'http://cloud.invalid'),method=input.method??'GET';if(u.origin!=='http://cloud.invalid'||u.hash||u.username||!u.pathname.startsWith(ROOT+'/'))throw Error('CLOUD_REQUEST_FORBIDDEN');const route=u.pathname.slice(ROOT.length);
+ if(!(method==='GET'&&(/^\/(?:me|documents)$/.test(route)||/^\/documents\/(?:workspace|bot|profile|memory|conversation|settings|file-manifest)\/[-a-zA-Z0-9_.]{1,128}$/.test(route)||/^\/chunks\/[a-f0-9]{64}$/.test(route))||method==='POST'&&/^\/(?:documents|chunks)$/.test(route)))throw Error('CLOUD_REQUEST_FORBIDDEN');
+ if(method==='GET'&&input.body!==undefined||method==='POST'&&(typeof input.body!=='string'||Buffer.byteLength(input.body)>2*1024*1024))throw Error('CLOUD_REQUEST_TOO_LARGE');return{endpoint:u.pathname+u.search,method,body:input.body};
+}
+class CloudSession extends MarketSession{constructor({identity}){super({identity,validateRequest:validateCloud});}async request(endpoint,body){const r=await this.perform({endpoint:ROOT+endpoint,...body?{method:'POST',body:JSON.stringify(body)}:{}});let value;try{value=JSON.parse(r.body);}catch{throw Error('CLOUD_RESPONSE_INVALID');}if(r.status<200||r.status>=300)throw Object.assign(Error(value.error??'CLOUD_UNAVAILABLE'),{status:r.status});return value;}}
+class CloudBackup{
+ constructor({root,cloud,readLocal,identity,clock=()=>new Date().toISOString()}){Object.assign(this,{root,cloud,readLocal,identity,clock});fs.mkdirSync(root,{recursive:true});this.file=path.join(root,'cloud-backup-state.json');if(fs.existsSync(this.file)&&fs.lstatSync(this.file).isSymbolicLink())throw Error('CLOUD_LOCAL_STATE_INVALID');this.state=fs.existsSync(this.file)?JSON.parse(fs.readFileSync(this.file)):{version:1,deviceId:randomUUID(),revision:0,pending:null};if(this.state.version!==1)throw Error('CLOUD_LOCAL_STATE_INVALID');this.save();}
+ save(){atomic(this.file,this.state);}
+ async collect(){const catalog=await this.readLocal('/naumi/bots');if(!Array.isArray(catalog.bots)||catalog.bots.length>500)throw Error('CLOUD_LOCAL_RESPONSE_INVALID');const bots=[],employees=[];for(const b of catalog.bots){bots.push(Object.fromEntries(['id','name','kind','purpose','status'].filter(k=>b[k]!==undefined).map(k=>[k,b[k]])));if(b.status==='archived')continue;const e=await this.readLocal('/naumi/employees?'+new URLSearchParams({botId:b.id,view:'export'}));employees.push({botId:b.id,profile:e.profile,memories:(e.memories??[]).filter(m=>m.status==='active')});}return{schemaVersion:1,scope:['bot-directory','employee-profiles','confirmed-memories'],snapshotAt:this.clock(),bots,employees};}
+ async backup(){const active=this.identity();if(!active)throw Error('CLOUD_LOGIN_REQUIRED');if(!this.state.pending){const payload=await this.collect();if(this.identity()!==active)throw Error('CLOUD_ACCOUNT_CHANGED');this.state.pending={operationId:randomUUID(),kind:'workspace',id:this.state.deviceId,expectedRevision:this.state.revision,payload};this.save();}const result=await this.cloud.request('/documents',this.state.pending);if(this.identity()!==active)throw Error('CLOUD_ACCOUNT_CHANGED');this.state.revision=result.revision;this.state.pending=null;this.state.lastBackupAt=result.updatedAt;this.save();return result;}
+ async list(){return this.cloud.request('/documents?kind=workspace');}
+ async download(id){if(!/^[-a-zA-Z0-9_.]{1,128}$/.test(id))throw Error('CLOUD_INVALID_DOCUMENT');const value=await this.cloud.request('/documents/workspace/'+id);if(digest(JSON.stringify(value.payload))!==value.digest||value.deleted)throw Error('CLOUD_RESPONSE_INTEGRITY');return value;}
+}
+module.exports={CloudSession,CloudBackup,validateCloud};
