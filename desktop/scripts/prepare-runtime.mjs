@@ -5,6 +5,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {stageDingTalk} from './stage-dingtalk.mjs';
 import {auditPackage} from '../../scripts/audit-enterprise-package.mjs';
+import {installReasoningDefaults} from '../../scripts/native-reasoning-extension.mjs';
 import {installAgentTriggers} from '../../scripts/native-agent-mentions-extension.mjs';
 import {installNativeComposer} from '../../scripts/native-composer-extension.mjs';
 const project=fileURLToPath(new URL('../..',import.meta.url));
@@ -39,6 +40,7 @@ export async function prepareRuntime({root=project,target=path.join(root,'runtim
   try{
     // Only runtime dependencies and source plugins are input. No user home/profile/config is copied.
     fs.cpSync(path.join(root,'node_modules'),path.join(staged,'node_modules'),{recursive:true,dereference:true,filter:source=>!source.split(path.sep).some(x=>['.cache','.bin','dingtalk-workspace-cli'].includes(x))&&!isRuntimeDevelopmentArtifact(source)});
+    installReasoningDefaults(path.join(staged,'node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js'));
     installNativeComposer(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'));
     installAgentTriggers(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js'));
     fs.cpSync(path.join(root,'plugins'),path.join(staged,'plugins'),{recursive:true});
