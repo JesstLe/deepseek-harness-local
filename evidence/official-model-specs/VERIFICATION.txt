@@ -113,3 +113,24 @@ Literal summary:
 ℹ skipped 0
 Exit status: 0
 The final four-artifact archive and hashes contain the corrected leaf-only implementation. Rollback was repeated on that implementation: restored4/removed2, baseline27/27, exit0; active source retained.
+
+FINAL LOCAL DEPLOYMENT
+Commands: node scripts/deploy-official-model-specs.mjs prepare; Stop-Naumi.ps1; node scripts/deploy-official-model-specs.mjs files; Start-Naumi.ps1.
+Input: main, zero running tasks, exact original runtime hashes; six task runtime files, package files-list delta only; original private profile copied before numeric migration.
+Literal outputs: SPEC_PREPARED files=6 config_snapshot=private running=0
+SPEC_FILES updated=6 unrelated_changed=0
+Corrected backend was then copied from main and the empty-task service restarted normally:
+STOPPED PID=30616
+RUNNING PID=10956 URL=http://127.0.0.1:3080 HTTP=200
+Exit status: 0
+Command: node scripts/deploy-official-model-specs.mjs migrate
+Input: exact original private snapshot and current already-calibrated, metadata-repaired profile; resume only after deep equality with the expected numeric result; no extra config replay.
+Literal output: SPEC_LIVE groups=8 models=38 calibrated=36 unknown=2 credentials=unchanged defaults=unchanged config_rollback=PASS model_calls=0
+Exit status: 0
+Post-check: repeated owner refresh-specs at the current revision.
+Literal output: SPEC_IDEMPOTENT calibrated=0 revision_unchanged=1
+Exit status: 0
+Receipt: DEPLOYMENT.json, verified main ed5653ef19cf6ef2fa3fde26703afde80d2f6e51. All six deployed paths match current source except the intentionally incremental package manifest; unrelated runtime files match pre-deployment hashes. Credentials and default model unchanged. Actual corrected profile retained; separate rollback profile restored original bytes and original hash. 76 sessions / 0 running / 3 Bots retained; no task inference calls.
+Known output budgets were preserved or reduced to limits; not expanded to vendor maxima. 5 subscription-dependent model entries retain their existing context. Two unmatched aliases remain unchanged: glm-5.3-flash-uncensored and deepseek-v4.1-flash-uncensored.
+Original provider defaults remain as fallback for unverified model IDs; recognized entries now have explicit per-model values and take precedence.
+New page module is served by the running service; refresh an existing page to load its new settings UI. No installer build or GitHub Release performed by this task.
