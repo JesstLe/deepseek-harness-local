@@ -2393,10 +2393,10 @@ index 0000000..e4fa56f
 +}
 diff --git a/scripts/deploy-im-gateway.mjs b/scripts/deploy-im-gateway.mjs
 new file mode 100644
-index 0000000..c906baf
+index 0000000..315fe9d
 --- /dev/null
 +++ b/scripts/deploy-im-gateway.mjs
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,55 @@
 +import fs from 'node:fs';
 +import path from 'node:path';
 +import assert from 'node:assert/strict';
@@ -2415,8 +2415,16 @@ index 0000000..c906baf
 + const dir=path.join(runtime,'runtime/im-gateway-'+randomUUID()),candidate=path.join(dir,'candidate'),plugin=path.join(candidate,'plugins/naumi-enterprise');fs.mkdirSync(plugin,{recursive:true});
 + const files=git('diff','--name-only',baseline,'HEAD','--','plugins/naumi-enterprise').toString().trim().split(/\r?\n/).map(p=>p.slice('plugins/naumi-enterprise/'.length));
 + for(const file of files){const from=path.join(installed,file);if(fs.existsSync(from)){const dest=path.join(plugin,file);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(from,dest);}}
-+ const patch=path.join(dir,'task-delta.patch');fs.writeFileSync(patch,git('diff','--binary',baseline,'HEAD','--','plugins/naumi-enterprise'));
++ execFileSync('git',['init','--quiet'],{cwd:candidate});
++ const patch=path.join(dir,'task-delta.patch');fs.writeFileSync(patch,git('diff','--binary',baseline,'HEAD','--',...files.filter(f=>!['host.js','package.json'].includes(f)).map(f=>'plugins/naumi-enterprise/'+f)));
 + execFileSync('git',['apply','--check','--ignore-space-change',patch],{cwd:candidate});execFileSync('git',['apply','--ignore-space-change',patch],{cwd:candidate});
++ // Runtime host/package intentionally lag other modules. Apply only the verified IM extension anchors.
++ const hostPath=path.join(plugin,'host.js');let host=fs.readFileSync(hostPath,'utf8');const sourceHost=fs.readFileSync(path.join(root,'plugins/naumi-enterprise/host.js'),'utf8');
++ const once=(value,needle,addition)=>{assert.equal(value.split(needle).length,2,'RUNTIME_EXTENSION_ANCHOR');return value.replace(needle,addition);};
++ const asset="  assets.set('model-connections.js','text/javascript; charset=utf-8');",imAssets="  assets.set('im-settings.js','text/javascript; charset=utf-8');\n  assets.set('im-settings.css','text/css; charset=utf-8');";
++ assert(sourceHost.replaceAll('\r\n','\n').includes(asset+'\n'+imAssets),'FIXED_SOURCE_ASSETS_CHANGED');
++ host=once(host,asset,asset+'\n'+imAssets);const css='<link rel="stylesheet" href="/naumi/assets/model-connections.css">',imCss='<link rel="stylesheet" href="/naumi/assets/im-settings.css">';assert(sourceHost.includes(css+imCss),'FIXED_SOURCE_CSS_CHANGED');host=once(host,css,css+imCss);fs.writeFileSync(hostPath,host);
++ const packagePath=path.join(plugin,'package.json'),pkg=JSON.parse(fs.readFileSync(packagePath)),sourcePkg=JSON.parse(fs.readFileSync(path.join(root,'plugins/naumi-enterprise/package.json')));const additions=sourcePkg.files.filter(f=>f.startsWith('im-'));assert.equal(additions.length,7);assert(!pkg.files.some(f=>additions.includes(f)),'IM_ALREADY_INSTALLED');pkg.files.push(...additions);fs.writeFileSync(packagePath,JSON.stringify(pkg,null,2)+'\n');
 + const rows=files.map(file=>{const old=path.join(installed,file),modified=path.join(plugin,file),bytes=fs.readFileSync(modified),prior=fs.existsSync(old)?fs.readFileSync(old):null;
 +  for(const [kind,data]of [['before',prior],['after',bytes]])if(data){const target=path.join(dir,kind,file);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,data);}
 +  if(file.endsWith('.js'))execFileSync(process.execPath,['--check',modified]);return {file,before:prior?hash(prior):null,after:hash(bytes)};
