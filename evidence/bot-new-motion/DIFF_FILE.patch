@@ -1,0 +1,80 @@
+diff --git a/plugins/naumi-enterprise/assets/bot-task.css b/plugins/naumi-enterprise/assets/bot-task.css
+index ee48ba8..b9b490d 100644
+--- a/plugins/naumi-enterprise/assets/bot-task.css
++++ b/plugins/naumi-enterprise/assets/bot-task.css
+@@ -19,10 +19,6 @@
+ .nbt-amend{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin-top:12px}.nbt-amend textarea{box-sizing:border-box;width:100%;min-width:0;resize:vertical;max-height:160px;border:1px solid #e4dcec;border-radius:8px;padding:8px;font:inherit;color:#51445f;background:#fdfcff}.nbt-amend textarea:focus-visible{outline:2px solid #b49ac9;outline-offset:1px}.nbt-amend button{border:1px solid #e2d7ed;border-radius:7px;padding:5px 10px;color:#79578f;background:#faf7fd;font:inherit;cursor:pointer}.nbt-amend button:disabled{opacity:.5;cursor:default}.nbt-amend [role=status]{font-size:11px;color:#6f947d}
+ .naumi-task-dock button:focus-visible{outline:2px solid #9775b7;outline-offset:2px}.nbt-more{align-self:flex-end}
+ .naumi-bot-entry[data-bot-state=queued] .naumi-bot-state{background:#a696bd}
+-.naumi-bot-entry[data-bot-state=running] .naumi-bot-avatar{position:relative}
+-.naumi-bot-entry[data-bot-state=running] .naumi-bot-avatar::after{content:"";position:absolute;inset:-3px;border:2px solid #70ae9690;border-top-color:transparent;border-radius:16px;animation:nbt-working 2.8s linear infinite;pointer-events:none}
+-@keyframes nbt-working{to{transform:rotate(360deg)}}
+-@media(prefers-reduced-motion:reduce){.naumi-bot-entry[data-bot-state=running] .naumi-bot-avatar::after{animation:none;border-top-color:#70ae9690}}
+ @media(max-width:700px){.naumi-task-dock{width:calc(100% - 64px)}}
+ @media(max-width:480px){.naumi-background-task{padding:9px 10px}.nbt-actions{gap:8px}.nbt-state{font-size:11px}.nbt-actions button{font-size:11px}}
+ @media(pointer:coarse){.nbt-actions button,.nbt-more,.nbt-cancel{min-height:38px}.nbt-file{min-height:44px}}
+diff --git a/scripts/verify-async-bot-ui.mjs b/scripts/verify-async-bot-ui.mjs
+index ac22f95..d77f749 100644
+--- a/scripts/verify-async-bot-ui.mjs
++++ b/scripts/verify-async-bot-ui.mjs
+@@ -4,7 +4,7 @@ import http from 'node:http';
+ import assert from 'node:assert/strict';
+ import {chromium} from '../desktop/node_modules/playwright/index.mjs';
+ 
+-const runtime='E:/Workspace/naumi-desktop',root=path.resolve('plugins/naumi-enterprise'),e=path.resolve('evidence/async-bot');
++const runtime='E:/Workspace/naumi-desktop',root=path.resolve('plugins/naumi-enterprise'),e=path.resolve(process.env.NAUMI_ASYNC_UI_EVIDENCE??'evidence/async-bot');
+ const directory=JSON.parse(fs.readFileSync(runtime+'/.dsh/naumi/bots.json','utf8')),source=directory.bots.find(b=>b.name.includes('主管'))??directory.bots[0],target=directory.bots.find(b=>b.id!==source.id);
+ const task={id:'async-ui-fixture',sourceBotId:source.id,sourceSessionId:source.homeSessionId,targetBotId:target.id,targetSessionId:target.sessionIds.at(-1),status:'running',revision:1,attempt:1,replyMode:'background',subject:'整理本周活动文案',createdAt:'2026-11-17T04:00:00Z',updatedAt:'2026-11-17T04:00:00Z'};
+ let tasks=[task],feeds=new Set(),feedCount=0,posts=0;
+@@ -14,20 +14,21 @@ const browser=await chromium.launch({headless:true,channel:'chrome'}),context=aw
+ page.setDefaultTimeout(15000);page.on('pageerror',error=>errors.push(error.message));
+ const check=(name,value)=>{assert(value,name);checks.push(name);console.log('UI_PASS '+name);};
+ const baseline=fs.readFileSync(runtime+'/.dsh/profiles/web/node_modules/@naumi/dsh-enterprise/client.js','utf8').replaceAll('\r\n','\n'),candidate=fs.readFileSync(root+'/client.js','utf8').replaceAll('\r\n','\n');
+-await page.route('**/plugins/**',async route=>{if(!decodeURIComponent(route.request().url()).includes('@naumi/dsh-enterprise/client.js'))return route.continue();const r=await route.fetch(),body=(await r.text()).replaceAll('\r\n','\n');assert(body.includes(baseline),'CANDIDATE_BASELINE_MISMATCH');await route.fulfill({response:r,body:body.replace(baseline,candidate)});});
+-await page.route('**/naumi/assets/**',async route=>{const name=new URL(route.request().url()).pathname.split('/').at(-1),p=root+'/assets/'+name;if(!fs.existsSync(p))return route.continue();await route.fulfill({status:200,contentType:name.endsWith('.css')?'text/css':name.endsWith('.svg')?'image/svg+xml':'text/javascript',body:fs.readFileSync(p)});});
++if(!process.env.NAUMI_ASYNC_UI_LIVE_ASSETS)await page.route('**/plugins/**',async route=>{if(!decodeURIComponent(route.request().url()).includes('@naumi/dsh-enterprise/client.js'))return route.continue();const r=await route.fetch(),body=(await r.text()).replaceAll('\r\n','\n');assert(body.includes(baseline),'CANDIDATE_BASELINE_MISMATCH');await route.fulfill({response:r,body:body.replace(baseline,candidate)});});
++if(!process.env.NAUMI_ASYNC_UI_LIVE_ASSETS)await page.route('**/naumi/assets/**',async route=>{const name=new URL(route.request().url()).pathname.split('/').at(-1),p=root+'/assets/'+name;if(!fs.existsSync(p))return route.continue();await route.fulfill({status:200,contentType:name.endsWith('.css')?'text/css':name.endsWith('.svg')?'image/svg+xml':'text/javascript',body:fs.readFileSync(p)});});
+ await page.route('**/naumi/bot-tasks*',async route=>{if(route.request().method()!=='GET'){posts++;return route.fulfill({status:409,contentType:'application/json',body:'{"error":"FIXTURE_READ_ONLY"}'});}const url=new URL(route.request().url());await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(url.searchParams.has('taskId')?{...task,result:'已完成的后台成果',delivery:{files:[]}}:{version:1,revision:task.revision,tasks})});});
+ await page.addInitScript(({eventUrl})=>{localStorage.setItem('naumi.navigationMode.v1','bot');const Native=window.EventSource;window.EventSource=class extends Native{constructor(url,options){super(String(url).includes('/naumi/bot-tasks/events')?eventUrl:url,options);}};},{eventUrl});
+ const logs=['server.out.log','server.err.log'].map(n=>fs.readFileSync(runtime+'/logs/'+n,'utf8')).join('\n'),launch=[...logs.matchAll(/http:\/\/127\.0\.0\.1:3080\/?\?token=[A-Za-z0-9_~.%-]+/g)].at(-1)?.[0];assert(launch);
+ try{
+-  await page.goto(launch,{waitUntil:'domcontentloaded'});await page.addStyleTag({content:fs.readFileSync(root+'/assets/bot-task.css','utf8')});
++  await page.goto(launch,{waitUntil:'domcontentloaded'});if(!process.env.NAUMI_ASYNC_UI_LIVE_ASSETS)await page.addStyleTag({content:fs.readFileSync(root+'/assets/bot-task.css','utf8')});
+   const row=page.locator('.naumi-bot-entry[data-bot-id="'+source.id+'"]');await row.locator('.naumi-bot-open').click();
+   const card=page.locator('.naumi-task-dock').locator('[data-task-id="'+task.id+'"]');await card.waitFor();
+   check('background_task_visible_without_waiting',await card.getAttribute('data-task-state')==='running');
+   check('source_reception_session_preserved',await page.locator('[data-naumi-context-session="'+source.homeSessionId+'"]').count()>0);
+   const employee=page.locator('.naumi-bot-entry[data-bot-id="'+target.id+'"]');await page.waitForFunction(id=>document.querySelector('[data-bot-id="'+id+'"]')?.dataset.botState==='running',target.id);
+   check('worker_avatar_running',await employee.getAttribute('data-bot-state')==='running');
+-  check('avatar_motion_tracks_real_work_state',await employee.locator('.naumi-bot-avatar').evaluate(el=>getComputedStyle(el,'::after').animationName==='nbt-working'));
++  await employee.locator('.naumi-character svg[data-emotion="32"]').waitFor();check('avatar_motion_tracks_real_work_state',await employee.locator('.naumi-character svg').getAttribute('data-emotion')==='32');check('legacy_working_frame_removed',await employee.locator('.naumi-bot-avatar').evaluate(el=>getComputedStyle(el,'::after').content==='none'&&getComputedStyle(el,'::after').animationName==='none'));
++  const motionBefore=await employee.locator('.naumi-character svg').evaluate(svg=>svg.outerHTML);await page.waitForTimeout(180);check('new_svg_motion_actually_advances',await employee.locator('.naumi-character svg').evaluate(svg=>svg.outerHTML)!==motionBefore);await employee.locator('.naumi-bot-row').screenshot({path:e+'/working-bot-new-motion.png'});
+   const model=page.locator('[data-slot="conversation.input.model"] button');check('model_selector_original_position',await model.count()===1);const modelName=await model.getAttribute('aria-label');
+   const composer=page.locator('[contenteditable="true"]').first();await composer.fill('另一个话题，保留草稿');
+   await card.getByRole('button',{name:'详情',exact:true}).click();await card.getByText('已完成的后台成果',{exact:true}).waitFor();check('task_details_operable',await card.getByText('已完成的后台成果',{exact:true}).isVisible());
+@@ -36,11 +37,11 @@ try{
+   check('completion_updates_original_task_card',await card.getAttribute('data-task-state')==='completed');check('new_topic_draft_not_replaced',await composer.innerText()==='另一个话题，保留草稿');check('model_choice_unchanged',await model.getAttribute('aria-label')===modelName);
+   await page.waitForFunction(id=>document.querySelector('[data-bot-id="'+id+'"]')?.dataset.botState!=='running',target.id);check('avatar_returns_to_idle',await employee.getAttribute('data-bot-state')!=='running');
+   check('one_event_feed_for_sidebar_and_cards',feedCount===1);check('employee_menu_retained',await row.getByRole('button',{name:source.name+'的设置',exact:true}).count()===1);
+-  await page.emulateMedia({reducedMotion:'reduce'});task.status='running';task.revision++;for(const res of feeds)res.write('data: changed\n\n');await page.waitForFunction(id=>document.querySelector('[data-bot-id="'+id+'"]')?.dataset.botState==='running',target.id);check('reduced_motion_supported',await employee.locator('.naumi-bot-avatar').evaluate(el=>getComputedStyle(el,'::after').animationName==='none'));
++  await page.emulateMedia({reducedMotion:'reduce'});task.status='running';task.revision++;for(const res of feeds)res.write('data: changed\n\n');await page.waitForFunction(id=>document.querySelector('[data-bot-id="'+id+'"]')?.dataset.botState==='running',target.id);await page.waitForTimeout(100);const frozen=await employee.locator('.naumi-character svg').evaluate(svg=>svg.outerHTML);await page.waitForTimeout(180);check('reduced_motion_supported',await employee.locator('.naumi-character svg').evaluate(svg=>svg.outerHTML)===frozen);
+   for(const width of [1000,580,360]){await page.setViewportSize({width,height:950});await card.waitFor();check('task_layout_'+width,await card.evaluate(el=>el.scrollWidth<=el.clientWidth+2&&el.getBoundingClientRect().right<=innerWidth+2));}
+   await page.locator('.naumi-task-dock').screenshot({path:e+'/async-task-narrow.png',animations:'disabled'});await page.setViewportSize({width:1440,height:980});await page.locator('.naumi-task-dock').screenshot({path:e+'/async-task-desktop.png',animations:'disabled'});
+   await composer.fill('');check('no_business_or_model_posts',posts===0);check('no_page_errors',errors.length===0);
+-  fs.writeFileSync(e+'/UI_VERIFICATION.json',JSON.stringify({status:'PASS',tier:'real Harness shell with candidate frontend, controlled read-only task catalog and real local SSE; no model or business writes',checks,errors,eventFeedConnections:feedCount},null,2)+'\n');
++  fs.writeFileSync(e+'/UI_VERIFICATION.json',JSON.stringify({status:'PASS',tier:process.env.NAUMI_ASYNC_UI_LIVE_ASSETS?'actual deployed frontend/CSS, controlled read-only task catalog and real local SSE; no static interception or model/business writes':'real Harness shell with candidate frontend, controlled read-only task catalog and real local SSE; no model or business writes',liveAssets:!!process.env.NAUMI_ASYNC_UI_LIVE_ASSETS,checks,errors,eventFeedConnections:feedCount},null,2)+'\n');
+   console.log('UI_COMPLETE checks='+checks.length+' errors='+errors.length);
+ }catch(error){await page.screenshot({path:e+'/ui-failure.png',animations:'disabled'}).catch(()=>{});fs.writeFileSync(e+'/UI_FAILURE.json',JSON.stringify({error:error.message,checks,errors,body:(await page.locator('body').innerText()).slice(-4500)},null,2));throw error;}
+ finally{await context.close();await browser.close();for(const res of feeds)res.end();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+diff --git a/tests/naumi-async-bot.test.mjs b/tests/naumi-async-bot.test.mjs
+index 30c3a42..c97a65d 100644
+--- a/tests/naumi-async-bot.test.mjs
++++ b/tests/naumi-async-bot.test.mjs
+@@ -88,6 +88,6 @@ test('task subscriptions share one event feed, clear identities on permission lo
+ test('async UI remains additive and retains employee menus, model location, native cancel/queue and reduced motion',()=>{
+   const ui=fs.readFileSync('plugins/naumi-enterprise/assets/bot-task-ui.js','utf8'),css=fs.readFileSync('plugins/naumi-enterprise/assets/bot-task.css','utf8'),sidebar=fs.readFileSync('plugins/naumi-enterprise/assets/bot-sidebar.js','utf8');
+   assert(ui.includes("name:'conversation.input.dock'"));assert(!ui.includes('session.prompt'));assert(!ui.includes('setInterval'));
+-  assert(sidebar.includes('EXPERIENCE_ACTIONS'));assert(sidebar.includes('receptionTarget'));assert(css.includes('prefers-reduced-motion'));
++  assert(sidebar.includes('EXPERIENCE_ACTIONS'));assert(sidebar.includes('receptionTarget'));assert(!css.includes('nbt-working'));assert(!css.includes('.naumi-bot-avatar::after'));assert(fs.readFileSync('plugins/naumi-enterprise/assets/bot-avatar-runtime.js','utf8').includes('prefers-reduced-motion'));
+   assert(fs.readFileSync('plugins/naumi-enterprise/bot-tasks.js','utf8').includes('END your turn'));
+ });

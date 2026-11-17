@@ -88,6 +88,6 @@ test('task subscriptions share one event feed, clear identities on permission lo
 test('async UI remains additive and retains employee menus, model location, native cancel/queue and reduced motion',()=>{
   const ui=fs.readFileSync('plugins/naumi-enterprise/assets/bot-task-ui.js','utf8'),css=fs.readFileSync('plugins/naumi-enterprise/assets/bot-task.css','utf8'),sidebar=fs.readFileSync('plugins/naumi-enterprise/assets/bot-sidebar.js','utf8');
   assert(ui.includes("name:'conversation.input.dock'"));assert(!ui.includes('session.prompt'));assert(!ui.includes('setInterval'));
-  assert(sidebar.includes('EXPERIENCE_ACTIONS'));assert(sidebar.includes('receptionTarget'));assert(css.includes('prefers-reduced-motion'));
+  assert(sidebar.includes('EXPERIENCE_ACTIONS'));assert(sidebar.includes('receptionTarget'));assert(!css.includes('nbt-working'));assert(!css.includes('.naumi-bot-avatar::after'));assert(fs.readFileSync('plugins/naumi-enterprise/assets/bot-avatar-runtime.js','utf8').includes('prefers-reduced-motion'));
   assert(fs.readFileSync('plugins/naumi-enterprise/bot-tasks.js','utf8').includes('END your turn'));
 });
