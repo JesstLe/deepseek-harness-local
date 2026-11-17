@@ -32,9 +32,19 @@ test('completion remains explicit and failures cannot display false completion',
 test('buttons retain native semantics and local path validation is non-destructive',()=>{
  assert(source.includes('${NSD_CreateButton}'));assert(source.includes('${NSD_OnClick}'));
  assert(source.includes('nsDialogs::SelectFolderDialog'));assert(source.includes('${If} $0 != error'));
- assert(source.includes('GetFullPathName $INSTDIR'));assert(source.includes('${GetFileName}'));
+ assert(source.includes('GetFullPathNameW'));assert(!source.includes('GetFullPathName $INSTDIR'));assert(source.includes('${GetFileName}'));
  const leave=source.slice(source.indexOf('Function NaumiInstallLeave'),source.indexOf('Function NaumiDoneLeave'));
  assert(!/CreateDirectory|WriteReg|Delete|RMDir|Exec/.test(leave));
+});
+
+test('new install directories use nonexisting-path-safe Win32 canonicalization and commit only after validation',()=>{
+ const leave=source.slice(source.indexOf('Function NaumiInstallLeave'),source.indexOf('Function NaumiDoneLeave'));
+ assert(leave.includes('${NSD_GetText} $NaumiPathField $NaumiCandidatePath'));
+ assert(leave.indexOf('Call NaumiCanonicalPath')<leave.indexOf('StrCpy $INSTDIR $NaumiCandidatePath'));
+ assert(leave.split('${If} $NaumiCandidatePath == ""').length===3);
+ assert(source.includes('PathGetDriveNumberW'));assert(source.includes('$1 >= ${NSIS_MAX_STRLEN}'));
+ const gate=read('desktop/installer/maintenance.nsh');assert(gate.indexOf('Call NaumiCanonicalPath')<gate.indexOf('!insertmacro NaumiExtractMaintenance',gate.indexOf('!macro customCheckAppRunning')));
+ assert(gate.includes('Call un.NaumiCanonicalPath'));assert(gate.includes('SetErrorLevel 43'));
 });
 test('one light layout scales geometry and uses high resolution branded assets',()=>{
  for(const s of ['MUI_BGCOLOR FFFFFF','GetDpiForWindow','NaumiScale','820 520','NaumiRail','Microsoft YaHei UI'])assert(source.includes(s));
