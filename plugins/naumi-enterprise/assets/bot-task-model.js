@@ -17,6 +17,32 @@ export function receptionTarget(bot,tasks,sessions,workspaces){
 export function sessionTasks(tasks,sessionId){
   return tasks.filter(t=>t.sourceSessionId===sessionId||t.targetSessionId===sessionId).sort((a,b)=>Number(ACTIVE_TASKS.has(b.status))-Number(ACTIVE_TASKS.has(a.status))||b.updatedAt.localeCompare(a.updatedAt));
 }
+export const SETTLED_TASKS=new Set(['completed','failed','cancelled','interrupted']);
+export const TASK_CARD_RETENTION_MS=8000;
+export const TASK_CARD_DISMISSALS_KEY='naumi.taskCards.dismissed.v1';
+export const taskCardIdentity=task=>JSON.stringify([task.id,task.attempt??1,task.status]);
+export function readTaskCardDismissals(storage){
+  try{const value=JSON.parse((storage??globalThis.localStorage)?.getItem(TASK_CARD_DISMISSALS_KEY)??'[]');return Array.isArray(value)?value.filter(v=>typeof v==='string'&&v.length<500).slice(-500):[];}catch{return [];}
+}
+export function dismissTaskCard(task,current=[],storage){
+  if(!SETTLED_TASKS.has(task.status))return current;
+  const key=taskCardIdentity(task),value=[...new Set([...readTaskCardDismissals(storage),...current,key])].slice(-500);
+  try{(storage??globalThis.localStorage)?.setItem(TASK_CARD_DISMISSALS_KEY,JSON.stringify(value));}catch{/* A blocked/full preference store never blocks chat. */}
+  return value;
+}
+/** Presentation-only retention. Never mutates, deletes, stops or rewrites a task. */
+export function taskDockRows(tasks,sessionId,{now=Date.now(),dismissed=[],pinned=[]}={}){
+  const hidden=new Set(dismissed),reading=new Set(pinned),current=[],history=[];let nextExpiry=null;
+  for(const task of sessionTasks(tasks,sessionId)){
+    if(!SETTLED_TASKS.has(task.status)){current.push(task);continue;}
+    const expiry=Date.parse(task.updatedAt)+TASK_CARD_RETENTION_MS,remaining=expiry-now;
+    const recent=remaining>0&&remaining<=TASK_CARD_RETENTION_MS;
+    if(!hidden.has(taskCardIdentity(task))&&(reading.has(task.id)||recent)){
+      current.push(task);if(!reading.has(task.id)&&recent)nextExpiry=nextExpiry===null?expiry:Math.min(nextExpiry,expiry);
+    }else history.push(task);
+  }
+  return {current,history,nextExpiry,errors:history.filter(t=>t.status==='failed'||t.status==='interrupted').length};
+}
 export function filePreviewAddress(file){const enc=s=>encodeURIComponent(s).replace(/%3A/gi,':');return `dsh-resource://file/session/${enc(file.sessionId)}/${file.path.replaceAll('\\','/').split('/').map(enc).join('/')}`;}
 
 /** One owner-authenticated event subscription shared by task cards and employee activity. */

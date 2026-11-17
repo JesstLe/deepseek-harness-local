@@ -1,0 +1,50 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import {chromium} from '../desktop/node_modules/playwright/index.mjs';
+
+const runtime='E:/Workspace/naumi-desktop',e=path.resolve('evidence/task-card-recycling'),root=path.resolve('plugins/naumi-enterprise/assets');
+const bots=JSON.parse(fs.readFileSync(runtime+'/.dsh/naumi/bots.json','utf8')).bots,source=bots.find(b=>b.name.includes('主管'))??bots[0],target=bots.find(b=>b.id!==source.id);
+const old=new Date(Date.now()-600000).toISOString(),make=(id,status,extra={})=>({id,sourceBotId:source.id,sourceSessionId:source.homeSessionId,targetBotId:target.id,targetSessionId:target.sessionIds.at(-1),status,attempt:1,revision:1,subject:'整理本周活动文案',createdAt:old,updatedAt:old,...extra});
+let tasks=[make('current','running'),make('old','completed'),make('error','failed')],writes=0;
+const browser=await chromium.launch({headless:true,channel:'chrome'}),context=await browser.newContext({viewport:{width:1440,height:980},colorScheme:'light'}),page=await context.newPage(),checks=[],errors=[];
+page.setDefaultTimeout(15000);page.on('pageerror',error=>errors.push(error.message));await page.clock.install();
+const check=(name,value)=>{assert(value,name);checks.push(name);console.log('UI_PASS '+name);};
+await page.route('**/naumi/assets/**',async route=>{const name=new URL(route.request().url()).pathname.split('/').at(-1);if(!['bot-task-model.js','bot-task-ui.js','bot-task.css'].includes(name))return route.continue();await route.fulfill({status:200,contentType:name.endsWith('.css')?'text/css':'text/javascript',body:fs.readFileSync(path.join(root,name))});});
+await page.route('**/naumi/bot-tasks*',async route=>{const req=route.request();if(req.method()!=='GET'){writes++;return route.fulfill({status:409,body:'{}'});}const id=new URL(req.url()).searchParams.get('taskId');await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(id?{...tasks.find(t=>t.id===id),result:'原任务成果保留',delivery:{files:[]}}:{version:1,revision:1,tasks})});});
+await page.addInitScript(()=>{
+  localStorage.setItem('naumi.navigationMode.v1','bot');const Native=window.EventSource;window.__taskFeeds=[];
+  window.EventSource=class{constructor(url,options){if(!String(url).includes('/naumi/bot-tasks/events'))return new Native(url,options);window.__taskFeeds.push(this);}close(){this.closed=true;}};
+  window.__refreshTaskCards=()=>window.__taskFeeds.filter(s=>!s.closed).forEach(s=>s.onmessage?.({data:'changed'}));
+});
+const logs=['server.out.log','server.err.log'].map(n=>fs.readFileSync(runtime+'/logs/'+n,'utf8')).join('\n'),launch=[...logs.matchAll(/http:\/\/127\.0\.0\.1:3080\/?\?token=[A-Za-z0-9_~.%-]+/g)].at(-1)?.[0];assert(launch);
+const update=async patch=>{Object.assign(tasks[0],patch,{revision:tasks[0].revision+1,updatedAt:new Date(await page.evaluate(()=>Date.now())).toISOString()});await page.evaluate(()=>window.__refreshTaskCards());};
+try{
+  await page.goto(launch,{waitUntil:'domcontentloaded'});await page.locator('[data-bot-id="'+source.id+'"] .naumi-bot-open').click();
+  const dock=page.locator('.naumi-task-dock'),current=dock.locator(':scope > [data-task-id="current"]'),history=dock.locator('.nbt-history-toggle');await current.waitFor();
+  check('old_completed_cards_recycled_on_open',await dock.locator(':scope > article').count()===1&&await history.innerText().then(s=>s.includes('2')));
+  check('historical_failure_remains_discoverable',await dock.locator('.nbt-history-errors').innerText()==='异常 1');
+  const composer=page.locator('[contenteditable="true"]').first(),model=page.locator('[data-slot="conversation.input.model"] button');await composer.fill('新话题草稿，不受卡片回收影响');const modelBefore=await model.getAttribute('aria-label');
+  await page.clock.fastForward(60000);check('running_work_never_auto_hidden',await current.isVisible()&&await current.getByRole('button',{name:'收起任务卡片'}).count()===0);
+  await history.click();await dock.locator('.nbt-history [data-task-id="old"]').waitFor();await dock.locator('[data-task-id="old"]').getByRole('button',{name:'详情',exact:true}).click();await dock.getByText('原任务成果保留',{exact:true}).waitFor();check('history_and_result_remain_available',true);await history.click();
+  await dock.screenshot({path:e+'/task-cards-active.png',animations:'disabled'});
+  await update({status:'completed'});await page.waitForFunction(()=>document.querySelector('.naumi-task-dock > [data-task-id="current"]')?.dataset.taskState==='completed');
+  check('completion_gets_short_visible_receipt',await current.isVisible());await page.clock.fastForward(8100);await current.waitFor({state:'detached'});
+  check('completed_card_auto_recycles_without_new_event',await dock.locator(':scope > article').count()===0);check('recycled_dock_is_compact',await dock.evaluate(el=>el.getBoundingClientRect().height<=35));
+  check('draft_and_model_preserved',await composer.innerText()==='新话题草稿，不受卡片回收影响'&&await model.getAttribute('aria-label')===modelBefore);
+  await update({status:'running',attempt:2});await current.waitFor();await current.getByRole('button',{name:'详情',exact:true}).click();await current.locator('pre').waitFor();
+  await update({status:'completed'});await page.waitForFunction(()=>document.querySelector('.naumi-task-dock > [data-task-id="current"]')?.dataset.taskState==='completed');await page.clock.fastForward(9000);
+  check('reading_expanded_result_is_not_interrupted',await current.isVisible());await current.getByRole('button',{name:'收起',exact:true}).click();await current.waitFor({state:'detached'});check('closing_expired_result_recycles_it',true);
+  await update({status:'completed',attempt:3});await current.waitFor();await page.setViewportSize({width:360,height:950});check('narrow_card_controls_fit',await current.evaluate(el=>el.scrollWidth<=el.clientWidth+2&&el.getBoundingClientRect().right<=innerWidth));await page.setViewportSize({width:1440,height:980});
+  await current.getByRole('button',{name:'收起任务卡片'}).click();await current.waitFor({state:'detached'});check('manual_dismiss_does_not_stop_or_delete_task',tasks[0].status==='completed'&&writes===0);
+  await composer.fill('');await page.reload({waitUntil:'domcontentloaded'});await page.locator('[data-bot-id="'+source.id+'"] .naumi-bot-open').click();await history.waitFor();
+  check('manual_dismiss_survives_reload',await current.count()===0&&await page.evaluate(()=>JSON.parse(localStorage.getItem('naumi.taskCards.dismissed.v1')).some(k=>k.includes('current'))));
+  await update({status:'running',attempt:4});await current.waitFor();check('retry_reappears_despite_prior_dismissal',await current.isVisible());
+  await update({status:'failed'});await page.waitForFunction(()=>document.querySelector('.naumi-task-dock > [data-task-id="current"]')?.dataset.taskState==='failed');await page.clock.fastForward(8100);await current.waitFor({state:'detached'});check('failed_card_recycles_with_exception_badge',await dock.locator('.nbt-history-errors').innerText()==='异常 2');
+  await dock.screenshot({path:e+'/task-cards-recycled.png',animations:'disabled'});
+  for(let i=0;i<25;i++)tasks.push(make('history-'+i,'completed'));await page.evaluate(()=>window.__refreshTaskCards());await page.waitForFunction(()=>document.querySelector('.nbt-history-toggle')?.textContent.includes('28'));
+  await history.click();check('history_initial_render_is_bounded',await dock.locator('.nbt-history article').count()===10);await dock.getByRole('button',{name:'更多记录',exact:true}).click();check('history_can_load_more',await dock.locator('.nbt-history article').count()===20);await history.click();
+  check('one_shared_activity_subscription_per_page',await page.evaluate(()=>window.__taskFeeds.filter(s=>!s.closed).length)===1);check('zero_model_or_task_writes',writes===0);check('zero_page_errors',errors.length===0);
+  fs.writeFileSync(e+'/UI_VERIFICATION.json',JSON.stringify({tier:'real Harness shell, candidate three assets, read-only controlled task catalog and clock; no model/task writes',checks,errors,finishedAt:new Date().toISOString()},null,2)+'\n');
+  console.log('RECYCLE_UI checks='+checks.length+' errors='+errors.length+' model_task_writes='+writes+' contexts_closed=1');
+}finally{await context.close();await browser.close();}

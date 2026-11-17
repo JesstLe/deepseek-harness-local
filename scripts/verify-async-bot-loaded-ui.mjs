@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {chromium} from '../desktop/node_modules/playwright/index.mjs';
 import {botLiveApi} from './bot-live-api.mjs';
 
-const root=path.resolve(process.argv[2]??'E:/Workspace/naumi-desktop'),api=await botLiveApi(root),e=path.resolve('evidence/async-bot');
+const root=path.resolve(process.argv[2]??'E:/Workspace/naumi-desktop'),api=await botLiveApi(root),e=path.resolve(process.env.NAUMI_UI_EVIDENCE_DIR??'evidence/async-bot');
 const bots=(await api.json('/naumi/bots')).bots,tasks=(await api.json('/naumi/bot-tasks?view=activity')).tasks;
 const source=bots.find(b=>tasks.some(t=>t.sourceSessionId===b.homeSessionId));assert(source,'A real reception task is required');
 const browser=await chromium.launch({headless:true,channel:'chrome'}),context=await browser.newContext({viewport:{width:1440,height:980},colorScheme:'light'}),page=await context.newPage();
@@ -18,6 +18,7 @@ try{
   await page.goto(launch,{waitUntil:'domcontentloaded'});
   const row=page.locator('[data-bot-id="'+source.id+'"]');await row.locator('.naumi-bot-open').click();
   const dock=page.locator('.naumi-task-dock');await dock.waitFor();
+  if(await dock.locator('[data-task-id]').count()===0){check('historical_cards_recycled',await dock.locator('.nbt-history-toggle').isVisible());await dock.locator('.nbt-history-toggle').click();}
   check('actual_runtime_assets_without_routes', ['bot-task-ui.js','bot-task-model.js','bot-task.css'].every(n=>assets.has(n)));
   check('actual_task_cards',await dock.locator('[data-task-id]').count()>0);
   check('actual_reception_session',await page.locator('[data-naumi-context-session="'+source.homeSessionId+'"]').count()===1);
