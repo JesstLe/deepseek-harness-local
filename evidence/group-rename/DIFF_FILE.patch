@@ -1,9 +1,9 @@
 diff --git a/docs/implementation/GROUP_RENAME.md b/docs/implementation/GROUP_RENAME.md
 new file mode 100644
-index 0000000..6b3cac5
+index 0000000..d76d7ea
 --- /dev/null
 +++ b/docs/implementation/GROUP_RENAME.md
-@@ -0,0 +1,38 @@
+@@ -0,0 +1,44 @@
 +# 群组改名
 +
 +## 模块与职责
@@ -42,6 +42,12 @@ index 0000000..6b3cac5
 +## 未完成项与下一步
 +
 +发布与用户实际群名以 DEPLOYMENT.json 和 VERIFICATION.txt 的观测为准；不把隔离 UI 测试视为用户运行环境已更新。源代码回滚只回滚该模块文件，不倒退聊天、任务、模型配置或已经成功保存的群名。
++
++## 主线并行整合记录
++
++共享 main 在提交间新增 `6192368`（primary Bot 模块）。本任务已普通 merge 为 `e664224`，随后将最新 main 同步到任务 worktree；primary 的默认接待、群成员与 UI 逻辑原样保留。最终回滚基线调整为 `6192368`，避免源代码回滚撤销别人的新增模块。当前运行的并行主线加载已包含三个群后端文件和群页面 JS，本任务发布仅补齐缺失的 catalog 和 CSS（以部署哈希比对为准），不重复重启服务。初次检测服务正处于并行发布间隙，读取失败；之后确认 92 Sessions、running=0 才继续。
++
++最终整合全量：`node --test tests/*.test.mjs desktop/tests/*.test.cjs`，581/581，通过；整合后的真实 Harness 页面复测 11 项通过，零 pageerror、零推理。
 diff --git a/plugins/naumi-enterprise/assets/bot-chat-model.js b/plugins/naumi-enterprise/assets/bot-chat-model.js
 index 565c03f..afb55cb 100644
 --- a/plugins/naumi-enterprise/assets/bot-chat-model.js
@@ -74,10 +80,10 @@ index e666b9e..81db5cc 100644
 +
 +.nbc-group-title{min-width:0;position:relative}.nbc-title-line{display:flex;align-items:center;gap:6px;min-width:0}.nbc-title-line h1{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nbc-title-line .nbc-icon{flex:none;width:28px;height:28px}.nbc-rename{position:absolute;top:100%;left:0;z-index:12;display:flex;flex-wrap:wrap;gap:8px;width:min(380px,calc(100vw - 110px));padding:12px;background:#fff;border:1px solid #e6e5ed;border-radius:12px;box-shadow:0 10px 30px #29233d18}.nbc-rename input{flex:1;min-width:80px;width:150px;padding:8px;border:1px solid #dcd8e7;border-radius:7px;color:#3a3b49;background:#fff;font:inherit}.nbc-rename button{border:1px solid #e6e5ed;border-radius:7px;background:#fff;padding:7px 10px;font:inherit;color:#75648f;cursor:pointer}.nbc-rename button[type=submit]{background:#75648f;color:#fff;border-color:#75648f}.nbc-rename button:disabled{opacity:.5;cursor:default}.nbc-rename .nbc-error{width:100%;padding:0;margin:0}.nbc-rename input:focus-visible{outline:2px solid #a498bf;outline-offset:2px}
 diff --git a/plugins/naumi-enterprise/assets/bot-groups.js b/plugins/naumi-enterprise/assets/bot-groups.js
-index 870bc57..2bf3a06 100644
+index eb58d72..80fa651 100644
 --- a/plugins/naumi-enterprise/assets/bot-groups.js
 +++ b/plugins/naumi-enterprise/assets/bot-groups.js
-@@ -6,7 +6,7 @@ import {groupCatalog,groupRequest,groupError,roomDraft,watchGroupReplies,roomWor
+@@ -7,7 +7,7 @@ import {groupCatalog,groupRequest,groupError,roomDraft,watchGroupReplies,roomWor
  
  export function createBotGroupsPage(ctx,React){
   const h=React.createElement,{useEffect,useState,useRef,useSyncExternalStore}=React,groups=groupCatalog(),catalog=botCatalog(),Avatar=createBotAvatar(React),Markdown=createChatMarkdown(React);
@@ -86,9 +92,9 @@ index 870bc57..2bf3a06 100644
   const action=(label,onClick,kind,props={})=>h('button',{type:'button',className:'nbc-icon','aria-label':label,title:label,onClick,...props},icon(kind));
   const openSession=id=>{ctx.layout.beginNavigation?.();ctx.uiWorkspace.openSession(id);};
   const openFile=file=>{const sidebar=ctx.get?.('sidebarRight');if(sidebar)sidebar.openResource(filePreviewAddress(file));else openSession(file.sessionId);};
-@@ -21,6 +21,21 @@ export function createBotGroupsPage(ctx,React){
+@@ -22,6 +22,21 @@ export function createBotGroupsPage(ctx,React){
    const key=e=>{if(e.key==='Escape'&&!pending){e.preventDefault();onCancel();}if(e.key==='Tab'){const nodes=[...ref.current.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled)')],first=nodes[0],last=nodes.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}};
-   return h('div',{className:'nbc-modal-backdrop',onMouseDown:e=>{if(e.target===e.currentTarget&&!pending)onCancel();}},h('form',{ref,className:'nbc-create',role:'dialog','aria-modal':true,'aria-label':'新建群聊',onSubmit:submit,onKeyDown:key},h('header',null,h('h2',null,'新建群聊'),action('关闭建群',onCancel,'close',{disabled:pending})),h('label',{className:'nbc-field'},'群名',h('input',{value:name,maxLength:80,required:true,disabled:pending,onChange:e=>change(()=>setName(e.target.value))})),h('fieldset',{disabled:pending},h('legend',null,'成员'),h('div',{className:'nbc-member-grid'},bots.map(bot=>h('label',{key:bot.id,className:'nbc-member-option','data-checked':members.includes(bot.id)},h('input',{type:'checkbox',checked:members.includes(bot.id),disabled:members.length>=12&&!members.includes(bot.id),onChange:e=>change(()=>{setMembers(v=>e.target.checked?[...v,bot.id]:v.filter(id=>id!==bot.id));if(!e.target.checked&&manager===bot.id)setManager('');})}),h(Avatar,{bot,staticPreview:true}),h('span',null,bot.name))))),h('label',{className:'nbc-field'},'默认接话者',h('select',{value:manager,disabled:pending,onChange:e=>change(()=>setManager(e.target.value))},h('option',{value:''},'每次点名'),bots.filter(b=>members.includes(b.id)).map(b=>h('option',{key:b.id,value:b.id},b.name)))),error&&h('p',{className:'nbc-error',role:'alert'},error),h('footer',null,h('button',{type:'button',onClick:onCancel,disabled:pending},'取消'),h('button',{type:'submit',className:'nbc-primary',disabled:pending||members.length<2||!name.trim()},pending?'创建中…':'创建群聊'))));
+   return h('div',{className:'nbc-modal-backdrop',onMouseDown:e=>{if(e.target===e.currentTarget&&!pending)onCancel();}},h('form',{ref,className:'nbc-create',role:'dialog','aria-modal':true,'aria-label':'新建群聊',onSubmit:submit,onKeyDown:key},h('header',null,h('h2',null,'新建群聊'),action('关闭建群',onCancel,'close',{disabled:pending})),h('label',{className:'nbc-field'},'群名',h('input',{value:name,maxLength:80,required:true,disabled:pending,onChange:e=>change(()=>setName(e.target.value))})),h('fieldset',{disabled:pending},h('legend',null,'成员'),h('div',{className:'nbc-member-grid'},bots.map(bot=>h('label',{key:bot.id,className:'nbc-member-option','data-checked':members.includes(bot.id)},h('input',{type:'checkbox',checked:members.includes(bot.id),disabled:bot.id===primary?.id||members.length>=12&&!members.includes(bot.id),onChange:e=>change(()=>{setMembers(v=>e.target.checked?[...v,bot.id]:v.filter(id=>id!==bot.id));if(!e.target.checked&&manager===bot.id)setManager('');})}),h(Avatar,{bot,staticPreview:true}),h('span',null,bot.name))))),!primary&&h('label',{className:'nbc-field'},'默认接话者',h('select',{value:manager,disabled:pending,onChange:e=>change(()=>setManager(e.target.value))},h('option',{value:''},'每次点名'),bots.filter(b=>members.includes(b.id)).map(b=>h('option',{key:b.id,value:b.id},b.name)))),error&&h('p',{className:'nbc-error',role:'alert'},error),h('footer',null,h('button',{type:'button',onClick:onCancel,disabled:pending},'取消'),h('button',{type:'submit',className:'nbc-primary',disabled:pending||members.length<2||!name.trim()},pending?'创建中…':'创建群聊'))));
   }
 + function GroupTitle({room,working}){
 +  const [editing,setEditing]=useState(false),[name,setName]=useState(''),[pending,setPending]=useState(false),[error,setError]=useState(''),[conflict,setConflict]=useState(false);
@@ -108,7 +114,7 @@ index 870bc57..2bf3a06 100644
   function NativeComposer({room,native,accessory,busy,onSubmit,onCancel}){
    const [binding,setBinding]=useState(null),[error,setError]=useState('');const callbacks=useRef({onSubmit,onCancel});callbacks.current={onSubmit,onCancel};
    useEffect(()=>{let closed=false,ref,dispose;const controller=new AbortController();
-@@ -77,7 +92,7 @@ export function createBotGroupsPage(ctx,React){
+@@ -78,7 +93,7 @@ export function createBotGroupsPage(ctx,React){
      (mentions||draft.targets.length>0)&&h('div',{className:'nbc-mentions','aria-label':'点名成员'},targets.map(m=>h('button',{type:'button',key:m.botId,'aria-pressed':draft.targets.includes(m.botId),disabled:sending||!!draft.taskId,onClick:()=>update({...draft,targets:draft.targets.includes(m.botId)?draft.targets.filter(id=>id!==m.botId):[...draft.targets,m.botId]})},'@'+label(m.botId)))))
    );
    return h('section',{className:'nbc-conversation','aria-label':room.name},
@@ -118,20 +124,20 @@ index 870bc57..2bf3a06 100644
      h('div',{className:'nbc-timeline',ref:timeline,role:'log','aria-label':'群消息记录',onScroll:e=>{const n=e.currentTarget;follow.current=n.scrollHeight-n.scrollTop-n.clientHeight<90;}},h('div',{className:'nbc-transcript'},
       readError&&h('div',{className:'nbc-error',role:'alert'},readError,h('button',{type:'button',onClick:()=>refresh.current?.()},'重试')),
 diff --git a/plugins/naumi-enterprise/bot-group-service.js b/plugins/naumi-enterprise/bot-group-service.js
-index c15a0cb..45e837a 100644
+index 343691e..22a80a3 100644
 --- a/plugins/naumi-enterprise/bot-group-service.js
 +++ b/plugins/naumi-enterprise/bot-group-service.js
-@@ -51,6 +51,8 @@ export class BotGroupService {
+@@ -55,6 +55,8 @@ export class BotGroupService {
      });
    }
  
 +  rename(input,actor='owner') { return this.store.rename(input,actor); }
 +
    post(input) {
+     this.alignPrimary();
      const post = this.store.post(input, () => {
-       const room = this.store.room(input.roomId);
 diff --git a/plugins/naumi-enterprise/bot-group-store.js b/plugins/naumi-enterprise/bot-group-store.js
-index 80c5e6f..350ae02 100644
+index 37d810f..ceac544 100644
 --- a/plugins/naumi-enterprise/bot-group-store.js
 +++ b/plugins/naumi-enterprise/bot-group-store.js
 @@ -40,6 +40,11 @@ export class BotGroupStore {
@@ -146,7 +152,7 @@ index 80c5e6f..350ae02 100644
        )`);
      } catch (error) {
        this.db.close();
-@@ -88,6 +93,24 @@ export class BotGroupStore {
+@@ -97,6 +102,24 @@ export class BotGroupStore {
      });
    }
  
@@ -172,7 +178,7 @@ index 80c5e6f..350ae02 100644
      return this.write(() => {
        const explicit = JSON.stringify(botIds);
 diff --git a/plugins/naumi-enterprise/bot-groups.js b/plugins/naumi-enterprise/bot-groups.js
-index 8b28cb7..d013a65 100644
+index c3c0a93..934862b 100644
 --- a/plugins/naumi-enterprise/bot-groups.js
 +++ b/plugins/naumi-enterprise/bot-groups.js
 @@ -1,5 +1,6 @@
@@ -201,7 +207,7 @@ index 8b28cb7..d013a65 100644
  export function installBotGroups(ctx, directory, getTasks) {
    return ctx.inject(['agents','webServer','connection','systemPrompt'], scope => {
      let store;
-@@ -29,9 +40,15 @@ export function installBotGroups(ctx, directory, getTasks) {
+@@ -32,9 +43,15 @@ export function installBotGroups(ctx, directory, getTasks) {
      directory.groupSessionOwner = resolveOwner;
      const installed = new Map();
      const install = agent => {
@@ -219,7 +225,7 @@ index 8b28cb7..d013a65 100644
      };
      scope.on('agent/created', ({agent}) => install(agent));
      scope.on('agent/disposed', ({agent}) => { installed.get(agent)?.(); installed.delete(agent); });
-@@ -86,6 +103,7 @@ export function installBotGroups(ctx, directory, getTasks) {
+@@ -89,6 +106,7 @@ export function installBotGroups(ctx, directory, getTasks) {
          try { input = commands.parse(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
          catch { send(400,{error:'BOT_GROUP_INVALID_REQUEST'}); return; }
          if(input.action==='create'){send(200,service.create(input));return;}
@@ -229,7 +235,7 @@ index 8b28cb7..d013a65 100644
          const requestAttachments=input.attachments??[];
 diff --git a/scripts/deploy-group-rename.mjs b/scripts/deploy-group-rename.mjs
 new file mode 100644
-index 0000000..bb6305d
+index 0000000..4a158f8
 --- /dev/null
 +++ b/scripts/deploy-group-rename.mjs
 @@ -0,0 +1,21 @@
@@ -239,29 +245,29 @@ index 0000000..bb6305d
 +function groupSnapshot(){const db=new DatabaseSync(path.join(runtime,'.dsh/naumi/bot-groups.sqlite'),{readOnly:true});try{const data=Object.fromEntries(['rooms','members','posts','replies','post_context'].map(t=>[t,db.prepare('SELECT * FROM '+t+' ORDER BY rowid').all()]));assert(!data.replies.some(r=>['queued','starting','sent'].includes(r.state)),'ACTIVE_GROUP_REPLY');return data;}finally{db.close();}}
 +if(mode==='prepare'){
 + assert.equal(execFileSync('git',['branch','--show-current'],{encoding:'utf8'}).trim(),'main');const api=await botLiveApi(runtime),sessions=await api.rpc('session/list',{_request:{}}),tasks=await api.json('/naumi/bot-tasks'),bots=await api.json('/naumi/bots'),models=await api.json('/naumi/model-connections'),groups=groupSnapshot();assert(!sessions.items.some(s=>s.running),'RUNNING_SESSIONS');assert(!tasks.tasks.some(t=>['queued','starting','running','waiting'].includes(t.status)),'ACTIVE_TASKS');
-+ const backupDir=path.join(runtime,'runtime/group-rename-'+randomUUID());fs.mkdirSync(backupDir,{recursive:true});const rows=files.map(file=>{const before=fs.readFileSync(path.join(installed,file)),after=fs.readFileSync(path.join(root,'plugins/naumi-enterprise',file)),baseline=execFileSync('git',['show','4c44363a579cd4172d867ec8994e09ab59d4adef:plugins/naumi-enterprise/'+file]);assert.equal(norm(before),norm(baseline),'RUNTIME_DRIFT '+file);for(const [kind,bytes]of [['before',before],['after',after]]){const p=path.join(backupDir,kind,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);}return {file,before:sha(before),after:sha(after)};});
++ const backupDir=path.join(runtime,'runtime/group-rename-'+randomUUID());fs.mkdirSync(backupDir,{recursive:true});const rows=files.map(file=>{const before=fs.readFileSync(path.join(installed,file)),after=fs.readFileSync(path.join(root,'plugins/naumi-enterprise',file)),baseline=execFileSync('git',['show','4c44363a579cd4172d867ec8994e09ab59d4adef:plugins/naumi-enterprise/'+file]);assert([norm(baseline),norm(after),norm(execFileSync('git',['show','6192368e41c5bc23a802ce3b04793aac0aa78b6d:plugins/naumi-enterprise/'+file]))].includes(norm(before)),'RUNTIME_DRIFT '+file);for(const [kind,bytes]of [['before',before],['after',after]]){const p=path.join(backupDir,kind,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);}return {file,before:sha(before),after:sha(after)};});
 + const protectedFiles=['.dsh/.credentials.yaml','.dsh/cordis.patch.yml','.dsh/profiles/web/package.json','.dsh/profiles/web/cordis.yml','.dsh/profiles/web/cordis.patch.yml','.dsh/naumi/bots.json','.dsh/naumi/bot-tasks.json','config/local.json','node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'];for(const f of fs.readdirSync(path.join(runtime,'.dsh/sessions'),{recursive:true}))if(f.endsWith('.jsonl.zstd'))protectedFiles.push('.dsh/sessions/'+f);const protectedHashes=Object.fromEntries(protectedFiles.filter(f=>fs.existsSync(path.join(runtime,f))).map(f=>[f,sha(fs.readFileSync(path.join(runtime,f)))]));
 + const db=new DatabaseSync(path.join(runtime,'.dsh/naumi/bot-groups.sqlite'),{readOnly:true});try{await backup(db,path.join(backupDir,'groups-before.sqlite'));}finally{db.close();}
 + const state={sourceCommit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),backupDir,rows,inventory:inventory(),protectedHashes,groups,sessions:sessions.items.length,tasksHash:sha(JSON.stringify(tasks)),botsHash:sha(JSON.stringify(bots)),modelsHash:sha(JSON.stringify(models)),operationId:randomUUID(),phase:'prepared'};fs.writeFileSync(checkpoint,JSON.stringify(state,null,2));console.log('RENAME_DEPLOY_PREPARED files=6 running=0 backup=PASS');
 +}else{
 + const state=JSON.parse(fs.readFileSync(checkpoint));assert.equal(execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),state.sourceCommit,'SOURCE_CHANGED');
 + if(mode==='apply'||mode==='restore'){
-+  assert(!fs.existsSync(path.join(runtime,'runtime/server.pid')),'SERVICE_MUST_BE_STOPPED');for(const r of state.rows){const expected=mode==='apply'?r.before:r.after;assert.equal(sha(fs.readFileSync(path.join(installed,r.file))),expected,'RUNTIME_CHANGED '+r.file);}for(const r of state.rows)fs.copyFileSync(path.join(state.backupDir,mode==='apply'?'after':'before',r.file),path.join(installed,r.file));state.phase=mode==='apply'?'applied':'restored';fs.writeFileSync(checkpoint,JSON.stringify(state,null,2));console.log('RENAME_DEPLOY_'+state.phase.toUpperCase()+' files=6');
++  const changed=state.rows.filter(r=>r.before!==r.after);if(!changed.every(r=>r.file.startsWith('assets/')))assert(!fs.existsSync(path.join(runtime,'runtime/server.pid')),'SERVICE_MUST_BE_STOPPED');for(const r of state.rows){const expected=mode==='apply'?r.before:r.after;assert.equal(sha(fs.readFileSync(path.join(installed,r.file))),expected,'RUNTIME_CHANGED '+r.file);}for(const r of changed)fs.copyFileSync(path.join(state.backupDir,mode==='apply'?'after':'before',r.file),path.join(installed,r.file));state.phase=mode==='apply'?'applied':'restored';fs.writeFileSync(checkpoint,JSON.stringify(state,null,2));console.log('RENAME_DEPLOY_'+state.phase.toUpperCase()+' files=6');
 + }else if(mode==='verify'){
 +  const api=await botLiveApi(runtime),sessions=await api.rpc('session/list',{_request:{}});assert.equal(sessions.items.length,state.sessions);assert(!sessions.items.some(s=>s.running));for(const [f,h]of Object.entries(state.protectedHashes))assert.equal(sha(fs.readFileSync(path.join(runtime,f))),h,'PROTECTED_CHANGED '+f);const current=inventory();for(const [f,h]of Object.entries(state.inventory))if(!files.includes(f))assert.equal(current[f],h,'UNRELATED_RUNTIME '+f);for(const r of state.rows)assert.equal(current[r.file],r.after);
 +  assert.equal(sha(JSON.stringify(await api.json('/naumi/bot-tasks'))),state.tasksHash);assert.equal(sha(JSON.stringify(await api.json('/naumi/bots'))),state.botsHash);assert.equal(sha(JSON.stringify(await api.json('/naumi/model-connections'))),state.modelsHash);assert.deepEqual(groupSnapshot(),state.groups);
 +  const listed=await api.json('/naumi/bot-groups'),matches=listed.rooms.filter(r=>r.name==='aa');assert.equal(matches.length,1,'EXACT_UNIQUE_GROUP_REQUIRED');assert.equal(matches[0].id,'dd7f92b1-af98-4101-8feb-154d1b6ffac2');const before=matches[0],after=await api.json('/naumi/bot-groups',{action:'rename',operationId:state.operationId,roomId:before.id,expectedName:before.name,name:'工作群'},'x-naumi-bot-groups');assert.deepEqual(after,{...before,name:'工作群'});assert.equal((await api.json('/naumi/bot-groups')).rooms.find(r=>r.id===before.id).name,'工作群');const afterRows=groupSnapshot(),wanted=structuredClone(state.groups);wanted.rooms.find(r=>r.id===before.id).name='工作群';assert.deepEqual(afterRows,wanted);
-+  const source=await (await api.request('/naumi/assets/bot-groups.js')).text();assert(source.includes('修改群名')&&source.includes('GroupTitle'));const record={status:'PASS',sourceCommit:state.sourceCommit,http:200,changedField:'rooms.name',roomId:before.id,before:'aa',after:'工作群',membersPreserved:true,groupAndMessageRowsPreserved:true,protectedFilesUnchanged:Object.keys(state.protectedHashes).length,unrelatedPluginFilesUnchanged:Object.keys(state.inventory).filter(f=>!files.includes(f)).length,sessions:state.sessions,running:0,files:state.rows,modelCalls:0,backup:state.backupDir};fs.writeFileSync(path.join(root,'evidence/group-rename/DEPLOYMENT.json'),JSON.stringify(record,null,2)+'\n');state.phase='verified';fs.writeFileSync(checkpoint,JSON.stringify(state,null,2));console.log('RENAME_LIVE_PASS name=工作群 http=200 members=UNCHANGED messages=UNCHANGED tasks=UNCHANGED models=UNCHANGED running=0');
++  const source=await (await api.request('/naumi/assets/bot-groups.js')).text();assert(source.includes('修改群名')&&source.includes('GroupTitle'));const record={status:'PASS',sourceCommit:state.sourceCommit,http:200,changedField:'rooms.name',roomId:before.id,before:'aa',after:'工作群',membersPreserved:true,groupAndMessageRowsPreserved:true,protectedFilesUnchanged:Object.keys(state.protectedHashes).length,unrelatedPluginFilesUnchanged:Object.keys(state.inventory).filter(f=>!files.includes(f)).length,sessions:state.sessions,running:0,files:state.rows,modelCalls:0,copiedFiles:state.rows.filter(r=>r.before!==r.after).map(r=>r.file),backup:state.backupDir};fs.writeFileSync(path.join(root,'evidence/group-rename/DEPLOYMENT.json'),JSON.stringify(record,null,2)+'\n');state.phase='verified';fs.writeFileSync(checkpoint,JSON.stringify(state,null,2));console.log('RENAME_LIVE_PASS name=工作群 http=200 members=UNCHANGED messages=UNCHANGED tasks=UNCHANGED models=UNCHANGED running=0');
 + }else throw Error('UNKNOWN_MODE');
 +}
 diff --git a/scripts/package-group-rename.mjs b/scripts/package-group-rename.mjs
 new file mode 100644
-index 0000000..14a8c08
+index 0000000..5a34c94
 --- /dev/null
 +++ b/scripts/package-group-rename.mjs
 @@ -0,0 +1,16 @@
 +import fs from 'node:fs';import path from 'node:path';import {execFileSync,spawnSync} from 'node:child_process';import {createHash,randomUUID} from 'node:crypto';import {pathToFileURL} from 'node:url';
-+const root=process.cwd(),e=path.join(root,'evidence/group-rename'),base='4c44363a579cd4172d867ec8994e09ab59d4adef',temp=path.join(root,'runtime/group-rename-evidence'),original=path.join(temp,'baseline'),copy=path.join(temp,'rollback-copy');fs.mkdirSync(temp,{recursive:true});
++const root=process.cwd(),e=path.join(root,'evidence/group-rename'),base='6192368e41c5bc23a802ce3b04793aac0aa78b6d',temp=path.join(root,'runtime/group-rename-evidence-6192368'),original=path.join(temp,'baseline'),copy=path.join(temp,'rollback-copy');fs.mkdirSync(temp,{recursive:true});
 +const files=['plugins/naumi-enterprise/bot-group-store.js','plugins/naumi-enterprise/bot-group-service.js','plugins/naumi-enterprise/bot-groups.js','plugins/naumi-enterprise/assets/bot-chat-model.js','plugins/naumi-enterprise/assets/bot-groups.js','plugins/naumi-enterprise/assets/bot-groups.css','tests/helpers/bot-group-http.mjs','tests/naumi-bot-runtime.test.mjs'];const sha=b=>createHash('sha256').update(b).digest('hex');
 +if(!fs.existsSync(original)){execFileSync('git',['archive','--format=zip','--output='+path.join(temp,'baseline.zip'),base]);execFileSync('python',['-c','import zipfile,sys;zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])',path.join(temp,'baseline.zip'),original]);fs.symlinkSync(path.join(root,'node_modules'),path.join(original,'node_modules'),'junction');}
 +const manifest=files.map(file=>{const bytes=execFileSync('git',['show',base+':'+file]);const before=path.join(e,'original',file);fs.mkdirSync(path.dirname(before),{recursive:true});fs.writeFileSync(before,bytes);return {file,before:sha(bytes),after:sha(fs.readFileSync(path.join(root,file)))};});fs.writeFileSync(path.join(e,'HASHES.json'),JSON.stringify({base,files:manifest},null,2)+'\n');
@@ -278,7 +284,7 @@ index 0000000..14a8c08
 +console.log('ARTIFACTS_CREATED originals='+files.length+' modified_zip=PASS patch=PASS rollback=PASS');
 diff --git a/scripts/verify-group-rename-ui.mjs b/scripts/verify-group-rename-ui.mjs
 new file mode 100644
-index 0000000..80e4046
+index 0000000..6a036bb
 --- /dev/null
 +++ b/scripts/verify-group-rename-ui.mjs
 @@ -0,0 +1,18 @@
@@ -286,7 +292,7 @@ index 0000000..80e4046
 +const root=process.cwd(),out=path.join(root,'evidence/group-rename'),temporary=path.join(root,'runtime','rename-fixture-'+randomUUID()),home=path.join(temporary,'home'),profile=path.join(home,'profiles/web');fs.mkdirSync(path.join(profile,'node_modules/@naumi'),{recursive:true});
 +for(const[name,folder]of [['dsh-enterprise','naumi-enterprise'],['dsh-ui-layout','naumi-ui-layout'],['dsh-sidebar-browser','naumi-sidebar-browser']])fs.symlinkSync(path.join(root,'plugins',folder),path.join(profile,'node_modules/@naumi',name),'junction');fs.symlinkSync(path.join(root,'node_modules/@deepseek-ai'),path.join(profile,'node_modules/@deepseek-ai'),'junction');
 +fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'naumi-rename-fixture',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}}));fs.writeFileSync(path.join(home,'cordis.patch.yml'),stringify([{id:'ui-theme',config:{preference:'light'}},{id:'session-log-deepseek',disabled:true}]));fs.writeFileSync(path.join(profile,'cordis.patch.yml'),stringify([{id:'ui-settings-general',config:{welcomeNoticeVersion:'2026-09-28.1'}}]));
-+const directory=new BotDirectory(path.join(home,'naumi/bots.json'));for(const [i,name]of ['项目主管','研发助理'].entries())await directory.create({sessionId:'fixture-home-'+i,cwd:temporary},{name,kind:'agent',purpose:'群组改名验收'});const bots=directory.list().bots;await directory.close();
++const directory=new BotDirectory(path.join(home,'naumi/bots.json'));for(const [i,name]of ['项目主管','研发助理'].entries())await directory.create({sessionId:'fixture-home-'+i,cwd:temporary},{name,kind:'agent',purpose:'群组改名验收'});const bots=directory.list().bots;await directory.choosePrimary(bots[0].id,directory.list().revision);await directory.close();
 +const sock=http.createServer();await new Promise(r=>sock.listen(0,'127.0.0.1',r));const port=sock.address().port;await new Promise(r=>sock.close(r));const base='http://127.0.0.1:'+port;let output='',browser;const child=spawn(process.execPath,[path.join(root,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'web','--host','127.0.0.1','--port',String(port),'--no-open'],{cwd:root,env:{...process.env,DSH_HOME:home,DSH_TELEMETRY_MODE:'DISABLED'},windowsHide:true});child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);const checks=[];function check(name,value){assert(value,name);checks.push(name);console.log('RENAME_UI_PASS '+name);}
 +try{
 + let launch;for(let i=0;i<150;i++){launch=output.match(new RegExp('http://127\\.0\\.0\\.1:'+port+'/?\\?token=[A-Za-z0-9_~.%-]+'))?.[0];if(launch)break;if(child.exitCode!==null)throw Error('FIXTURE_BOOT_FAILED');await new Promise(r=>setTimeout(r,200));}assert(launch,'FIXTURE_BOOT_TIMEOUT');
