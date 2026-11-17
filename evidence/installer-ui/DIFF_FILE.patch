@@ -1,8 +1,8 @@
 diff --git a/.gitattributes b/.gitattributes
-index e45ca96..6b23920 100644
+index e45ca96..579f758 100644
 --- a/.gitattributes
 +++ b/.gitattributes
-@@ -198,3 +198,18 @@ plugins/naumi-ui-layout/UPSTREAM.json text eol=lf
+@@ -198,3 +198,20 @@ plugins/naumi-ui-layout/UPSTREAM.json text eol=lf
  /evidence/product-identity/ROLLBACK.sh text eol=lf
  /evidence/product-identity/DIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab,cr-at-eol
  /evidence/bot-task-integrity/DIFF_FILE.patch -text whitespace=-blank-at-eol
@@ -21,6 +21,8 @@ index e45ca96..6b23920 100644
 +/evidence/installer-ui/** -text whitespace=cr-at-eol
 +/evidence/installer-ui/DIFF_FILE.patch -text whitespace=-blank-at-eol
 +/evidence/installer-ui/ROLLBACK.sh text eol=lf
++/desktop/scripts/build-desktop.mjs text eol=lf
++/evidence/installer-ui/*.log -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
 diff --git a/CHANGELOG.md b/CHANGELOG.md
 index 677d824..9575901 100644
 --- a/CHANGELOG.md
@@ -1802,7 +1804,7 @@ index 554b399..2a93113 100644
        "dependencies": {
          "electron-updater": "^6.6.2"
 diff --git a/desktop/package.json b/desktop/package.json
-index 0502961..09c79b9 100644
+index 0502961..8715c25 100644
 --- a/desktop/package.json
 +++ b/desktop/package.json
 @@ -1,6 +1,6 @@
@@ -1819,8 +1821,8 @@ index 0502961..09c79b9 100644
      "icons": "node scripts/build-icons.mjs",
 -    "build": "npm run icons && npm run stage && electron-builder --win --x64",
 -    "build:dir": "npm run icons && npm run stage && electron-builder --win --x64 --dir",
-+    "build": "npm run icons && npm run installer:ui && npm run stage && electron-builder --win --x64",
-+    "build:dir": "npm run icons && npm run installer:ui && npm run stage && electron-builder --win --x64 --dir",
++    "build": "npm run icons && npm run installer:ui && npm run stage && node scripts/build-desktop.mjs",
++    "build:dir": "npm run icons && npm run installer:ui && npm run stage && node scripts/build-desktop.mjs --dir",
      "test": "node --test tests/*.test.cjs",
      "release": "node ../scripts/publish-desktop-update.mjs",
 -    "stage": "node ../scripts/build-naumi-layout.mjs && node ../scripts/build-naumi-browser.mjs && node scripts/prepare-runtime.mjs"
@@ -1829,16 +1831,54 @@ index 0502961..09c79b9 100644
    },
    "dependencies": {
      "electron-updater": "^6.6.2"
-@@ -74,7 +75,8 @@
-       "allowElevation": false,
-       "useZip": true,
-       "differentialPackage": false,
--      "include": "installer/maintenance.nsh"
-+      "include": "installer/maintenance.nsh",
-+      "script": "installer/engine.nsi"
-     },
-     "publish": [
-       {
+diff --git a/desktop/scripts/build-desktop.mjs b/desktop/scripts/build-desktop.mjs
+new file mode 100644
+index 0000000..558fa97
+--- /dev/null
++++ b/desktop/scripts/build-desktop.mjs
+@@ -0,0 +1,42 @@
++// Keep electron-builder's stock two-pass uninstaller/signing/size validation.
++// Its nsis.script option bypasses that pipeline, so substitute presentation only
++// at the pinned computeFinalScript boundary, in this build process, never on disk.
++import fs from 'node:fs';
++import path from 'node:path';
++import {createHash} from 'node:crypto';
++import {createRequire} from 'node:module';
++import {fileURLToPath,pathToFileURL} from 'node:url';
++const root=fileURLToPath(new URL('../..',import.meta.url));
++const sha=b=>createHash('sha256').update(b).digest('hex');
++export function presentationScript(raw,engine,metadata){
++ const normalized=raw.replaceAll('\r\n','\n');
++ if(sha(normalized)!==metadata.originalEngineSHA256 || sha(engine)!==metadata.modifiedEngineSHA256 ||
++ engine!==normalized.replace('!include "assistedInstaller.nsh"','!include "${NAUMI_WIZARD_DIR}\\pages.nsh"'))throw Error('NSIS_PRESENTATION_SOURCE_CHANGED');
++ return engine;
++}
++export function installPresentationHook(Target,engine,metadata){
++ const original=Target.prototype.computeFinalScript;
++ if(typeof original!=='function'||original.length!==3)throw Error('NSIS_BUILD_INTERFACE_CHANGED');
++ Target.prototype.computeFinalScript=function(raw,isInstaller,archs){
++  return original.call(this,presentationScript(raw,engine,metadata),isInstaller,archs);
++ };
++ return ()=>{Target.prototype.computeFinalScript=original;};
++}
++export async function buildDesktop(args=process.argv.slice(2)){
++ const require=createRequire(import.meta.url),{build,Platform,Arch}=require('electron-builder');
++ const {NsisTarget}=require('app-builder-lib/out/targets/nsis/NsisTarget.js');
++ const dir=path.join(root,'desktop/installer'),metadata=JSON.parse(fs.readFileSync(path.join(dir,'UPSTREAM.json')));
++ const pkg=JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json')));
++ if(pkg.build.nsis.script)throw Error('NSIS_CUSTOM_SCRIPT_BYPASSES_STOCK_UNINSTALLER');
++ if(require('app-builder-lib/package.json').version!==metadata.version)throw Error('NSIS_BUILDER_VERSION_CHANGED');
++ for(const arg of args)if(arg!=='--dir'&&!arg.startsWith('--output='))throw Error('UNKNOWN_BUILD_ARGUMENT '+arg);
++ const output=args.find(a=>a.startsWith('--output='))?.slice('--output='.length);
++ const callerCwd=process.cwd();
++ const restore=installPresentationHook(NsisTarget,fs.readFileSync(path.join(dir,'engine.nsi'),'utf8'),metadata);
++ try{
++  process.chdir(path.join(root,'desktop'));
++  console.log('NAUMI_BUILDER stock_uninstaller=1 stock_signing=1 stock_size_check=1 engine_delta=1');
++  return await build({projectDir:path.join(root,'desktop'),targets:Platform.WINDOWS.createTarget(args.includes('--dir')?'dir':'nsis',Arch.x64),publish:'never',...(output?{config:{directories:{output}}}:{})});
++ }finally{restore();process.chdir(callerCwd);}
++}
++if(process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url)await buildDesktop();
 diff --git a/desktop/scripts/build-installer-ui.mjs b/desktop/scripts/build-installer-ui.mjs
 new file mode 100644
 index 0000000..60d558c
@@ -1952,10 +1992,10 @@ index 0000000..8f96185
 +console.log(`INSTALLER_UI_COMPILE ${preview?'presentation_preview':'fixture'}=PASS production_presentation=shared executable=${exe}`);
 diff --git a/desktop/tests/installer-ui.test.cjs b/desktop/tests/installer-ui.test.cjs
 new file mode 100644
-index 0000000..b7772d8
+index 0000000..225dc34
 --- /dev/null
 +++ b/desktop/tests/installer-ui.test.cjs
-@@ -0,0 +1,59 @@
+@@ -0,0 +1,69 @@
 +'use strict';
 +const test=require('node:test'), assert=require('node:assert/strict');
 +const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
@@ -2004,7 +2044,7 @@ index 0000000..b7772d8
 + const hook=read('desktop/installer/maintenance.nsh');
 + for(const s of ['!macro customCheckAppRunning','SetErrorLevel 42','installer-preflight.cjs','!macro customInstall','!macro customUnInstall'])assert(hook.includes(s));
 + assert(!hook.includes('taskkill'));assert.equal(pkg.build.appId,'com.naumi.desktop');
-+ assert.equal(pkg.build.nsis.deleteAppDataOnUninstall,false);assert.equal(pkg.build.nsis.script,'installer/engine.nsi');
++ assert.equal(pkg.build.nsis.deleteAppDataOnUninstall,false);assert.equal(pkg.build.nsis.script,undefined);
 + assert(pkg.scripts.build.includes('npm run installer:ui && npm run stage'));
 + assert.equal(pkg.build.beforePack,'./scripts/verify-staged-runtime.cjs');
 + const lock=JSON.parse(read('desktop/package-lock.json'));assert.equal(lock.version,pkg.version);assert.equal(lock.packages[''].version,pkg.version);
@@ -2015,12 +2055,22 @@ index 0000000..b7772d8
 + for(const token of ['RMDir','DeleteRegKey','WriteRegStr','WriteUninstaller','ExecShell'])assert(!preview.includes(token));
 + assert(preview.includes('NaumiUninstallPage'));assert(preview.includes('Page custom NaumiDone'));
 +});
++
++test('presentation build hook preserves both native builder phases and restores original method',async()=>{
++ const {installPresentationHook,presentationScript}=await import('../scripts/build-desktop.mjs');
++ const raw=read('desktop/node_modules/app-builder-lib/templates/nsis/installer.nsi'),engine=read('desktop/installer/engine.nsi'),meta=JSON.parse(read('desktop/installer/UPSTREAM.json'));
++ const calls=[];class Target{computeFinalScript(raw,installer,archs){calls.push({raw,installer,archs,owner:this});return raw;}}
++ const original=Target.prototype.computeFinalScript,restore=installPresentationHook(Target,engine,meta),target=new Target;
++ try{target.computeFinalScript(raw,false,['x64']);target.computeFinalScript(raw,true,['x64']);assert.deepEqual(calls.map(c=>c.installer),[false,true]);assert(calls.every(c=>c.raw===engine&&c.owner===target));assert.throws(()=>presentationScript(raw+'x',engine,meta),/SOURCE_CHANGED/);}finally{restore();}
++ assert.equal(Target.prototype.computeFinalScript,original);
++ const builder=read('desktop/scripts/build-desktop.mjs');assert(builder.includes("publish:'never'"));assert(!builder.includes('writeFile'));
++});
 diff --git a/docs/implementation/INSTALLER_UI.md b/docs/implementation/INSTALLER_UI.md
 new file mode 100644
-index 0000000..6cebab8
+index 0000000..3e8c2b2
 --- /dev/null
 +++ b/docs/implementation/INSTALLER_UI.md
-@@ -0,0 +1,58 @@
+@@ -0,0 +1,64 @@
 +# Naumi 原生安装／卸载界面
 +
 +## 模块与职责
@@ -2045,6 +2095,12 @@ index 0000000..6cebab8
 +- `customCheckAppRunning`、维护准入、失败exit42、finish回执保留；UI不拥有员工数据、会话、模型或维护事务。
 +- 默认卸载保留个人数据；显式上游 `--delete-app-data` 参数行为没有更改。
 +- 不重命名真实依赖／开源许可。隐藏的是默认状态与逐文件路径控件，而非删除依赖。
++
++### 构建接口修正
++
++`nsis.script` 会使 electron-builder 跳过标准的卸载器两阶段生成，直接使用复制来的引擎会缺少 `UNINSTALLER_OUT_FILE`。最终实现不设置该选项；`build-desktop.mjs` 在构建进程内替换 pinned `computeFinalScript` 的输入，安装与卸载两个阶段均只替换一个页面 include，并在 finally 恢复方法。不改 node_modules 文件，不跳过标准卸载器生成、签名与体积检查；版本、函数签名和源码hash不符立即失败。9项UI契约覆盖两个阶段及恢复。
++
++原输出目录被已有桌面进程占用时，使用 `npm --prefix desktop run build -- --output=../runtime/naumi-desktop-release-0.3.3`；不结束现有进程。正式构建输出和失败日志见BUILD.json。
 +
 +## 本次实现与迁移
 +
@@ -2088,7 +2144,7 @@ index 2cef7f0..5d79a43 100644
 +export const PRODUCT_VERSION="0.3.3";
 diff --git a/scripts/installer-ui-evidence.mjs b/scripts/installer-ui-evidence.mjs
 new file mode 100644
-index 0000000..b50f1df
+index 0000000..6b33169
 --- /dev/null
 +++ b/scripts/installer-ui-evidence.mjs
 @@ -0,0 +1,74 @@
@@ -2106,7 +2162,7 @@ index 0000000..b50f1df
 + 'desktop/installer/presentation.nsh','desktop/installer/pages.nsh','desktop/installer/engine.nsi',
 + 'desktop/installer/multiuser-init.nsh','desktop/installer/UPSTREAM.json',
 + ...['logo','rail','action-install','action-uninstall','action-done','action-cancel','action-browse'].map(n=>'desktop/installer/assets/'+n+'.bmp'),
-+ 'desktop/scripts/build-installer-ui.mjs','desktop/scripts/verify-installer-ui.mjs',
++ 'desktop/scripts/build-installer-ui.mjs','desktop/scripts/verify-installer-ui.mjs','desktop/scripts/build-desktop.mjs',
 + 'desktop/tests/installer-ui.test.cjs','docs/implementation/INSTALLER_UI.md','scripts/installer-ui-evidence.mjs'];
 +const runTests=(copy,log)=>{
 + const result=spawnSync(process.execPath,['--test','tests/*.test.mjs','desktop/tests/*.test.cjs'],{cwd:copy,encoding:'utf8',windowsHide:true,timeout:240000,maxBuffer:15*1024*1024});

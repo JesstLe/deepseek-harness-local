@@ -23,6 +23,12 @@ Bot integrity 两个后端文件及其 `.gitattributes` 证据条目原样保留
 - 默认卸载保留个人数据；显式上游 `--delete-app-data` 参数行为没有更改。
 - 不重命名真实依赖／开源许可。隐藏的是默认状态与逐文件路径控件，而非删除依赖。
 
+### 构建接口修正
+
+`nsis.script` 会使 electron-builder 跳过标准的卸载器两阶段生成，直接使用复制来的引擎会缺少 `UNINSTALLER_OUT_FILE`。最终实现不设置该选项；`build-desktop.mjs` 在构建进程内替换 pinned `computeFinalScript` 的输入，安装与卸载两个阶段均只替换一个页面 include，并在 finally 恢复方法。不改 node_modules 文件，不跳过标准卸载器生成、签名与体积检查；版本、函数签名和源码hash不符立即失败。9项UI契约覆盖两个阶段及恢复。
+
+原输出目录被已有桌面进程占用时，使用 `npm --prefix desktop run build -- --output=../runtime/naumi-desktop-release-0.3.3`；不结束现有进程。正式构建输出和失败日志见BUILD.json。
+
 ## 本次实现与迁移
 
 1. 安装页：原生路径输入／目录选择／取消／安装；检查本机绝对路径、规范化路径、保留Naumi子目录。

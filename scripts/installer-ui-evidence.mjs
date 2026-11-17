@@ -12,7 +12,7 @@ const files=['.gitattributes','CHANGELOG.md','desktop/package.json','desktop/pac
  'desktop/installer/presentation.nsh','desktop/installer/pages.nsh','desktop/installer/engine.nsi',
  'desktop/installer/multiuser-init.nsh','desktop/installer/UPSTREAM.json',
  ...['logo','rail','action-install','action-uninstall','action-done','action-cancel','action-browse'].map(n=>'desktop/installer/assets/'+n+'.bmp'),
- 'desktop/scripts/build-installer-ui.mjs','desktop/scripts/verify-installer-ui.mjs',
+ 'desktop/scripts/build-installer-ui.mjs','desktop/scripts/verify-installer-ui.mjs','desktop/scripts/build-desktop.mjs',
  'desktop/tests/installer-ui.test.cjs','docs/implementation/INSTALLER_UI.md','scripts/installer-ui-evidence.mjs'];
 const runTests=(copy,log)=>{
  const result=spawnSync(process.execPath,['--test','tests/*.test.mjs','desktop/tests/*.test.cjs'],{cwd:copy,encoding:'utf8',windowsHide:true,timeout:240000,maxBuffer:15*1024*1024});
