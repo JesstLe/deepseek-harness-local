@@ -46,7 +46,7 @@ test('maintenance gate, user data retention, product identity and package stagin
  const hook=read('desktop/installer/maintenance.nsh');
  for(const s of ['!macro customCheckAppRunning','SetErrorLevel 42','installer-preflight.cjs','!macro customInstall','!macro customUnInstall'])assert(hook.includes(s));
  assert(!hook.includes('taskkill'));assert.equal(pkg.build.appId,'com.naumi.desktop');
- assert.equal(pkg.build.nsis.deleteAppDataOnUninstall,false);assert.equal(pkg.build.nsis.script,'installer/engine.nsi');
+ assert.equal(pkg.build.nsis.deleteAppDataOnUninstall,false);assert.equal(pkg.build.nsis.script,undefined);
  assert(pkg.scripts.build.includes('npm run installer:ui && npm run stage'));
  assert.equal(pkg.build.beforePack,'./scripts/verify-staged-runtime.cjs');
  const lock=JSON.parse(read('desktop/package-lock.json'));assert.equal(lock.version,pkg.version);assert.equal(lock.packages[''].version,pkg.version);
@@ -56,4 +56,14 @@ test('uninstall preview is a non-destructive presentation, not an alternate remo
  const preview=fixture.slice(fixture.indexOf('const body=preview?'),fixture.indexOf('`:`'));
  for(const token of ['RMDir','DeleteRegKey','WriteRegStr','WriteUninstaller','ExecShell'])assert(!preview.includes(token));
  assert(preview.includes('NaumiUninstallPage'));assert(preview.includes('Page custom NaumiDone'));
+});
+
+test('presentation build hook preserves both native builder phases and restores original method',async()=>{
+ const {installPresentationHook,presentationScript}=await import('../scripts/build-desktop.mjs');
+ const raw=read('desktop/node_modules/app-builder-lib/templates/nsis/installer.nsi'),engine=read('desktop/installer/engine.nsi'),meta=JSON.parse(read('desktop/installer/UPSTREAM.json'));
+ const calls=[];class Target{computeFinalScript(raw,installer,archs){calls.push({raw,installer,archs,owner:this});return raw;}}
+ const original=Target.prototype.computeFinalScript,restore=installPresentationHook(Target,engine,meta),target=new Target;
+ try{target.computeFinalScript(raw,false,['x64']);target.computeFinalScript(raw,true,['x64']);assert.deepEqual(calls.map(c=>c.installer),[false,true]);assert(calls.every(c=>c.raw===engine&&c.owner===target));assert.throws(()=>presentationScript(raw+'x',engine,meta),/SOURCE_CHANGED/);}finally{restore();}
+ assert.equal(Target.prototype.computeFinalScript,original);
+ const builder=read('desktop/scripts/build-desktop.mjs');assert(builder.includes("publish:'never'"));assert(!builder.includes('writeFile'));
 });

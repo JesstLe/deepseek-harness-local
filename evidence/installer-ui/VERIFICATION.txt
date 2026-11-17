@@ -3,7 +3,8 @@ Branch: codex/naumi-installer-ui-20261117
 Initial baseline: e17dc652dbc39ec2420cc092863b30fbbb35e3be
 Integrated/test baseline: 8995df9da41b6a36483a1b84277396892968d69c
 Changed fields: desktop version 0.3.2 -> 0.3.3; desktop lock root versions -> 0.3.3;
-nsis.script unset -> installer/engine.nsi; build invokes installer:ui before fresh stage;
+nsis.script remains unset; build-desktop.mjs substitutes pinned presentation input for both native
+builder phases; stock uninstaller/signing/size-check pipeline remains enabled; fresh stage retained;
 maintenance includes shared presentation and suppresses uninstall detail printing;
 custom native install/progress/uninstall/completion pages, light brand rail, DPI geometry,
 native button semantics, local path checks, explicit completion and silent-safe failure UI.
@@ -29,15 +30,15 @@ MODIFIED
 Command: node --test tests/*.test.mjs desktop/tests/*.test.cjs
 Input: modified source; no real employee/model/business task execution
 Literal output/result:
-ℹ tests 466
+ℹ tests 467
 ℹ suites 0
-ℹ pass 466
+ℹ pass 467
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
 Exit status: 0
-Full output: MODIFIED.log. Final focused UI recheck: UI_TARGETED.log, 8/8, exit0.
+Full output: MODIFIED.log. Final focused UI recheck: UI_TARGETED.log, 9/9, exit0.
 
 NATIVE COMPILE AND UI
 Commands: node desktop/scripts/build-installer-ui.mjs
@@ -62,8 +63,8 @@ Exit status: native fixture 2 (expected rejection); assertion runner 0. NATIVE_F
 
 ROLLBACK
 Command: D:/DEV/Git/bin/bash.exe evidence/installer-ui/ROLLBACK.sh --test
-Input: another baseline source copy, apply 23 modified files, restore 6 originals and
-remove 17 new files, verify hashes, then node --test tests/*.test.mjs desktop/tests/*.test.cjs
+Input: another baseline source copy, apply 24 modified files, restore 6 originals and
+remove 18 new files, verify hashes, then node --test tests/*.test.mjs desktop/tests/*.test.cjs
 Literal output:
 ROLLBACK tests=458 pass=458 fail=0 exit=0
 RESTORED version=0.3.2 default_nsis_pages=1 maintenance=retained data_retention=retained bot_integrity=retained
@@ -76,7 +77,7 @@ ROLLBACK_RESULT.json. Rollback never targets the shared checkout, runtime or emp
 REOPEN
 Command: node scripts/installer-ui-evidence.mjs reopen
 Literal output:
-REOPEN files=23 zip_crc=PASS hashes=PASS patch=PASS verification=PASS rollback=PASS
+REOPEN files=24 zip_crc=PASS hashes=PASS patch=PASS verification=PASS rollback=PASS
 Zip originals and modified bytes checked; patch reverse-check checked; shell syntax checked;
 ROLLBACK.sh Git executable mode100755 checked before commit.
 
@@ -84,3 +85,12 @@ BUILD / DELIVERY
 Pending fixed-main build receipt; append actual build provenance to BUILD.json.
 This slice does not run full-product install/upgrade/downgrade/removal or publish a Release.
 The existing 3080 service, configurations, task ledger and employee data were not touched.
+
+PRODUCTION BUILD INTEGRATION CORRECTION
+Initial fixed-main 4273cf0 full stage passed. Default output build exited1 on locked dxil.dll;
+existing desktop processes retained. Root-CWD direct builder attempt exited1 on hook resolution.
+Separate-directory CLI then reached real NSIS compilation but exited1: custom nsis.script
+skips standard uninstaller generation and leaves UNINSTALLER_OUT_FILE unset. All three logs
+retained as BUILD_ATTEMPT1/2/3.log. Final fix removes nsis.script and uses a build-process-local
+computeFinalScript input substitution for both stock phases; no third-party file edits or
+installer transaction replacement. A ninth targeted test covers both phases and hook restoration.
