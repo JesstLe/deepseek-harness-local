@@ -74,3 +74,6 @@ BotDirectory / 原生 Session、BotTaskStore、原生标题事件和工作区服
 - 安装器模块11/11通过。最终复测从已安装旧策略0.3.6覆盖到修订版0.3.6，保留最初0.3.5安装及退出回执；不把这次补测写成第二次干净的0.3.5起点。当前候选仍未公开。
 
 - 首个policy候选真实重试观察到旧卸载器参数仍缺少--keep-shortcuts，未认定修复：installUtil.nsh中的函数在include时已展开原宏，随后重定义只影响外层Section。已改为从固定upstream生成仅替换该宏的install-util.nsh，让原函数定义前就采用修订宏；构建校验原始/修改util双hash，原生fixture也从实际生成util取宏并先编译函数再调用。新增编译时序回归，模块12/12及原生5例通过；首个policy上传仍为草稿，后续替换。
+
+- 最终候选固定main58ccccd（runtime stage dbaaee9，包含D2/本轮总览迁移文件版本与D4；不含后来e7fe7a5目标关联或creation/import后续切片）。该候选worktree最终集中全仓739/739，exit0，152.98秒，FULL_CANDIDATE_FINAL.log；没有真实模型请求。
+- 最终修订包495184762字节，SHA256 f37018df64eee312193b7109e3f9da35d1f306c3dea3e44745b3e07cd7b00d2e；草稿资产已替换，最终原生旧卸载器命令行确含--keep-shortcuts（UPGRADE_NATIVE_ARGS.json），覆盖安装完整验证尚在执行。共享3080不参与安装验收。
