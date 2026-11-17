@@ -1,0 +1,893 @@
+diff --git a/.gitattributes b/.gitattributes
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -282,3 +282,15 @@
+ /evidence/im-settings-polish/*.log -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
+ /evidence/im-settings-polish/DIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab,cr-at-eol
+ /evidence/im-settings-polish/ROLLBACK.sh text eol=lf
++
++# Blender MCP source/evidence and copy rollback byte stability.
++/plugins/naumi-enterprise/blender* text eol=lf
++/plugins/naumi-enterprise/blender-bridge/** text eol=lf
++/plugins/naumi-enterprise/blender-skills/** text eol=lf
++/plugins/naumi-enterprise/assets/blender* text eol=lf
++/plugins/naumi-enterprise/third-party/blender-mcp/** text eol=lf
++/scripts/*blender* text eol=lf
++/tests/blender-mcp.test.mjs text eol=lf
++/docs/implementation/BLENDER_MCP.md text eol=lf
++/evidence/blender-mcp/** -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab,cr-at-eol
++/evidence/blender-mcp/ROLLBACK.sh text eol=lf
+diff --git a/package.json b/package.json
+--- a/package.json
++++ b/package.json
+@@ -23,7 +23,8 @@
+   },
+   "dependencies": {
+     "@deepseek-ai/dsh": "0.2.2-rc.1",
+-    "agent-desktop": "1.3.1"
++    "agent-desktop": "1.3.1",
++    "@modelcontextprotocol/server": "2.2.0"
+   },
+   "allowScripts": {
+     "@deepseek-ai/dsh-subprocess-local@0.2.2-rc.1": true,
+diff --git a/package-lock.json b/package-lock.json
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -9,7 +9,8 @@
+       "version": "1.0.0",
+       "dependencies": {
+         "@deepseek-ai/dsh": "0.2.2-rc.1",
+-        "agent-desktop": "1.3.1"
++        "agent-desktop": "1.3.1",
++        "@modelcontextprotocol/server": "2.2.0"
+       },
+       "devDependencies": {
+         "acorn": "8.19.0"
+@@ -10510,6 +10511,19 @@
+       "funding": {
+         "url": "https://github.com/sponsors/colinhacks"
+       }
++    },
++    "node_modules/@modelcontextprotocol/server": {
++      "version": "2.2.0",
++      "resolved": "https://registry.npmjs.org/@modelcontextprotocol/server/-/server-2.2.0.tgz",
++      "integrity": "sha512-qFnltjus6Gk8Lx6J1w2RXmr3YPN22MNT6qD6zjAkaiWIlFIFxWClz0rXHNuJF/KSUyn5YGhkSvXkWDbQHVLFEQ==",
++      "license": "MIT",
++      "dependencies": {
++        "@modelcontextprotocol/core": "2.2.0",
++        "zod": "^4.2.0"
++      },
++      "engines": {
++        "node": ">=20"
++      }
+     }
+   }
+ }
+diff --git a/plugins/naumi-enterprise/host.js b/plugins/naumi-enterprise/host.js
+--- a/plugins/naumi-enterprise/host.js
++++ b/plugins/naumi-enterprise/host.js
+@@ -1,3 +1,4 @@
++import {installBlender} from './blender.js';
+ import {installPluginMarket} from './plugin-market.js';
+ import {PRODUCT_VERSION} from './product-version.js';
+ import {installModelConnections} from './model-connections.js';
+@@ -18,6 +19,7 @@
+   installModelConnections(ctx);
+   installPluginMarket(ctx);
+   installAgentDesktop(ctx);
++  installBlender(ctx);
+   installEgoBrowser(ctx);
+   installDingTalk(ctx);
+   installTeamProfile(ctx);
+@@ -31,6 +33,8 @@
+   assets.set('desktop-updates.js','text/javascript; charset=utf-8');
+   assets.set('desktop-updates.css','text/css; charset=utf-8');
+   assets.set('product-identity.css','text/css; charset=utf-8');
++  assets.set('blender-settings.js','text/javascript; charset=utf-8');
++  assets.set('blender-settings.css','text/css; charset=utf-8');
+   assets.set('model-connections.js','text/javascript; charset=utf-8');
+   assets.set('im-settings.js','text/javascript; charset=utf-8');
+   assets.set('im-settings.css','text/css; charset=utf-8');
+@@ -83,7 +87,7 @@
+   ctx.on('webserver/index-inject',table=>{
+     table.push({kind:'global',name:'__NAUMI__',value:{collaborationOrigin,designOrigin,version:'0.3.0',product:'Naumi',productVersion:PRODUCT_VERSION}});
+     table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/bot-groups.css"><link rel="stylesheet" href="/naumi/assets/primary-bot.css"><link rel="stylesheet" href="/naumi/assets/plugin-market.css"><link rel="stylesheet" href="/naumi/assets/desktop-updates.css">'});
+-    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/product-identity.css"><link rel="stylesheet" href="/naumi/assets/model-connections.css"><link rel="stylesheet" href="/naumi/assets/im-settings.css"><link rel="stylesheet" href="/naumi/assets/employee-center.css"><link rel="stylesheet" href="/naumi/assets/employee-experience.css"><link rel="stylesheet" href="/naumi/assets/browser.css"><link rel="stylesheet" href="/naumi/assets/browser-native.css"><link rel="stylesheet" href="/naumi/assets/team-panel.css"><link rel="stylesheet" href="/naumi/assets/bot-sidebar.css"><link rel="stylesheet" href="/naumi/assets/bot-task.css"><link rel="stylesheet" href="/naumi/assets/bot-avatar.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
++    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/product-identity.css"><link rel="stylesheet" href="/naumi/assets/model-connections.css"><link rel="stylesheet" href="/naumi/assets/im-settings.css"><link rel="stylesheet" href="/naumi/assets/blender-settings.css"><link rel="stylesheet" href="/naumi/assets/employee-center.css"><link rel="stylesheet" href="/naumi/assets/employee-experience.css"><link rel="stylesheet" href="/naumi/assets/browser.css"><link rel="stylesheet" href="/naumi/assets/browser-native.css"><link rel="stylesheet" href="/naumi/assets/team-panel.css"><link rel="stylesheet" href="/naumi/assets/bot-sidebar.css"><link rel="stylesheet" href="/naumi/assets/bot-task.css"><link rel="stylesheet" href="/naumi/assets/bot-avatar.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
+   });
+   ctx.effect(()=>ctx.webServer.tapIndex(html=>html.replace(/<title>[^<]*<\/title>/i,'<title>Naumi</title>').replace(/<link[^>]+rel="(?:shortcut )?icon"[^>]*href="(?!\/naumi\/)[^"]*"[^>]*>/g,'')));
+ }
+diff --git a/plugins/naumi-enterprise/client.js b/plugins/naumi-enterprise/client.js
+--- a/plugins/naumi-enterprise/client.js
++++ b/plugins/naumi-enterprise/client.js
+@@ -1,5 +1,6 @@
+ /** Async presentation-only module; the original enterprise app below stays intact. */
+ function installNaumiContextUI(ctx,React,createPortal,Icon){
++  ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/blender-settings.js').then(m=>{if(!closed)dispose=m.installBlenderUI(ctx,React);}).catch(e=>console.error('Naumi Blender:',e));return()=>{closed=true;dispose?.();};});
+   ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/plugin-market.js').then(module=>{if(!closed)dispose=module.installPluginMarketUI(ctx,React);}).catch(error=>console.error('Naumi plugin market:',error));return()=>{closed=true;dispose?.();};});
+   ctx.effect(()=>{
+     let dispose,closed=false;
+diff --git a/plugins/naumi-enterprise/package.json b/plugins/naumi-enterprise/package.json
+--- a/plugins/naumi-enterprise/package.json
++++ b/plugins/naumi-enterprise/package.json
+@@ -76,7 +76,11 @@
+     "im-platforms.js",
+     "im-adapters",
+     "model-reasoning.js",
+-    "official-reasoning-specs.json"
++    "official-reasoning-specs.json",
++    "blender.js",
++    "blender-runtime.js",
++    "blender-bridge",
++    "blender-skills"
+   ],
+   "dsh": {
+     "bundle": {
+@@ -113,6 +117,7 @@
+     "@deepseek-ai/dsh-schedule": "0.2.2-rc.1",
+     "@deepseek-ai/dsh-skill-filesystem": "0.2.2-rc.1",
+     "@deepseek-ai/dsh-tool-executor-native": "0.2.2-rc.1",
+-    "@earendil-works/pi-ai": "1.5.2"
++    "@earendil-works/pi-ai": "1.5.2",
++    "@modelcontextprotocol/server": "2.2.0"
+   }
+ }
+diff --git a/plugins/naumi-enterprise/blender.js b/plugins/naumi-enterprise/blender.js
+new file mode 100644
+--- /dev/null
++++ b/plugins/naumi-enterprise/blender.js
+@@ -0,0 +1,39 @@
++import * as mcpClient from '@deepseek-ai/dsh-mcp-client';
++import * as filesystemSkills from '@deepseek-ai/dsh-skill-filesystem';
++import {fileURLToPath} from 'node:url';
++import {z} from 'zod';
++import {BlenderRuntime,blenderMcpConfig} from './blender-runtime.js';
++
++const command=z.discriminatedUnion('action',[
++  z.object({action:z.literal('detect')}).strict(),
++  z.object({action:z.literal('select'),executable:z.string().min(1).max(4096).nullable(),expectedRevision:z.number().int().nonnegative()}).strict(),
++  z.object({action:z.literal('start')}).strict(),z.object({action:z.literal('disconnect')}).strict(),
++]);
++export function createBlenderHandler(scope,runtime){return async(req,res)=>{
++  res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Naumi-Blender','1');
++  const send=(status,value)=>{if(!res.destroyed)res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'}).end(JSON.stringify(value));};
++  const a=scope.connection.admit(req);if('rejection'in a){send(a.rejection,{error:'AUTH_REQUIRED'});return;}if(a.peer.principal.kind!=='owner'){send(403,{error:'OWNER_REQUIRED'});return;}
++  const read=async()=>{const names=scope.tools.definitions().filter(t=>t.name.startsWith('mcp__naumi_blender__'));return {...await runtime.status(),namespace:'naumi_blender',toolCount:names.length,toolRegistered:names.length===6};};
++  try{
++    if(req.method==='GET'){send(200,await read());return;}
++    if(req.method!=='POST'){res.setHeader('Allow','GET, POST');send(405,{error:'METHOD_NOT_ALLOWED'});return;}
++    if(req.headers['x-naumi-blender']!=='1'||req.headers.origin&&![`http://${req.headers.host}`,`https://${req.headers.host}`].includes(req.headers.origin)){send(403,{error:'SAME_ORIGIN_REQUIRED'});return;}
++    if(!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type']??'')){send(415,{error:'JSON_REQUIRED'});return;}
++    let size=0;const chunks=[];for await(const b of req){size+=b.length;if(size>8192){send(413,{error:'BLENDER_BODY_TOO_LARGE'});return;}chunks.push(b);}
++    let p;try{p=command.parse(JSON.parse(Buffer.concat(chunks).toString('utf8')));}catch{send(400,{error:'BLENDER_INVALID_REQUEST'});return;}
++    if(p.action==='select')await runtime.save(p.executable,p.expectedRevision);
++    if(p.action==='detect')runtime.cached=null;
++    if(p.action==='start')await runtime.start();
++    if(p.action==='disconnect')await runtime.disconnect();
++    send(200,await read());
++  }catch(e){const code=/^BLENDER_[A-Z_]+$/.test(e.message)?e.message:'BLENDER_OPERATION_FAILED';send(code==='BLENDER_CONFIG_CONFLICT'?409:400,{error:code});}
++};}
++export function installBlender(ctx){
++  return ctx.inject(['tools','skills','webServer','connection'],scope=>{
++    const runtime=new BlenderRuntime();
++    scope.plugin(mcpClient,blenderMcpConfig(runtime.home));
++    scope.plugin(filesystemSkills,{providerName:'naumi-blender',includeDefaultRoots:false,customSkillDirs:[fileURLToPath(new URL('./blender-skills',import.meta.url))],watch:false});
++    scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/blender',handler:createBlenderHandler(scope,runtime)}));
++    scope.effect(()=>()=>runtime.close());
++  });
++}
+diff --git a/plugins/naumi-enterprise/blender-runtime.js b/plugins/naumi-enterprise/blender-runtime.js
+new file mode 100644
+--- /dev/null
++++ b/plugins/naumi-enterprise/blender-runtime.js
+@@ -0,0 +1,65 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import os from 'node:os';
++import {fileURLToPath} from 'node:url';
++import {execFile,spawn} from 'node:child_process';
++import {promisify} from 'node:util';
++import {randomBytes,randomUUID} from 'node:crypto';
++import {readBridge,requestBlender} from './blender-bridge/client.js';
++
++const exec=promisify(execFile),delay=ms=>new Promise(r=>setTimeout(r,ms));
++export const blenderHome=()=>path.join(process.env.DSH_HOME??path.join(os.homedir(),'.dsh'),'naumi','blender');
++const atomic=(file,value)=>{fs.mkdirSync(path.dirname(file),{recursive:true});const temp=file+'.'+randomUUID()+'.tmp';fs.writeFileSync(temp,JSON.stringify(value,null,2)+'\n',{mode:0o600});fs.renameSync(temp,file);};
++const alive=pid=>{if(!Number.isInteger(pid)||pid<1)return false;try{process.kill(pid,0);return true;}catch(e){return e.code!=='ESRCH';}};
++function pending(home){try{const v=JSON.parse(fs.readFileSync(path.join(home,'pending.json'),'utf8'));return alive(v.pid)?v:null;}catch{return null;}}
++function acquire(home){const file=path.join(home,'launch.lock');for(let i=0;i<2;i++)try{const fd=fs.openSync(file,'wx',0o600);fs.writeFileSync(fd,JSON.stringify({pid:process.pid}));return {fd,file};}catch(e){if(e.code!=='EEXIST')throw e;let owner;try{owner=JSON.parse(fs.readFileSync(file,'utf8'));}catch{throw Error('BLENDER_LAUNCH_IN_PROGRESS');}if(alive(owner.pid))throw Error('BLENDER_LAUNCH_IN_PROGRESS');fs.unlinkSync(file);}throw Error('BLENDER_LAUNCH_IN_PROGRESS');}
++export function loadBlenderConfig(home){try{const v=JSON.parse(fs.readFileSync(path.join(home,'config.json'),'utf8'));if(v.version!==1||!Number.isInteger(v.revision)||v.revision<0||v.executable!==null&&typeof v.executable!=='string')throw Error();return v;}catch(e){if(e.code==='ENOENT')return {version:1,revision:0,executable:null};throw Error('BLENDER_CONFIG_INVALID');}}
++export async function inspectBlender(executable){
++  if(!path.isAbsolute(executable)||path.basename(executable).toLowerCase()!==(process.platform==='win32'?'blender.exe':'blender'))throw Error('BLENDER_EXECUTABLE_INVALID');
++  const stat=fs.statSync(executable);if(!stat.isFile())throw Error('BLENDER_EXECUTABLE_INVALID');
++  const {stdout}=await exec(executable,['--version'],{timeout:10000,maxBuffer:8192,windowsHide:true});
++  const version=/^Blender (\d+)\.(\d+)\.(\d+)([^\r\n]*)/m.exec(stdout);if(!version||Number(version[1])<4)throw Error('BLENDER_VERSION_UNSUPPORTED');
++  return {executable,version:version[0].trim()};
++}
++export async function discoverBlender({platform=process.platform,env=process.env,exists=fs.existsSync,inspect=inspectBlender}={}){
++  const candidates=new Set();if(env.NAUMI_BLENDER_EXECUTABLE)candidates.add(env.NAUMI_BLENDER_EXECUTABLE);
++  const dirs=platform==='win32'?[path.join(env.ProgramFiles??'C:/Program Files','Blender Foundation'),path.join(env.LOCALAPPDATA??os.homedir(),'Programs','Blender Foundation')]:platform==='darwin'?['/Applications/Blender.app/Contents/MacOS']:['/usr/bin','/usr/local/bin','/snap/bin'];
++  for(const dir of dirs){const binary=platform==='win32'?'blender.exe':'blender';if(exists(path.join(dir,binary)))candidates.add(path.join(dir,binary));try{for(const entry of fs.readdirSync(dir,{withFileTypes:true}))if(entry.isDirectory()&&/^blender/i.test(entry.name))candidates.add(path.join(dir,entry.name,binary));}catch{}}
++  const found=[];for(const candidate of candidates)if(exists(candidate))try{found.push(await inspect(candidate));}catch{}
++  return found.sort((a,b)=>b.version.localeCompare(a.version,undefined,{numeric:true}));
++}
++export function blenderMcpConfig(home=blenderHome()){
++  return {serverName:'naumi_blender',transport:'stdio',command:process.execPath,args:[fileURLToPath(new URL('./blender-bridge/server.mjs',import.meta.url))],env:{NAUMI_BLENDER_HOME:home},cwd:fileURLToPath(new URL('.',import.meta.url)),toolCallTimeoutMs:150000,failOnStartupError:false,maxInstructionBytes:8192,reconnect:{enabled:true,initialDelayMs:500,maxDelayMs:15000,maxAttempts:5}};
++}
++export class BlenderRuntime{
++  constructor({home=blenderHome(),discover=discoverBlender,inspect=inspectBlender,spawnProcess=spawn}={}){Object.assign(this,{home,discover,inspect,spawnProcess});this.serial=Promise.resolve();}
++  async candidates(){if(!this.cached||Date.now()-this.scannedAt>300000){this.cached=await this.discover();this.scannedAt=Date.now();}return this.cached;}
++  async status(){
++    const config=loadBlenderConfig(this.home),candidates=await this.candidates();let engine=config.executable?candidates.find(c=>c.executable===config.executable):candidates[0];
++    if(config.executable&&!engine)try{engine=await this.inspect(config.executable);}catch{}
++    let connected=false,instance=null,descriptor=null;try{descriptor=readBridge(this.home);instance=await requestBlender(this.home,'hello',{}, {timeoutMs:1500});connected=instance?.protocol===1&&instance.name==='naumi-blender';}catch{}
++    const running=!!descriptor&&alive(descriptor.pid);
++    return {revision:config.revision,bundledMcp:true,engineBundled:false,installed:!!engine,engine:engine??null,candidates,connected,running,unresponsive:running&&!connected,instance:connected?{pid:instance.pid,version:instance.blenderVersion}:null,launching:!connected&&!running&&(!!this.starting||!!pending(this.home)),telemetry:false};
++  }
++  execute(fn){const run=this.serial.then(fn);this.serial=run.catch(()=>{});return run;}
++  save(executable,revision){return this.execute(async()=>{const old=loadBlenderConfig(this.home);if(old.revision!==revision)throw Error('BLENDER_CONFIG_CONFLICT');const state=await this.status();if(state.running||state.launching)throw Error('BLENDER_DISCONNECT_REQUIRED');if(executable!==null)await this.inspect(executable);atomic(path.join(this.home,'config.json'),{...old,revision:old.revision+1,executable});this.cached=null;return this.status();});}
++  start({headless=false}={}){return this.execute(async()=>{
++    const before=await this.status();if(before.connected)return before;if(before.running)throw Error('BLENDER_BUSY');if(before.launching)throw Error('BLENDER_START_PENDING');if(!before.engine)throw Error('BLENDER_NOT_INSTALLED');
++    fs.mkdirSync(this.home,{recursive:true});const {fd,file:lock}=acquire(this.home);
++    this.starting=true;let child;
++    try{
++      const run=path.join(this.home,'runs',randomUUID()),file=path.join(run,'launch.json');fs.mkdirSync(run,{recursive:true});
++      const spec={version:1,home:this.home,instanceId:randomUUID(),token:randomBytes(32).toString('hex'),headless};atomic(file,spec);
++      const bootstrap=fileURLToPath(new URL('./blender-bridge/addon.py',import.meta.url));
++      child=this.spawnProcess(before.engine.executable,[...headless?['--background']:[],'--factory-startup','--python',bootstrap,'--',file],{windowsHide:headless,detached:!headless,stdio:'ignore'});
++      this.lastChild=child;let failed=false;child.once('error',()=>{failed=true;});if(!headless)child.unref();
++      if(child.pid)atomic(path.join(this.home,'pending.json'),{pid:child.pid,instanceId:spec.instanceId});
++      const deadline=Date.now()+45000;
++      while(Date.now()<deadline){if(failed||child.exitCode!==null)throw Error('BLENDER_LAUNCH_FAILED');try{const result=await requestBlender(this.home,'hello',{}, {timeoutMs:800});if(result?.protocol===1&&readBridge(this.home)?.instanceId===spec.instanceId){fs.unlinkSync(path.join(this.home,'pending.json'));return this.status();}}catch{}await delay(150);}
++      // No retry or kill: the window may be opening slowly and may already contain user edits.
++      throw Error('BLENDER_START_PENDING');
++    }finally{this.starting=false;if(fd!==undefined){fs.closeSync(fd);fs.unlinkSync(lock);}}
++  });}
++  disconnect(){return this.execute(async()=>{await requestBlender(this.home,'disconnect',{}, {timeoutMs:5000});return this.status();});}
++  async close(){await this.serial;/* The user-owned Blender window and scene outlive the Host. */}
++}
+diff --git a/plugins/naumi-enterprise/blender-bridge/client.js b/plugins/naumi-enterprise/blender-bridge/client.js
+new file mode 100644
+--- /dev/null
++++ b/plugins/naumi-enterprise/blender-bridge/client.js
+@@ -0,0 +1,38 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import net from 'node:net';
++import {createHmac,randomUUID,timingSafeEqual} from 'node:crypto';
++
++export const bridgeFile=home=>path.join(home,'active.json');
++const fail=code=>{throw Error(code);};
++export function readBridge(home){
++  let d;try{d=JSON.parse(fs.readFileSync(bridgeFile(home),'utf8'));}catch(e){if(e.code==='ENOENT')return null;fail('BLENDER_DESCRIPTOR_INVALID');}
++  if(d.version!==1||!Number.isInteger(d.port)||d.port<1||d.port>65535||!Number.isInteger(d.pid)||d.pid<1||!/^[a-f0-9]{64}$/.test(d.token)||typeof d.instanceId!=='string')fail('BLENDER_DESCRIPTOR_INVALID');
++  return d;
++}
++export function requestBlender(home,type,params={}, {requestId=randomUUID(),timeoutMs=120000,signal}={}){
++  const d=readBridge(home);if(!d)return Promise.reject(Error('BLENDER_NOT_CONNECTED'));
++  const payload=JSON.stringify({id:requestId,instanceId:d.instanceId,type,params}),mac=createHmac('sha256',d.token).update(payload).digest('hex');
++  return new Promise((resolve,reject)=>{
++    if(signal?.aborted){reject(Error('BLENDER_REQUEST_ABORTED'));return;}
++    const socket=net.createConnection({host:'127.0.0.1',port:d.port}),chunks=[];let bytes=0,settled=false,sent=false;
++    const finish=(error,value)=>{if(settled)return;settled=true;signal?.removeEventListener('abort',abort);socket.destroy();error?reject(error):resolve(value);};
++    const abort=()=>finish(Error(sent?'BLENDER_RESULT_UNKNOWN':'BLENDER_REQUEST_ABORTED'));
++    socket.setTimeout(timeoutMs,()=>finish(Error(sent?'BLENDER_RESULT_UNKNOWN':'BLENDER_CONNECTION_TIMEOUT')));
++    socket.on('connect',()=>{socket.write(JSON.stringify({payload,mac})+'\n');sent=true;});
++    socket.on('error',()=>finish(Error(sent?'BLENDER_RESULT_UNKNOWN':'BLENDER_NOT_CONNECTED')));
++    socket.on('end',()=>{if(!settled)finish(Error('BLENDER_RESULT_UNKNOWN'));});
++    socket.on('data',chunk=>{
++      bytes+=chunk.length;if(bytes>12*1024*1024){finish(Error('BLENDER_RESPONSE_TOO_LARGE'));return;}chunks.push(chunk);
++      const raw=Buffer.concat(chunks).toString('utf8');if(!raw.endsWith('\n'))return;
++      try{
++        const envelope=JSON.parse(raw),expected=createHmac('sha256',d.token).update(envelope.payload).digest(),actual=Buffer.from(envelope.mac??'','hex');
++        if(actual.length!==expected.length||!timingSafeEqual(expected,actual))fail('BLENDER_REPLY_AUTH_FAILED');
++        const value=JSON.parse(envelope.payload);if(value.id!==requestId||value.instanceId!==d.instanceId)fail('BLENDER_REPLY_IDENTITY');
++        if(value.status==='error')fail(/^BLENDER_[A-Z_]+$/.test(value.code??'')?value.code:'BLENDER_EXECUTION_FAILED');
++        finish(null,value.result);
++      }catch(e){finish(/^BLENDER_/.test(e.message)?e:Error('BLENDER_INVALID_RESPONSE'));}
++    });
++    signal?.addEventListener('abort',abort,{once:true});
++  });
++}
+diff --git a/plugins/naumi-enterprise/blender-bridge/server.mjs b/plugins/naumi-enterprise/blender-bridge/server.mjs
+new file mode 100644
+--- /dev/null
++++ b/plugins/naumi-enterprise/blender-bridge/server.mjs
+@@ -0,0 +1,29 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import {fileURLToPath} from 'node:url';
++import {McpServer} from '@modelcontextprotocol/server';
++import {serveStdio} from '@modelcontextprotocol/server/stdio';
++import {z} from 'zod';
++import {BlenderRuntime,blenderHome} from '../blender-runtime.js';
++import {requestBlender} from './client.js';
++
++export function createBlenderServer(home=process.env.NAUMI_BLENDER_HOME??blenderHome()){
++ const server=new McpServer({name:'naumi-blender',version:'1.0.0'},{instructions:'Naumi local Blender tools. First inspect blender_status and get_scene_info. If disconnected, the user can launch Blender in Settings > Blender. Preserve existing objects unless explicitly asked to replace them. execute_blender_code is full bpy/Python and inherits the existing tool approval policy, not a sandbox. Use one UUID requestId per mutation and reuse it only for the SAME request. A timeout is UNKNOWN: query operation_status, never blindly rerun with another UUID. Preview is not file delivery; save requested .blend/export/render files into the task workspace and use native present. No paid asset generation or telemetry is included.'});
++ const runtime=new BlenderRuntime({home});
++ const result=value=>({content:[{type:'text',text:JSON.stringify(value)}],...value?.state==='failed'?{isError:true}:{}});
++ const wrap=fn=>async(args,ctx)=>{try{return await fn(args,ctx);}catch(e){return {isError:true,content:[{type:'text',text:/^BLENDER_[A-Z_]+$/.test(e.message)?e.message:'BLENDER_OPERATION_FAILED'}]};}};
++ const read={readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false};
++ server.registerTool('blender_status',{description:'Check bundled MCP, installed Blender and authenticated local connection separately. Does not launch Blender.',inputSchema:z.object({}).strict(),annotations:read},wrap(async()=>result(await runtime.status())));
++ server.registerTool('get_scene_info',{description:'Read the actual connected Blender scene, object count and object names. Does not change the scene.',inputSchema:z.object({}).strict(),annotations:read},wrap(async(_,ctx)=>result(await requestBlender(home,'get_scene_info',{}, {signal:ctx.signal}))));
++ server.registerTool('get_object_info',{description:'Read one exact named Blender object.',inputSchema:z.object({name:z.string().min(1).max(256)}).strict(),annotations:read},wrap(async(args,ctx)=>result(await requestBlender(home,'get_object_info',args,{signal:ctx.signal}))));
++ server.registerTool('execute_blender_code',{description:'Execute requested Python/bpy in the managed Blender main thread. Full local Python access; writes require the existing tool permission. Stable UUID requestId required; query receipt on timeout, never blind replay.',inputSchema:z.object({requestId:z.uuid(),code:z.string().min(1).max(131072)}).strict(),annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true}},wrap(async({requestId,code},ctx)=>result(await requestBlender(home,'execute_code',{code},{requestId,signal:ctx.signal}))));
++ server.registerTool('operation_status',{description:'Reconcile the exact durable mutation UUID, including completed, failed and unknown. Does not rerun it.',inputSchema:z.object({requestId:z.uuid()}).strict(),annotations:read},wrap(async(args,ctx)=>result(await requestBlender(home,'operation_status',args,{signal:ctx.signal}))));
++ server.registerTool('render_preview',{description:'Render a Workbench camera preview and return a PNG image; restores render settings afterward. Requires an existing scene camera. Not final file delivery.',inputSchema:z.object({requestId:z.uuid(),width:z.number().int().min(64).max(1600).default(640),height:z.number().int().min(64).max(1200).default(480)}).strict(),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false}},wrap(async({requestId,...args},ctx)=>{
++  const receipt=await requestBlender(home,'render_preview',args,{requestId,signal:ctx.signal});if(receipt.state!=='completed')return result(receipt);
++  const file=path.resolve(receipt.imagePath),folder=path.resolve(home,'previews');if(!file.startsWith(folder+path.sep)||path.basename(file)!==requestId+'.png')throw Error('BLENDER_PREVIEW_SCOPE');
++  const bytes=fs.readFileSync(file);if(bytes.length>6*1024*1024||!bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))throw Error('BLENDER_PREVIEW_INVALID');
++  return {content:[{type:'image',mimeType:'image/png',data:bytes.toString('base64')},{type:'text',text:JSON.stringify({requestId,state:'completed',preview:true})}]};
++ }));
++ return server;
++}
++if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){serveStdio(()=>createBlenderServer());}
+diff --git a/plugins/naumi-enterprise/blender-bridge/addon.py b/plugins/naumi-enterprise/blender-bridge/addon.py
+new file mode 100644
+--- /dev/null
++++ b/plugins/naumi-enterprise/blender-bridge/addon.py
+@@ -0,0 +1,213 @@
++"""Naumi's local Blender bridge. stdlib+bpy only; no user preferences or network services.
++Core command names follow ahujasid/blender-mcp; transport/auth/lifecycle are Naumi-owned.
++"""
++import bpy
++import socket, threading, queue, json, os, sys, time, uuid, hmac, hashlib, io, contextlib, traceback
++
++MAX_BYTES = 1024 * 1024
++
++class Bridge:
++    def __init__(self, spec):
++        self.spec = spec
++        self.home = spec['home']
++        self.instance = spec['instanceId']
++        self.token = spec['token'].encode()
++        self.work = queue.Queue(maxsize=32)
++        self.running = True
++        self.ledger_path = os.path.join(self.home, 'receipts.json')
++        try:
++            with open(self.ledger_path, encoding='utf-8') as f:
++                self.records = json.load(f)
++        except FileNotFoundError:
++            self.records = {}
++        if not isinstance(self.records, dict):
++            raise RuntimeError('BLENDER_LEDGER_INVALID')
++        for r in self.records.values():
++            if r.get('state') in ('accepted', 'running'):
++                r['state'] = 'unknown'
++        self.persist()
++        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
++        self.socket.bind(('127.0.0.1', 0))
++        self.socket.listen(8)
++        self.socket.settimeout(1)
++        self.descriptor = {'version': 1, 'pid': os.getpid(), 'port': self.socket.getsockname()[1],
++                           'instanceId': self.instance, 'token': spec['token']}
++        self.atomic(os.path.join(self.home, 'active.json'), self.descriptor)
++        threading.Thread(target=self.accept, daemon=True).start()
++
++    def atomic(self, path, value):
++        temp = path + '.' + str(uuid.uuid4()) + '.tmp'
++        with open(temp, 'x', encoding='utf-8') as f:
++            try:
++                os.chmod(temp, 0o600)
++            except OSError:
++                pass
++            json.dump(value, f, ensure_ascii=False)
++            f.flush()
++            os.fsync(f.fileno())
++        os.replace(temp, path)
++
++    def persist(self):
++        self.atomic(self.ledger_path, self.records)
++
++    def accept(self):
++        while self.running:
++            try:
++                client, _ = self.socket.accept()
++                threading.Thread(target=self.handle, args=(client,), daemon=True).start()
++            except socket.timeout:
++                continue
++            except OSError:
++                break
++
++    def handle(self, client):
++        try:
++            client.settimeout(180)
++            data = b''
++            while b'\n' not in data:
++                part = client.recv(16384)
++                if not part:
++                    return
++                data += part
++                if len(data) > MAX_BYTES:
++                    return
++            envelope = json.loads(data.decode())
++            raw = envelope['payload']
++            signature = hmac.new(self.token, raw.encode(), hashlib.sha256).hexdigest()
++            if not hmac.compare_digest(signature, envelope.get('mac', '')):
++                return
++            req = json.loads(raw)
++            if req.get('instanceId') != self.instance or not isinstance(req.get('id'), str):
++                return
++            done = threading.Event()
++            item = {'req': req, 'done': done}
++            self.work.put(item, timeout=2)
++            if not done.wait(175):
++                return
++            payload = json.dumps({'id': req['id'], 'instanceId': self.instance, **item['answer']}, ensure_ascii=False)
++            mac = hmac.new(self.token, payload.encode(), hashlib.sha256).hexdigest()
++            client.sendall((json.dumps({'payload': payload, 'mac': mac}) + '\n').encode())
++        except Exception:
++            pass
++        finally:
++            client.close()
++
++    def pump(self):
++        try:
++            item = self.work.get_nowait()
++        except queue.Empty:
++            return 0.05 if self.running else None
++        try:
++            req = item['req']
++            result = self.command(req)
++            item['answer'] = {'status': 'success', 'result': result}
++        except Exception as exc:
++            code = str(exc)
++            item['answer'] = {'status': 'error', 'code': code if code.startswith('BLENDER_') else 'BLENDER_EXECUTION_FAILED'}
++        finally:
++            item['done'].set()
++        return 0.05 if self.running else None
++
++    def command(self, req):
++        kind, p = req['type'], req.get('params', {})
++        if kind == 'hello':
++            return {'name': 'naumi-blender', 'protocol': 1, 'pid': os.getpid(), 'blenderVersion': bpy.app.version_string, 'telemetry': False}
++        if kind == 'get_scene_info':
++            objects = list(bpy.context.scene.objects)
++            return {'scene': bpy.context.scene.name, 'file': bpy.data.filepath, 'objectCount': len(objects),
++                    'objects': [{'name': o.name, 'type': o.type, 'location': list(o.location)} for o in objects[:1000]],
++                    'truncated': len(objects) > 1000}
++        if kind == 'get_object_info':
++            o = bpy.data.objects.get(p['name'])
++            if o is None:
++                raise RuntimeError('BLENDER_OBJECT_NOT_FOUND')
++            return {'name': o.name, 'type': o.type, 'location': list(o.location), 'rotation': list(o.rotation_euler),
++                    'scale': list(o.scale), 'dimensions': list(o.dimensions)}
++        if kind == 'operation_status':
++            return self.records.get(p['requestId'], {'state': 'not_found', 'requestId': p['requestId']})
++        if kind in ('execute_code', 'render_preview'):
++            return self.mutate(req)
++        if kind == 'disconnect':
++            self.running = False
++            self.socket.close()
++            # Close only this bridge. A GUI Blender window and its unsaved scene stay open.
++            try:
++                with open(os.path.join(self.home, 'active.json'), encoding='utf-8') as f:
++                    current = json.load(f)
++                if current.get('instanceId') == self.instance:
++                    os.unlink(os.path.join(self.home, 'active.json'))
++            except FileNotFoundError:
++                pass
++            return {'disconnected': True, 'scenePreserved': True}
++        raise RuntimeError('BLENDER_COMMAND_UNKNOWN')
++
++    def mutate(self, req):
++        request_id = req['id']
++        digest = hashlib.sha256(json.dumps([req['type'], req['params']], sort_keys=True).encode()).hexdigest()
++        prior = self.records.get(request_id)
++        if prior:
++            if prior['digest'] != digest:
++                raise RuntimeError('BLENDER_REQUEST_CONFLICT')
++            if prior['instanceId'] != self.instance:
++                raise RuntimeError('BLENDER_REQUEST_OLD_INSTANCE')
++            return prior
++        if len(self.records) >= 10000:
++            raise RuntimeError('BLENDER_LEDGER_FULL')
++        record = {'requestId': request_id, 'instanceId': self.instance, 'digest': digest, 'state': 'running'}
++        self.records[request_id] = record
++        self.persist()  # durable admission precedes any bpy/filesystem side effect
++        try:
++            if req['type'] == 'execute_code':
++                stream = io.StringIO()
++                with contextlib.redirect_stdout(stream):
++                    exec(req['params']['code'], {'bpy': bpy, '__name__': '__naumi_blender__'})
++                output = stream.getvalue()
++                record.update(state='completed', text=output[:MAX_BYTES], truncated=len(output) > MAX_BYTES)
++            else:
++                record.update(state='completed', imagePath=self.render(request_id, req['params']))
++        except Exception as exc:
++            record.update(state='failed', error=str(exc)[:4000], traceback=traceback.format_exc()[-8000:])
++        self.persist()
++        return record
++
++    def render(self, request_id, params):
++        scene = bpy.context.scene
++        if scene.camera is None:
++            raise RuntimeError('BLENDER_CAMERA_REQUIRED')
++        render = scene.render
++        saved = (render.engine, render.filepath, render.resolution_x, render.resolution_y,
++                 render.resolution_percentage, render.image_settings.file_format)
++        folder = os.path.join(self.home, 'previews')
++        os.makedirs(folder, exist_ok=True)
++        target = os.path.join(folder, request_id + '.png')
++        try:
++            render.engine = 'BLENDER_WORKBENCH'
++            render.filepath = target
++            render.resolution_x = params.get('width', 640)
++            render.resolution_y = params.get('height', 480)
++            render.resolution_percentage = 100
++            render.image_settings.file_format = 'PNG'
++            bpy.ops.render.render(write_still=True)
++        finally:
++            render.engine, render.filepath, render.resolution_x, render.resolution_y, render.resolution_percentage, render.image_settings.file_format = saved
++        return target
++
++
++def main():
++    args = sys.argv[sys.argv.index('--') + 1:]
++    with open(args[0], encoding='utf-8') as f:
++        spec = json.load(f)
++    if spec.get('version') != 1:
++        raise RuntimeError('BLENDER_BOOTSTRAP_VERSION')
++    bridge = Bridge(spec)
++    if spec.get('headless'):
++        while bridge.running:
++            bridge.pump()
++            time.sleep(0.01)
++        time.sleep(0.2)  # let the final signed reply leave its socket before background Blender exits
++    else:
++        bpy.app.timers.register(bridge.pump, first_interval=0.05, persistent=True)
++        bpy.app.driver_namespace['naumi_blender_bridge'] = bridge
++
++if __name__ == '__main__':
++    main()
+diff --git a/plugins/naumi-enterprise/blender-skills/naumi-blender/SKILL.md b/plugins/naumi-enterprise/blender-skills/naumi-blender/SKILL.md
+new file mode 100644
+--- /dev/null
++++ b/plugins/naumi-enterprise/blender-skills/naumi-blender/SKILL.md
+@@ -0,0 +1,13 @@
++---
++name: naumi-blender
++description: Use Naumi's bundled Blender MCP for local 3D scene inspection, bpy modeling, materials, rendering, and exports. Requires a Blender connection; no global Python, uv or manual MCP setup.
++---
++
++# Blender
++
++1. Call `mcp__naumi_blender__blender_status`. Bundled MCP, installed engine and actual connected session are separate facts. If disconnected, direct the user to Settings → Blender → 启动 Blender. Never provision a paid generation service or switch models for this integration.
++2. Call `mcp__naumi_blender__get_scene_info`, then inspect exact objects before edits. Preserve unrelated objects and unsaved work. The managed Blender window is independent from other existing Blender processes.
++3. `execute_blender_code` runs full Python/bpy on Blender's main thread and uses the normal tool permission/approval lifecycle; it is not a Python sandbox. Use small, explicit operations and a stable UUID `requestId` for each distinct mutation.
++4. On timeout or lost reply, call `operation_status` with that UUID. Do not rerun the same effect with a new UUID. An unknown receipt is not a failed operation. A receipt from a preceding Blender instance does not prove the new scene contains that result.
++5. `render_preview` requires an existing camera, returns an image, and restores the scene's render configuration. It is not final file delivery. Save requested .blend, exported meshes and rendered images in the task's actual workspace and use the existing native `present` tool to deliver verified files.
++6. Blender may be installed separately. Prefer the detected local version; do not silently download another multi-hundred-megabyte engine. The main Naumi installer does not bundle Blender itself. No telemetry or paid asset generation is included in this bridge.
+diff --git a/plugins/naumi-enterprise/assets/blender-settings.js b/plugins/naumi-enterprise/assets/blender-settings.js
+new file mode 100644
+--- /dev/null
++++ b/plugins/naumi-enterprise/assets/blender-settings.js
+@@ -0,0 +1,18 @@
++const labels={BLENDER_NOT_INSTALLED:'未检测到 Blender，请选择安装路径',BLENDER_EXECUTABLE_INVALID:'请选择 Blender 可执行文件',BLENDER_VERSION_UNSUPPORTED:'请选择 Blender 4.0 或更新版本',BLENDER_CONFIG_CONFLICT:'配置已更新，请重新检测',BLENDER_LAUNCH_IN_PROGRESS:'Blender 正在启动',BLENDER_START_PENDING:'Blender 仍在启动，请稍后检测连接',BLENDER_NOT_CONNECTED:'Blender 尚未连接',BLENDER_LAUNCH_FAILED:'Blender 启动失败，请检查路径',BLENDER_BUSY:'Blender 尚在运行，连接待响应，请稍后检测',BLENDER_DISCONNECT_REQUIRED:'请先断开当前 Blender 连接，再更换路径'};
++async function request(body,signal){const r=await fetch('/naumi/blender',{credentials:'same-origin',cache:'no-store',signal,...body?{method:'POST',headers:{'content-type':'application/json','x-naumi-blender':'1'},body:JSON.stringify(body)}:{}}),v=await r.json();if(!r.ok)throw Object.assign(Error(labels[v.error]??'Blender 暂未就绪'),{status:r.status});return v;}
++export function installBlenderUI(ctx,React){
++ const h=React.createElement,{useEffect,useState,useRef}=React;
++ function Blender(){
++  const [data,setData]=useState(null),[pending,setPending]=useState(null),[error,setError]=useState(''),[editing,setEditing]=useState(false),[value,setValue]=useState('');const alive=useRef(false),flight=useRef(false);const busy=pending!==null;
++  useEffect(()=>{alive.current=true;const ac=new AbortController();const load=()=>{if(!flight.current)request(null,ac.signal).then(v=>{if(alive.current)setData(v);}).catch(e=>{if(alive.current&&!ac.signal.aborted){if([401,403].includes(e.status))setData(null);setError(e.message);}});};load();const timer=setInterval(load,5000);return()=>{alive.current=false;ac.abort();clearInterval(timer);};},[]);
++  async function act(body){if(flight.current)return;flight.current=true;setPending(body.action);setError('');try{const v=await request(body);if(alive.current){setData(v);if(body.action==='select')setEditing(false);}}catch(e){if(alive.current)setError(e.message);}finally{flight.current=false;if(alive.current)setPending(null);}}
++  const button=(text,fn,props={})=>h('button',{type:'button',disabled:busy,onClick:fn,...props},text);
++  return h('section',{className:'nb3d','aria-label':'Blender'},h('header',null,h('h2',null,'Blender'),button(pending==='detect'?'检测中…':'检测连接',()=>act({action:'detect'}))),
++   error&&h('div',{role:'alert',className:'nb3d-error'},error),!data&&!error&&h('div',{role:'status'},'加载中…'),
++   data&&h('article',{className:'nb3d-panel'},h('div',{className:'nb3d-main'},h('span',{className:'nb3d-mark','aria-hidden':true},h('svg',{viewBox:'0 0 40 40',fill:'none'},h('path',{d:'M6 8h12l12 7a10 10 0 1 1-15 14l-8 1-3-4 8-6L3 19l-1-5 15 1z',fill:'#ef8c36'}),h('circle',{cx:25,cy:24,r:7,fill:'white'}),h('circle',{cx:25,cy:24,r:4.5,fill:'#5389b6'}))),h('div',null,h('h3',null,data.connected?'Blender '+data.instance.version:data.engine?.version??'Blender 引擎'),h('span',{className:'nb3d-status','data-ready':data.connected},data.connected?'已连接':data.unresponsive?'连接待响应':data.installed?'已检测到 · 未启动':'未安装'))),
++    h('dl',null,h('div',null,h('dt',null,'MCP'),h('dd',null,data.toolRegistered?'已就绪 · '+data.toolCount+' 个工具':'正在加载')),h('div',null,h('dt',null,'程序'),h('dd',null,data.engine?.executable??'未选择')),h('div',null,h('dt',null,'运行方式'),h('dd',null,'独立 Blender 窗口'))),
++    h('footer',null,button('路径设置',()=>{setValue(data.engine?.executable??'');setEditing(v=>!v);},{disabled:busy||data.running||data.launching}),data.running?button('断开连接',()=>act({action:'disconnect'})):data.installed?button(pending==='start'||data.launching?'正在启动…':'启动 Blender',()=>act({action:'start'}),{className:'nb3d-primary',disabled:busy||data.launching}):h('a',{href:'https://www.blender.org/download/lts/',target:'_blank',rel:'noopener noreferrer',className:'nb3d-primary'},'下载 Blender'))),
++   editing&&data&&h('form',{className:'nb3d-panel nb3d-path',onSubmit:e=>{e.preventDefault();void act({action:'select',executable:value.trim()||null,expectedRevision:data.revision});}},h('label',{htmlFor:'nb3d-executable'},'Blender 路径'),h('input',{id:'nb3d-executable',required:true,value,disabled:busy,onChange:e=>setValue(e.target.value),spellCheck:false}),data.candidates.length>0&&h('div',{className:'nb3d-candidates'},...data.candidates.map(c=>button(c.version,()=>setValue(c.executable),{key:c.executable,title:c.executable}))),h('footer',null,button('取消',()=>setEditing(false)),h('button',{type:'submit',className:'nb3d-primary',disabled:busy},pending==='select'?'保存中…':'保存'))));
++ }
++ return ctx.slots.inject('settings.section',()=>ctx.slots.register({name:'settings.section',id:'blender',order:30,label:()=> 'Blender'},Blender));
++}
+diff --git a/plugins/naumi-enterprise/assets/blender-settings.css b/plugins/naumi-enterprise/assets/blender-settings.css
+new file mode 100644
+--- /dev/null
++++ b/plugins/naumi-enterprise/assets/blender-settings.css
+@@ -0,0 +1 @@
++.nb3d{padding:10px 0 30px;color:#27334a;color-scheme:light;font-size:13px;line-height:1.5}.nb3d *{box-sizing:border-box}.nb3d header,.nb3d footer{display:flex;align-items:center;justify-content:space-between;gap:10px}.nb3d header{margin-bottom:28px}.nb3d h2{margin:0;font-size:23px;font-weight:650;letter-spacing:-.6px}.nb3d h3{margin:0 0 5px;font-size:15px;font-weight:620}.nb3d button,.nb3d a{font:inherit;font-size:12px;display:inline-flex;align-items:center;justify-content:center;min-height:35px;padding:7px 13px;color:#67758d;background:#fff;border:1px solid #e4e9f1;border-radius:8px;text-decoration:none;cursor:pointer}.nb3d button:hover:not(:disabled){background:#f5f8fd;border-color:#cdd9eb}.nb3d button:disabled{opacity:.45;cursor:default}.nb3d :is(button,a,input):focus-visible{outline:3px solid #c2d4ff;outline-offset:2px}.nb3d .nb3d-primary{background:#3567ed;border-color:#3567ed;color:white}.nb3d-panel{background:#fff;border:1px solid #e7ecf3;border-radius:14px;overflow:hidden;margin-bottom:16px}.nb3d-main{display:flex;align-items:center;gap:15px;padding:24px}.nb3d-mark{display:grid;place-items:center;width:54px;height:54px;border-radius:15px;background:#fff5eb;flex:none}.nb3d-mark svg{width:43px;height:43px}.nb3d-status{font-size:11px;color:#8d98aa}.nb3d-status[data-ready=true]{color:#328465}.nb3d dl{margin:0;padding:0 24px 22px}.nb3d dl>div{display:grid;grid-template-columns:65px minmax(0,1fr);gap:15px;padding:9px 0;border-bottom:1px solid #f1f4f8}.nb3d dl>div:last-child{border:0}.nb3d dt{color:#98a3b5}.nb3d dd{margin:0;color:#6a7991;overflow-wrap:anywhere;font-size:12px}.nb3d-panel footer{padding:14px 21px;border-top:1px solid #edf1f6;background:#fcfdff}.nb3d-error{padding:12px 15px;background:#fff3ef;color:#ad6653;border-radius:9px;margin-bottom:16px}.nb3d-path{padding:21px}.nb3d-path label{display:block;color:#76859c;font-size:12px;margin-bottom:9px}.nb3d-path input{width:100%;height:40px;border:1px solid #e2e8f1;border-radius:8px;background:#fbfcfe;padding:9px 12px;color:#465873;font:inherit;font-size:12px}.nb3d-path footer{border:0;padding:18px 0 0;background:none;justify-content:flex-end}.nb3d-candidates{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}.nb3d-candidates button{font-size:11px}@media(max-width:480px){.nb3d-main{padding:19px}.nb3d dl{padding:0 19px 17px}.nb3d dl>div{grid-template-columns:52px minmax(0,1fr);gap:10px}.nb3d h2{font-size:22px}.nb3d h3{font-size:14px}}
+diff --git a/plugins/naumi-enterprise/third-party/blender-mcp/LICENSE b/plugins/naumi-enterprise/third-party/blender-mcp/LICENSE
+new file mode 100644
+--- /dev/null
++++ b/plugins/naumi-enterprise/third-party/blender-mcp/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2025 Siddharth Ahuja
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.diff --git a/plugins/naumi-enterprise/third-party/blender-mcp/NOTICE b/plugins/naumi-enterprise/third-party/blender-mcp/NOTICE
+new file mode 100644
+--- /dev/null
++++ b/plugins/naumi-enterprise/third-party/blender-mcp/NOTICE
+@@ -0,0 +1,4 @@
++Naumi Blender integration uses the public MCP TypeScript SDK 2.2.0 (MIT) and the existing Harness MCP client.
++The local Blender addon retains the core command envelope and vocabulary of ahujasid/blender-mcp (MIT), reviewed at b6a2ce30c14636a562b5549684d9db6fc01f29ab (mcp-for-blender 2.3.0).
++This is a narrowly scoped Naumi bridge, not the full upstream distribution. Its stdlib-only Blender-side bootstrap, authenticated profile-scoped transport, durable receipts and lifecycle are Naumi-owned. No upstream telemetry, paid generation service or auto-updater is included.
++Blender itself is not redistributed by this package. The user-selected installed Blender is a separate process.
+diff --git a/plugins/naumi-enterprise/third-party/blender-mcp/UPSTREAM.json b/plugins/naumi-enterprise/third-party/blender-mcp/UPSTREAM.json
+new file mode 100644
+--- /dev/null
++++ b/plugins/naumi-enterprise/third-party/blender-mcp/UPSTREAM.json
+@@ -0,0 +1,17 @@
++{
++  "upstream": "https://github.com/ahujasid/blender-mcp",
++  "reviewedCommit": "b6a2ce30c14636a562b5549684d9db6fc01f29ab",
++  "upstreamPythonPackage": "mcp-for-blender@2.3.0",
++  "mode": "core-command protocol adapter; full upstream Python server and addon are not redistributed",
++  "reviewedHashes": {
++    "server": "bfb5aeb98f503e9d5fb31bf9df40a8ca64402c7555c4d0bef1dae343e4d0f651",
++    "addon": "35e5f317b932d15b485a37d914f7c9d7b527c7ea527f526569c1c111e5f39a05"
++  },
++  "mcpSdk": {
++    "name": "@modelcontextprotocol/server",
++    "version": "2.2.0"
++  },
++  "blenderBinaryIncluded": false,
++  "telemetry": false,
++  "paidGenerators": false
++}
+diff --git a/tests/blender-mcp.test.mjs b/tests/blender-mcp.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/tests/blender-mcp.test.mjs
+@@ -0,0 +1,34 @@
++import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import net from 'node:net';import {randomUUID,createHmac} from 'node:crypto';import {Readable} from 'node:stream';import {EventEmitter} from 'node:events';
++import {BlenderRuntime,loadBlenderConfig,discoverBlender,inspectBlender,blenderMcpConfig} from '../plugins/naumi-enterprise/blender-runtime.js';import {readBridge,requestBlender} from '../plugins/naumi-enterprise/blender-bridge/client.js';import {createBlenderHandler} from '../plugins/naumi-enterprise/blender.js';
++const temp=t=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-blender-unit-'));t.after(()=>{assert(path.resolve(dir).startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(dir,{recursive:true,force:true});});return dir;};
++async function socketFixture(t,handler){const home=temp(t),token='a'.repeat(64),instanceId=randomUUID(),server=net.createServer(s=>{s.on('data',b=>{const e=JSON.parse(b.toString()),r=JSON.parse(e.payload);handler(s,r,{token,instanceId});});});await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));fs.writeFileSync(path.join(home,'active.json'),JSON.stringify({version:1,pid:process.pid,port:server.address().port,token,instanceId}));return home;}
++function answer(s,r,d,result,{badMac=false,wrongId=false}={}){const payload=JSON.stringify({id:wrongId?'wrong':r.id,instanceId:d.instanceId,status:'success',result});s.end(JSON.stringify({payload,mac:badMac?'0'.repeat(64):createHmac('sha256',d.token).update(payload).digest('hex')})+'\n');}
++
++test('MCP uses bundled Node/official SDK stdio, profile home and a stable namespace, never global uv/python or network bootstrap',()=>{const c=blenderMcpConfig('E:/fixture-home');assert.equal(c.command,process.execPath);assert.equal(c.serverName,'naumi_blender');assert.equal(c.transport,'stdio');assert(c.args[0].endsWith('server.mjs'));assert.equal(c.env.NAUMI_BLENDER_HOME,'E:/fixture-home');assert.equal(c.toolCallTimeoutMs,150000);assert.equal(c.failOnStartupError,false);assert.doesNotMatch(JSON.stringify(c),/uvx|npx|python\.exe/);});
++
++test('missing engine remains honest and does not spawn or create a second tool engine',async t=>{const home=temp(t),calls=[];const r=new BlenderRuntime({home,discover:async()=>[],spawnProcess:(...x)=>calls.push(x)});const s=await r.status();assert.equal(s.installed,false);assert.equal(s.bundledMcp,true);assert.equal(s.engineBundled,false);assert.equal(s.connected,false);await assert.rejects(r.start(),/BLENDER_NOT_INSTALLED/);assert.equal(calls.length,0);});
++
++test('path selection validates before CAS publication, serializes concurrent writes and preserves corrupt configs',async t=>{const home=temp(t),inspect=async p=>{if(p==='bad')throw Error('BLENDER_EXECUTABLE_INVALID');return {executable:p,version:'Blender 5.2.3 LTS'};},r=new BlenderRuntime({home,discover:async()=>[],inspect});assert.equal(loadBlenderConfig(home).revision,0);await assert.rejects(r.save('bad',0),/BLENDER_EXECUTABLE_INVALID/);assert.equal(loadBlenderConfig(home).revision,0);const results=await Promise.allSettled([r.save('a',0),r.save('b',0)]);assert.equal(results.filter(x=>x.status==='fulfilled').length,1);assert.equal(loadBlenderConfig(home).revision,1);fs.writeFileSync(path.join(home,'config.json'),'broken');await assert.rejects(r.status(),/BLENDER_CONFIG_INVALID/);assert.equal(fs.readFileSync(path.join(home,'config.json'),'utf8'),'broken');});
++
++test('discovery checks known installation roots and supplied paths, not shell interpolation',async t=>{const home=temp(t),root=path.join(home,'Blender Foundation','Blender 5.2');fs.mkdirSync(root,{recursive:true});const exe=path.join(root,'blender.exe');fs.writeFileSync(exe,'');const candidates=await discoverBlender({platform:'win32',env:{ProgramFiles:home,LOCALAPPDATA:home},inspect:async p=>({executable:p,version:'Blender 5.2.3 LTS'})});assert.equal(candidates.length,1);assert.equal(candidates[0].executable,exe);await assert.rejects(inspectBlender(path.join(home,'other.exe')),/BLENDER_EXECUTABLE_INVALID/);});
++
++test('authenticated loopback reply is scoped to exact request/instance, wrong MAC and identity fail closed',async t=>{for(const scenario of ['valid','mac','id']){const home=await socketFixture(t,(s,r,d)=>answer(s,r,d,{objects:3},{badMac:scenario==='mac',wrongId:scenario==='id'}));if(scenario==='valid')assert.deepEqual(await requestBlender(home,'get_scene_info'),{objects:3});else await assert.rejects(requestBlender(home,'get_scene_info'),scenario==='mac'?/BLENDER_REPLY_AUTH_FAILED/:/BLENDER_REPLY_IDENTITY/);}});
++
++test('lost/timeout reply is UNKNOWN and is never automatically re-executed',async t=>{let calls=0;const home=await socketFixture(t,(s)=>{calls++;setTimeout(()=>s.end(),70);});await assert.rejects(requestBlender(home,'execute_code',{code:'print(1)'},{timeoutMs:15}),/BLENDER_RESULT_UNKNOWN/);assert.equal(calls,1);});
++
++test('malformed descriptors never redirect the bridge to a remote host',async t=>{const home=temp(t);assert.equal(readBridge(home),null);fs.writeFileSync(path.join(home,'active.json'),JSON.stringify({version:1,host:'remote',port:9876,pid:1,token:'bad',instanceId:'x'}));assert.throws(()=>readBridge(home),/BLENDER_DESCRIPTOR_INVALID/);});
++
++test('an already-starting process is not launched twice and stale launch locks recover without killing a process',async t=>{const home=temp(t),engine={executable:'fixture',version:'Blender 5.2.3 LTS'};let calls=0;const r=new BlenderRuntime({home,discover:async()=>[engine],spawnProcess:()=>{calls++;return Object.assign(new EventEmitter(),{exitCode:1,unref(){}});}});fs.writeFileSync(path.join(home,'pending.json'),JSON.stringify({pid:process.pid}));await assert.rejects(r.start(),/BLENDER_START_PENDING/);assert.equal(calls,0);fs.unlinkSync(path.join(home,'pending.json'));fs.writeFileSync(path.join(home,'launch.lock'),JSON.stringify({pid:2147483647}));await assert.rejects(r.start(),/BLENDER_LAUNCH_FAILED/);assert.equal(calls,1);assert.equal(fs.existsSync(path.join(home,'launch.lock')),false);});
++
++test('status excludes authentication secrets; an active session prevents engine path replacement',async t=>{const home=await socketFixture(t,(s,r,d)=>answer(s,r,d,{name:'naumi-blender',protocol:1,pid:process.pid,blenderVersion:'5.2.3',token:'SHOULD_NOT_ESCAPE'}));const r=new BlenderRuntime({home,discover:async()=>[]});const status=await r.status();assert.equal(status.connected,true);assert.doesNotMatch(JSON.stringify(status),/SHOULD_NOT_ESCAPE|aaaaaaaaaaaaaaaa/);await assert.rejects(r.save(null,0),/BLENDER_DISCONNECT_REQUIRED/);});
++
++test('owner API is strict, bounded and same-origin; it does not accept headless flags or Python payloads',async()=>{
++ let principal='owner';const calls=[],scope={connection:{admit:()=>principal?{peer:{principal:{kind:principal}}}:{rejection:401}},tools:{definitions:()=>Array.from({length:6},(_,i)=>({name:'mcp__naumi_blender__tool'+i}))}},runtime={status:async()=>({installed:false,connected:false}),start:async()=>calls.push('start'),disconnect:async()=>calls.push('disconnect'),save:async(...a)=>calls.push(a)};const handler=createBlenderHandler(scope,runtime);
++ async function call(method='GET',body,headers={}){const req=Readable.from(body===undefined?[]:[Buffer.from(typeof body==='string'?body:JSON.stringify(body))]);Object.assign(req,{method,headers:{host:'localhost',...headers}});let status,value;const res={setHeader(){},writeHead(s){status=s;return this;},end(v){value=v;}};await handler(req,res);return {status,value:value&&JSON.parse(value)};}
++ assert.equal((await call()).value.toolCount,6);principal='guest';assert.equal((await call()).status,403);principal=null;assert.equal((await call()).status,401);principal='owner';assert.equal((await call('DELETE')).status,405);const headers={'x-naumi-blender':'1','content-type':'application/json',origin:'http://localhost'};
++ assert.equal((await call('POST',{action:'start'})).status,403);assert.equal((await call('POST',{action:'start'},{...headers,origin:'https://evil.invalid'})).status,403);assert.equal((await call('POST',{action:'start'},{'x-naumi-blender':'1'})).status,415);assert.equal((await call('POST','x'.repeat(8193),headers)).status,413);assert.equal((await call('POST',{action:'start',headless:true},headers)).status,400);assert.equal((await call('POST',{action:'start',code:'oops'},headers)).status,400);assert.equal(calls.length,0);assert.equal((await call('POST',{action:'start'},headers)).status,200);assert.deepEqual(calls,['start']);
++});
++
++test('bundle declares official SDK and all addon/skill assets without an engine, Python environment, telemetry or paid service',()=>{const p=JSON.parse(fs.readFileSync('plugins/naumi-enterprise/package.json'));assert.equal(p.peerDependencies['@modelcontextprotocol/server'],'2.2.0');for(const n of ['blender.js','blender-runtime.js','blender-bridge','blender-skills'])assert(p.files.includes(n));const source=fs.readFileSync('plugins/naumi-enterprise/blender-bridge/addon.py','utf8');assert.doesNotMatch(source,/import requests|import httpx|telemetry_consent|https?:\/\//);assert.match(source,/127\.0\.0\.1/);assert.match(source,/self\.persist\(\)\s*# durable/);assert.match(fs.readFileSync('plugins/naumi-enterprise/blender-bridge/server.mjs','utf8'),/destructiveHint:true/);assert.match(fs.readFileSync('plugins/naumi-enterprise/blender-skills/naumi-blender/SKILL.md','utf8'),/operation_status/);});
++
++test('a busy live Blender is never mistaken for an absent engine or launched a second time',async t=>{const home=await socketFixture(t,()=>{});let spawns=0;const r=new BlenderRuntime({home,discover:async()=>[],spawnProcess:()=>{spawns++;}});const state=await r.status();assert.equal(state.running,true);assert.equal(state.connected,false);assert.equal(state.unresponsive,true);await assert.rejects(r.start(),/BLENDER_BUSY/);assert.equal(spawns,0);});
+diff --git a/scripts/verify-blender-mcp.mjs b/scripts/verify-blender-mcp.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/verify-blender-mcp.mjs
+@@ -0,0 +1,22 @@
++import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import {randomUUID,createHash} from 'node:crypto';import {Context} from '@deepseek-ai/cordis';import * as mcpClient from '@deepseek-ai/dsh-mcp-client';
++import {BlenderRuntime,inspectBlender,blenderMcpConfig} from '../plugins/naumi-enterprise/blender-runtime.js';import {requestBlender} from '../plugins/naumi-enterprise/blender-bridge/client.js';
++const out=process.env.BLENDER_EVIDENCE??'E:/tmp/naumi-blender-evidence',home=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-blender-test-')),executable=process.env.NAUMI_BLENDER_TEST_EXECUTABLE??'C:/Program Files/Blender Foundation/Blender 5.2/blender.exe';fs.mkdirSync(out,{recursive:true});
++const engine=await inspectBlender(executable),runtime=new BlenderRuntime({home,discover:async()=>[engine]}),ctx=new Context(),definitions=new Map(),checks=[];ctx.provide('tools');ctx.set('tools',{register(t){definitions.set(t.name,t);return()=>definitions.delete(t.name);}});const check=(name,value)=>{assert(value,name);checks.push(name);console.log('BLENDER_REAL_PASS '+name);};
++const invoke=async(name,args={})=>definitions.get('mcp__naumi_blender__'+name).execute(args,{signal:new AbortController().signal});const value=r=>JSON.parse(r.content.find(v=>v.type==='text').text);
++try{
++ check('installed_version_verified',/^Blender ([4-9]|[1-9][0-9]+)\./.test(engine.version));
++ check('initially_disconnected',!(await runtime.status()).connected);await runtime.start({headless:true});check('isolated_real_Blender_connected',(await runtime.status()).connected);
++ await ctx.plugin(mcpClient,{...blenderMcpConfig(home),failOnStartupError:true});check('native_Harness_MCP_six_tools',definitions.size===6);
++ check('status_separates_engine_and_MCP',value(await invoke('blender_status')).connected===true);
++ const before=value(await invoke('get_scene_info'));check('scene_read_via_native_MCP',before.objectCount>=3);
++ const requestId=randomUUID(),blend=path.join(home,'acceptance.blend'),code=`import bpy\nbpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8, location=(0,0,1))\nbpy.context.object.name='NaumiMcpSmoke'\nbpy.ops.wm.save_as_mainfile(filepath=${JSON.stringify(blend.replaceAll('\\','/'))})\nprint('BLENDER_SMOKE_OBJECT=NaumiMcpSmoke')`;
++ const executed=value(await invoke('execute_blender_code',{requestId,code}));check('real_bpy_create_and_save',executed.state==='completed'&&fs.statSync(blend).size>0);
++ const repeated=value(await invoke('execute_blender_code',{requestId,code}));const after=value(await invoke('get_scene_info'));check('duplicate_UUID_no_second_execution',repeated.state==='completed'&&after.objectCount===before.objectCount+1);
++ check('exact_object_lookup',value(await invoke('get_object_info',{name:'NaumiMcpSmoke'})).name==='NaumiMcpSmoke');
++ await assert.rejects(invoke('execute_blender_code',{requestId,code:'print("changed")'}),/BLENDER_REQUEST_CONFLICT/);check('UUID_payload_conflict_rejected',true);
++ check('durable_receipt_completed',value(await invoke('operation_status',{requestId})).state==='completed');
++ const renderId=randomUUID(),preview=await invoke('render_preview',{requestId:renderId,width:320,height:240});const img=preview.content.find(v=>v.type==='image');check('real_PNG_returned_through_MCP',img?.mimeType==='image/png');fs.writeFileSync(path.join(out,'blender-real-preview.png'),Buffer.from(img.data,'base64'));
++ const cancelledId=randomUUID(),ac=new AbortController();const pending=requestBlender(home,'execute_code',{code:'import time\ntime.sleep(0.4)\nprint("ONCE_AFTER_TIMEOUT")'},{requestId:cancelledId,signal:ac.signal});setTimeout(()=>ac.abort(),150);await assert.rejects(pending,/BLENDER_RESULT_UNKNOWN/);await new Promise(r=>setTimeout(r,700));check('cancelled_wait_reconciles_without_replay',(await requestBlender(home,'operation_status',{requestId:cancelledId})).state==='completed');
++ const report={tier:'REAL '+engine.version+' isolated background process + real official MCP SDK and Harness MCP client, no model/provider calls',checks,engine:engine.version,objectsBefore:before.objectCount,objectsAfter:after.objectCount,blend:{path:blend,bytes:fs.statSync(blend).size,sha256:createHash('sha256').update(fs.readFileSync(blend)).digest('hex')}};fs.writeFileSync(path.join(out,'REAL_MCP.json'),JSON.stringify(report,null,2)+'\n');
++}finally{await ctx.fiber.dispose();check('native_tools_removed_on_dispose',definitions.size===0);try{await runtime.disconnect();}catch{}await runtime.close();const child=runtime.lastChild;if(child&&child.exitCode===null)await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(r,5000))]);if(child?.exitCode===null){child.kill();console.log('TEST_OWN_PROCESS_TERMINATED');}}
++console.log('BLENDER_REAL_COMPLETE checks='+checks.length+' model_calls=0 user_scenes=UNTOUCHED');
+diff --git a/scripts/verify-blender-ui.mjs b/scripts/verify-blender-ui.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/verify-blender-ui.mjs
+@@ -0,0 +1,11 @@
++import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import http from 'node:http';import assert from 'node:assert/strict';import {spawn} from 'node:child_process';import {randomUUID} from 'node:crypto';import {stringify} from 'yaml';import {chromium} from '../desktop/node_modules/playwright/index.mjs';import {BotDirectory} from '../plugins/naumi-enterprise/bots.js';
++const root=process.cwd(),out=process.env.BLENDER_EVIDENCE??'E:/tmp/naumi-blender-evidence',temp=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-blender-ui-')),home=path.join(temp,'home'),profile=path.join(home,'profiles/web');fs.mkdirSync(path.join(profile,'node_modules/@naumi'),{recursive:true});fs.mkdirSync(out,{recursive:true});
++for(const[n,f]of [['dsh-enterprise','naumi-enterprise'],['dsh-ui-layout','naumi-ui-layout'],['dsh-sidebar-browser','naumi-sidebar-browser']])fs.symlinkSync(path.join(root,'plugins',f),path.join(profile,'node_modules/@naumi',n),'junction');fs.symlinkSync(path.join(root,'node_modules/@deepseek-ai'),path.join(profile,'node_modules/@deepseek-ai'),'junction');
++fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'naumi-blender-ui-fixture',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}}));fs.writeFileSync(path.join(home,'cordis.patch.yml'),stringify([{id:'ui-theme',config:{preference:'light'}},{id:'session-log-deepseek',disabled:true}]));fs.writeFileSync(path.join(profile,'cordis.patch.yml'),stringify([{id:'ui-settings-general',config:{welcomeNoticeVersion:'2026-09-28.1'}}]));const dir=new BotDirectory(path.join(home,'naumi/bots.json'));await dir.create({sessionId:'blender-ui-home',cwd:temp},{name:'设计助手',kind:'agent',purpose:'3D工具界面验收'});await dir.choosePrimary(dir.list().bots[0].id,dir.list().revision);await dir.close();
++const socket=http.createServer();await new Promise(r=>socket.listen(0,'127.0.0.1',r));const port=socket.address().port;await new Promise(r=>socket.close(r));let log='',browser;const base='http://127.0.0.1:'+port,child=spawn(process.execPath,[path.join(root,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'web','--host','127.0.0.1','--port',String(port),'--no-open'],{cwd:root,env:{...process.env,DSH_HOME:home,DSH_TELEMETRY_MODE:'DISABLED'},windowsHide:true});child.stdout.on('data',b=>log+=b);child.stderr.on('data',b=>log+=b);const checks=[];const check=(n,v)=>{assert(v,n);checks.push(n);console.log('BLENDER_UI_PASS '+n);};
++try{
++ let launch;for(let i=0;i<150;i++){launch=log.match(new RegExp('http://127\\.0\\.0\\.1:'+port+'/?\\?token=[A-Za-z0-9_~.%-]+'))?.[0];if(launch)break;if(child.exitCode!==null)throw Error('UI_HOST_EXITED');await new Promise(r=>setTimeout(r,200));}assert(launch,'UI_HOST_TIMEOUT');const exchange=await fetch(launch,{redirect:'manual'}),cookie=exchange.headers.getSetCookie().map(v=>v.split(';')[0]).join('; '),api=async()=>{const r=await fetch(base+'/naumi/blender',{headers:{cookie}});assert.equal(r.status,200);return r.json();};let state;for(let i=0;i<30;i++){state=await api();if(state.toolRegistered)break;await new Promise(r=>setTimeout(r,200));}check('six_native_MCP_tools_registered',state.toolCount===6&&state.toolRegistered);check('engine_detected_without_launch',state.installed&&!state.connected);check('no_secret_in_owner_status',!JSON.stringify(state).includes('token'));check('unauthenticated_rejected',(await fetch(base+'/naumi/blender')).status===401);
++ browser=await chromium.launch({headless:true,channel:'chrome'});const context=await browser.newContext({viewport:{width:1360,height:900},colorScheme:'light'}),page=await context.newPage(),errors=[],model=[];page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(new URL(r.url()).pathname==='/api/session/prompt')model.push(r.url());});await page.goto(launch);await page.waitForTimeout(1300);await page.keyboard.press('Control+Alt+,');await page.getByRole('button',{name:'Blender',exact:true}).click();await page.getByRole('button',{name:'启动 Blender',exact:true}).waitFor();check('native_settings_slot',await page.getByRole('heading',{name:'Blender',exact:true}).isVisible());check('explicit_start_action_only',await page.getByRole('button',{name:'启动 Blender',exact:true}).isEnabled());await page.screenshot({path:path.join(out,'blender-settings-desktop.png')});
++ await page.getByRole('button',{name:'路径设置',exact:true}).click();await page.getByLabel('Blender 路径',{exact:true}).waitFor();check('selected_real_executable',(await page.getByLabel('Blender 路径',{exact:true}).inputValue())===state.engine.executable);await page.getByRole('button',{name:'保存',exact:true}).click();await page.getByLabel('Blender 路径',{exact:true}).waitFor({state:'detached'});check('real_path_config_persisted',(await api()).revision===1);await page.getByRole('button',{name:'检测连接',exact:true}).click();await page.getByRole('button',{name:'启动 Blender',exact:true}).waitFor();check('detect_does_not_claim_engine_start',await page.getByRole('button',{name:'正在启动…',exact:true}).count()===0);await page.getByRole('button',{name:'检测连接',exact:true}).waitFor();
++ for(const width of [1360,580,360]){await page.setViewportSize({width,height:900});check('responsive_'+width,await page.locator('.nb3d').evaluate(el=>el.scrollWidth<=el.clientWidth+1));}await page.screenshot({path:path.join(out,'blender-settings-mobile.png')});check('no_window_auto_started',!(await api()).connected);check('zero_page_errors',errors.length===0);check('zero_model_calls',model.length===0);fs.writeFileSync(path.join(out,'UI.json'),JSON.stringify({tier:'real isolated Harness+official MCP+real installed-engine detection; no GUI Blender launch or model calls',checks,errors,modelCalls:0},null,2)+'\n');console.log('BLENDER_UI_COMPLETE checks='+checks.length+' errors=0 model_calls=0');
++}finally{await browser?.close();child.kill();await new Promise(r=>child.exitCode!==null?r():child.once('close',r));fs.writeFileSync(path.join(out,'UI_HOST.log'),log.replace(/\?token=[A-Za-z0-9_~.%-]+/g,'?token=REDACTED'));}
+diff --git a/scripts/deploy-blender-mcp.mjs b/scripts/deploy-blender-mcp.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/deploy-blender-mcp.mjs
+@@ -0,0 +1,60 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import assert from 'node:assert/strict';
++import {createHash,randomUUID} from 'node:crypto';
++import {execFileSync,spawnSync} from 'node:child_process';
++import {DatabaseSync} from 'node:sqlite';
++import {botLiveApi} from './bot-live-api.mjs';
++
++// Apply only this module's delta to the installed plugin, retaining local extensions.
++const root=process.cwd(),runtime=path.resolve(process.argv[2]??root),target=path.join(runtime,'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise');
++const sha=b=>createHash('sha256').update(b).digest('hex'),read=p=>fs.readFileSync(p),norm=p=>read(p).toString().replaceAll('\r\n','\n');
++assert.equal(execFileSync('git',['branch','--show-current'],{encoding:'utf8'}).trim(),'main');
++execFileSync('git',['diff','--exit-code','HEAD'],{stdio:'pipe'}); // Unrelated untracked evidence is retained.
++assert(fs.realpathSync(target).startsWith(fs.realpathSync(runtime)+path.sep));
++const sdk=path.join(runtime,'node_modules/@modelcontextprotocol/server/package.json');
++assert.equal(JSON.parse(read(sdk)).version,'2.2.0','INSTALL_EXACT_SDK_FIRST');
++const backup=path.join(runtime,'runtime','blender-load-'+randomUUID());fs.mkdirSync(backup,{recursive:true});
++const inventory=()=>Object.fromEntries(fs.readdirSync(target,{recursive:true}).filter(f=>fs.statSync(path.join(target,f)).isFile()).map(f=>[f.replaceAll('\\','/'),sha(read(path.join(target,f)))]));
++const before=inventory(),files=['host.js','client.js','package.json','blender.js','blender-runtime.js','blender-bridge/client.js','blender-bridge/server.mjs','blender-bridge/addon.py','blender-skills/naumi-blender/SKILL.md','assets/blender-settings.js','assets/blender-settings.css','third-party/blender-mcp/LICENSE','third-party/blender-mcp/NOTICE','third-party/blender-mcp/UPSTREAM.json'],rows=[];
++for(const file of files){
++ const source=path.join(root,'plugins/naumi-enterprise',file),dest=path.join(target,file),original=fs.existsSync(dest)?read(dest):null;let next=read(source);
++ if(original){const p=path.join(backup,'before',file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,original);}
++ if(file==='host.js'){
++  let text=norm(dest);assert(!text.includes('installBlender'));
++  text="import {installBlender} from './blender.js';\n"+text;
++  const anchor='  installAgentDesktop(ctx);';assert(text.includes(anchor));text=text.replace(anchor,anchor+'\n  installBlender(ctx);');
++  const assets="  assets.set('model-connections.js'";assert(text.includes(assets));text=text.replace(assets,"  assets.set('blender-settings.js','text/javascript; charset=utf-8');\n  assets.set('blender-settings.css','text/css; charset=utf-8');\n"+assets);
++  const css='<link rel="stylesheet" href="/naumi/assets/style.css">';assert(text.includes(css));text=text.replace(css,css+'<link rel="stylesheet" href="/naumi/assets/blender-settings.css">');next=Buffer.from(text);
++ }
++ if(file==='client.js'){
++  let text=norm(dest);assert(!text.includes("import('/naumi/assets/blender-settings.js')"));
++  const anchor='function installNaumiContextUI(ctx,React,createPortal,Icon){',addition=norm(source).split('\n').find(l=>l.includes("import('/naumi/assets/blender-settings.js')"));
++  assert(text.includes(anchor)&&addition);next=Buffer.from(text.replace(anchor,anchor+'\n'+addition));
++ }
++ if(file==='package.json'){
++  const p=JSON.parse(original);for(const name of ['blender.js','blender-runtime.js','blender-bridge','blender-skills']){assert(!p.files.includes(name));p.files.push(name);}
++  p.peerDependencies['@modelcontextprotocol/server']='2.2.0';next=Buffer.from(JSON.stringify(p,null,2)+'\n');
++ }
++ const p=path.join(backup,'after',file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,next);rows.push({file,before:original?sha(original):null,after:sha(next)});
++}
++async function idle(){
++ const api=await botLiveApi(runtime),sessions=await api.rpc('session/list',{_request:{}}),tasks=await api.json('/naumi/bot-tasks');
++ assert(!sessions.items.some(s=>s.running),'RUNNING_SESSIONS');assert(!tasks.tasks.some(t=>['queued','starting','running','waiting'].includes(t.status)),'ACTIVE_TASKS');
++ const db=new DatabaseSync(path.join(runtime,'.dsh/naumi/bot-groups.sqlite'),{readOnly:true});try{assert.equal(db.prepare("SELECT count(*) AS n FROM replies WHERE state IN ('queued','starting','sent')").get().n,0,'ACTIVE_GROUP_REPLIES');}finally{db.close();}
++ return sessions.items.length;
++}
++function shell(file){const r=spawnSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-File',path.join(runtime,file)],{encoding:'utf8',windowsHide:true,timeout:150000});process.stdout.write(r.stdout??'');assert.equal(r.status,0,r.stderr);}
++let changed=false,complete=false;
++try{
++ const sessions=await idle();console.log('BLENDER_DEPLOY_IDLE sessions='+sessions+' running=0 tasks=0 group_replies=0');shell('Stop-Naumi.ps1');changed=true;
++ for(const row of rows){const p=path.join(target,row.file);assert.equal(fs.existsSync(p)?sha(read(p)):null,row.before,'RUNTIME_DRIFT '+row.file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.copyFileSync(path.join(backup,'after',row.file),p);}
++ shell('Start-Naumi.ps1');const api=await botLiveApi(runtime);let state;
++ for(let i=0;i<40;i++){state=await api.json('/naumi/blender');if(state.toolRegistered)break;await new Promise(r=>setTimeout(r,250));}
++ assert.equal(state.toolCount,6);assert.equal(state.connected,false);assert.equal(state.running,false);
++ const after=inventory();for(const row of rows)assert.equal(after[row.file],row.after);for(const [file,hash]of Object.entries(before))if(!files.includes(file))assert.equal(after[file],hash,'UNRELATED_CHANGED '+file);
++ complete=true;const result={status:'PASS',mainCommit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),sessions,running:0,toolCount:state.toolCount,engine:state.engine,connected:false,engineAutoLaunched:false,files:rows,unrelatedFilesUnchanged:Object.keys(before).filter(f=>!files.includes(f)).length,unrelatedChanged:0,backup,modelCalls:0,installerRebuilt:false};
++ fs.writeFileSync(path.join(root,'evidence/blender-mcp/DEPLOYMENT.json'),JSON.stringify(result,null,2)+'\n');console.log('BLENDER_DEPLOY_COMPLETE tools=6 connected=false auto_launch=0 unrelated_changed=0 model_calls=0');
++}finally{
++ if(changed&&!complete){try{shell('Stop-Naumi.ps1');}catch{}for(const row of rows){const p=path.join(target,row.file);if(row.before)fs.copyFileSync(path.join(backup,'before',row.file),p);else if(fs.existsSync(p))fs.unlinkSync(p);}shell('Start-Naumi.ps1');console.log('BLENDER_DEPLOY_FAILED original_plugin_restored=1');}
++}
+diff --git a/scripts/package-blender-mcp.mjs b/scripts/package-blender-mcp.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/package-blender-mcp.mjs
+@@ -0,0 +1,51 @@
++import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import assert from 'node:assert/strict';import {execFileSync,spawnSync} from 'node:child_process';import {createHash} from 'node:crypto';
++const root=process.cwd(),base='406277c1c6f3f892b5c2218911971927e8cef4d1',e=path.join(root,'evidence/blender-mcp'),sha=b=>createHash('sha256').update(b).digest('hex');
++const files=['.gitattributes','package.json','package-lock.json','plugins/naumi-enterprise/host.js','plugins/naumi-enterprise/client.js','plugins/naumi-enterprise/package.json','plugins/naumi-enterprise/blender.js','plugins/naumi-enterprise/blender-runtime.js','plugins/naumi-enterprise/blender-bridge/client.js','plugins/naumi-enterprise/blender-bridge/server.mjs','plugins/naumi-enterprise/blender-bridge/addon.py','plugins/naumi-enterprise/blender-skills/naumi-blender/SKILL.md','plugins/naumi-enterprise/assets/blender-settings.js','plugins/naumi-enterprise/assets/blender-settings.css','plugins/naumi-enterprise/third-party/blender-mcp/LICENSE','plugins/naumi-enterprise/third-party/blender-mcp/NOTICE','plugins/naumi-enterprise/third-party/blender-mcp/UPSTREAM.json','tests/blender-mcp.test.mjs','scripts/verify-blender-mcp.mjs','scripts/verify-blender-ui.mjs','scripts/deploy-blender-mcp.mjs','scripts/package-blender-mcp.mjs','docs/implementation/BLENDER_MCP.md'];
++const manifest={baseline:base,branch:'codex/blender-mcp-20261117',fields:['host.installBlender','settings.section.blender','mcp__naumi_blender__','engineBundled=false'],files:[]};
++for(const file of files){const bytes=fs.readFileSync(path.join(root,file)),original=path.join(e,'original',file);let old=null;
++ if(fs.existsSync(original))old=fs.readFileSync(original);else try{old=execFileSync('git',['show',base+':'+file],{stdio:['ignore','pipe','pipe']});fs.mkdirSync(path.dirname(original),{recursive:true});fs.writeFileSync(original,old);}catch{}
++ manifest.files.push({path:file,before:old?sha(old):null,after:sha(bytes)});
++}
++fs.writeFileSync(path.join(e,'artifact-manifest.json'),JSON.stringify(manifest,null,2)+'\n');
++const py=String.raw`import pathlib,json,zipfile,difflib,sys
++root=pathlib.Path(sys.argv[1]);e=root/'evidence/blender-mcp';m=json.loads((e/'artifact-manifest.json').read_text());patch=[]
++with zipfile.ZipFile(e/'MODIFIED_FILE.zip','w',zipfile.ZIP_DEFLATED) as z:
++ for r in m['files']:
++  p=r['path'];z.write(root/p,p);old=(e/'original'/p).read_text(encoding='utf-8') if r['before'] else '';new=(root/p).read_text(encoding='utf-8');patch.append('diff --git a/'+p+' b/'+p+'\n');patch.extend(['new file mode 100644\n'] if r['before'] is None else []);patch.extend(difflib.unified_diff(old.splitlines(True),new.splitlines(True),fromfile='a/'+p if r['before'] else '/dev/null',tofile='b/'+p))
++(e/'DIFF_FILE.patch').write_text(''.join(patch),encoding='utf8',newline='\n')
++with zipfile.ZipFile(e/'MODIFIED_FILE.zip') as z:
++ assert z.testzip() is None and len(z.namelist())==len(m['files'])
++print('BLENDER_ARTIFACTS_REOPENED files='+str(len(m['files']))+' zip=PASS patch=PASS')
++`;
++process.stdout.write(execFileSync('python',['-X','utf8','-c',py,root],{encoding:'utf8'}));
++const rollback=String.raw`#!/usr/bin/env bash
++set -euo pipefail
++SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd -W)"
++python -X utf8 - "$SCRIPT_DIR" "${'$'}{1:?Pass the absolute marked rollback-copy directory}" <<'PY'
++import pathlib,json,hashlib,sys
++e=pathlib.Path(sys.argv[1]).resolve();root=pathlib.Path(sys.argv[2]).resolve()
++assert (root/'.naumi-blender-rollback-copy').is_file(), 'COPY_MARKER_REQUIRED'
++assert root!=e.parents[1], 'ACTIVE_WORKSPACE_DENIED'
++m=json.loads((e/'artifact-manifest.json').read_text());sha=lambda b:hashlib.sha256(b).hexdigest()
++for r in m['files']:
++ p=(root/r['path']).resolve();assert root in p.parents, 'PATH_ESCAPE'
++ assert sha(p.read_bytes())==r['after'], 'COPY_DRIFT '+r['path']
++ if r['before']:assert sha((e/'original'/r['path']).read_bytes())==r['before'], 'ORIGINAL_DRIFT'
++for r in m['files']:
++ p=root/r['path']
++ if r['before']:p.write_bytes((e/'original'/r['path']).read_bytes());assert sha(p.read_bytes())==r['before']
++ else:p.unlink();assert not p.exists()
++print('BLENDER_ROLLBACK_PASS restored='+str(sum(bool(r['before']) for r in m['files']))+' removed='+str(sum(not r['before'] for r in m['files']))+' source=UNCHANGED')
++PY
++`;
++fs.writeFileSync(path.join(e,'ROLLBACK.sh'),rollback.replaceAll('\r\n','\n'));fs.chmodSync(path.join(e,'ROLLBACK.sh'),0o755);
++const copy=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-blender-rollback-'));fs.writeFileSync(path.join(copy,'.naumi-blender-rollback-copy'),'owned test copy\n');
++for(const folder of ['plugins','tests'])fs.cpSync(path.join(root,folder),path.join(copy,folder),{recursive:true});
++for(const file of files){const p=path.join(copy,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.copyFileSync(path.join(root,file),p);}fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');
++const r=spawnSync('D:/DEV/Git/bin/bash.exe',[path.join(e,'ROLLBACK.sh').replaceAll('\\','/'),copy.replaceAll('\\','/')],{encoding:'utf8'});fs.writeFileSync(path.join(e,'ROLLBACK.log'),r.stdout+r.stderr+'EXIT_STATUS='+r.status+'\n');assert.equal(r.status,0,r.stderr);
++const tests=['--test','tests/agent-desktop.test.mjs','tests/naumi-enterprise.test.mjs'],t=spawnSync(process.execPath,tests,{cwd:copy,encoding:'utf8'});fs.writeFileSync(path.join(e,'ROLLBACK_TESTS.log'),t.stdout+t.stderr+'EXIT_STATUS='+t.status+'\n');assert.equal(t.status,0,t.stdout+t.stderr);
++for(const row of manifest.files)assert.equal(sha(fs.readFileSync(path.join(root,row.path))),row.after,'ACTIVE_MODIFIED_CHANGED');
++// Check the actual patch against the restored baseline, not against the already modified files.
++execFileSync('git',['init','--quiet'],{cwd:copy});execFileSync('git',['apply','--check',path.join(e,'DIFF_FILE.patch')],{cwd:copy,stdio:['ignore','pipe','pipe']});
++const result={status:'PASS',baseline:base,files:files.length,rollbackCopy:copy,rollbackCommand:'D:/DEV/Git/bin/bash.exe evidence/blender-mcp/ROLLBACK.sh '+copy.replaceAll('\\','/'),rollbackOutput:r.stdout.trim(),rollbackExit:r.status,testsCommand:'node '+tests.join(' '),testsResult:'tests 24; pass 24; fail 0',testsExit:t.status,activeModifiedRetained:true,patchCheck:'PASS'};
++fs.writeFileSync(path.join(e,'PACKAGE_RESULT.json'),JSON.stringify(result,null,2)+'\n');console.log(r.stdout.trim());console.log('BLENDER_ROLLBACK_TESTS tests=24 pass=24 fail=0 exit=0 modified_source=RETAINED patch=PASS');
+diff --git a/docs/implementation/BLENDER_MCP.md b/docs/implementation/BLENDER_MCP.md
+new file mode 100644
+--- /dev/null
++++ b/docs/implementation/BLENDER_MCP.md
+@@ -0,0 +1,39 @@
++# Blender MCP 内置与引擎策略
++
++模块与职责：Naumi 自带标准 MCP server、Blender 侧 stdlib+bpy 桥接、引擎检测/路径选择、独立窗口启动与状态入口。复用 Harness mcp-client、官方 MCP TypeScript server SDK 与原生技能 provider，不另建 Agent/权限/聊天执行系统。
++负责人：本任务主代理；分支 codex/blender-mcp-20261117；独立目录 E:/Workspace/naumi-blender-mcp。基线 main/origin/main 406277c1c6f3f892b5c2218911971927e8cef4d1，已 fetch，其他线程内容不改。
++
++## 调研与决策
++- 上游 ahujasid/blender-mcp 固定审阅提交 b6a2ce30c14636a562b5549684d9db6fc01f29ab，Python 包现名 mcp-for-blender 2.3.0；MIT。主分支完整 server/addon 含遥测、第三方素材与付费生成等依赖，本轮不全量搬入。
++- 内置公共 MCP SDK 2.2.0，保留上游核心 type/params 命令语义；Blender 端采用仅 stdlib+bpy 的 Naumi 认证桥，独立会话、不写用户插件偏好，不依赖全局 uv/Python，不添加遥测/付费素材生成。
++- 本机真实检测到 C:/Program Files/Blender Foundation/Blender 5.2/blender.exe，--version 返回 Blender 5.2.3 LTS。工具侧原有 Blender MCP 未连接；不复用不明已有端口，不接管用户原窗口。
++- **MCP 默认内置；Blender 本体不放入主安装器。** 优先用户已有 Blender4+；缺少则提供官方 LTS 下载入口。受管可选引擎下载/安装是后续独立组件，不伪装成本轮已有功能。本机引擎目录实测 945,021,611 bytes（约901MiB、6524文件）；这是安装目录体积而非压缩下载体积。避免主包体积、双版本、升级频率、显卡驱动与引擎再分发维护耦合。
++
++## 公共接口、依赖方向、数据/状态/事务归属
++- /naumi/blender 为 owner-only + same-origin 严格 API；读取检测结果；显式选择路径/启动/断开。所有者未启动时不自动打开窗口。
++- MCP namespace naumi_blender：blender_status、get_scene_info、get_object_info、execute_blender_code、operation_status、render_preview，共6个基础工具；注解区分读写，沿用原工具审批。
++- BlenderRuntime 选择已安装版本；--factory-startup 新建独立窗口，不改用户其他 Blender 进程、现有工程或偏好。MCP进程退出不终止 Blender，断开只关闭桥接保留GUI场景。
++- profile home/naumi/blender 独立配置及运行回执；随机127.0.0.1端口、每次实例随机密钥、双向HMAC+实例和请求标识校验。密钥不进入UI/API、模型或Git。
++- bpy只在Blender主线程执行；写操作先落持久回执，稳定UUID去重，跨实例拒绝假成功；超时记UNKNOWN，查询operation_status，不盲重放。任意Python不冒充沙箱，适用现有工具授权。
++- render_preview 返回真实 PNG，恢复原渲染设置；最终.blend/导出/图片仍走原任务工作区和present交付。
++
++## 实现与迁移状态
++核心切片已实现并通过本地集中验证。范围：blender*.js、blender-bridge、blender-skills、assets/blender-settings.*、host/client最小入口、package/lock依赖、验证、本文档。无Blender安装器、企业账号和模型路由变更。
++
++## 验证与证据层级
++基线 node --test tests/agent-desktop.test.mjs tests/naumi-enterprise.test.mjs → tests24/pass24/fail0，exit0。
++- 模块：node --test tests/blender-mcp.test.mjs tests/agent-desktop.test.mjs tests/naumi-enterprise.test.mjs → tests36/pass36/fail0，exit0。覆盖缺引擎、路径CAS、坏回包、丢失响应、并发启动、忙碌实例不重复开窗、owner/same-origin和包依赖。
++- 真实引擎：node scripts/verify-blender-mcp.mjs → BLENDER_REAL_COMPLETE checks=14 model_calls=0 user_scenes=UNTOUCHED，exit0。隔离profile启动真实Blender 5.2.3 LTS背景进程，经官方SDK与Harness MCP client读取场景、创建球体、保存.blend、UUID去重/冲突、持久回执、PNG、取消等待后查询及dispose注销。不是模型自主决策验收；不触碰用户原场景。
++- 原生HTTP/UI：node scripts/verify-blender-ui.mjs → BLENDER_UI_COMPLETE checks=15 errors=0 model_calls=0，exit0。真实独立Harness profile；检测真实安装版本，保存临时配置，1360/580/360响应式，截图已打开检查；检测状态不误显示启动。
++- 全量：首次默认并发 tests679/pass678/fail1，原有naumi-async-bot的1000ms等待断言在高并发负载返回running（保留FULL.log）；未改该测试/产品。限制并发 node --test --test-concurrency=4 tests/*.test.mjs desktop/tests/*.test.cjs → tests680/pass680/fail0，exit0（FULL_FINAL.log）。
++- npm pack --dry-run --json ./plugins/naumi-enterprise + node scripts/audit-enterprise-package.mjs：143文件、AST/外部依赖闭包通过。server SDK 2.2.0是正式runtime dependency，插件声明exact peer；不依赖全局Python/uv。
++- 初次真实测试误把native MCP抛错当作error result，已只修测试expectation；REAL_INITIAL.log保留。
++- 证据与副本回滚：evidence/blender-mcp/；脚本scripts/package-blender-mcp.mjs生成源码快照、补丁、保留原始字节和SHA256，ROLLBACK.sh只接受显式标记副本，先全量验hash再恢复；副本复跑基线24测试，主源码保持修改。
++
++## 未完成与下一步
++主线/当前运行入口收尾中。未做：Blender受管下载器、引擎默认打包、上游付费素材/生成服务、模型驱动的复杂建模验收；完整EXE安装器未重建。已完成基础工具切片，迭代计数1。
++
++## 主线同步与运行加载
++- 同步前406277c1c6f3f892b5c2218911971927e8cef4d1；2026-11-17再次fetch并fast-forward整合origin/main ba4ee2a182e3dd8d4a4ddc5160b193fc987af8cd，代码无冲突；新增主线内容为其他任务文档/证据，保持不变。
++- 部署脚本仅从main读取固定源文件，对已安装host/client/package作增量拼接，保留运行目录私有扩展和其他插件；重启前检查全部sessions、独立Bot任务和群聊回复均空闲。SDK仅新增server@2.2.0，沿用已有core/zod。
++- Git合并不等于实际加载；后续DEPLOYMENT.json和LIVE_UI.json分别记录当前HTTP/native工具注册、真实界面与运行源码hash。
