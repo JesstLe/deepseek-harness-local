@@ -326,7 +326,7 @@ window.__ModuleLoader__.load({
 			const onRightbarDrag = (0, react.useCallback)((dx) => {
 				actions.setRightbar(rightbarBase.current - dx);
 			}, [actions]);
-			const productTitle = "Naumi · 企业协作";
+			const productTitle = "Naumi";
 			const rightbarMax = cols.rightbar === 0 ? 0 : clampWidth(rightbarPreference, 300, viewport * RIGHTBAR_MAX_RATIO);
 			const sidebarWidth = drawer ? Math.min(layoutInfo.sidebar || 280, Math.max(0, viewport - 48)) : cols.sidebar;
 			const sidebar = (0, react.useMemo)(() => renderSlot("sidebar", {

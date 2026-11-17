@@ -47,9 +47,9 @@ test('network failure remains unavailable, without last-user cached data',async(
   try{const {routes}=harness();const r=await invoke(routes.get('/naumi/workspace'),{cookie:'design_ops_session='+'a'.repeat(32)});assert.equal(r.status,502);assert.equal(r.body,'{"error":"COLLABORATION_UNAVAILABLE"}');}finally{global.fetch=previous;}
 });
 test('assets are allowlisted, traversal and upload are not served',async()=>{const {routes}=harness();assert.equal((await invoke(routes.get('/naumi/assets'),{url:'/naumi/assets/../../secret',method:'GET'})).status,404);assert.equal((await invoke(routes.get('/naumi/assets'),{url:'/naumi/assets/symbol.svg',method:'POST'})).status,404);const r=await invoke(routes.get('/naumi/assets'),{url:'/naumi/assets/symbol.svg'});assert.equal(r.status,200);assert.match(r.body.toString(),/<svg/);});
-test('index title and globals are branded without user or credential fields',()=>{const {ctx,injections}=harness();const rows=[];injections[0](rows);assert.equal(rows[0].name,'__NAUMI__');assert.deepEqual(Object.keys(rows[0].value),['collaborationOrigin','designOrigin','version']);assert.match(ctx.index('<title>DeepSeek Harness</title>'),/Naumi · 企业协作/);});
+test('index title and globals are branded without user or credential fields',()=>{const {ctx,injections}=harness();const rows=[];injections[0](rows);assert.equal(rows[0].name,'__NAUMI__');assert.deepEqual(Object.keys(rows[0].value),['collaborationOrigin','designOrigin','version','product','productVersion']);assert.match(ctx.index('<title>DeepSeek Harness</title>'),/<title>Naumi<\/title>/);});
 test('branded layout preserves the exact original AppFrame apart from two declared substitutions',()=>{
   const upstream=fs.readFileSync('node_modules/@deepseek-ai/dsh-client-ui-layout/lib/client.js','utf8');
   const branded=fs.readFileSync('plugins/naumi-ui-layout/client.js','utf8');
-  assert.equal(branded.replace('id: "@naumi/dsh-ui-layout"','id: "@deepseek-ai/dsh-client-ui-layout"').replace('const productTitle = "Naumi · 企业协作";','const productTitle = "DeepSeek Harness";'),upstream);
+  assert.equal(branded.replace('id: "@naumi/dsh-ui-layout"','id: "@deepseek-ai/dsh-client-ui-layout"').replace('const productTitle = "Naumi";','const productTitle = "DeepSeek Harness";'),upstream);
 });
