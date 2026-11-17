@@ -1,5 +1,5 @@
 import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';import assert from 'node:assert/strict';
-const root=process.cwd(),out=path.join(root,'evidence/primary-bot'),base='9f99b1d86d52c651f414007e75f3156b384a0346',sha=b=>createHash('sha256').update(b).digest('hex');fs.mkdirSync(out,{recursive:true});
+const root=process.cwd(),out=path.join(root,'evidence/primary-bot'),base='078142a',sha=b=>createHash('sha256').update(b).digest('hex');fs.mkdirSync(out,{recursive:true});
 const files=execFileSync('git',['diff','--name-only',base,'HEAD','--','plugins/naumi-enterprise','tests/naumi-primary-bot.test.mjs','scripts/primary-bot-ui-host.mjs','scripts/deploy-primary-bot.mjs','scripts/primary-bot-evidence.mjs','scripts/plan-bot-workspaces.mjs','tests/naumi-workspace-plan.test.mjs','docs/implementation/PRIMARY_BOT_ONBOARDING.md','docs/implementation/BOT_WORKSPACE_MIGRATION.md'],{encoding:'utf8'}).trim().split('\n').filter(Boolean);
 // Limit scope to this slice; the integrated streaming Markdown fix belongs to main.
 const own=files.filter(f=>!f.endsWith('/bot-chat-markdown.js')),manifest=[];
