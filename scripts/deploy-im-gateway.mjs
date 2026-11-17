@@ -7,7 +7,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {botLiveApi} from './bot-live-api.mjs';
 
 const root=process.cwd(),runtime='E:/Workspace/naumi-desktop',mode=process.argv[2]??'prepare',installed=path.join(runtime,'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise'),checkpoint=path.join(runtime,'runtime/im-gateway-deploy.json');
-const baseline='541830103b4cd2782a3f8621f012c625932c95d1',git=(...args)=>execFileSync('git',args,{cwd:root}),hash=b=>createHash('sha256').update(b).digest('hex');
+const baseline='d041201',git=(...args)=>execFileSync('git',args,{cwd:root}),hash=b=>createHash('sha256').update(b).digest('hex');
 function inventory(){return Object.fromEntries(fs.readdirSync(installed,{recursive:true}).filter(p=>fs.statSync(path.join(installed,p)).isFile()).map(p=>[p.replaceAll('\\','/'),hash(fs.readFileSync(path.join(installed,p)))]));}
 function groupRows(){const db=new DatabaseSync(path.join(runtime,'.dsh/naumi/bot-groups.sqlite'),{readOnly:true});try{return Object.fromEntries(['rooms','members','posts','replies','post_context','room_name_operations'].map(t=>[t,db.prepare('SELECT * FROM '+t+' ORDER BY rowid').all()]));}finally{db.close();}}
 async function gate(){const api=await botLiveApi(runtime),sessions=await api.rpc('session/list',{_request:{}}),tasks=await api.json('/naumi/bot-tasks');assert(!sessions.items.some(s=>s.running),'RUNNING_SESSIONS');assert(!tasks.tasks.some(t=>['queued','starting','running','waiting'].includes(t.status)),'ACTIVE_TASKS');const groups=groupRows();assert(!groups.replies.some(r=>['queued','starting','sent'].includes(r.state)),'ACTIVE_GROUP_REPLY');return {api,sessions,tasks,groups};}
