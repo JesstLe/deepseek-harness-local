@@ -24,7 +24,11 @@ export class BotTaskService{
   }
   current(taskId){const task=this.store.read().tasks.find(t=>t.id===taskId);if(!task)fail('BOT_TASK_NOT_FOUND');return task;}
   authorized(agent,taskId,write=false){const caller=this.caller(agent,write),task=this.current(taskId);
-    if(![task.sourceBotId,task.targetBotId].includes(caller.bot.id))fail('BOT_TASK_FORBIDDEN');return {caller,task};}
+    if(![task.sourceBotId,task.targetBotId].includes(caller.bot.id))fail('BOT_TASK_FORBIDDEN');
+    // Bot-wide reads are intentional; writes belong to the exact task endpoints.
+    // A new reception/test Session bound to the same Bot is not a write grant.
+    if(write&&caller.bot.id===task.sourceBotId&&caller.root.id!==task.sourceSessionId)fail('BOT_TASK_SESSION_REQUIRED');
+    return {caller,task};}
   serial(taskId,fn){
     const run=(this.lanes.get(taskId)??Promise.resolve()).then(fn),tail=run.then(()=>{},()=>{});this.lanes.set(taskId,tail);
     return run.finally(()=>{if(this.lanes.get(taskId)===tail)this.lanes.delete(taskId);});
@@ -58,7 +62,7 @@ export class BotTaskService{
   summaries(agent,input={}){
     const {limit=20,offset=0}=z.object({limit:z.number().int().min(1).max(100).optional(),offset:z.number().int().min(0).optional()}).strict().parse(input);
     const all=this.list(agent).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));
-    return {total:all.length,offset,limit,hasMore:offset+limit<all.length,tasks:all.slice(offset,offset+limit).map(t=>({id:t.id,sourceBotId:t.sourceBotId,sourceSessionId:t.sourceSessionId,targetBotId:t.targetBotId,targetSessionId:t.targetSessionId,status:t.status,revision:t.revision,attempt:t.attempt,task:t.task.slice(0,240),progress:t.progress?.slice(0,160),hasResult:!!t.result,fileCount:t.delivery?.files?.length??0,updatedAt:t.updatedAt}))};
+    return {total:all.length,offset,limit,hasMore:offset+limit<all.length,tasks:all.slice(offset,offset+limit).map(t=>({id:t.id,sourceBotId:t.sourceBotId,sourceSessionId:t.sourceSessionId,targetBotId:t.targetBotId,targetSessionId:t.targetSessionId,status:t.status,revision:t.revision,attempt:t.attempt,task:t.task.slice(0,240),...(t.progress!==undefined?{progress:t.progress.slice(0,160)}:{}),hasResult:!!t.result,fileCount:t.delivery?.files?.length??0,updatedAt:t.updatedAt}))};
   }
   async get(agent,taskId){this.authorized(agent,taskId);await this.observeTask(taskId);return this.view(this.current(taskId));}
   async wait(agent,{taskId,afterRevision,timeoutMs=30000,waitForResult=false},{signal}={}){

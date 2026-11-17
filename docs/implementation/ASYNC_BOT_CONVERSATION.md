@@ -72,3 +72,9 @@ bot_dispatch({targetBotId:"bot-<实际目录 ID>",task:"生成活动文案",outp
 旧 Session 的 request header 仍记录原官方供应商；选择新模型不应重写这些历史记录。BasicCompactionEngine 的摘要 hook 在旧 provider 属于 deepseek-account/deepseek 且已无注册适配器、当前会话明确选中另一个已注册 provider 时，使用所选路由执行辅助摘要（maxTokens 上限 8192）。正常路由、未明确迁移及其他供应商保持原逻辑。预设把压缩引擎隔离在子作用域，因此在插件生命周期内一次安装受条件保护的文档化 summarize hook，卸载恢复原函数；不关闭压缩、不重新注册官方适配器，也不吞掉摘要失败。配置通过每次调用的只读 facade 提供，不污染全局策略。
 
 bot_task_list 工具返回默认最近20条、最多100条的分页摘要，省略历史结果全文；详情和owner HTTP账本保持原契约。避免模型为了定位一次旧任务就把全部历史交付塞入上下文。实际同任务二轮与旧官方上下文副本压缩的真实模型验收见 evidence/bot-task-continuity/。
+
+## 任务写入隔离与事故修复
+
+Bot-wide list/get/wait 不变；写入历史任务的发送端工具必须处于该任务原 sourceSessionId，其他接待/测试会话即使同属主管 Bot 也返回 BOT_TASK_SESSION_REQUIRED。用户可回原会话或从精确任务卡显式操作；owner HTTP 原 sourceSessionId 语义不变，执行端回复仍校验精确 targetSessionId。工具摘要的缺省进度省略键，所有测试经过原生 lossless JSON 输出边界。
+
+旧真实环境续办验收脚本已退役，避免重演测试会话误改业务任务。此前验收存在漏查已有任务写入的错误，见 [证据勘误](../../evidence/bot-task-continuity/ERRATUM-20261117.md)；本次缺陷、修复、事务归属和数据恢复见 [任务完整性修复](../changes/2026-11-17-bot-task-integrity.md)。数据修复只标记受影响任务为 interrupted、清除残留测试要求并保留审计，不自动派活。
