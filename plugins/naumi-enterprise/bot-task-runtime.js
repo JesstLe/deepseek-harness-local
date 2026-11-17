@@ -1,6 +1,6 @@
 import {installModelSelection,modelSelectionProjectionDefinition} from '@deepseek-ai/dsh-agent';
 import {freezeMessage} from '@deepseek-ai/dsh-llm';
-import {references,announcedFiles,validateFiles,registerFiles} from './bot-deliverables.js';
+import {references,announcedFiles,validateFiles,registerFiles,verifyHandoffFiles} from './bot-deliverables.js';
 
 const permissionTypes=['permission/preset','sandbox/mode','approval/policy'];
 
@@ -83,6 +83,7 @@ export function createBotTaskRuntime(ctx){
   });
   return {
     snapshot,profile,ensure,
+    verifyHandoff:(sessionId,refs)=>verifyHandoffFiles(ctx,snapshot,sessionId,refs,AbortSignal.timeout(10000)),
     publishTurn:publish,
     async declare(sessionId,files,callId,signal){
       const stored=await snapshot(sessionId),turn=stored?.events.findLast(e=>e.type==='turn/start')?.data.turn;

@@ -1,0 +1,42 @@
+// Keep electron-builder's stock two-pass uninstaller/signing/size validation.
+// Its nsis.script option bypasses that pipeline, so substitute presentation only
+// at the pinned computeFinalScript boundary, in this build process, never on disk.
+import fs from 'node:fs';
+import path from 'node:path';
+import {createHash} from 'node:crypto';
+import {createRequire} from 'node:module';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+const root=fileURLToPath(new URL('../..',import.meta.url));
+const sha=b=>createHash('sha256').update(b).digest('hex');
+export function presentationScript(raw,engine,metadata){
+ const normalized=raw.replaceAll('\r\n','\n');
+ if(sha(normalized)!==metadata.originalEngineSHA256 || sha(engine)!==metadata.modifiedEngineSHA256 ||
+ engine!==normalized.replace('!include "assistedInstaller.nsh"','!include "${NAUMI_WIZARD_DIR}\\pages.nsh"'))throw Error('NSIS_PRESENTATION_SOURCE_CHANGED');
+ return engine;
+}
+export function installPresentationHook(Target,engine,metadata){
+ const original=Target.prototype.computeFinalScript;
+ if(typeof original!=='function'||original.length!==3)throw Error('NSIS_BUILD_INTERFACE_CHANGED');
+ Target.prototype.computeFinalScript=function(raw,isInstaller,archs){
+  return original.call(this,presentationScript(raw,engine,metadata),isInstaller,archs);
+ };
+ return ()=>{Target.prototype.computeFinalScript=original;};
+}
+export async function buildDesktop(args=process.argv.slice(2)){
+ const require=createRequire(import.meta.url),{build,Platform,Arch}=require('electron-builder');
+ const {NsisTarget}=require('app-builder-lib/out/targets/nsis/NsisTarget.js');
+ const dir=path.join(root,'desktop/installer'),metadata=JSON.parse(fs.readFileSync(path.join(dir,'UPSTREAM.json')));
+ const pkg=JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json')));
+ if(pkg.build.nsis.script)throw Error('NSIS_CUSTOM_SCRIPT_BYPASSES_STOCK_UNINSTALLER');
+ if(require('app-builder-lib/package.json').version!==metadata.version)throw Error('NSIS_BUILDER_VERSION_CHANGED');
+ for(const arg of args)if(arg!=='--dir'&&!arg.startsWith('--output='))throw Error('UNKNOWN_BUILD_ARGUMENT '+arg);
+ const output=args.find(a=>a.startsWith('--output='))?.slice('--output='.length);
+ const callerCwd=process.cwd();
+ const restore=installPresentationHook(NsisTarget,fs.readFileSync(path.join(dir,'engine.nsi'),'utf8'),metadata);
+ try{
+  process.chdir(path.join(root,'desktop'));
+  console.log('NAUMI_BUILDER stock_uninstaller=1 stock_signing=1 stock_size_check=1 engine_delta=1');
+  return await build({projectDir:path.join(root,'desktop'),targets:Platform.WINDOWS.createTarget(args.includes('--dir')?'dir':'nsis',Arch.x64),publish:'never',...(output?{config:{directories:{output}}}:{})});
+ }finally{restore();process.chdir(callerCwd);}
+}
+if(process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url)await buildDesktop();

@@ -80,6 +80,7 @@ export class BotGroupService {
       status:task.status, attempt:task.attempt, subject:task.task.slice(0,200),
       updatedAt:task.updatedAt, files:task.delivery?.files ?? [],
       result:task.result?.slice(0,6000),
+      ...(task.handoff ? {handoff:{taskId:task.handoff.taskId,sessionId:task.handoff.sessionId}} : {}),
     }))};
   }
 

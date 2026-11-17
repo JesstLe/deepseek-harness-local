@@ -47,7 +47,8 @@ export function createBotGroupsPage(ctx, React) {
         key:`${file.sessionId}:${file.seq}:${file.index}`,onClick:() => openFile(file)}));
       return h('article',{key:task.id},h('strong',null,task.subject),
         h('p',{className:'nbg-muted'},`${label(task.targetBotId)} · ${taskLabel(task)}`),task.result && h('p',null,task.result),
-        h('div',{className:'nbg-actions'},button('打开任务',{onClick:() => openSession(task.targetSessionId)}),files));
+        h('div',{className:'nbg-actions'},button('打开任务',{onClick:() => openSession(task.targetSessionId)}),
+          task.handoff && button('打开上游任务',{onClick:() => openSession(task.handoff.sessionId)}),files));
     });
     return h('details',{className:'nbg-tasks'},h('summary',null,`群任务（${tasks.length}） · ${open} 进行中 · ${finished} 已完成`),h('div',{className:'nbg-task-list'},items));
   }

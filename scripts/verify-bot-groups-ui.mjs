@@ -106,13 +106,15 @@ try {
 
   const issued = {id:'task-1',sourceSessionId:group.members[0].sessionId,targetBotId:'bot-1',targetSessionId:'child-session',
     status:'completed',attempt:1,task:'审核上新文案',result:'审核完成',updatedAt:new Date().toISOString(),
+    handoff:{taskId:'task-draft',sessionId:'draft-session'},
     delivery:{files:[{sessionId:'child-session',path:'审阅报告.md',seq:7,index:0}]}};
   fixture.tasks.push(issued);
   await page.getByText('群任务（1） · 0 进行中 · 1 已完成',{exact:true}).click();
   await page.getByRole('button',{name:'打开任务',exact:true}).click();
+  await page.getByRole('button',{name:'打开上游任务',exact:true}).click();
   await page.getByRole('button',{name:'审阅报告.md',exact:true}).click();
   const opened = await page.evaluate(() => window.fixtureOpened);
-  assert.deepEqual(opened.sessions,['child-session']);
+  assert.deepEqual(opened.sessions,['child-session','draft-session']);
   assert.equal(decodeURIComponent(opened.resources[0]),'dsh-resource://file/session/child-session/审阅报告.md');
 
   await page.reload();
