@@ -51,3 +51,7 @@ D1–D4共同属于第一优先级，顺序为依赖安排，不是把主动性�
 ## D1 实施进展
 
 已实现轻量工作入口并复用原组件；25项模块、602项全仓与18项隔离真实壳交互通过。首次UI runner的关闭按钮可访问名与窄屏隐藏侧栏两个定位错误已更正，失败日志保留。最终源码/主线/加载状态以 evidence/daily-work/VERIFICATION.txt 为准；D2–D5未因此退出。
+
+## D3 自然目标提议进展
+
+复用原生会话来源校验、EmployeeWorkStore与GoalForm，新增employee_goal_propose，仅形成待确认记录。用户修改后确认或忽略；确认与正式goal同事务，支持CAS与原operationId重试，原提议/消息来源保留，不派单、不启用规则。该切片的源码/主线/隔离壳/运行加载分别以 [实现记录](../implementation/NATURAL_WORK_GOALS.md) 和evidence/natural-work-goals/VERIFICATION.txt为准。D3任务关联与固定文件版本、D2员工连续性、D5安装分发及真实供应商验收仍保留。

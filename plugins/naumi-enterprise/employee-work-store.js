@@ -39,10 +39,34 @@ export class EmployeeWorkStore{
     if(next.status!=='completed'&&goals.some(g=>g.id!==next.id&&g.status==='completed'&&g.dependencies.includes(next.id)))fail('WORK_COMPLETED_DEPENDENT');
     if(next.parentId&&['completed','cancelled'].includes(byId.get(next.parentId).status))fail('WORK_PARENT_CLOSED');
   }
+  proposals(botId){return this.store.entitiesOfType(botId,'goalproposal');}
+  proposal(botId,proposalId){const value=this.store.entity(botId,proposalId);if(!value||!proposalId.startsWith('goalproposal-'))fail('WORK_PROPOSAL_NOT_FOUND');return value;}
+  proposeGoal(botId,{operationId,...input},actor){
+    input=goalInput.parse(input);guardText(input);if(actor?.kind!=='proposal'||!actor.sessionId||!actor.messageId||!actor.quote)fail('WORK_USER_SOURCE_REQUIRED');
+    const proposalKey=digest(JSON.stringify({input,sessionId:actor.sessionId,messageId:actor.messageId}));
+    return this.store.mutate(botId,operationId,'goal_propose',{input,proposalKey},actor,()=>{
+      const all=this.proposals(botId),same=all.find(p=>p.proposalKey===proposalKey);if(same)return same;
+      if(all.length>=1000||all.filter(p=>p.status==='pending').length>=50)fail('WORK_PROPOSAL_CAPACITY');
+      const time=this.store.now();return this.save({id:'goalproposal-'+randomUUID(),botId,revision:1,status:'pending',goal:input,source:actor,proposalKey,goalId:null,createdAt:time,updatedAt:time},'goalproposal','goal_propose',actor);
+    });
+  }
+  reviewProposal(botId,{proposalId,expectedRevision,operationId,decision,goal:edited},actor={kind:'owner'}){
+    if(actor.kind!=='owner')fail('WORK_REVIEWER_REQUIRED');id.parse(proposalId);rev.parse(expectedRevision);z.enum(['confirm','dismiss']).parse(decision);
+    if(edited!==undefined){edited=goalInput.parse(edited);guardText(edited);if(decision!=='confirm')fail('WORK_INVALID_REQUEST');}
+    return this.store.mutate(botId,operationId,'goal_proposal_review',{proposalId,expectedRevision,decision,...edited?{goal:edited}:{}},actor,()=>{
+      const current=this.proposal(botId,proposalId);if(current.revision!==expectedRevision)fail('WORK_CONFLICT');if(current.status!=='pending')fail('WORK_PROPOSAL_RESOLVED');
+      const goal=decision==='confirm'?this.insertGoal(botId,edited??current.goal,actor,{sourceProposalId:current.id}):null;
+      const proposal=this.save({...current,status:decision==='confirm'?'confirmed':'dismissed',goalId:goal?.id??null,revision:current.revision+1,resolvedAt:this.store.now()},'goalproposal','goal_proposal_'+decision,actor);
+      return {proposal,goal};
+    });
+  }
+  insertGoal(botId,input,actor,extra={}){
+    if(this.goals(botId).length>=1000)fail('WORK_CAPACITY');const time=this.store.now();
+    const goal={id:'goal-'+randomUUID(),botId,revision:1,...input,...extra,status:'planned',createdAt:time,updatedAt:time};this.validateGraph(botId,goal);return this.save(goal,'goal','goal_create',actor);
+  }
   createGoal(botId,{operationId,...input},actor={kind:'owner'}){
     input=goalInput.parse(input);guardText(input);return this.store.mutate(botId,operationId,'goal_create',input,actor,()=>{
-      if(this.goals(botId).length>=1000)fail('WORK_CAPACITY');const time=this.store.now();
-      const goal={id:'goal-'+randomUUID(),botId,revision:1,...input,status:'planned',createdAt:time,updatedAt:time};this.validateGraph(botId,goal);return this.save(goal,'goal','goal_create',actor);
+      return this.insertGoal(botId,input,actor);
     });
   }
   updateGoal(botId,{goalId,expectedRevision,operationId,patch},actor={kind:'owner'}){
@@ -103,6 +127,7 @@ export class EmployeeWorkStore{
 }
 
 export const workCommands=z.discriminatedUnion('action',[
+  z.object({action:z.literal('goal_proposal_review'),botId:id,operationId:op,proposalId:id,expectedRevision:rev,decision:z.enum(['confirm','dismiss']),goal:goalInput.optional()}).strict(),
   z.object({action:z.literal('goal_create'),botId:id,operationId:op,...goalInput.shape}).strict(),
   z.object({action:z.literal('goal_update'),botId:id,operationId:op,goalId:id,expectedRevision:rev,patch:goalPatch}).strict(),
   z.object({action:z.literal('delivery_create'),botId:id,operationId:op,goalId:id,title,fileName,content,sourceTaskId:id.nullable().optional()}).strict(),
