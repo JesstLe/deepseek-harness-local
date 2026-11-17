@@ -2,9 +2,12 @@ import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import {officialModelSpecs,modelSpecView,configureModelSpec,refreshModelSpecs} from './model-specs.js';
 
+import {reasoningLevels,configureReasoning,reasoningView,validateDefault} from './model-reasoning.js';
+
 const protocols=['openai-completions','openai-responses','anthropic-messages'];
-const model=z.object({id:z.string().trim().min(1).max(512),name:z.string().trim().max(160).optional(),contextWindow:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),maxTokens:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional()}).strict();
-const save=z.object({action:z.literal('save'),id:z.string().regex(/^[a-z][a-z0-9_-]{0,79}$/),expectedRevision:z.number().int().nonnegative(),displayName:z.string().trim().min(1).max(120),baseURL:z.string().trim().min(1).max(2048),api:z.enum(protocols),models:z.array(model).min(1).max(200),apiKey:z.string().trim().min(1).max(16000).optional()}).strict();
+const effortMap=z.record(z.string(),z.union([z.string().min(1).max(40),z.null()]));
+const model=z.object({id:z.string().trim().min(1).max(512),reasoningPreset:z.enum(['inherit','disabled','official','custom']).optional(),reasoningEfforts:z.union([z.literal(false),effortMap]).optional(),reasoningMode:z.enum(['native','adaptive','budget']).optional(),name:z.string().trim().max(160).optional(),contextWindow:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),maxTokens:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional()}).strict();
+const save=z.object({action:z.literal('save'),id:z.string().regex(/^[a-z][a-z0-9_-]{0,79}$/),expectedRevision:z.number().int().nonnegative(),displayName:z.string().trim().min(1).max(120),baseURL:z.string().trim().min(1).max(2048),api:z.enum(protocols),reasoning:z.enum(reasoningLevels).nullable().optional(),models:z.array(model).min(1).max(200),apiKey:z.string().trim().min(1).max(16000).optional()}).strict();
 const remove=z.object({action:z.literal('remove'),id:z.string().min(1).max(80),expectedRevision:z.number().int().nonnegative()}).strict();
 const refresh=z.object({action:z.literal('refresh-specs'),expectedRevision:z.number().int().nonnegative()}).strict();
 const discover=z.object({action:z.literal('discover'),id:z.string().min(1).max(80).optional(),baseURL:z.string().trim().min(1).max(2048),api:z.enum(protocols),apiKey:z.string().trim().min(1).max(16000).optional()}).strict();
@@ -55,8 +58,8 @@ export class ModelConnections{
  namespace(){const ns=this.ctx.settings.describe({redactSecrets:true}).find(n=>n.ns==='llm-pi-ai');if(!ns)throw error('MODEL_SETTINGS_UNAVAILABLE',503);return ns;}
  async read(){const ns=this.namespace(),groups=[];for(const[id,p]of Object.entries(ns.value.providers??{})){
   const info=p.apiKeyEnv?await this.ctx.credentials.describe(p.apiKeyEnv):{configured:false,writable:true};
-  groups.push({id,displayName:p.displayName??id,api:p.api??'openai-completions',baseURL:p.baseURL??'',models:(p.models??[]).map(m=>({id:m.id,...m.name?{name:m.name}:{}})),configured:info.configured,editable:protocols.includes(p.api)&&Array.isArray(p.models)&&p.models.length>0});
- }for(const group of groups){const provider=ns.value.providers[group.id];group.models=group.models.map(m=>{const raw=provider.models.find(row=>row.id===m.id);return modelSpecView({...m,...raw.contextWindow===undefined?{}:{contextWindow:raw.contextWindow},...raw.maxTokens===undefined?{}:{maxTokens:raw.maxTokens}},provider);});}return {revision:ns.revision,writable:this.ctx.settings.writable,groups,specs:officialModelSpecs};}
+  groups.push({id,displayName:p.displayName??id,api:p.api??'openai-completions',reasoning:p.reasoning??null,baseURL:p.baseURL??'',models:(p.models??[]).map(m=>({id:m.id,...m.name?{name:m.name}:{}})),configured:info.configured,editable:protocols.includes(p.api)&&Array.isArray(p.models)&&p.models.length>0});
+ }for(const group of groups){const provider=ns.value.providers[group.id];group.models=group.models.map(m=>{const raw=provider.models.find(row=>row.id===m.id);return {...modelSpecView({...m,...raw.contextWindow===undefined?{}:{contextWindow:raw.contextWindow},...raw.maxTokens===undefined?{}:{maxTokens:raw.maxTokens}},provider),...reasoningView(raw,provider.api)};});}return {revision:ns.revision,writable:this.ctx.settings.writable,groups,specs:officialModelSpecs};}
  async repairDefault(removed){
   const current=this.ctx.agentDefaultModel.currentSelection();
   const p=this.namespace().value.providers??{},own=p[current.provider];
@@ -84,7 +87,9 @@ export class ModelConnections{
   }else{
    if(new Set(p.models.map(m=>m.id)).size!==p.models.length)throw error('MODEL_DUPLICATE_ID');
    if(!p.apiKey&&!previous?.apiKeyEnv)throw error('MODEL_KEY_REQUIRED');
-   const profile={...stored,displayName:p.displayName,baseURL:endpoint(p.baseURL),api:p.api,models:p.models.map(m=>configureModelSpec(m,(stored?.models??previous?.models)?.find(old=>old.id===m.id),previous??{})),apiKeyEnv:previous?.apiKeyEnv};
+   const profile={...stored,displayName:p.displayName,baseURL:endpoint(p.baseURL),api:p.api,models:p.models.map(m=>configureReasoning(m,configureModelSpec(m,(stored?.models??previous?.models)?.find(old=>old.id===m.id),previous??{}),p.api)),apiKeyEnv:previous?.apiKeyEnv};
+   if(p.reasoning!==undefined){if(p.reasoning===null)delete profile.reasoning;else profile.reasoning=p.reasoning;}
+   if(p.reasoning!==undefined||p.models.some(m=>m.reasoningPreset!==undefined||m.reasoningEfforts!==undefined)){profile.preserveReasoningDefault=true;validateDefault(profile,profile.reasoning);}
    if(p.apiKey){if(/[\r\n\u0000-\u001f\u007f]/.test(p.apiKey))throw error('MODEL_KEY_INVALID');newRef='NAUMI_MODEL_'+randomUUID().replaceAll('-','').toUpperCase();profile.apiKeyEnv=newRef;await this.ctx.credentials.set(newRef,p.apiKey);}
    try{await this.ctx.settings.mutate('llm-pi-ai',[{op:'set',path:['providers',p.id],value:profile}],ns.revision);}
    catch(e){if(newRef)try{await this.ctx.credentials.unset(newRef);}catch{throw error('MODEL_SAVE_CLEANUP_FAILED',500);}throw e;}

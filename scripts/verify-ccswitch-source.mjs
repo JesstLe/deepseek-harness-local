@@ -1,0 +1,2 @@
+import {readCCSwitchSources} from './ccswitch-source.mjs';import fs from 'node:fs';import assert from 'node:assert/strict';
+const before=JSON.parse(fs.readFileSync('evidence/ccswitch-reasoning-audit/BASELINE_AUDIT.json')).sourceRows,now=readCCSwitchSources();assert.equal(now.length,before.length);for(const r of before)assert.equal(now.find(n=>n.id===r.id&&n.app===r.app)?.sourceHash,r.sourceHash,'SOURCE_CHANGED');console.log('CC_SWITCH_UNCHANGED rows='+now.length+' source_writes=0');

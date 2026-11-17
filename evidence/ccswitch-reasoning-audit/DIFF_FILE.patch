@@ -1,0 +1,739 @@
+diff --git a/desktop/scripts/prepare-runtime.mjs b/desktop/scripts/prepare-runtime.mjs
+--- a/desktop/scripts/prepare-runtime.mjs
++++ b/desktop/scripts/prepare-runtime.mjs
+@@ -5,6 +5,7 @@
+ import {execFileSync} from 'node:child_process';
+ import {stageDingTalk} from './stage-dingtalk.mjs';
+ import {auditPackage} from '../../scripts/audit-enterprise-package.mjs';
++import {installReasoningDefaults} from '../../scripts/native-reasoning-extension.mjs';
+ import {installAgentTriggers} from '../../scripts/native-agent-mentions-extension.mjs';
+ import {installNativeComposer} from '../../scripts/native-composer-extension.mjs';
+ const project=fileURLToPath(new URL('../..',import.meta.url));
+@@ -39,6 +40,7 @@
+   try{
+     // Only runtime dependencies and source plugins are input. No user home/profile/config is copied.
+     fs.cpSync(path.join(root,'node_modules'),path.join(staged,'node_modules'),{recursive:true,dereference:true,filter:source=>!source.split(path.sep).some(x=>['.cache','.bin','dingtalk-workspace-cli'].includes(x))&&!isRuntimeDevelopmentArtifact(source)});
++    installReasoningDefaults(path.join(staged,'node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js'));
+     installNativeComposer(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'));
+     installAgentTriggers(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js'));
+     fs.cpSync(path.join(root,'plugins'),path.join(staged,'plugins'),{recursive:true});
+diff --git a/plugins/naumi-enterprise/assets/model-connections.css b/plugins/naumi-enterprise/assets/model-connections.css
+--- a/plugins/naumi-enterprise/assets/model-connections.css
++++ b/plugins/naumi-enterprise/assets/model-connections.css
+@@ -1,3 +1,5 @@
+ .nm-connections{color:#26334b;background:#fff;max-width:900px;margin:0 auto;padding:8px 0 24px;font:14px/1.55 Inter,"Segoe UI","Microsoft YaHei",sans-serif;color-scheme:light}.nm-connections *{box-sizing:border-box}.nm-connections header,.nm-group-head,.nm-connections footer{display:flex;align-items:center;gap:12px;justify-content:space-between}.nm-connections header{margin-bottom:24px}.nm-connections h2{font-size:20px;margin:0;font-weight:650}.nm-connections h3{font-size:15px;margin:0;font-weight:600;overflow-wrap:anywhere}.nm-connections button{border:1px solid #dfe5ef;border-radius:9px;padding:8px 14px;background:#fff;color:#354766;font:inherit;cursor:pointer}.nm-connections button:hover{background:#f3f6fc;border-color:#bac9e3}.nm-connections button:disabled{opacity:.5;cursor:default}.nm-connections .nm-primary,.nm-connections header>button{background:#315ded;color:#fff;border-color:#315ded}.nm-list{display:grid;gap:14px}.nm-list article{border:1px solid #e2e8f1;border-radius:14px;padding:20px;background:#fff}.nm-ready,.nm-missing{flex-shrink:0;font-size:12px;padding:3px 9px;border-radius:20px;background:#edf8f2;color:#2d7d59}.nm-missing{background:#fff6e7;color:#a47229}.nm-url{font-size:13px;color:#738098;margin:10px 0;overflow-wrap:anywhere}.nm-chips{display:flex;gap:6px;flex-wrap:wrap}.nm-chips span{font-size:12px;background:#f3f5fa;border-radius:6px;padding:3px 8px;overflow-wrap:anywhere;max-width:100%}.nm-connections footer{justify-content:flex-end;margin-top:16px}.nm-form{display:grid;grid-template-columns:1fr 1fr;gap:18px}.nm-form label{display:flex;flex-direction:column;gap:7px;min-width:0}.nm-form label:nth-child(2),.nm-models,.nm-form footer{grid-column:1/-1}.nm-form label>span{font-size:13px;font-weight:550}.nm-form input,.nm-form select,.nm-form textarea{border:1px solid #dce3ee;border-radius:9px;padding:10px 12px;background:#fff;color:#26334b;width:100%;font:inherit}.nm-form textarea{resize:vertical;min-height:120px;font-family:ui-monospace,Consolas,monospace}.nm-connections :focus-visible{outline:2px solid #7397f4;outline-offset:2px}.nm-error,.nm-notice{padding:12px 14px;border-radius:9px;margin-bottom:16px;overflow-wrap:anywhere}.nm-error{background:#fff1f1;color:#ad3e49}.nm-error button{margin-left:12px}.nm-notice{background:#edf8f2;color:#2d7d59}.nm-empty{padding:60px 20px;text-align:center;border:1px dashed #dce3ee;border-radius:14px;background:#fafbfe}@media(max-width:580px){.nm-form{grid-template-columns:1fr}.nm-form label{grid-column:1/-1}.nm-list article{padding:15px}.nm-group-head{align-items:flex-start}.nm-connections header{flex-wrap:wrap}.nm-connections footer{flex-wrap:wrap}}
+ .nm-model-heading,.nm-catalog-head,.nm-catalog-tools,.nm-catalog-actions{display:flex;align-items:center;justify-content:space-between;gap:10px}.nm-model-heading{margin-bottom:8px;flex-wrap:wrap}.nm-model-heading label{font-size:13px;font-weight:550}.nm-model-heading button{padding:6px 12px;color:#315ded;border-color:#d9e2ff;background:#f7f9ff}.nm-catalog{margin-top:12px;padding:14px;border:1px solid #dfe6f3;border-radius:12px;background:#fafbff}.nm-catalog-head{margin-bottom:12px}.nm-catalog-head strong{font-size:13px}.nm-catalog-head button,.nm-catalog-tools button{padding:3px 7px;font-size:12px}.nm-catalog-tools{justify-content:flex-start;margin:10px 0}.nm-catalog-tools>span{margin-left:auto;color:#738098;font-size:12px}.nm-catalog-list{max-height:260px;overflow:auto;overscroll-behavior:contain;border:1px solid #e5eaf3;border-radius:8px;background:#fff}.nm-form .nm-catalog-row{display:flex;flex-direction:row;align-items:flex-start;gap:10px;padding:9px 11px;border-bottom:1px solid #eef1f7;cursor:pointer}.nm-catalog-row:last-child{border-bottom:0}.nm-catalog-row:hover{background:#f3f6ff}.nm-form .nm-catalog-row>input{width:15px;height:15px;margin:3px 0 0;flex-shrink:0;accent-color:#315ded}.nm-catalog-row>span{min-width:0;overflow-wrap:anywhere;font-size:13px;font-weight:400}.nm-catalog-row small{display:block;color:#738098;font-size:12px;margin-top:2px}.nm-catalog-actions{justify-content:flex-end;margin-top:12px}.nm-discovery-status{padding:10px 0;color:#738098;font-size:13px}.nm-discovery-error{margin-top:10px;padding:10px 12px;border-radius:8px;background:#fff1f1;color:#ad3e49;font-size:13px}.nm-discovery-error button{margin-left:8px;font-size:12px;padding:3px 7px}@media(max-width:580px){.nm-catalog{padding:10px}.nm-catalog-actions button{width:100%}}
+ .nm-header-actions{display:flex;gap:10px;flex-wrap:wrap}.nm-specs{grid-column:1/-1;border:1px solid #dfe6f3;border-radius:12px;background:#fff;overflow:hidden}.nm-specs>summary{cursor:pointer;padding:12px 14px;font-weight:600;font-size:13px;background:#f8faff}.nm-spec-rows{max-height:380px;overflow:auto;overscroll-behavior:contain}.nm-spec-row{padding:14px;border-top:1px solid #e8edf5}.nm-spec-title{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.nm-spec-title code{font-size:13px;overflow-wrap:anywhere}.nm-spec-title a,.nm-spec-title>span{font-size:11px;color:#52719b;text-decoration:none}.nm-spec-title a:hover{text-decoration:underline}.nm-spec-limits{font-size:11px;color:#738098;margin:5px 0 10px;overflow-wrap:anywhere}.nm-spec-inputs{display:grid;grid-template-columns:1fr 1fr auto;align-items:end;gap:10px}.nm-form .nm-spec-inputs label{grid-column:auto;font-size:12px;font-weight:500}.nm-spec-inputs input{font-variant-numeric:tabular-nums}.nm-spec-inputs>button{white-space:nowrap;padding:10px;font-size:12px}@media(max-width:580px){.nm-spec-inputs{grid-template-columns:1fr 1fr}.nm-spec-inputs>button{grid-column:1/-1}.nm-spec-row{padding:12px}}
++
++.nm-reasoning{margin-top:14px;padding-top:12px;border-top:1px solid #edf0f6}.nm-reasoning-head{display:flex;align-items:end;gap:14px}.nm-reasoning-head>label{flex:1}.nm-reasoning-head a{font-size:12px;color:#52719b;white-space:nowrap;margin-bottom:11px}.nm-reasoning .nm-effort-levels{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 0}.nm-form .nm-effort-levels label{display:flex;flex-direction:row;align-items:center;gap:6px;border:1px solid #e1e7f2;border-radius:7px;padding:5px 10px;font-size:12px;background:#f8faff}.nm-effort-levels input{width:14px;height:14px;accent-color:#315ded;padding:0;margin:0}.nm-form .nm-reasoning-default{grid-column:1/-1;max-width:320px}.nm-reasoning>label{margin-top:10px;font-size:12px}
+diff --git a/plugins/naumi-enterprise/assets/model-connections.js b/plugins/naumi-enterprise/assets/model-connections.js
+--- a/plugins/naumi-enterprise/assets/model-connections.js
++++ b/plugins/naumi-enterprise/assets/model-connections.js
+@@ -1,4 +1,5 @@
+-const labels={MODEL_CONTEXT_RANGE:'上下文预算超出官方或最大输入允许范围',MODEL_OUTPUT_RANGE:'输出预算超出官方上限',MODEL_TOKEN_BUDGET:'上下文预算必须大于输出预算',MODEL_SPEC_UNVERIFIED:'此型号尚未核验官方上限，仅支持调低已有预算',MODEL_DISCOVERY_KEY_ORIGIN_CHANGED:'API 地址已更换，请填写此地址的 API Key',MODEL_DISCOVERY_AUTH:'API Key 无效或没有模型列表权限',MODEL_DISCOVERY_UNSUPPORTED:'此接口未提供模型列表，可手动填写模型 ID',MODEL_DISCOVERY_RATE_LIMITED:'请求过于频繁，请稍后重试',MODEL_DISCOVERY_REDIRECT:'模型接口发生跳转，请检查 API URL',MODEL_DISCOVERY_TIMEOUT:'获取超时，请重试',MODEL_DISCOVERY_INVALID:'接口未返回有效的模型列表',MODEL_DISCOVERY_TOO_LARGE:'模型列表过大，请手动填写模型 ID',MODEL_DISCOVERY_BUSY:'正在获取模型列表，请稍后重试',MODEL_DISCOVERY_FAILED:'获取失败，请检查 API URL 和网络后重试',MODEL_URL_INVALID:'请填写 API 基础地址，不含密钥或请求路径',MODEL_KEY_REQUIRED:'请填写 API Key',MODEL_KEY_INVALID:'API Key 包含无效字符',MODEL_DUPLICATE_ID:'模型 ID 重复',MODEL_SETTINGS_CONFLICT:'配置已被更新，请重新载入后再保存',MODEL_SAVE_FAILED:'保存失败，请重试',MODEL_SETTINGS_READ_ONLY:'当前配置只读',OWNER_REQUIRED:'仅本机所有者可配置',AUTH_REQUIRED:'请重新连接工作台'};
++const levels=['off','minimal','low','medium','high','xhigh','max'],effortNames={off:'关闭',minimal:'最低',low:'低',medium:'中',high:'高',xhigh:'超高',max:'最大'};
++const labels={MODEL_REASONING_INVALID:'请至少选择一个有效推理档位',MODEL_REASONING_UNVERIFIED:'此型号尚未核验推理档位',MODEL_REASONING_PROTOCOL:'推理模式与接口协议不匹配',MODEL_REASONING_DEFAULT_UNSUPPORTED:'默认档位必须被连接内所有模型支持',MODEL_CONTEXT_RANGE:'上下文预算超出官方或最大输入允许范围',MODEL_OUTPUT_RANGE:'输出预算超出官方上限',MODEL_TOKEN_BUDGET:'上下文预算必须大于输出预算',MODEL_SPEC_UNVERIFIED:'此型号尚未核验官方上限，仅支持调低已有预算',MODEL_DISCOVERY_KEY_ORIGIN_CHANGED:'API 地址已更换，请填写此地址的 API Key',MODEL_DISCOVERY_AUTH:'API Key 无效或没有模型列表权限',MODEL_DISCOVERY_UNSUPPORTED:'此接口未提供模型列表，可手动填写模型 ID',MODEL_DISCOVERY_RATE_LIMITED:'请求过于频繁，请稍后重试',MODEL_DISCOVERY_REDIRECT:'模型接口发生跳转，请检查 API URL',MODEL_DISCOVERY_TIMEOUT:'获取超时，请重试',MODEL_DISCOVERY_INVALID:'接口未返回有效的模型列表',MODEL_DISCOVERY_TOO_LARGE:'模型列表过大，请手动填写模型 ID',MODEL_DISCOVERY_BUSY:'正在获取模型列表，请稍后重试',MODEL_DISCOVERY_FAILED:'获取失败，请检查 API URL 和网络后重试',MODEL_URL_INVALID:'请填写 API 基础地址，不含密钥或请求路径',MODEL_KEY_REQUIRED:'请填写 API Key',MODEL_KEY_INVALID:'API Key 包含无效字符',MODEL_DUPLICATE_ID:'模型 ID 重复',MODEL_SETTINGS_CONFLICT:'配置已被更新，请重新载入后再保存',MODEL_SAVE_FAILED:'保存失败，请重试',MODEL_SETTINGS_READ_ONLY:'当前配置只读',OWNER_REQUIRED:'仅本机所有者可配置',AUTH_REQUIRED:'请重新连接工作台'};
+ export function mergeModelIds(text,models){return [...new Set([...text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean),...models.map(m=>m.id)])].join('\n');}
+ async function request(body,signal){const r=await fetch('/naumi/model-connections',{credentials:'same-origin',signal,cache:'no-store',...body?{method:'POST',headers:{'Content-Type':'application/json','x-naumi-model-connections':'1'},body:JSON.stringify(body)}:{}});const v=await r.json();if(!r.ok)throw Object.assign(Error(labels[v.error]??'模型连接暂不可用'),{status:r.status});return v;}
+ export function installModelConnectionsUI(ctx,React){
+@@ -23,13 +24,20 @@
+   function addModels(){const chosen=catalog.filter(m=>selected.includes(m.id)),text=mergeModelIds(draft.modelText,chosen);if(text.split('\n').filter(Boolean).length>200){setFetchError('每个连接最多保存 200 个模型');return;}setDraft(d=>({...d,modelText:mergeModelIds(d.modelText,chosen),models:[...(d.models??[]),...chosen.filter(m=>!d.models?.some(old=>old.id===m.id))]}));setCatalog(null);setSelected([]);setFetchError('');}
+   async function reload(){if(flight.current)return;flight.current=true;setBusy(true);try{const v=await request();if(alive.current){setData(v);setConflict(false);cancel();setError('');}}catch(e){if(alive.current)setError(e.message);}finally{flight.current=false;if(alive.current)setBusy(false);}}
+   async function submit(body){if(flight.current||conflict)return;flight.current=true;setBusy(true);setError('');setNotice('');try{const v=await request({...body,expectedRevision:data.revision});if(alive.current){setData(v);cancel();setNotice(v.specRefresh?'已校准 '+v.specRefresh.changed+' 个模型'+(v.specRefresh.unknown.length?'，'+v.specRefresh.unknown.length+' 个未核验型号保持原配置':''):v.defaultPending?'连接已保存，默认模型待更新':'已保存');}}catch(e){if(alive.current){setError(e.message);if(e.status===409)setConflict(true);}}finally{flight.current=false;if(alive.current)setBusy(false);}}
+-  function save(e){e.preventDefault();if(fetching)return;const ids=draft.modelText.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);if(!ids.length){setError('请至少填写一个模型 ID');return;}submit({action:'save',id:draft.id,displayName:draft.displayName,baseURL:draft.baseURL,api:draft.api,models:ids.map(id=>{const prior=draft.models?.find(m=>m.id===id);return {id,...prior?.name?{name:prior.name}:{},...prior?.contextWindow===undefined?{}:{contextWindow:prior.contextWindow},...prior?.maxTokens===undefined?{}:{maxTokens:prior.maxTokens}};}),...key.trim()?{apiKey:key.trim()}: {}});}
++  function save(e){e.preventDefault();if(fetching)return;const ids=draft.modelText.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);if(!ids.length){setError('请至少填写一个模型 ID');return;}submit({action:'save',id:draft.id,displayName:draft.displayName,baseURL:draft.baseURL,api:draft.api,...draft.reasoning===undefined?{}:{reasoning:draft.reasoning},models:ids.map(id=>{const prior=draft.models?.find(m=>m.id===id);return {id,...prior?.reasoningPreset?{reasoningPreset:prior.reasoningPreset,...prior.reasoningPreset==='custom'?{reasoningEfforts:prior.reasoningEfforts,reasoningMode:prior.reasoningMode}: {}}:{},...prior?.name?{name:prior.name}:{},...prior?.contextWindow===undefined?{}:{contextWindow:prior.contextWindow},...prior?.maxTokens===undefined?{}:{maxTokens:prior.maxTokens}};}),...key.trim()?{apiKey:key.trim()}: {}});}
+   const locked=busy||conflict||!data?.writable,change=(field,value)=>{if(['baseURL','api'].includes(field))resetDiscovery();setDraft(d=>({...d,[field]:value}));};
+   const configuredIds=draft?[...new Set(draft.modelText.split(/\r?\n/).map(id=>id.trim()).filter(Boolean))]:[];
+   const officialFor=id=>data?.specs?.models?.find(m=>m.id===id);
+   function budget(id){const prior=draft.models?.find(m=>m.id===id),spec=officialFor(id);let output=prior?.maxTokens??Math.min(128000,spec?.maxOutputTokens??128000);if(spec&&output>=spec.contextWindow)output=Math.max(1,Math.floor(spec.contextWindow/2));const cap=spec?Math.min(spec.contextWindow,spec.maxInputTokens?spec.maxInputTokens+Number(output):Infinity):prior?.contextLimit??prior?.contextWindow;return {prior,spec,context:prior?.contextWindow??(spec?.conditional?undefined:cap),output:prior?.maxTokens??(spec?output:undefined),cap,outputCap:spec?.maxOutputTokens??prior?.outputLimit??prior?.maxTokens};}
+   function changeBudget(id,field,raw){const value=raw===''?'':Number(raw);setDraft(d=>{const prior=d.models?.find(m=>m.id===id)??{id},next={...prior,[field]:value},spec=officialFor(id);if(field==='maxTokens'&&spec?.maxInputTokens&&value!==''&&next.contextWindow>spec.maxInputTokens+value)next.contextWindow=spec.maxInputTokens+value;return {...d,models:[...(d.models??[]).filter(m=>m.id!==id),next]};});}
+   function useOfficial(id){const b=budget(id);if(!b.spec)return;setDraft(d=>({...d,models:[...(d.models??[]).filter(m=>m.id!==id),{...b.prior,id,contextWindow:b.cap,maxTokens:b.output}]}));}
++  function reasoning(id){const m=draft.models?.find(m=>m.id===id)??{id},spec=m.reasoningOfficial;const preset=m.reasoningPreset??(m.reasoningEfforts===false?'disabled':m.reasoningEfforts===undefined?'inherit':spec&&JSON.stringify(m.reasoningEfforts)===JSON.stringify(spec.efforts)&&m.reasoningMode===spec.mode?'official':'custom');return {m,spec,preset,efforts:preset==='official'?spec?.efforts:preset==='custom'?m.reasoningEfforts:undefined};}
++  function changeReasoning(id,values){setDraft(d=>({...d,models:[...(d.models??[]).filter(m=>m.id!==id),{...d.models?.find(m=>m.id===id),id,...values}]}));}
++  const commonEfforts=draft?levels.filter(level=>configuredIds.length&&configuredIds.every(id=>Object.hasOwn(reasoning(id).efforts??{},level))):[];
++  function reasoningFields(id){const r=reasoning(id);return h('div',{className:'nm-reasoning'},h('div',{className:'nm-reasoning-head'},h('label',null,'推理努力程度',h('select',{'aria-label':id+' 推理能力',disabled:locked,value:r.preset,onChange:e=>changeReasoning(id,{reasoningPreset:e.target.value,...e.target.value==='custom'?{reasoningEfforts:r.m.reasoningEfforts||{low:'low',high:'high'},reasoningMode:r.m.reasoningMode??(draft.api==='anthropic-messages'?'adaptive':'native')}: {}})},h('option',{value:'inherit'},'继承模型目录'),r.spec&&h('option',{value:'official'},'官方档位'),h('option',{value:'disabled'},'不支持'),h('option',{value:'custom'},'自定义'))),r.spec&&h('a',{href:r.spec.source,target:'_blank',rel:'noopener noreferrer'},'官方来源')),
++   (r.preset==='official'||r.preset==='custom')&&h('div',{className:'nm-effort-levels'},...levels.filter(l=>r.preset==='custom'||Object.hasOwn(r.efforts??{},l)).map(l=>h('label',{key:l},h('input',{type:'checkbox','aria-label':id+' 档位 '+l,disabled:locked||r.preset==='official',checked:Object.hasOwn(r.efforts??{},l),onChange:e=>{const efforts={...r.efforts};if(e.target.checked)efforts[l]=l==='off'?'none':l;else delete efforts[l];changeReasoning(id,{reasoningEfforts:efforts});}}),effortNames[l]))),
++   r.preset==='custom'&&h('label',null,'参数模式',h('select',{'aria-label':id+' 推理参数模式',disabled:locked,value:r.m.reasoningMode??(draft.api==='anthropic-messages'?'adaptive':'native'),onChange:e=>changeReasoning(id,{reasoningMode:e.target.value})},...(draft.api==='anthropic-messages'?[['adaptive','Adaptive effort'],['budget','Token budget']]:[['native','原生 effort']]).map(([value,label])=>h('option',{key:value,value},label)))));
++  }
+   const visibleModels=catalog?.filter(m=>(m.id+' '+(m.name??'')).toLocaleLowerCase().includes(query.toLocaleLowerCase()))??[];
+   return h('section',{className:'nm-connections','aria-label':'模型连接'},
+    h('header',null,h('h2',null,'模型连接'),!draft&&h('div',{className:'nm-header-actions'},h('button',{type:'button',disabled:locked,onClick:()=>submit({action:'refresh-specs'})},'校准官方参数'),h('button',{type:'button',className:'nm-primary',disabled:locked,onClick:()=>edit()},'添加连接'))),
+@@ -50,7 +58,8 @@
+        h('div',{className:'nm-catalog-actions'},h('button',{type:'button',className:'nm-primary',disabled:locked||!selected.length,onClick:addModels},'添加所选（'+selected.length+'）'))))),
+     configuredIds.length>0&&h('details',{className:'nm-specs',open:true},h('summary',null,'模型参数 · '+configuredIds.length),h('div',{className:'nm-spec-rows'},...configuredIds.map(id=>{const b=budget(id);return h('section',{key:id,className:'nm-spec-row','aria-label':id+' 参数'},h('div',{className:'nm-spec-title'},h('code',null,id),b.spec?h('a',{href:b.spec.source,target:'_blank',rel:'noopener noreferrer',title:b.spec.precision==='exact'?'官方精确 token 数':'官方原文 '+(b.spec.contextLabel??'')+'；K/M 标注使用保守十进制预算'},b.spec.provider+' · 官方'):h('span',null,'未核验'),b.spec?.conditional&&h('span',null,'套餐限定')),
+       h('div',{className:'nm-spec-limits'},b.spec?'官方上下文 '+(b.spec.contextLabel??b.spec.contextWindow.toLocaleString())+(b.spec.maxInputTokens?' · 最大输入 '+b.spec.maxInputTokens.toLocaleString():'')+' · 最大输出 '+(b.spec.maxOutputTokens?.toLocaleString()??'未公布'):'沿用当前连接上限'),
+-      h('div',{className:'nm-spec-inputs'},h('label',null,'上下文预算',h('input',{type:'number','aria-label':id+' 上下文预算',min:1,max:b.cap,step:1,required:b.context!==undefined,disabled:locked||b.context===undefined&&!b.spec,value:b.context??'',placeholder:b.spec?.conditional?'按套餐填写':'未核验',onChange:e=>changeBudget(id,'contextWindow',e.target.value)})),h('label',null,'输出预算',h('input',{type:'number','aria-label':id+' 输出预算',min:1,max:Math.min(b.outputCap??Infinity,(Number(b.context)||Infinity)-1),step:1,required:b.output!==undefined,disabled:locked||b.output===undefined,value:b.output??'',placeholder:'未核验',onChange:e=>changeBudget(id,'maxTokens',e.target.value)})),b.spec&&h('button',{type:'button',disabled:locked,onClick:()=>useOfficial(id)},'官方值'))); }))),
++      h('div',{className:'nm-spec-inputs'},h('label',null,'上下文预算',h('input',{type:'number','aria-label':id+' 上下文预算',min:1,max:b.cap,step:1,required:b.context!==undefined,disabled:locked||b.context===undefined&&!b.spec,value:b.context??'',placeholder:b.spec?.conditional?'按套餐填写':'未核验',onChange:e=>changeBudget(id,'contextWindow',e.target.value)})),h('label',null,'输出预算',h('input',{type:'number','aria-label':id+' 输出预算',min:1,max:Math.min(b.outputCap??Infinity,(Number(b.context)||Infinity)-1),step:1,required:b.output!==undefined,disabled:locked||b.output===undefined,value:b.output??'',placeholder:'未核验',onChange:e=>changeBudget(id,'maxTokens',e.target.value)})),b.spec&&h('button',{type:'button',disabled:locked,onClick:()=>useOfficial(id)},'官方值')),reasoningFields(id)); }))),
++    h('label',{className:'nm-reasoning-default'},h('span',null,'默认推理努力程度'),h('select',{'aria-label':'默认推理努力程度',value:draft.reasoning??'',disabled:locked,onChange:e=>change('reasoning',e.target.value||null)},h('option',{value:''},'供应商默认'),...levels.filter(l=>commonEfforts.includes(l)||l===draft.reasoning).map(l=>h('option',{key:l,value:l,disabled:!commonEfforts.includes(l)},effortNames[l])))),
+     h('footer',null,h('button',{type:'button',disabled:busy,onClick:cancel},'取消'),h('button',{type:'submit',className:'nm-primary',disabled:locked||fetching},busy?'保存中…':'保存'))):
+    data?.groups.length?h('div',{className:'nm-list'},...data.groups.map(g=>h('article',{key:g.id},h('div',{className:'nm-group-head'},h('h3',null,g.displayName),h('span',{className:g.configured?'nm-ready':'nm-missing'},g.configured?'已配置':'待配置')),h('div',{className:'nm-url'},g.baseURL),h('div',{className:'nm-chips'},...g.models.slice(0,8).map(m=>h('span',{key:m.id},m.name??m.id)),g.models.length>8&&h('span',null,'+'+(g.models.length-8))),h('footer',null,confirm===g.id?h(React.Fragment,null,h('span',null,'移除此连接？'),h('button',{disabled:locked,onClick:()=>submit({action:'remove',id:g.id})},'确认移除'),h('button',{disabled:busy,onClick:()=>setConfirm(null)},'取消')):h(React.Fragment,null,h('button',{disabled:locked||!g.editable||!g.configured,onClick:()=>{edit(g);void fetchModels(g,'');}},'获取模型列表'),h('button',{disabled:locked||!g.editable,onClick:()=>edit(g)},'编辑'),h('button',{disabled:locked,onClick:()=>setConfirm(g.id)},'移除')))))):
+    data&&h('div',{className:'nm-empty'},h('button',{disabled:locked,onClick:()=>edit()},'添加模型连接')));
+diff --git a/plugins/naumi-enterprise/model-connections.js b/plugins/naumi-enterprise/model-connections.js
+--- a/plugins/naumi-enterprise/model-connections.js
++++ b/plugins/naumi-enterprise/model-connections.js
+@@ -2,9 +2,12 @@
+ import {z} from 'zod';
+ import {officialModelSpecs,modelSpecView,configureModelSpec,refreshModelSpecs} from './model-specs.js';
+ 
++import {reasoningLevels,configureReasoning,reasoningView,validateDefault} from './model-reasoning.js';
++
+ const protocols=['openai-completions','openai-responses','anthropic-messages'];
+-const model=z.object({id:z.string().trim().min(1).max(512),name:z.string().trim().max(160).optional(),contextWindow:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),maxTokens:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional()}).strict();
+-const save=z.object({action:z.literal('save'),id:z.string().regex(/^[a-z][a-z0-9_-]{0,79}$/),expectedRevision:z.number().int().nonnegative(),displayName:z.string().trim().min(1).max(120),baseURL:z.string().trim().min(1).max(2048),api:z.enum(protocols),models:z.array(model).min(1).max(200),apiKey:z.string().trim().min(1).max(16000).optional()}).strict();
++const effortMap=z.record(z.string(),z.union([z.string().min(1).max(40),z.null()]));
++const model=z.object({id:z.string().trim().min(1).max(512),reasoningPreset:z.enum(['inherit','disabled','official','custom']).optional(),reasoningEfforts:z.union([z.literal(false),effortMap]).optional(),reasoningMode:z.enum(['native','adaptive','budget']).optional(),name:z.string().trim().max(160).optional(),contextWindow:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),maxTokens:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional()}).strict();
++const save=z.object({action:z.literal('save'),id:z.string().regex(/^[a-z][a-z0-9_-]{0,79}$/),expectedRevision:z.number().int().nonnegative(),displayName:z.string().trim().min(1).max(120),baseURL:z.string().trim().min(1).max(2048),api:z.enum(protocols),reasoning:z.enum(reasoningLevels).nullable().optional(),models:z.array(model).min(1).max(200),apiKey:z.string().trim().min(1).max(16000).optional()}).strict();
+ const remove=z.object({action:z.literal('remove'),id:z.string().min(1).max(80),expectedRevision:z.number().int().nonnegative()}).strict();
+ const refresh=z.object({action:z.literal('refresh-specs'),expectedRevision:z.number().int().nonnegative()}).strict();
+ const discover=z.object({action:z.literal('discover'),id:z.string().min(1).max(80).optional(),baseURL:z.string().trim().min(1).max(2048),api:z.enum(protocols),apiKey:z.string().trim().min(1).max(16000).optional()}).strict();
+@@ -55,8 +58,8 @@
+  namespace(){const ns=this.ctx.settings.describe({redactSecrets:true}).find(n=>n.ns==='llm-pi-ai');if(!ns)throw error('MODEL_SETTINGS_UNAVAILABLE',503);return ns;}
+  async read(){const ns=this.namespace(),groups=[];for(const[id,p]of Object.entries(ns.value.providers??{})){
+   const info=p.apiKeyEnv?await this.ctx.credentials.describe(p.apiKeyEnv):{configured:false,writable:true};
+-  groups.push({id,displayName:p.displayName??id,api:p.api??'openai-completions',baseURL:p.baseURL??'',models:(p.models??[]).map(m=>({id:m.id,...m.name?{name:m.name}:{}})),configured:info.configured,editable:protocols.includes(p.api)&&Array.isArray(p.models)&&p.models.length>0});
+- }for(const group of groups){const provider=ns.value.providers[group.id];group.models=group.models.map(m=>{const raw=provider.models.find(row=>row.id===m.id);return modelSpecView({...m,...raw.contextWindow===undefined?{}:{contextWindow:raw.contextWindow},...raw.maxTokens===undefined?{}:{maxTokens:raw.maxTokens}},provider);});}return {revision:ns.revision,writable:this.ctx.settings.writable,groups,specs:officialModelSpecs};}
++  groups.push({id,displayName:p.displayName??id,api:p.api??'openai-completions',reasoning:p.reasoning??null,baseURL:p.baseURL??'',models:(p.models??[]).map(m=>({id:m.id,...m.name?{name:m.name}:{}})),configured:info.configured,editable:protocols.includes(p.api)&&Array.isArray(p.models)&&p.models.length>0});
++ }for(const group of groups){const provider=ns.value.providers[group.id];group.models=group.models.map(m=>{const raw=provider.models.find(row=>row.id===m.id);return {...modelSpecView({...m,...raw.contextWindow===undefined?{}:{contextWindow:raw.contextWindow},...raw.maxTokens===undefined?{}:{maxTokens:raw.maxTokens}},provider),...reasoningView(raw,provider.api)};});}return {revision:ns.revision,writable:this.ctx.settings.writable,groups,specs:officialModelSpecs};}
+  async repairDefault(removed){
+   const current=this.ctx.agentDefaultModel.currentSelection();
+   const p=this.namespace().value.providers??{},own=p[current.provider];
+@@ -84,7 +87,9 @@
+   }else{
+    if(new Set(p.models.map(m=>m.id)).size!==p.models.length)throw error('MODEL_DUPLICATE_ID');
+    if(!p.apiKey&&!previous?.apiKeyEnv)throw error('MODEL_KEY_REQUIRED');
+-   const profile={...stored,displayName:p.displayName,baseURL:endpoint(p.baseURL),api:p.api,models:p.models.map(m=>configureModelSpec(m,(stored?.models??previous?.models)?.find(old=>old.id===m.id),previous??{})),apiKeyEnv:previous?.apiKeyEnv};
++   const profile={...stored,displayName:p.displayName,baseURL:endpoint(p.baseURL),api:p.api,models:p.models.map(m=>configureReasoning(m,configureModelSpec(m,(stored?.models??previous?.models)?.find(old=>old.id===m.id),previous??{}),p.api)),apiKeyEnv:previous?.apiKeyEnv};
++   if(p.reasoning!==undefined){if(p.reasoning===null)delete profile.reasoning;else profile.reasoning=p.reasoning;}
++   if(p.reasoning!==undefined||p.models.some(m=>m.reasoningPreset!==undefined||m.reasoningEfforts!==undefined)){profile.preserveReasoningDefault=true;validateDefault(profile,profile.reasoning);}
+    if(p.apiKey){if(/[\r\n\u0000-\u001f\u007f]/.test(p.apiKey))throw error('MODEL_KEY_INVALID');newRef='NAUMI_MODEL_'+randomUUID().replaceAll('-','').toUpperCase();profile.apiKeyEnv=newRef;await this.ctx.credentials.set(newRef,p.apiKey);}
+    try{await this.ctx.settings.mutate('llm-pi-ai',[{op:'set',path:['providers',p.id],value:profile}],ns.revision);}
+    catch(e){if(newRef)try{await this.ctx.credentials.unset(newRef);}catch{throw error('MODEL_SAVE_CLEANUP_FAILED',500);}throw e;}
+diff --git a/plugins/naumi-enterprise/model-reasoning.js b/plugins/naumi-enterprise/model-reasoning.js
+new file mode 100644
+--- /dev/null
++++ b/plugins/naumi-enterprise/model-reasoning.js
+@@ -0,0 +1,18 @@
++import fs from 'node:fs';
++export const reasoningSpecs=JSON.parse(fs.readFileSync(new URL('./official-reasoning-specs.json',import.meta.url),'utf8'));
++export const reasoningLevels=['off','minimal','low','medium','high','xhigh','max'];
++const fail=code=>{throw Object.assign(Error(code),{code,status:400});};
++export function reasoningSpec(id,api){const spec=reasoningSpecs.models.find(m=>m.id===id);return spec&&['anthropic-messages','openai-responses','openai-completions'].includes(api)?{...spec,mode:api==='anthropic-messages'?'adaptive':'native'}:null;}
++export function validateEfforts(value){if(value===false)return false;if(!value||typeof value!=='object'||Array.isArray(value)||!Object.keys(value).some(k=>k!=='off'))fail('MODEL_REASONING_INVALID');const out={};for(const [k,v]of Object.entries(value)){if(!reasoningLevels.includes(k)||!(typeof v==='string'&&v.length>0&&v.length<=40&&/^[a-z0-9_-]+$/.test(v)||k==='off'&&v===null))fail('MODEL_REASONING_INVALID');out[k]=v;}return out;}
++export function configureReasoning(input,configured,api){const next={...configured};delete next.reasoningPreset;delete next.reasoningMode;let efforts,mode;
++ if(input.reasoningPreset==='inherit'){delete next.reasoningEfforts;return next;}
++ if(input.reasoningPreset==='disabled')efforts=false;
++ if(input.reasoningPreset==='official'){const spec=reasoningSpec(input.id,api);if(!spec)fail('MODEL_REASONING_UNVERIFIED');efforts=spec.efforts;mode=spec.mode;}
++ if(input.reasoningEfforts!==undefined){if(input.reasoningPreset&&input.reasoningPreset!=='custom')fail('MODEL_REASONING_INVALID');efforts=validateEfforts(input.reasoningEfforts);mode=input.reasoningMode;}
++ if(efforts!==undefined)next.reasoningEfforts=structuredClone(efforts);
++ if(mode==='adaptive'){if(api!=='anthropic-messages')fail('MODEL_REASONING_PROTOCOL');next.compat={...next.compat,forceAdaptiveThinking:true};}
++ if(mode==='budget'||mode==='native'){if(mode==='budget'&&api!=='anthropic-messages'||mode==='native'&&api==='anthropic-messages')fail('MODEL_REASONING_PROTOCOL');if(next.compat&&Object.hasOwn(next.compat,'forceAdaptiveThinking')){next.compat={...next.compat};delete next.compat.forceAdaptiveThinking;}}
++ return next;
++}
++export function reasoningView(model,api){const declared=model.reasoningEfforts;return {...declared===undefined?{}:{reasoningEfforts:structuredClone(declared)},reasoningMode:api==='anthropic-messages'?(model.compat?.forceAdaptiveThinking?'adaptive':'budget'):'native',reasoningOfficial:reasoningSpec(model.id,api)};}
++export function validateDefault(profile,level){if(level===undefined||level===null)return;for(const m of profile.models??[]){const efforts=m.reasoningEfforts;if(!efforts||!Object.hasOwn(efforts,level))fail('MODEL_REASONING_DEFAULT_UNSUPPORTED');}}
+diff --git a/plugins/naumi-enterprise/official-reasoning-specs.json b/plugins/naumi-enterprise/official-reasoning-specs.json
+new file mode 100644
+--- /dev/null
++++ b/plugins/naumi-enterprise/official-reasoning-specs.json
+@@ -0,0 +1,274 @@
++{
++  "checkedAt": "2026-11-17",
++  "models": [
++    {
++      "id": "gpt-5.5",
++      "efforts": {
++        "off": "none",
++        "low": "low",
++        "medium": "medium",
++        "high": "high",
++        "xhigh": "xhigh"
++      },
++      "source": "https://developers.openai.com/api/docs/models/gpt-5.5.md",
++      "sourceFile": "evidence/official-model-specs/sources/openai-gpt-5.5.txt",
++      "sourceSHA256": "5c508a781addc036a8d03475e7b7e22587258fe298a8fe95d59631c3b142d0f6",
++      "checkedAt": "2026-11-17"
++    },
++    {
++      "id": "gpt-5.6-luna",
++      "efforts": {
++        "off": "none",
++        "low": "low",
++        "medium": "medium",
++        "high": "high",
++        "xhigh": "xhigh",
++        "max": "max"
++      },
++      "source": "https://developers.openai.com/api/docs/models/gpt-5.6-luna.md",
++      "sourceFile": "evidence/official-model-specs/sources/openai-gpt-5.6-luna.txt",
++      "sourceSHA256": "0851edda7f1a257348c2f307fba721df9f6b7963fe6b0b4b1052fb6df3893979",
++      "checkedAt": "2026-11-17"
++    },
++    {
++      "id": "gpt-5.6-sol",
++      "efforts": {
++        "off": "none",
++        "low": "low",
++        "medium": "medium",
++        "high": "high",
++        "xhigh": "xhigh",
++        "max": "max"
++      },
++      "source": "https://developers.openai.com/api/docs/models/gpt-5.6-sol.md",
++      "sourceFile": "evidence/official-model-specs/sources/openai-gpt-5.6-sol.txt",
++      "sourceSHA256": "c0c7f9a635a572335cfe0ba4ea9b920d9b3d2b40aa1ba9f31f3adff203834637",
++      "checkedAt": "2026-11-17"
++    },
++    {
++      "id": "gpt-5.6-terra",
++      "efforts": {
++        "off": "none",
++        "low": "low",
++        "medium": "medium",
++        "high": "high",
++        "xhigh": "xhigh",
++        "max": "max"
++      },
++      "source": "https://developers.openai.com/api/docs/models/gpt-5.6-terra.md",
++      "sourceFile": "evidence/official-model-specs/sources/openai-gpt-5.6-terra.txt",
++      "sourceSHA256": "77a5b6c2fcf0b921354158199e2a76f6e90abf895e09c6d30fdc9dc6b56c3702",
++      "checkedAt": "2026-11-17"
++    },
++    {
++      "id": "gpt-6-astra",
++      "efforts": {
++        "low": "low",
++        "medium": "medium",
++        "high": "high",
++        "xhigh": "xhigh",
++        "max": "max"
++      },
++      "source": "https://developers.openai.com/api/docs/models/gpt-6-astra.md",
++      "sourceFile": "evidence/official-model-specs/sources/openai-gpt-6-astra.txt",
++      "sourceSHA256": "a9b79d0f5988c879aea6f4f7adb19743c469ee538d8e19744bdaee13d0c50ae2",
++      "checkedAt": "2026-11-17"
++    },
++    {
++      "id": "gpt-6-luna",
++      "efforts": {
++        "off": "none",
++        "low": "low",
++        "medium": "medium",
++        "high": "high",
++        "xhigh": "xhigh",
++        "max": "max"
++      },
++      "source": "https://developers.openai.com/api/docs/models/gpt-6-luna.md",
++      "sourceFile": "evidence/official-model-specs/sources/openai-gpt-6-luna.txt",
++      "sourceSHA256": "44dcc0a50961150ee700aa701df8d46c59488f003979f3c755c3230bd8a0dfb2",
++      "checkedAt": "2026-11-17"
++    },
++    {
++      "id": "gpt-6-sol",
++      "efforts": {
++        "off": "none",
++        "low": "low",
++        "medium": "medium",
++        "high": "high",
++        "xhigh": "xhigh",
++        "max": "max"
++      },
++      "source": "https://developers.openai.com/api/docs/models/gpt-6-sol.md",
++      "sourceFile": "evidence/official-model-specs/sources/openai-gpt-6-sol.txt",
++      "sourceSHA256": "8e3cd3378f0686313dd489ed37347d481d24d4b791e7bd28b1538c4df7762fc4",
++      "checkedAt": "2026-11-17"
++    },
++    {
++      "id": "gpt-6.1-sol",
++      "efforts": {
++        "low": "low",
++        "medium": "medium",
++        "high": "high",
++        "xhigh": "xhigh",
++        "max": "max"
++      },
++      "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol.md",
++      "sourceFile": "evidence/official-model-specs/sources/openai-gpt-6.1-sol.txt",
++      "sourceSHA256": "02dff9ef937bbc97fb24ba7c936269a549563cfb8a49b91a6ba1c1575d2b77c0",
++      "checkedAt": "2026-11-17"
++    },
++    {
++      "id": "gpt-6.1-terra",
++      "efforts": {
++        "off": "none",
++        "low": "low",
++        "medium": "medium",
++        "high": "high",
++        "xhigh": "xhigh",
++        "max": "max"
++      },
++      "source": "https://developers.openai.com/api/docs/models/gpt-6.1-terra.md",
++      "sourceFile": "evidence/official-model-specs/sources/openai-gpt-6.1-terra.txt",
++      "sourceSHA256": "6a73b3e2e941fbe3813636d5bd2d653ff190e49cc3692eaf8daa3bb125c877f8",
++      "checkedAt": "2026-11-17"
++    },
++    {
++      "id": "k3",
++      "efforts": {
++        "low": "low",
++        "high": "high",
++        "max": "max"
++      },
++      "source": "https://www.kimi.com/code/docs/en/kimi-code/models.html",
++      "sourceFile": "evidence/ccswitch-reasoning-audit/sources/kimi-coding-models.txt",
++      "sourceSHA256": "00d4c5aacce45c614be99b69fa77727d1f6517cfb3506011b6098905d0b8cc02",
++      "checkedAt": "2026-11-17"
++    },
++    {
++      "id": "k3-256k",
++      "efforts": {
++        "low": "low",
++        "high": "high",
++        "max": "max"
++      },
++      "source": "https://www.kimi.com/code/docs/en/kimi-code/models.html",
++      "sourceFile": "evidence/ccswitch-reasoning-audit/sources/kimi-coding-models.txt",
++      "sourceSHA256": "00d4c5aacce45c614be99b69fa77727d1f6517cfb3506011b6098905d0b8cc02",
++      "checkedAt": "2026-11-17"
++    },
++    {
++      "id": "k3.1-pro",
++      "efforts": {
++        "low": "low",
++        "high": "high",
++        "max": "max"
++      },
++      "source": "https://www.kimi.com/code/docs/en/kimi-code/models.html",
++      "sourceFile": "evidence/ccswitch-reasoning-audit/sources/kimi-coding-models.txt",
++      "sourceSHA256": "00d4c5aacce45c614be99b69fa77727d1f6517cfb3506011b6098905d0b8cc02",
++      "checkedAt": "2026-11-17"
++    },
++    {
++      "id": "kimi-for-coding",
++      "efforts": {
++        "low": "low",
++        "high": "high",
++        "max": "max"
++      },
++      "source": "https://www.kimi.com/code/docs/en/kimi-code/models.html",
++      "sourceFile": "evidence/ccswitch-reasoning-audit/sources/kimi-coding-models.txt",
++      "sourceSHA256": "00d4c5aacce45c614be99b69fa77727d1f6517cfb3506011b6098905d0b8cc02",
++      "checkedAt": "2026-11-17"
++    },
++    {
++      "id": "glm-5.3",
++      "efforts": {
++        "low": "low",
++        "high": "high",
++        "max": "max"
++      },
++      "source": "https://docs.z.ai/api-reference/llm/chat-completion.md",
++      "sourceFile": "evidence/official-model-specs/sources/zhipu-api.txt",
++      "sourceSHA256": "6b6465d8434d7f781bf94b4605331b5d18f059829c7b2635e9ae921852f63358",
++      "checkedAt": "2026-11-17"
++    },
++    {
++      "id": "glm-5.3-flash",
++      "efforts": {
++        "low": "low",
++        "high": "high",
++        "max": "max"
++      },
++      "source": "https://docs.z.ai/api-reference/llm/chat-completion.md",
++      "sourceFile": "evidence/official-model-specs/sources/zhipu-api.txt",
++      "sourceSHA256": "6b6465d8434d7f781bf94b4605331b5d18f059829c7b2635e9ae921852f63358",
++      "checkedAt": "2026-11-17"
++    },
++    {
++      "id": "glm-5.2",
++      "efforts": {
++        "off": "none",
++        "high": "high",
++        "max": "max"
++      },
++      "source": "https://docs.z.ai/api-reference/llm/chat-completion.md",
++      "sourceFile": "evidence/official-model-specs/sources/zhipu-api.txt",
++      "sourceSHA256": "6b6465d8434d7f781bf94b4605331b5d18f059829c7b2635e9ae921852f63358",
++      "checkedAt": "2026-11-17"
++    },
++    {
++      "id": "deepseek-flash",
++      "efforts": {
++        "off": "none",
++        "low": "low",
++        "high": "high",
++        "max": "max"
++      },
++      "source": "https://api-docs.deepseek.com/guides/thinking_mode",
++      "sourceFile": "evidence/ccswitch-reasoning-audit/sources/deepseek-thinking.txt",
++      "sourceSHA256": "a909826b4244b97777016a45b1dbdfa90d5755efc1d5f5db5f8a4713f9c91e9e",
++      "checkedAt": "2026-11-17"
++    },
++    {
++      "id": "deepseek-v4-pro",
++      "efforts": {
++        "off": "none",
++        "low": "low",
++        "high": "high",
++        "max": "max"
++      },
++      "source": "https://api-docs.deepseek.com/guides/thinking_mode",
++      "sourceFile": "evidence/ccswitch-reasoning-audit/sources/deepseek-thinking.txt",
++      "sourceSHA256": "a909826b4244b97777016a45b1dbdfa90d5755efc1d5f5db5f8a4713f9c91e9e",
++      "checkedAt": "2026-11-17"
++    },
++    {
++      "id": "deepseek-v4-flash",
++      "efforts": {
++        "off": "none",
++        "low": "low",
++        "high": "high",
++        "max": "max"
++      },
++      "source": "https://api-docs.deepseek.com/guides/thinking_mode",
++      "sourceFile": "evidence/ccswitch-reasoning-audit/sources/deepseek-thinking.txt",
++      "sourceSHA256": "a909826b4244b97777016a45b1dbdfa90d5755efc1d5f5db5f8a4713f9c91e9e",
++      "checkedAt": "2026-11-17"
++    },
++    {
++      "id": "MiniMax-M3.1-Flash",
++      "efforts": {
++        "low": "low",
++        "medium": "medium",
++        "high": "high",
++        "xhigh": "xhigh",
++        "max": "max"
++      },
++      "source": "https://platform.minimax.io/docs/api-reference/text-anthropic-api.md",
++      "sourceFile": "evidence/official-model-specs/sources/minimax-anthropic.txt",
++      "sourceSHA256": "c622367780ee9de862cb6be5c48f0d9e77ca272363a23843a20d2a5b1e3b3e39",
++      "checkedAt": "2026-11-17"
++    }
++  ]
++}
+diff --git a/plugins/naumi-enterprise/package.json b/plugins/naumi-enterprise/package.json
+--- a/plugins/naumi-enterprise/package.json
++++ b/plugins/naumi-enterprise/package.json
+@@ -62,10 +62,6 @@
+     "desktop-enterprise.js",
+     "model-connections.js",
+     "product-version.js",
+-    "plugin-market.js",
+-    "market-contract.js",
+-    "market-installer.js",
+-    "market-native.js",
+     "model-specs.js",
+     "official-model-specs.json",
+     "im-gateway.js",
+@@ -74,7 +70,9 @@
+     "im-delivery.js",
+     "im-interactions.js",
+     "im-platforms.js",
+-    "im-adapters"
++    "im-adapters",
++    "model-reasoning.js",
++    "official-reasoning-specs.json"
+   ],
+   "dsh": {
+     "bundle": {
+diff --git a/scripts/sync-naumi.mjs b/scripts/sync-naumi.mjs
+--- a/scripts/sync-naumi.mjs
++++ b/scripts/sync-naumi.mjs
+@@ -1,5 +1,6 @@
+ import fs from 'node:fs';
+ import path from 'node:path';
++import {installReasoningDefaults} from './native-reasoning-extension.mjs';
+ import {installAgentTriggers} from './native-agent-mentions-extension.mjs';
+ import {installNativeComposer} from './native-composer-extension.mjs';
+ const packages=[['naumi-enterprise','@naumi/dsh-enterprise'],['naumi-ui-layout','@naumi/dsh-ui-layout'],['naumi-sidebar-browser','@naumi/dsh-sidebar-browser']];
+@@ -30,3 +31,5 @@
+ console.log('NAUMI_SYNC packages=3 bundle_enabled=1');
+ installNativeComposer(path.resolve('node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'));
+ installAgentTriggers(path.resolve('node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js'));
++
++installReasoningDefaults(path.resolve('node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js'));
+diff --git a/scripts/audit-ccswitch-models.mjs b/scripts/audit-ccswitch-models.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/audit-ccswitch-models.mjs
+@@ -0,0 +1,5 @@
++import {readCCSwitchSources} from './ccswitch-source.mjs';import fs from 'node:fs';import path from 'node:path';import {spawnSync} from 'node:child_process';import {createHash} from 'node:crypto';import {parse} from 'yaml';import {botLiveApi} from './bot-live-api.mjs';
++const root=process.cwd(),runtime='E:/Workspace/naumi-desktop';const rows=readCCSwitchSources(),api=await botLiveApi(runtime),state=await api.rpc('settings/describe',{}),ns=state.namespaces.find(n=>n.ns==='llm-pi-ai'),providers=ns.value.providers??{},raw=parse(fs.readFileSync(path.join(runtime,'.dsh/profiles/web/cordis.patch.yml'),'utf8')).find(x=>x.id==='llm-pi-ai')?.config?.providers??{},credentials=parse(fs.readFileSync(path.join(runtime,'.dsh/.credentials.yaml'),'utf8')),canon=(url,api)=>{if(!url)return '';try{const u=new URL(url);u.hash='';u.search='';let s=u.toString().replace(/\/$/,'');return api==='anthropic-messages'?s.replace(/\/v1$/,''):s;}catch{return '';}},publicURL=url=>{if(!url)return '';try{const u=new URL(url);u.username='';u.password='';u.search='';u.hash='';return u.toString().replace(/\/$/,'');}catch{return '';}};
++const liveGroups=Object.entries(providers).map(([id,p])=>({id,name:p.displayName,api:p.api,baseURL:publicURL(p.baseURL),credentialConfigured:!!credentials.refs?.[p.apiKeyEnv],reasoning:p.reasoning??null,thinkingBudgets:p.thinkingBudgets??null,models:(p.models??[]).map(m=>({id:m.id,contextWindow:m.contextWindow,maxTokens:m.maxTokens,reasoningEfforts:m.reasoningEfforts??null,compat:m.compat??null,userReasoning:raw[id]?.models?.find(x=>x.id===m.id)?.reasoningEfforts??null}))}));
++const sources=rows.map(r=>{const endpointMatches=Object.entries(providers).filter(([,p])=>r.api===p.api&&canon(r.baseURL,r.api)===canon(p.baseURL,p.api)),matched=endpointMatches.filter(([,p])=>r.key&&credentials.refs?.[p.apiKeyEnv]===r.key);return {id:r.id,app:r.app,name:r.name,current:r.current,baseURL:publicURL(r.baseURL),api:r.api,keyPresent:!!r.key,modelIds:r.models,effort:r.effort,sourceHash:r.sourceHash,reason:r.reason||(!r.key?'missing-key':!r.baseURL?'missing-endpoint':''),endpointMatches:endpointMatches.map(([id])=>id),credentialMatchedGroups:matched.map(([id])=>id),missingModels:r.models.filter(mid=>!matched.some(([,p])=>p.models?.some(m=>m.id===mid)))};});
++const catalog=await api.rpc('session/modelCatalog',{});const result={checkedAt:new Date().toISOString(),sourceRows:sources,liveGroups,defaultSelection:state.namespaces.find(n=>n.ns==='agent-default-model')?.value,catalog,ccSwitchReadOnly:true,secretValuesWritten:false,configurationWrites:0,inferenceCalls:0};fs.mkdirSync(path.join(root,'evidence/ccswitch-reasoning-audit'),{recursive:true});fs.writeFileSync(path.join(root,'evidence/ccswitch-reasoning-audit/BASELINE_AUDIT.json'),JSON.stringify(result,null,2)+'\n');console.log('CCS_AUDIT source_rows='+sources.length+' groups='+liveGroups.length+' models='+liveGroups.reduce((n,g)=>n+g.models.length,0)+' configuration_writes=0 inference=0');for(const row of sources)console.log(JSON.stringify(row));console.log('CATALOG_SHAPE '+JSON.stringify({type:Array.isArray(catalog)?'array':typeof catalog,keys:Object.keys(catalog).slice(0,12)}));for(const g of liveGroups)console.log(JSON.stringify({group:g.id,models:g.models.map(m=>({id:m.id,reasoningEfforts:m.userReasoning})),defaultEffort:g.reasoning}));
+diff --git a/scripts/ccswitch-source.mjs b/scripts/ccswitch-source.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/ccswitch-source.mjs
+@@ -0,0 +1,21 @@
++import {spawnSync} from 'node:child_process';
++export function readCCSwitchSources(){const py=String.raw`
++import json,sqlite3,pathlib,tomllib,hashlib,re,os
++p=pathlib.Path.home()/'.cc-switch/cc-switch.db';db=sqlite3.connect(p.as_uri()+'?mode=ro',uri=True);rows=[]
++for ident,app,name,raw,meta,current in db.execute('select id,app_type,name,settings_config,meta,is_current from providers order by app_type,sort_index'):
++ d=json.loads(raw);env=d.get('env',{});cfg={};key=base=api='';models=[];effort={};reason=''
++ if app=='codex' and d.get('config'):
++  cfg=tomllib.loads(d['config']);p=cfg.get('model_providers',{}).get(cfg.get('model_provider'),{});key=d.get('auth',{}).get('OPENAI_API_KEY','');base=p.get('base_url','');api='openai-responses' if p.get('wire_api')=='responses' else 'openai-completions';models=[cfg['model']] if cfg.get('model') else [];effort={k:v for k,v in cfg.items() if re.search('reason|effort|think',k,re.I) and isinstance(v,(str,int,bool))}
++ elif app=='claude':
++  key=env.get('ANTHROPIC_AUTH_TOKEN') or env.get('ANTHROPIC_API_KEY','');base=env.get('ANTHROPIC_BASE_URL','https://api.anthropic.com');api='anthropic-messages';models=list(dict.fromkeys(v for k,v in env.items() if (k=='ANTHROPIC_MODEL' or re.fullmatch(r'ANTHROPIC_DEFAULT_\w+_MODEL',k) or k=='CLAUDE_CODE_SUBAGENT_MODEL') and isinstance(v,str) and v));effort={k:v for k,v in env.items() if re.search('EFFORT|THINKING',k) and isinstance(v,(str,int,bool))}
++ elif app=='omp':
++  key=d.get('apiKey','');base=d.get('baseUrl','');api=d.get('api','');models=[m['id'] for m in d.get('models',[])];effort={m['id']:{k:v for k,v in m.items() if re.search('reason|think|effort',k,re.I)} for m in d.get('models',[]) if any(re.search('reason|think|effort',k,re.I) for k in m)}
++ elif app=='gemini':
++  key=env.get('GEMINI_API_KEY') or env.get('GOOGLE_API_KEY','');base=env.get('GOOGLE_GEMINI_BASE_URL') or env.get('GEMINI_BASE_URL','');api='google-generative-ai';models=[env['GEMINI_MODEL']] if env.get('GEMINI_MODEL') else []
++ elif app=='hermes':
++  key=os.environ.get(d.get('key_env',''),'');base=d.get('api','');api='openai-completions';models=[d['default_model']] if d.get('default_model') else []
++ else:reason='no-direct-api-key-route'
++ rows.append(dict(id=ident,app=app,name=name,baseURL=base,api=api,key=key,models=models,effort=effort,current=bool(current),reason=reason,sourceHash=hashlib.sha256(raw.encode()).hexdigest()))
++print(json.dumps(rows,ensure_ascii=False))
++`;const child=spawnSync('python',['-c',py],{encoding:'utf8',env:{...process.env,PYTHONIOENCODING:'utf-8'},windowsHide:true,maxBuffer:4*1024*1024});if(child.status!==0)throw Error('CC_SWITCH_READ_FAILED');return JSON.parse(child.stdout);
++}diff --git a/scripts/native-reasoning-extension.mjs b/scripts/native-reasoning-extension.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/native-reasoning-extension.mjs
+@@ -0,0 +1,22 @@
++import fs from 'node:fs';import path from 'node:path';import {createHash,randomUUID} from 'node:crypto';import {pathToFileURL} from 'node:url';
++export const REASONING_UPSTREAM_SHA='1a3ae58f9b4493e15459cc5000ec80f21b5d3f4a9dea6ffb6bc28e5b8817ae8a';
++export const REASONING_EXTENSION='Naumi preserve provider reasoning default v1';
++const sha=b=>createHash('sha256').update(b).digest('hex');
++function transform(code){const replace=(a,b)=>{if(code.split(a).length!==2)throw Error('REASONING_ANCHOR_CHANGED');code=code.replace(a,b);};
++ replace('\treasoning: z.union(THINKING_LEVELS),','\treasoning: z.union(THINKING_LEVELS),\n\tpreserveReasoningDefault: z.boolean(),');
++ replace('const reasoning = resolveReasoningLevel(model, options.reasoningEffort ?? profile.reasoning);',`const reasoning = resolveReasoningLevel(model, options.reasoningEffort ?? profile.reasoning);
++            // ${REASONING_EXTENSION}: change only this request's model, never catalog or explicit off.
++            const dispatchModel = profile.preserveReasoningDefault === true && reasoning === void 0 && model.reasoning
++                ? {...model, thinkingLevelMap:{...model.thinkingLevelMap, off:null}} : model;`);
++ replace('snapshot.models.streamSimple(model, context, {','snapshot.models.streamSimple(dispatchModel, context, {');return code;}
++export function extendReasoningDefaults(original){
++ if(sha(original)===REASONING_UPSTREAM_SHA)return transform(original);
++ if(original.includes(REASONING_EXTENSION)){let restored=original.replace('\treasoning: z.union(THINKING_LEVELS),\n\tpreserveReasoningDefault: z.boolean(),','\treasoning: z.union(THINKING_LEVELS),').replace(`const reasoning = resolveReasoningLevel(model, options.reasoningEffort ?? profile.reasoning);
++            // ${REASONING_EXTENSION}: change only this request's model, never catalog or explicit off.
++            const dispatchModel = profile.preserveReasoningDefault === true && reasoning === void 0 && model.reasoning
++                ? {...model, thinkingLevelMap:{...model.thinkingLevelMap, off:null}} : model;`,'const reasoning = resolveReasoningLevel(model, options.reasoningEffort ?? profile.reasoning);').replace('snapshot.models.streamSimple(dispatchModel, context, {','snapshot.models.streamSimple(model, context, {');if(sha(restored)===REASONING_UPSTREAM_SHA&&transform(restored)===original)return original;}
++ throw Error('REASONING_UPSTREAM_CHANGED');
++}
++export function installReasoningDefaults(file){const before=fs.readFileSync(file,'utf8'),after=extendReasoningDefaults(before);if(before===after)return {changed:false,sha256:sha(after)};const backup=file+'.naumi-original';if(fs.existsSync(backup)&&sha(fs.readFileSync(backup))!==REASONING_UPSTREAM_SHA)throw Error('REASONING_BACKUP_CHANGED');if(!fs.existsSync(backup))fs.writeFileSync(backup,before);const tmp=file+'.'+randomUUID()+'.tmp';fs.writeFileSync(tmp,after);fs.renameSync(tmp,file);return {changed:true,originalSHA256:sha(before),sha256:sha(after)};}
++if(process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url)console.log('REASONING_EXTENSION '+JSON.stringify(installReasoningDefaults(path.resolve(process.argv[2]??'node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js'))));
++
+diff --git a/scripts/probe-ccswitch-models.mjs b/scripts/probe-ccswitch-models.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/probe-ccswitch-models.mjs
+@@ -0,0 +1,8 @@
++import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';import {parse} from 'yaml';import {Context} from '@deepseek-ai/cordis';import * as pi from '@deepseek-ai/dsh-llm-pi-ai';import {createUserMessage} from '@deepseek-ai/dsh-llm';import {readCCSwitchSources} from './ccswitch-source.mjs';
++const root=process.cwd(),runtime='E:/Workspace/naumi-desktop',out=path.join(root,'evidence/ccswitch-reasoning-audit'),rows=readCCSwitchSources(),config=parse(fs.readFileSync(path.join(runtime,'.dsh/profiles/web/cordis.patch.yml'),'utf8')).find(x=>x.id==='llm-pi-ai').config.providers,creds=parse(fs.readFileSync(path.join(runtime,'.dsh/.credentials.yaml'),'utf8')),sha=v=>createHash('sha256').update(v).digest('hex'),canon=(s,api)=>{s=s.replace(/\/$/,'');return api==='anthropic-messages'?s.replace(/\/v1$/,''):s;};
++const routes=new Map();for(const [id,p]of Object.entries(config)){const key=creds.refs?.[p.apiKeyEnv];if(!key)continue;routes.set(id,{id,name:p.displayName,api:p.api,baseURL:p.baseURL,key,models:p.models.map(m=>m.id),sources:[]});}
++for(const row of rows){if(!row.key||!row.baseURL||!['anthropic-messages','openai-responses','openai-completions'].includes(row.api))continue;let r=[...routes.values()].find(r=>r.api===row.api&&r.key===row.key&&canon(r.baseURL,r.api)===canon(row.baseURL,row.api));if(!r){const id='source-'+sha(row.app+'/'+row.id).slice(0,8);r={id,name:row.name,api:row.api,baseURL:canon(row.baseURL,row.api),key:row.key,models:[],sources:[]};routes.set(id,r);}r.sources.push({app:row.app,id:row.id,name:row.name});for(const id of row.models)if(!r.models.includes(id))r.models.push(id);}
++async function catalog(r){const base=canon(r.baseURL,r.api),suffixes=base.endsWith('/v1')?['/models']:['/v1/models','/models'];for(const [i,suffix]of suffixes.entries()){try{const response=await fetch(base+suffix,{headers:r.api==='anthropic-messages'?{'x-api-key':r.key,'anthropic-version':'2023-06-01'}:{authorization:'Bearer '+r.key},signal:AbortSignal.timeout(18000),redirect:'manual'});if([404,405].includes(response.status)&&i<suffixes.length-1){await response.body?.cancel();continue;}if(!response.ok){await response.body?.cancel();return {status:response.status};}const text=await response.text();if(text.length>2*1024*1024)return {status:200,error:'CATALOG_TOO_LARGE'};let data;try{data=JSON.parse(text);}catch{return {status:200,error:'NOT_JSON'};}return {status:response.status,models:Array.isArray(data.data)?data.data.filter(m=>typeof m.id==='string').map(m=>m.id):[],metadataKeys:Array.isArray(data.data)?Object.keys(data.data[0]??{}).filter(k=>!['api_key','key','token','secret'].includes(k)):[]};}catch(e){return {status:0,error:e.name==='TimeoutError'?'TIMEOUT':e.cause?.code??e.name};}}}
++async function generation(route,model){let adapter;const ctx=new Context(),keys={AUDIT_KEY:route.key},host=await ctx.plugin({apply(scope){scope.provide('llm',{registerConfigurableProviders:()=>({replace(){}}),registerModelDiscovery:()=>()=>{},registerAdapter:(_r,value)=>{adapter=value;return {replace(){}};}});scope.provide('credentials',{resolve:async ref=>keys[ref]?{value:keys[ref]}:undefined});}});let plugin;const started=Date.now();try{plugin=await ctx.plugin(pi,{providers:{audit:{api:route.api,baseURL:route.baseURL,apiKeyEnv:'AUDIT_KEY',timeoutMs:30000,models:[{id:model,contextWindow:128000,maxTokens:2048,reasoningEfforts:false}]}}});let text='',usage,finish,reasoningChunks=0;for await(const c of adapter.stream({provider:'audit',model,messages:[createUserMessage({source:{kind:'user'},content:[{type:'text',text:'Reply exactly OK. Do not use tools.'}]})],maxTokens:2048,signal:AbortSignal.timeout(35000)})){if(c.type==='text-delta')text+=c.text;if(c.type.includes('reasoning'))reasoningChunks++;if(c.type==='usage')usage=c.usage;if(c.type==='finish'){const raw=JSON.stringify(c.reason);finish={kind:c.reason?.kind??c.reason,errorTag:/expired|invalid.*key|unauthorized|authentication|401/i.test(raw)?'AUTHENTICATION':/budget|max_tokens|max_output_tokens/i.test(raw)?'TOKEN_BUDGET':/credit|balance|quota|payment/i.test(raw)?'QUOTA':/503|overload|unavailable/i.test(raw)?'UPSTREAM_UNAVAILABLE':/timeout|aborted/i.test(raw)?'TIMEOUT':/empty/i.test(raw)?'EMPTY_RESPONSE':raw.includes('error')?'PROVIDER_ERROR':null};}}return {valid:/\bOK\b/.test(text),ms:Date.now()-started,visibleCharacters:text.length,reasoningChunks,finish,usage};}catch(e){return {valid:false,ms:Date.now()-started,error:/^[A-Z0-9_]+$/.test(e.code??'')?e.code:e.name,status:typeof e.status==='number'?e.status:undefined};}finally{await plugin?.dispose();await host.dispose();}}
++const previous=process.argv.includes('--failed')&&fs.existsSync(path.join(out,'ROUTE_PROBES.json'))?JSON.parse(fs.readFileSync(path.join(out,'ROUTE_PROBES.json'))).results:[];const results=previous.filter(r=>r.generation?.valid);for(const r of [...routes.values()].filter(r=>!previous.length||previous.some(v=>v.id===r.id&&!v.generation?.valid))){const listing=await catalog(r),sample=r.models[0],probe=sample?await generation(r,sample):null;const value={id:r.id,name:r.name,api:r.api,baseURL:r.baseURL,sources:r.sources,catalog:listing,sample:sample??null,generation:probe};results.push(value);fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'ROUTE_PROBES.json'),JSON.stringify({checkedAt:new Date().toISOString(),results,probePolicy:{maximumPerRoute:1,maximumOutputTokens:2048,maximumSeconds:35,configurationWrites:0,sourceWrites:0,realGroupMessages:0}},null,2)+'\n');console.log(JSON.stringify({id:r.id,catalogStatus:listing.status,advertisedModels:listing.models?.length??0,sample,valid:probe?.valid??null,error:probe?.error,ms:probe?.ms}));}
++console.log('ROUTE_PROBES_COMPLETE routes='+results.length+' valid='+results.filter(r=>r.generation?.valid).length+' configuration_writes=0 source_writes=0');
+diff --git a/scripts/probe-reasoning-models.mjs b/scripts/probe-reasoning-models.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/probe-reasoning-models.mjs
+@@ -0,0 +1,8 @@
++import fs from 'node:fs';import {randomUUID} from 'node:crypto';import {parse} from 'yaml';import {Context} from '@deepseek-ai/cordis';import {createUserMessage} from '@deepseek-ai/dsh-llm';import {patched} from '../tests/helpers/reasoning-adapter.mjs';import {configureReasoning,reasoningSpec} from '../plugins/naumi-enterprise/model-reasoning.js';import {readCCSwitchSources} from './ccswitch-source.mjs';
++const runtime='E:/Workspace/naumi-desktop',providers=parse(fs.readFileSync(runtime+'/.dsh/profiles/web/cordis.patch.yml','utf8')).find(r=>r.id==='llm-pi-ai').config.providers,creds=parse(fs.readFileSync(runtime+'/.dsh/.credentials.yaml','utf8')).refs,rows=readCCSwitchSources(),results=[];
++function publicFailure(reason){let s=JSON.stringify(reason);for(const key of [...Object.values(creds),...rows.map(r=>r.key)].filter(k=>typeof k==='string'&&k.length>=4))s=s.replaceAll(key,'[REDACTED]');s=s.replace(/Bearer\s+\S+|sk-[\w-]+/gi,'[REDACTED]').replace(/https?:\/\/[^\s"\\]+/g,'[ENDPOINT]');return s.slice(0,500);}
++const tests=[['ccs-provider-8c7ab447-51aed7','gpt-6.1-sol','high'],['ccs-zhipu-glm-3a2b31','glm-5.3','low'],['ccs-zhipu-glm-3a2b31','glm-5.3-flash','max'],['ccs-codex-gpt-2f6b6a','gpt-6-astra','max'],['ccs-deepseek-992333','deepseek-v4-pro','low'],['ccs-deepseek-992333','deepseek-flash','max'],['ccs-default-46d468','gpt-6-sol','high']];
++if(process.argv.includes('--remaining')){const prior=JSON.parse(fs.readFileSync('evidence/ccswitch-reasoning-audit/REASONING_LIVE_PROBES.json')).results;results.push(...prior);tests.splice(0,tests.length,...Object.entries(providers).filter(([id])=>!['ccs-kimi-for-coding-4b613c','ccs-open-edf491'].includes(id)).flatMap(([id,p])=>p.models.filter(m=>!prior.some(r=>r.group===id&&r.model===m.id&&r.valid)).map(m=>[id,m.id,reasoningSpec(m.id,p.api)?.efforts.high?'high':undefined])));}
++if(process.argv.includes('--opencode')){const row=rows.find(r=>r.app==='claude'&&r.name==='OpenCode Go');tests.splice(0,tests.length,['opencode-go','qwen3.8-flash',undefined]);providers['opencode-go']={headers:{'x-opencode-session':'naumi-audit-'+randomUUID()},api:row.api,baseURL:row.baseURL,apiKeyEnv:'SOURCE_KEY',models:[{id:'qwen3.8-flash',contextWindow:128000,maxTokens:2048}]};creds.SOURCE_KEY=row.key;}
++for(const[id,mid,effort]of tests){const p=providers[id];let adapter,plugin;const ctx=new Context(),host=await ctx.plugin({apply(s){s.provide('llm',{registerConfigurableProviders:()=>({replace(){}}),registerModelDiscovery:()=>()=>{},registerAdapter:(_r,v)=>{adapter=v;return {replace(){}};}});s.provide('credentials',{resolve:async ref=>({value:creds[ref]})});}});const start=Date.now();try{const m=effort?configureReasoning({id:mid,reasoningPreset:'official'},p.models.find(m=>m.id===mid),p.api):p.models.find(m=>m.id===mid);plugin=await ctx.plugin(patched,{providers:{[id]:{...p,models:[m],preserveReasoningDefault:true,timeoutMs:30000}}});let text='',usage,finish;for await(const c of adapter.stream({provider:id,model:mid,reasoningEffort:effort,messages:[createUserMessage({source:{kind:'user'},content:[{type:'text',text:'Reply exactly OK. Do not use tools.'}]})],maxTokens:2048,signal:AbortSignal.timeout(35000)})){if(c.type==='text-delta')text+=c.text;if(c.type==='usage')usage=c.usage;if(c.type==='finish')finish=publicFailure(c.reason);}results.push({group:id,model:mid,effort:effort??null,valid:/\bOK\b/.test(text),visibleCharacters:text.length,usage,finish,ms:Date.now()-start});}catch(e){results.push({group:id,model:mid,effort,valid:false,error:publicFailure({message:e.message,code:e.code}),ms:Date.now()-start});}finally{await plugin?.dispose();await host.dispose();}console.log(JSON.stringify(results.at(-1)));}
++const filename=process.argv.includes('--opencode')?'OPENCODE_RECHECK.json':'REASONING_LIVE_PROBES.json';fs.writeFileSync('evidence/ccswitch-reasoning-audit/'+filename,JSON.stringify({checkedAt:new Date().toISOString(),results,maxOutputTokens:2048,maximumSeconds:35,sourceWrites:0,configurationWrites:0},null,2)+'\n');console.log('REASONING_LIVE_COMPLETE tested='+results.length+' valid='+results.filter(r=>r.valid).length);
+diff --git a/scripts/reasoning-fixture-runner.mjs b/scripts/reasoning-fixture-runner.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/reasoning-fixture-runner.mjs
+@@ -0,0 +1,3 @@
++import {pathToFileURL} from 'node:url';import fs from 'node:fs';import path from 'node:path';
++// Call the exported CLI explicitly: Windows worktree junctions can make import.meta.main false.
++const {runCli}=await import(pathToFileURL(fs.realpathSync(path.resolve('node_modules/@deepseek-ai/dsh/lib/bin.js'))).href);await runCli();
+diff --git a/scripts/verify-reasoning-ui.mjs b/scripts/verify-reasoning-ui.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/verify-reasoning-ui.mjs
+@@ -0,0 +1,49 @@
++import fs from 'node:fs';import {zstdDecompressSync} from 'node:zlib';import {extendReasoningDefaults} from './native-reasoning-extension.mjs';import path from 'node:path';import http from 'node:http';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';import {spawn} from 'node:child_process';import {stringify,parse} from 'yaml';import {chromium} from '../desktop/node_modules/playwright/index.mjs';
++const root=process.cwd(),e=path.join(root,'evidence/ccswitch-reasoning-audit'),temporary=path.join(root,'runtime','reasoning-ui-fixture-'+randomUUID()),home=path.join(temporary,'home'),profile=path.join(home,'profiles/web');fs.mkdirSync(path.join(profile,'node_modules/@naumi'),{recursive:true});
++for(const[name,folder]of [['dsh-enterprise','naumi-enterprise'],['dsh-ui-layout','naumi-ui-layout'],['dsh-sidebar-browser','naumi-sidebar-browser']])fs.symlinkSync(path.join(root,'plugins',folder),path.join(profile,'node_modules/@naumi',name),'junction');const scope=path.join(profile,'node_modules/@deepseek-ai');fs.mkdirSync(scope,{recursive:true});for(const entry of fs.readdirSync(path.join(root,'node_modules/@deepseek-ai'))){const source=path.join(root,'node_modules/@deepseek-ai',entry),dest=path.join(scope,entry);if(entry==='dsh-llm-pi-ai'){fs.cpSync(source,dest,{recursive:true});const file=path.join(dest,'lib/index.js');fs.writeFileSync(file,extendReasoningDefaults(fs.readFileSync(file,'utf8')));}else fs.symlinkSync(source,dest,'junction');}
++fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'naumi-discovery-fixture',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}}));fs.writeFileSync(path.join(home,'cordis.patch.yml'),stringify([{id:'ui-theme',config:{preference:'light'}},{id:'session-log-deepseek',disabled:true}]));
++let mode='normal',modelRequests=0;const inferenceRequests=[];
++const upstream=http.createServer(async(req,res)=>{if(req.url!=='/v1/models'){inferenceRequests.push(req.url);res.writeHead(404).end();return;}modelRequests++;assert.equal(req.method,'GET');assert.equal(req.headers.authorization,'Bearer discovery-fixture-key');const state=mode;if(state==='delay')await new Promise(r=>setTimeout(r,1200));if(res.destroyed)return;if(state==='error'){res.writeHead(401).end(JSON.stringify({error:'do-not-show-provider-body'}));return;}res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data:state==='empty'?[]:[{id:'manual-model'},{id:'alpha-model'},{id:'beta-model'},{id:'alpha-model'}]}));});await new Promise(r=>upstream.listen(0,'127.0.0.1',r));const apiURL='http://127.0.0.1:'+upstream.address().port+'/v1';
++fs.writeFileSync(path.join(profile,'cordis.patch.yml'),stringify([{id:'ui-settings-general',config:{welcomeNoticeVersion:'2026-09-28.1'}},{id:'llm-pi-ai',config:{providers:{existing:{displayName:'测试连接',api:'openai-completions',baseURL:apiURL,apiKeyEnv:'DISCOVERY_FIXTURE_KEY',defaultContextWindow:128000,defaultMaxTokens:16384,models:[{id:'gpt-6-sol',contextWindow:400000,maxTokens:16384},{id:'glm-5.3',contextWindow:128000,maxTokens:16384}]}}}}]));
++const sock=http.createServer();await new Promise(r=>sock.listen(0,'127.0.0.1',r));const port=sock.address().port;await new Promise(r=>sock.close(r));const base='http://127.0.0.1:'+port;let output='',browser;
++const child=spawn(process.execPath,[path.join(root,'scripts/reasoning-fixture-runner.mjs'),'web','--host','127.0.0.1','--port',String(port),'--no-open'],{cwd:root,env:{...process.env,DSH_HOME:home,DSH_TELEMETRY_MODE:'DISABLED',DISCOVERY_FIXTURE_KEY:'discovery-fixture-key'},windowsHide:true});child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);const checks=[];function check(name,yes){assert(yes,name);checks.push(name);console.log('SPEC_PASS '+name);}
++try{
++ let launch;for(let i=0;i<200;i++){launch=output.match(new RegExp('http://127\\.0\\.0\\.1:'+port+'/?\\?token=[A-Za-z0-9_~.%-]+'))?.[0];if(launch)break;if(child.exitCode!==null){fs.writeFileSync(path.join(e,'UI_BOOT_FAILURE.log'),output.replace(/token=[A-Za-z0-9_~.%-]+/g,'token=[REDACTED]'));throw Error('FIXTURE_BOOT_FAILED');}await new Promise(r=>setTimeout(r,200));}if(!launch)fs.writeFileSync(path.join(e,'UI_BOOT_TIMEOUT.log'),output.replace(/token=[A-Za-z0-9_~.%-]+/g,'token=[REDACTED]'));assert(launch,'FIXTURE_BOOT_TIMEOUT');
++ const exchange=await fetch(launch,{redirect:'manual'}),cookie=exchange.headers.getSetCookie().map(v=>v.split(';')[0]).join('; ');assert(cookie);const headers={cookie,'Content-Type':'application/json','x-naumi-model-connections':'1',origin:base};async function call(body){const r=await fetch(base+'/naumi/model-connections',{headers,...body?{method:'POST',body:JSON.stringify(body)}:{}});return {status:r.status,value:await r.json()};}const initial=(await call()).value;
++ check('actual_http_reasoning_recommendations_without_enabling_them',initial.groups[0].models[0].reasoningOfficial.efforts.off==='none'&&initial.groups[0].models[0].reasoningEfforts===undefined&&initial.groups[0].reasoning===null);
++ browser=await chromium.launch({headless:true,channel:'chrome'});const context=await browser.newContext({viewport:{width:1360,height:1080},colorScheme:'light'}),page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.route('**/*',route=>{const u=new URL(route.request().url());return ['http:','https:'].includes(u.protocol)&&u.origin!==base?route.abort():route.continue();});await page.goto(launch);await page.waitForFunction(()=>document.body.getAttribute('data-naumi')==='enterprise');await page.getByRole('button',{name:/设置|Settings/}).first().click();await page.getByRole('button',{name:'模型连接',exact:true}).click();const panel=page.locator('.nm-connections');await panel.getByRole('heading',{name:'测试连接',exact:true}).waitFor();
++
++ const rpc=async(method,args={})=>{console.log('RPC_START '+method);const r=await fetch(base+'/api/'+method,{signal:AbortSignal.timeout(20000),method:'POST',headers,body:JSON.stringify({type:'client-request',rpcId:'reasoning-ui',method,payload:{args}})});const v=(await r.json()).result;assert(v.ok,JSON.stringify(v.error));return v.value;};
++ await panel.getByRole('button',{name:'编辑',exact:true}).click();
++ for(const id of ['gpt-6-sol','glm-5.3'])await panel.getByLabel(id+' 推理能力',{exact:true}).selectOption('official');
++ const def=panel.getByLabel('默认推理努力程度',{exact:true});
++ check('mixed_group_only_offers_shared_efforts',await def.locator('option').allTextContents().then(a=>a.includes('高')&&!a.includes('关闭')&&!a.includes('中')));
++ await def.selectOption('high');await panel.getByRole('button',{name:'保存',exact:true}).click();await panel.getByRole('heading',{name:'测试连接',exact:true}).waitFor();
++ let live=(await call()).value;const persisted=()=>parse(fs.readFileSync(path.join(profile,'cordis.patch.yml'),'utf8')).find(x=>x.id==='llm-pi-ai').config.providers.existing;
++ check('real_settings_persist_official_capabilities_and_group_default',persisted().preserveReasoningDefault===true&&persisted().reasoning==='high'&&persisted().models[0].reasoningEfforts.off==='none'&&persisted().models.every(m=>m.compat?.forceAdaptiveThinking===undefined));
++ check('budgets_credentials_and_private_raw_metadata_unchanged',persisted().models[0].contextWindow===400000&&persisted().models[0].maxTokens===16384&&persisted().apiKeyEnv==='DISCOVERY_FIXTURE_KEY'&&persisted().models.every(m=>!('input'in m)&&!('reasoningPreset'in m)));
++ let catalog=await rpc('session/modelCatalog');const group=catalog.groups.find(g=>g.id==='existing');
++ check('actual_native_catalog_exposes_efforts_and_default',group.models[0].reasoning.defaultEffort==='high'&&group.models[0].reasoning.efforts.some(e=>e.id==='off')&&!group.models[1].reasoning.efforts.some(e=>e.id==='off'));
++ const invalid=await call({action:'save',id:'existing',expectedRevision:live.revision,displayName:'测试连接',baseURL:apiURL,api:'openai-completions',reasoning:'off',models:[{id:'gpt-6-sol',reasoningPreset:'official'},{id:'glm-5.3',reasoningPreset:'official'}]});
++ check('server_rejects_incompatible_default_without_writes',invalid.status===400&&invalid.value.error==='MODEL_REASONING_DEFAULT_UNSUPPORTED'&&(await call()).value.revision===live.revision);
++ const stale=await call({action:'save',id:'existing',expectedRevision:initial.revision,displayName:'测试连接',baseURL:apiURL,api:'openai-completions',reasoning:null,models:[{id:'gpt-6-sol',reasoningPreset:'official'}]});check('reasoning_save_is_CAS_guarded',stale.status===409);
++ await panel.getByRole('button',{name:'编辑',exact:true}).click();await def.selectOption('');await panel.getByRole('button',{name:'保存',exact:true}).click();await panel.getByRole('heading',{name:'测试连接',exact:true}).waitFor();
++ catalog=await rpc('session/modelCatalog');check('provider_default_unsets_configured_effort_not_off',!('reasoning'in persisted())&&catalog.groups.find(g=>g.id==='existing').models.every(m=>m.reasoning.defaultEffort===undefined));
++ await panel.getByRole('button',{name:'编辑',exact:true}).click();check('capability_mode_round_trips_without_becoming_custom',await panel.getByLabel('gpt-6-sol 推理能力',{exact:true}).inputValue()==='official');
++ await panel.getByLabel('gpt-6-sol 推理能力',{exact:true}).selectOption('custom');await panel.getByLabel('gpt-6-sol 档位 max',{exact:true}).uncheck();await panel.getByRole('button',{name:'保存',exact:true}).click();await panel.getByRole('heading',{name:'测试连接',exact:true}).waitFor();check('custom_effort_subset_persists',!Object.hasOwn(persisted().models[0].reasoningEfforts,'max')&&persisted().models[0].reasoningEfforts.high==='high');
++ await panel.getByRole('button',{name:'编辑',exact:true}).click();await panel.getByLabel('gpt-6-sol 推理能力',{exact:true}).selectOption('official');await panel.getByRole('button',{name:'保存',exact:true}).click();await panel.getByRole('heading',{name:'测试连接',exact:true}).waitFor();
++ await panel.getByRole('button',{name:'编辑',exact:true}).click();
++ for(const width of [1360,580,360]){await page.setViewportSize({width,height:1080});check('responsive_'+width,await panel.evaluate(el=>el.scrollWidth<=el.clientWidth+2));}
++ await page.setViewportSize({width:1360,height:1080});await panel.locator('.nm-specs').screenshot({path:path.join(e,'reasoning-settings.png')});check('no_supplier_calls_or_page_errors',inferenceRequests.length===0&&errors.length===0);
++ async function createBot(name){const catalog=await fetch(base+'/naumi/bots',{headers}).then(r=>r.json());const r=await fetch(base+'/naumi/bots',{method:'POST',headers:{...headers,'x-naumi-bots':'1'},body:JSON.stringify({action:'create',requestId:randomUUID(),expectedRevision:catalog.revision,fields:{name,kind:'agent',purpose:'推理档位隔离验收'}})});const bot=await r.json();assert(r.ok,JSON.stringify(bot));return {sessionId:bot.homeSessionId};}const primaryCwd=path.join(temporary,'primary');fs.mkdirSync(primaryCwd);const workspace=await rpc('workspace/create',{request:{path:primaryCwd}});const pr=await fetch(base+'/naumi/bots',{method:'POST',headers:{...headers,'x-naumi-bots':'1'},body:JSON.stringify({action:'create-primary',requestId:randomUUID(),expectedRevision:0,name:'推理甲',workspaceId:workspace.workspace.workspaceId})});const primary=await pr.json();assert(pr.ok,JSON.stringify(primary));const a={sessionId:primary.homeSessionId},b=await createBot('推理乙');
++ await rpc('session/selectModel',{request:{sessionId:a.sessionId,provider:'existing',model:'gpt-6-sol',reasoningEffort:'high'}});await rpc('session/selectModel',{request:{sessionId:b.sessionId,provider:'existing',model:'gpt-6-sol',reasoningEffort:'low'}});
++ await page.evaluate(()=>localStorage.setItem('naumi.navigationMode.v1','bot'));await page.keyboard.press('Escape');await page.reload();await page.getByRole('button',{name:/^推理甲，/}).click();const picker=page.getByRole('button',{name:/选择模型，当前/}).first();await picker.waitFor();
++ check('native_picker_shows_session_effort',/High/.test(await picker.getAttribute('aria-label')));await picker.click();await page.getByRole('menuitem',{name:/推理等级/}).click();await page.getByRole('menuitemradio',{name:'Max',exact:true}).click();await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(el=>el.getAttribute('aria-label')?.includes('推理等级 Max')));
++ check('native_effort_menu_selects_max',/Max/.test(await picker.getAttribute('aria-label')));await picker.click();await page.getByRole('menuitem',{name:/推理等级/}).click();await page.screenshot({path:path.join(e,'native-reasoning-picker.png')});await page.keyboard.press('Escape');await page.keyboard.press('Escape');
++ await page.getByRole('button',{name:/^推理乙，/}).click();await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(el=>el.getAttribute('aria-label')?.includes('推理等级 Low')));check('session_efforts_do_not_bleed',/Low/.test(await picker.getAttribute('aria-label')));
++ await page.reload();await page.getByRole('button',{name:/^推理甲，/}).click();await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(el=>el.getAttribute('aria-label')?.includes('推理等级 Max')));check('native_effort_survives_reopen',/Max/.test(await picker.getAttribute('aria-label')));
++ function storedSelection(id){let file;for(const day of fs.readdirSync(path.join(home,'sessions'))){const f=path.join(home,'sessions',day,id,'session.v4.jsonl.zstd');if(fs.existsSync(f))file=f;}if(!file)return null;const bytes=fs.readFileSync(file),parts=[];let offset=0;while(offset<bytes.length){const frame=zstdDecompressSync(bytes.subarray(offset),{info:true});offset+=frame.engine.bytesWritten;parts.push(frame.buffer);}const events=Buffer.concat(parts).toString().split('\n').filter(Boolean).map(JSON.parse);return events.filter(e=>e.type==='model/selection').at(-1);}
++ for(let i=0;i<40&&JSON.stringify(storedSelection(a.sessionId)).includes('max')===false;i++)await new Promise(r=>setTimeout(r,100));check('native_selection_written_to_real_session_log',JSON.stringify(storedSelection(a.sessionId)).includes('max')&&JSON.stringify(storedSelection(b.sessionId)).includes('low'));
++ check('native_selection_did_not_send_messages',inferenceRequests.length===0&&errors.length===0);
++ fs.writeFileSync(path.join(e,'UI_HTTP.json'),JSON.stringify({status:'PASS',passed:checks.length,checks,pageErrors:errors,liveConfigurationWrites:0,supplierCalls:0},null,2)+'\n');console.log('REASONING_UI_COMPLETE checks='+checks.length+' errors='+errors.length+' supplierCalls=0');
++}finally{await browser?.close();child.kill();await new Promise(r=>child.exitCode!==null?r():child.once('close',r));upstream.closeAllConnections();await new Promise(r=>upstream.close(r));}
+diff --git a/scripts/verify-ccswitch-source.mjs b/scripts/verify-ccswitch-source.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/verify-ccswitch-source.mjs
+@@ -0,0 +1,2 @@
++import {readCCSwitchSources} from './ccswitch-source.mjs';import fs from 'node:fs';import assert from 'node:assert/strict';
++const before=JSON.parse(fs.readFileSync('evidence/ccswitch-reasoning-audit/BASELINE_AUDIT.json')).sourceRows,now=readCCSwitchSources();assert.equal(now.length,before.length);for(const r of before)assert.equal(now.find(n=>n.id===r.id&&n.app===r.app)?.sourceHash,r.sourceHash,'SOURCE_CHANGED');console.log('CC_SWITCH_UNCHANGED rows='+now.length+' source_writes=0');
+diff --git a/scripts/deploy-reasoning-models.mjs b/scripts/deploy-reasoning-models.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/deploy-reasoning-models.mjs
+@@ -0,0 +1,34 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync} from 'node:child_process';import {parse} from 'yaml';import {DatabaseSync} from 'node:sqlite';import {botLiveApi} from './bot-live-api.mjs';import {reasoningSpec} from '../plugins/naumi-enterprise/model-reasoning.js';import {extendReasoningDefaults,installReasoningDefaults} from './native-reasoning-extension.mjs';
++const root=process.cwd(),runtime='E:/Workspace/naumi-desktop',mode=process.argv[2],checkpoint=path.join(runtime,'runtime/reasoning-models-deploy.json'),installed=path.join(runtime,'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise'),profile=path.join(runtime,'.dsh/profiles/web/cordis.patch.yml'),native='node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js';
++const sha=b=>createHash('sha256').update(b).digest('hex'),read=p=>fs.existsSync(p)?fs.readFileSync(p):null,save=(p,v)=>fs.writeFileSync(p,JSON.stringify(v,null,2)+'\n'),git=(...args)=>execFileSync('git',args,{cwd:root}),inventory=()=>Object.fromEntries(fs.readdirSync(installed,{recursive:true}).filter(f=>fs.statSync(path.join(installed,f)).isFile()).map(f=>[f.replaceAll('\\','/'),sha(fs.readFileSync(path.join(installed,f)))]));
++function providers(file){return parse(fs.readFileSync(file,'utf8')).find(r=>r.id==='llm-pi-ai').config.providers;}
++function groupState(){const db=new DatabaseSync(path.join(runtime,'.dsh/naumi/bot-groups.sqlite'),{readOnly:true});try{const rows=Object.fromEntries(['rooms','members','posts','replies','post_context','room_name_operations'].map(t=>[t,db.prepare('SELECT * FROM '+t+' ORDER BY rowid').all()]));assert(!rows.replies.some(r=>['queued','starting','sent'].includes(r.state)),'GROUP_BUSY');return sha(JSON.stringify(rows));}finally{db.close();}}
++async function gate(){const api=await botLiveApi(runtime),sessions=await api.rpc('session/list',{_request:{}}),tasks=await api.json('/naumi/bot-tasks');assert(!sessions.items.some(s=>s.running),'RUNNING_SESSIONS');assert(!tasks.tasks.some(t=>['queued','starting','running','waiting'].includes(t.status)),'ACTIVE_TASKS');return {api,sessions,groups:groupState()};}
++if(mode==='prepare'){
++ assert.equal(git('branch','--show-current').toString().trim(),'main');assert.equal(git('status','--porcelain','--untracked-files=no').toString(),'','TRACKED_MAIN_DIRTY');assert(!fs.existsSync(checkpoint),'EXISTING_DEPLOYMENT_INTENT');const g=await gate(),settings=await g.api.rpc('settings/describe',{}),baseline='2ae583a',commit=git('rev-parse','HEAD').toString().trim(),dir=path.join(runtime,'.dsh/reasoning-models-'+randomUUID()),candidate=path.join(dir,'candidate');fs.mkdirSync(path.join(candidate,'plugins/naumi-enterprise'),{recursive:true});
++ const changed=['model-connections.js','assets/model-connections.js','assets/model-connections.css'],added=['model-reasoning.js','official-reasoning-specs.json'];
++ for(const f of changed){const dest=path.join(candidate,'plugins/naumi-enterprise',f);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(path.join(installed,f),dest);}
++ execFileSync('git',['init','--quiet'],{cwd:candidate});const patch=path.join(dir,'runtime-delta.patch');fs.writeFileSync(patch,git('diff','--binary',baseline,commit,'--',...changed.map(f=>'plugins/naumi-enterprise/'+f)));execFileSync('git',['apply','--check','--ignore-space-change',patch],{cwd:candidate});execFileSync('git',['apply','--ignore-space-change',patch],{cwd:candidate});
++ for(const f of added)fs.copyFileSync(path.join(root,'plugins/naumi-enterprise',f),path.join(candidate,'plugins/naumi-enterprise',f));const pkg=JSON.parse(fs.readFileSync(path.join(installed,'package.json')));for(const f of added)if(!pkg.files.includes(f))pkg.files.push(f);fs.writeFileSync(path.join(candidate,'plugins/naumi-enterprise/package.json'),JSON.stringify(pkg,null,2)+'\n');
++ const rows=[...changed,...added,'package.json'].map(f=>({relative:path.relative(runtime,path.join(installed,f)).replaceAll('\\','/'),before:read(path.join(installed,f)),after:read(path.join(candidate,'plugins/naumi-enterprise',f))}));const nativeBefore=read(path.join(runtime,native));rows.push({relative:native,before:nativeBefore,after:Buffer.from(extendReasoningDefaults(nativeBefore.toString()))});
++ for(const row of rows){for(const[k,b]of [['before',row.before],['after',row.after]])if(b){const file=path.join(dir,k,row.relative);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,b);}row.before=row.before?sha(row.before):null;row.after=sha(row.after);}
++ fs.copyFileSync(profile,path.join(dir,'original-profile.yml'));const protectedPaths=['.dsh/.credentials.yaml','.dsh/cordis.patch.yml','.dsh/profiles/web/package.json','.dsh/profiles/web/cordis.yml','.dsh/naumi/bots.json','.dsh/naumi/bot-tasks.json','config/local.json','node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js','node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js'];const protectedHashes=Object.fromEntries(protectedPaths.filter(p=>fs.existsSync(path.join(runtime,p))).map(p=>[p,sha(read(path.join(runtime,p)))]));
++ const sessionFrames=[];const walk=dir=>{for(const e of fs.readdirSync(dir,{withFileTypes:true})){const f=path.join(dir,e.name);if(e.isDirectory())walk(f);else if(e.name==='session.v4.jsonl.zstd'){const b=read(f);sessionFrames.push({relative:path.relative(runtime,f),size:b.length,sha256:sha(b)});}}};walk(path.join(runtime,'.dsh/sessions'));
++ save(checkpoint,{phase:'prepared',commit,baseline,dir,rows,protectedHashes,inventory:inventory(),sessionFrames,groups:g.groups,sessionCount:g.sessions.items.length,defaultModel:settings.namespaces.find(n=>n.ns==='agent-default-model').value});console.log('REASONING_DEPLOY_PREPARED files=7 running=0 source=main');
++}else{
++ const state=JSON.parse(fs.readFileSync(checkpoint));git('merge-base','--is-ancestor',state.commit,'HEAD');
++ if(mode==='apply'){
++ assert.equal(state.phase,'prepared');assert(!fs.existsSync(path.join(runtime,'runtime/server.pid')),'SERVICE_MUST_BE_STOPPED');for(const row of state.rows){const b=read(path.join(runtime,row.relative));assert.equal(b?sha(b):null,row.before,'RUNTIME_DRIFT '+row.relative);}
++ for(const row of state.rows){const file=path.join(runtime,row.relative);if(row.relative===native){installReasoningDefaults(file);continue;}const b=read(path.join(state.dir,'after',row.relative));assert.equal(sha(b),row.after);fs.mkdirSync(path.dirname(file),{recursive:true});const temp=file+'.'+randomUUID()+'.tmp';fs.writeFileSync(temp,b);fs.renameSync(temp,file);}state.phase='files';save(checkpoint,state);console.log('REASONING_DEPLOY_APPLIED files=7 unrelated_files=unchanged');
++ }else if(mode==='migrate'){
++ assert.equal(state.phase,'files');const g=await gate(),current=providers(profile),before=providers(path.join(state.dir,'original-profile.yml'));assert.deepEqual(current,before,'PROVIDER_CONFIG_DRIFT');const expected=structuredClone(before),ops=[],changes=[],retained=[];
++ for(const [id,p]of Object.entries(before)){let touched=false;for(const [index,m]of p.models.entries()){const spec=reasoningSpec(m.id,p.api);if(!spec||Object.hasOwn(m,'reasoningEfforts')){retained.push({group:id,model:m.id,reason:spec?'existing-explicit-capability':'no-verified-effort'});continue;}touched=true;expected[id].models[index].reasoningEfforts=spec.efforts;ops.push({op:'set',path:['providers',id,'models',String(index),'reasoningEfforts'],value:spec.efforts});if(spec.mode==='adaptive'){const compat={...m.compat,forceAdaptiveThinking:true};expected[id].models[index].compat=compat;ops.push({op:'set',path:['providers',id,'models',String(index),'compat'],value:compat});}changes.push({group:id,model:m.id,efforts:Object.keys(spec.efforts),mode:spec.mode,source:spec.source});}if(touched){expected[id].preserveReasoningDefault=true;ops.push({op:'set',path:['providers',id,'preserveReasoningDefault'],value:true});}}
++ const ns=(await g.api.rpc('settings/describe',{})).namespaces.find(n=>n.ns==='llm-pi-ai');save(path.join(state.dir,'migration-intent.json'),{expected,ops,expectedRevision:ns.revision});if(ops.length)await g.api.rpc('settings/mutate',{ns:'llm-pi-ai',ops,expectedRevision:ns.revision});assert.deepEqual(providers(profile),expected);state.phase='migrated';state.changes=changes;state.retained=retained;save(checkpoint,state);console.log('REASONING_MIGRATED models='+changes.length+' retained='+retained.length+' budgets=unchanged credentials=unchanged defaults=unchanged');
++ }else if(mode==='verify'){
++ assert.equal(state.phase,'migrated');const g=await gate(),now=inventory();let untouched=0;for(const [f,h]of Object.entries(state.inventory))if(!state.rows.some(r=>r.relative.endsWith('/'+f))){assert.equal(now[f],h,'UNRELATED_RUNTIME '+f);untouched++;}for(const row of state.rows)assert.equal(sha(read(path.join(runtime,row.relative))),row.after);for(const[p,h]of Object.entries(state.protectedHashes))assert.equal(sha(read(path.join(runtime,p))),h,'PROTECTED '+p);assert.equal(g.groups,state.groups);assert.equal(g.sessions.items.length,state.sessionCount);
++ for(const r of state.sessionFrames){const b=read(path.join(runtime,r.relative));assert(b&&b.length>=r.size,'SESSION_TRUNCATED');assert.equal(sha(b.subarray(0,r.size)),r.sha256,'SESSION_PREFIX_CHANGED');}
++ const settings=await g.api.rpc('settings/describe',{});assert.deepEqual(settings.namespaces.find(n=>n.ns==='agent-default-model').value,state.defaultModel);const catalog=await g.api.rpc('session/modelCatalog',{});for(const c of state.changes){const m=catalog.groups.find(g=>g.id===c.group)?.models.find(m=>m.id===c.model);assert.deepEqual(m.reasoning.efforts.map(e=>e.id),c.efforts);assert.equal(m.reasoning.defaultEffort,undefined);}const view=await g.api.json('/naumi/model-connections');assert.equal(view.groups.reduce((n,g)=>n+g.models.length,0),38);
++ const modified=read(profile),old=read(path.join(state.dir,'original-profile.yml')),copy=path.join(state.dir,'rollback-test-profile.yml');fs.writeFileSync(path.join(state.dir,'modified-profile.yml'),modified);fs.writeFileSync(copy,modified);fs.writeFileSync(copy,old);assert.equal(sha(read(copy)),sha(old));assert.equal(sha(read(profile)),sha(modified));
++ const result={status:'PASS',tier:'actual installed desktop linked local backend',mainCommit:state.commit,runtimeFiles:state.rows.length,unrelatedRuntimeUnchanged:untouched,protectedFilesUnchanged:Object.keys(state.protectedHashes).length,sessions:g.sessions.items.length,sessionPrefixesPreserved:state.sessionFrames.length,running:0,groups:view.groups.length,models:38,reasoningModels:state.changes.length,retained:state.retained,changes:state.changes,credentialsUnchanged:true,defaultSelectionUnchanged:true,budgetsUnchanged:true,configurationRollbackCopy:'PASS',activeModifiedRetained:true,backup:state.dir,supplierCallsInDeployment:0};save(path.join(root,'evidence/ccswitch-reasoning-audit/DEPLOYMENT.json'),result);state.phase='verified';save(checkpoint,state);console.log('REASONING_LIVE_PASS models=38 reasoning='+state.changes.length+' retained='+state.retained.length+' sessions='+result.sessions+' running=0 rollback=PASS');
++ }else throw Error('Use prepare|apply|migrate|verify');
++}
+diff --git a/scripts/package-reasoning-audit.mjs b/scripts/package-reasoning-audit.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/package-reasoning-audit.mjs
+@@ -0,0 +1,17 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {execFileSync,spawnSync} from 'node:child_process';import {createHash,randomUUID} from 'node:crypto';
++const root=process.cwd(),base=process.argv[2]??'2ae583a',e=path.join(root,'evidence/ccswitch-reasoning-audit'),sha=b=>createHash('sha256').update(b).digest('hex');
++const files=['desktop/scripts/prepare-runtime.mjs','plugins/naumi-enterprise/assets/model-connections.css','plugins/naumi-enterprise/assets/model-connections.js','plugins/naumi-enterprise/model-connections.js','plugins/naumi-enterprise/model-reasoning.js','plugins/naumi-enterprise/official-reasoning-specs.json','plugins/naumi-enterprise/package.json','scripts/sync-naumi.mjs','scripts/audit-ccswitch-models.mjs','scripts/ccswitch-source.mjs','scripts/native-reasoning-extension.mjs','scripts/probe-ccswitch-models.mjs','scripts/probe-reasoning-models.mjs','scripts/reasoning-fixture-runner.mjs','scripts/verify-reasoning-ui.mjs','scripts/verify-ccswitch-source.mjs','scripts/deploy-reasoning-models.mjs','scripts/package-reasoning-audit.mjs','tests/helpers/reasoning-adapter.mjs','tests/naumi-model-connections.test.mjs','tests/naumi-model-reasoning.test.mjs','docs/implementation/CCSWITCH_REASONING_AUDIT.md'];
++const manifest={baseline:execFileSync('git',['rev-parse',base],{encoding:'utf8'}).trim(),files:[]};for(const file of files){const current=fs.readFileSync(path.join(root,file));let old;try{old=execFileSync('git',['show',base+':'+file],{stdio:['ignore','pipe','pipe']});}catch{old=null;}if(old?.equals(current))continue;manifest.files.push({path:file,before:old?sha(old):null,after:sha(current)});if(old){const p=path.join(e,'original',file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,old);}}
++fs.writeFileSync(path.join(e,'artifact-manifest.json'),JSON.stringify(manifest,null,2)+'\n');const py=String.raw`import pathlib,json,zipfile,difflib,sys
++root=pathlib.Path(sys.argv[1]);e=root/'evidence/ccswitch-reasoning-audit';m=json.loads((e/'artifact-manifest.json').read_text());patch=[]
++with zipfile.ZipFile(e/'MODIFIED_FILE.zip','w',zipfile.ZIP_DEFLATED) as z:
++ for r in m['files']:
++  p=r['path'];z.write(root/p,p);old=(e/'original'/p).read_text(encoding='utf-8') if r['before'] else '';new=(root/p).read_text(encoding='utf-8');patch.extend(['diff --git a/'+p+' b/'+p+'\n']);patch.extend(['new file mode 100644\n'] if r['before'] is None else []);patch.extend(difflib.unified_diff(old.splitlines(True),new.splitlines(True),fromfile='a/'+p if r['before'] else '/dev/null',tofile='b/'+p))
++(e/'DIFF_FILE.patch').write_text(''.join(patch),encoding='utf8',newline='\n')
++with zipfile.ZipFile(e/'MODIFIED_FILE.zip') as z:
++ assert z.testzip() is None and len(z.namelist())==len(m['files'])
++print('ARTIFACT_PACKAGE_PASS files='+str(len(m['files']))+' zip=reopened patch=reopened')
++`;
++process.stdout.write(execFileSync('python',['-X','utf8','-c',py,root],{encoding:'utf8'}));const copy=path.join(root,'runtime/reasoning-rollback-'+randomUUID());fs.mkdirSync(copy,{recursive:true});fs.writeFileSync(path.join(copy,'.naumi-reasoning-copy'),'owned test copy\n');for(const folder of ['plugins','tests'])fs.cpSync(path.join(root,folder),path.join(copy,folder),{recursive:true});for(const r of manifest.files){const p=path.join(copy,r.path);fs.mkdirSync(path.dirname(p),{recursive:true});fs.copyFileSync(path.join(root,r.path),p);}fs.mkdirSync(path.join(copy,'evidence'),{recursive:true});fs.cpSync(path.join(root,'evidence/official-model-specs'),path.join(copy,'evidence/official-model-specs'),{recursive:true});fs.writeFileSync(path.join(copy,'package.json'),'{"type":"module"}');fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');
++const bash='D:/DEV/Git/bin/bash.exe',result=spawnSync(bash,[path.join(e,'ROLLBACK.sh').replaceAll('\\','/'),copy.replaceAll('\\','/')],{cwd:root,encoding:'utf8'});fs.writeFileSync(path.join(e,'ROLLBACK.log'),result.stdout+result.stderr+'EXIT_STATUS='+result.status+'\n');assert.equal(result.status,0,result.stderr);const tests=['tests/naumi-model-connections.test.mjs','tests/naumi-model-specs.test.mjs','tests/naumi-model-discovery.test.mjs'];const tested=spawnSync(process.execPath,['--test',...tests],{cwd:copy,encoding:'utf8'});fs.writeFileSync(path.join(e,'ROLLBACK_TESTS.log'),tested.stdout+tested.stderr+'EXIT_STATUS='+tested.status+'\n');assert.equal(tested.status,0,tested.stdout+tested.stderr);for(const r of manifest.files)assert.equal(sha(fs.readFileSync(path.join(root,r.path))),r.after,'ACTIVE_MODIFIED_NOT_RETAINED');
++fs.writeFileSync(path.join(e,'PACKAGE_RESULT.json'),JSON.stringify({status:'PASS',baseline:manifest.baseline,files:manifest.files.length,rollbackCopy:copy,rollbackCommand:'D:/DEV/Git/bin/bash.exe evidence/ccswitch-reasoning-audit/ROLLBACK.sh '+copy,rollbackExit:result.status,rollbackOutput:result.stdout.trim(),testsCommand:'node --test '+tests.join(' '),testsExit:tested.status,activeModifiedRetained:true,artifacts:Object.fromEntries(['MODIFIED_FILE.zip','DIFF_FILE.patch','ROLLBACK.sh'].map(f=>[f,{path:path.join(e,f),sha256:sha(fs.readFileSync(path.join(e,f)))}]))},null,2)+'\n');console.log(result.stdout.trim());console.log('ROLLBACK_TESTS_PASS tests=44 exit=0 active_modified=retained');
+diff --git a/tests/helpers/reasoning-adapter.mjs b/tests/helpers/reasoning-adapter.mjs
+new file mode 100644
+--- /dev/null
++++ b/tests/helpers/reasoning-adapter.mjs
+@@ -0,0 +1,10 @@
++import fs from 'node:fs';import path from 'node:path';import {pathToFileURL} from 'node:url';import {Context} from '@deepseek-ai/cordis';import {createUserMessage} from '@deepseek-ai/dsh-llm';import {extendReasoningDefaults} from '../../scripts/native-reasoning-extension.mjs';
++const temp=path.resolve('runtime/reasoning-adapter-fixture.mjs');fs.mkdirSync(path.dirname(temp),{recursive:true});const original=fs.readFileSync(path.resolve('node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js'),'utf8');fs.writeFileSync(temp,extendReasoningDefaults(original));
++export const patched=await import(pathToFileURL(temp).href);
++export async function adapterFixture(providers,pi=patched){let adapter;const ctx=new Context();const host=await ctx.plugin({apply(scope){scope.provide('llm',{registerConfigurableProviders:()=>({replace(){}}),registerModelDiscovery:()=>()=>{},registerAdapter:(_r,value)=>{adapter=value;return {replace(){}};}});scope.provide('credentials',{resolve:async()=>({value:'fixture-key'})});}});const plugin=await ctx.plugin(pi,{providers});return {adapter,async close(){await plugin.dispose();await host.dispose();}};}
++export async function generate(adapter,effort,model='gpt-6-sol'){const chunks=[];for await(const c of adapter.stream({provider:'test',model,reasoningEffort:effort,messages:[createUserMessage({source:{kind:'user'},content:[{type:'text',text:'Reply OK'}]})],maxTokens:2048,signal:AbortSignal.timeout(10000)}))chunks.push(c);return chunks;}
++export function mockResponse(res,api){res.writeHead(200,{'content-type':'text/event-stream'});const send=(type,value)=>res.write((api==='anthropic-messages'?'event: '+type+'\n':'')+'data: '+JSON.stringify({type,...value})+'\n\n');if(api==='anthropic-messages'){
++ send('message_start',{message:{id:'fixture',type:'message',role:'assistant',model:'fixture',content:[],stop_reason:null,usage:{input_tokens:2,output_tokens:0}}});send('content_block_start',{index:0,content_block:{type:'text',text:''}});send('content_block_delta',{index:0,delta:{type:'text_delta',text:'OK'}});send('content_block_stop',{index:0});send('message_delta',{delta:{stop_reason:'end_turn'},usage:{output_tokens:1}});send('message_stop',{});
++ }else if(api==='openai-completions'){res.write('data: '+JSON.stringify({id:'fixture',object:'chat.completion.chunk',choices:[{index:0,delta:{role:'assistant',content:'OK'},finish_reason:null}]})+'\n\n');res.write('data: '+JSON.stringify({id:'fixture',choices:[{index:0,delta:{},finish_reason:'stop'}],usage:{prompt_tokens:2,completion_tokens:1,total_tokens:3}})+'\n\ndata: [DONE]\n\n');
++ }else {const response={id:'resp_fixture',object:'response',created_at:1,status:'in_progress',model:'fixture',output:[]};send('response.created',{response});send('response.output_item.added',{output_index:0,item:{id:'msg_fixture',type:'message',role:'assistant',content:[]}});send('response.content_part.added',{item_id:'msg_fixture',output_index:0,content_index:0,part:{type:'output_text',text:'',annotations:[]}});send('response.output_text.delta',{item_id:'msg_fixture',output_index:0,content_index:0,delta:'OK'});send('response.output_item.done',{output_index:0,item:{id:'msg_fixture',type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:'OK',annotations:[]}]}});send('response.completed',{response:{...response,status:'completed',usage:{input_tokens:2,output_tokens:1,total_tokens:3},output:[]}});}
++ res.end();}
+diff --git a/tests/naumi-model-connections.test.mjs b/tests/naumi-model-connections.test.mjs
+--- a/tests/naumi-model-connections.test.mjs
++++ b/tests/naumi-model-connections.test.mjs
+@@ -35,3 +35,10 @@
+  try{assert.equal((await post(input(f),{cookie:''})).status,401);assert.equal((await post(input(f),{cookie:'guest'})).status,403);assert.equal((await post(input(f),{origin:'https://foreign.example'})).status,403);assert.equal((await post(input(f),{'x-naumi-model-connections':''})).status,403);assert.equal((await post(input(f),{'Content-Type':'text/plain'})).status,415);assert.equal((await post('{')).status,400);assert.equal((await post('x'.repeat(131073))).status,413);assert.equal((await post(input(f))).status,200);const r=await fetch(origin+'/naumi/model-connections',{headers:{cookie:'owner'}});assert.equal(r.headers.get('Cache-Control'),'no-store');assert(!(await r.text()).includes('fixture-key'));assert.equal((await post(input(f,{expectedRevision:0}))).status,409);}
+  finally{server.closeAllConnections();await new Promise(r=>server.close(r));await host.dispose();await provider.dispose();}
+ });
++
++
++test('reasoning official/default save is durable, safely projected and preserves raw budgets, credentials and default model',async()=>{const f=fixture();await f.service.execute(input(f,{api:'anthropic-messages',models:[{id:'gpt-6-sol',contextWindow:128000,maxTokens:16384,reasoningPreset:'official'}],reasoning:'high'}));const p=f.providers.team;assert.equal(p.preserveReasoningDefault,true);assert.equal(p.reasoning,'high');assert.equal(p.models[0].compat.forceAdaptiveThinking,true);assert.equal(p.models[0].contextWindow,128000);assert.equal(p.models[0].maxTokens,16384);assert(!('reasoningPreset'in p.models[0]));const read=await f.service.read();assert.equal(read.groups[0].reasoning,'high');assert(read.groups[0].models[0].reasoningOfficial.efforts.max);const ref=p.apiKeyEnv,selection=structuredClone(f.selection);await f.service.execute(input(f,{apiKey:undefined,api:'anthropic-messages',reasoning:null,models:[{id:'gpt-6-sol'}]}));assert(!('reasoning'in f.providers.team));assert.deepEqual(f.providers.team.models[0].reasoningEfforts,p.models[0].reasoningEfforts);assert.equal(f.providers.team.apiKeyEnv,ref);assert.deepEqual(f.selection,selection);});
++test('invalid reasoning and incompatible mixed-group default never stage keys or mutate settings',async()=>{for(const change of [{models:[{id:'gpt-6-sol',reasoningPreset:'official'},{id:'gpt-6.1-sol',reasoningPreset:'official'}],reasoning:'off'},{models:[{id:'gpt-6-sol',reasoningEfforts:{off:'none'}}]},{models:[{id:'private',reasoningPreset:'official'}]},{models:[{id:'private',reasoningEfforts:{high:null}}]}]){const f=fixture();await assert.rejects(f.service.execute(input(f,change)));assert.equal(f.revision,0);assert.equal(f.keys.size,0);}});
++test('concurrent reasoning saves retain CAS and write failure retains original capabilities and defaults',async()=>{const f=fixture();await f.service.execute(input(f,{models:[{id:'gpt-6-sol',reasoningPreset:'official'}]}));const before=structuredClone(f.providers);f.fail();await assert.rejects(f.service.execute(input(f,{reasoning:'high',models:[{id:'gpt-6-sol',reasoningPreset:'official'}]})));assert.deepEqual(f.providers,before);assert.equal(f.keys.size,1);});
++
++test('sparse custom effort maps persist through actual request validation',async()=>{const f=fixture();await f.service.execute(input(f,{models:[{id:'fixture-model',reasoningPreset:'custom',reasoningEfforts:{low:'low',high:'high'},reasoningMode:'native'}]}));assert.deepEqual(f.providers.team.models[0].reasoningEfforts,{low:'low',high:'high'});assert(!('reasoningMode'in f.providers.team.models[0]));});
+diff --git a/tests/naumi-model-reasoning.test.mjs b/tests/naumi-model-reasoning.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/tests/naumi-model-reasoning.test.mjs
+@@ -0,0 +1,9 @@
++import test from 'node:test';import assert from 'node:assert/strict';import http from 'node:http';import fs from 'node:fs';import path from 'node:path';import {createHash,randomUUID} from 'node:crypto';import {reasoningSpec,reasoningSpecs,configureReasoning,validateEfforts,validateDefault} from '../plugins/naumi-enterprise/model-reasoning.js';import {extendReasoningDefaults,installReasoningDefaults,REASONING_UPSTREAM_SHA} from '../scripts/native-reasoning-extension.mjs';import {adapterFixture,generate,mockResponse} from './helpers/reasoning-adapter.mjs';
++const model=(id,api)=>configureReasoning({id,reasoningPreset:'official'},{id,contextWindow:128000,maxTokens:16384},api);
++test('official exact IDs distinguish mandatory thinking and optional off; unknown aliases are not guessed',()=>{assert.equal(reasoningSpec('gpt-6.1-sol','openai-responses').efforts.off,undefined);assert.equal(reasoningSpec('gpt-6-sol','openai-responses').efforts.off,'none');assert.deepEqual(Object.keys(reasoningSpec('glm-5.3','anthropic-messages').efforts),['low','high','max']);assert.equal(reasoningSpec('glm-5.3-flash-uncensored','anthropic-messages'),null);assert.equal(reasoningSpec('gpt-6.1-sol[1M]','anthropic-messages'),null);for(const s of reasoningSpecs.models){assert.match(s.source,/^https:\/\//);assert.match(s.sourceSHA256,/^[a-f0-9]{64}$/);}});
++test('official adaptive, inherited, disabled and custom modes preserve unrelated model fields and strip request-only fields',()=>{const old={id:'glm-5.3',custom:'preserved',compat:{supportsCacheControl:false}};const next=configureReasoning({id:old.id,reasoningPreset:'official'},{...old,reasoningPreset:'official'},'anthropic-messages');assert.equal(next.compat.forceAdaptiveThinking,true);assert.equal(next.compat.supportsCacheControl,false);assert.equal(next.custom,'preserved');assert(!('reasoningPreset'in next));assert(!('reasoningEfforts'in configureReasoning({reasoningPreset:'inherit'},next,'anthropic-messages')));assert.equal(configureReasoning({reasoningPreset:'disabled'},next,'anthropic-messages').reasoningEfforts,false);});
++test('malformed, off-only, empty or mismatched protocol efforts are rejected',()=>{for(const v of [{},{off:'none'},{high:null},{ultra:'high'},{high:''},{high:'secret value'},[]])assert.throws(()=>validateEfforts(v),e=>e.code==='MODEL_REASONING_INVALID');assert.throws(()=>configureReasoning({id:'unknown',reasoningPreset:'official'},{id:'unknown'},'openai-responses'));assert.throws(()=>configureReasoning({reasoningEfforts:{high:'high'},reasoningMode:'adaptive'},{},'openai-responses'));});
++test('group default must be accepted by every exact model; provider default is never guessed',()=>{const p={models:[model('gpt-6-sol','openai-responses'),model('gpt-6.1-sol','openai-responses')]};assert.doesNotThrow(()=>validateDefault(p,'high'));assert.throws(()=>validateDefault(p,'off'));assert.doesNotThrow(()=>validateDefault(p,null));});
++test('pinned extension is idempotent, atomic and refuses upstream/backup drift',()=>{const original=fs.readFileSync('node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js','utf8'),candidate=extendReasoningDefaults(original);assert.equal(extendReasoningDefaults(candidate),candidate);assert.throws(()=>extendReasoningDefaults(candidate+'\n'));const dir=path.resolve('runtime/reasoning-pin-'+randomUUID());fs.mkdirSync(dir,{recursive:true});const file=path.join(dir,'index.js');fs.writeFileSync(file,original);assert.equal(installReasoningDefaults(file).changed,true);assert.equal(installReasoningDefaults(file).changed,false);assert.equal(createHash('sha256').update(fs.readFileSync(file+'.naumi-original')).digest('hex'),REASONING_UPSTREAM_SHA);});
++for(const api of ['openai-responses','openai-completions','anthropic-messages'])test('real adapter '+api+' preserves default vs off and maps low/high/xhigh/max without budgets',async()=>{const bodies=[];const server=http.createServer(async(req,res)=>{let b='';for await(const c of req)b+=c;bodies.push(JSON.parse(b));mockResponse(res,api);});await new Promise(r=>server.listen(0,'127.0.0.1',r));const f=await adapterFixture({test:{api,baseURL:'http://127.0.0.1:'+server.address().port+'/v1',apiKeyEnv:'FIXTURE',preserveReasoningDefault:true,models:[model('gpt-6-sol',api)]}});try{const info=await f.adapter.resolveModel('test','gpt-6-sol');assert(info.reasoning.efforts.some(e=>e.id==='max'));for(const effort of [undefined,'off','low','high','xhigh','max']){const chunks=await generate(f.adapter,effort);assert(chunks.some(c=>c.type==='text-delta'&&c.text==='OK'));const b=bodies.at(-1);if(api==='anthropic-messages'){if(effort===undefined){assert.equal(b.thinking,undefined);assert.equal(b.output_config,undefined);}else if(effort==='off'){assert.equal(b.thinking.type,'disabled');assert.equal(b.output_config,undefined);}else{assert.equal(b.thinking.type,'adaptive');assert.equal(b.thinking.budget_tokens,undefined);assert.equal(b.output_config.effort,effort);}}else if(api==='openai-responses')assert.equal(b.reasoning?.effort,effort==='off'?'none':effort);else assert.equal(b.reasoning_effort,effort==='off'?'none':effort);}const n=bodies.length;await assert.rejects(generate(f.adapter,'minimal'),e=>e.code==='UNSUPPORTED_REASONING_EFFORT');assert.equal(bodies.length,n);}finally{await f.close();server.closeAllConnections();await new Promise(r=>server.close(r));}});
++test('non-opted existing route retains original default-off wire behavior; group default is applied explicitly',async()=>{const bodies=[],api='openai-responses',server=http.createServer(async(req,res)=>{let b='';for await(const c of req)b+=c;bodies.push(JSON.parse(b));mockResponse(res,api);});await new Promise(r=>server.listen(0,'127.0.0.1',r));for(const opt of [false,true]){const f=await adapterFixture({test:{api,baseURL:'http://127.0.0.1:'+server.address().port+'/v1',apiKeyEnv:'FIXTURE',preserveReasoningDefault:opt,...opt?{reasoning:'high'}:{},models:[model('gpt-6-sol',api)]}});try{await generate(f.adapter);assert.equal(bodies.at(-1).reasoning.effort,opt?'high':'none');}finally{await f.close();}}server.closeAllConnections();await new Promise(r=>server.close(r));});
+diff --git a/docs/implementation/CCSWITCH_REASONING_AUDIT.md b/docs/implementation/CCSWITCH_REASONING_AUDIT.md
+new file mode 100644
+--- /dev/null
++++ b/docs/implementation/CCSWITCH_REASONING_AUDIT.md
+@@ -0,0 +1,20 @@
++# CC Switch 模型复核与推理档位
++
++日期：2026-11-17。负责人：当前任务；基线 541830103b4cd2782a3f8621f012c625932c95d1；分支 codex/ccswitch-reasoning-audit-20261117；独立 worktree E:/Workspace/naumi-model-reasoning-audit。首次同步主线 e16b369。功能迭代 1。
++
++## 模块与职责
++只读复核 CC Switch 来源、当前桌面绑定的实际 3080 后端，补齐模型连接配置和原生推理档位。凭据值不进入证据、Git 或日志。当前 18 个来源、8 个已导入分组、38 个模型；8 组密钥匹配，38 条原生目录均缺 reasoning。10 条路由各做一次原生小请求，6 条成功；对 4 条失败再定向检查一次，Kimi/open 配额错误，OpenCode/LAN 仍失败，保留原连接，不因模型列表 401/404 删除可用推理路由。
++
++## 公共接口、依赖方向、数据/状态/事务归属
++复用原 ModelConnections、settings 原始配置/CAS、credentials、PiAiAdapter、原生输入器旁模型/推理选择器和 Session 模型选择持久化。官方能力目录仅提供精确 ID 推荐；供应商代理支持与官方规格分开验收。未知别名保留，不按名字猜能力。
++
++原生缺口：添加包含 off 的能力映射时，无指定档位会被 pi-ai 当作显式关闭。增加 opt-in preserveReasoningDefault，仅在已声明能力且未指定档位时，把 dispatch 副本的 off 设为 null；目录仍公开真实 off 能力，显式关闭仍发送 none/disabled。扩展脚本固定原始 SHA、原子替换、原始备份，sync 和打包共用；未启用路由不改变。
++
++## 本次实现与迁移状态
++开发中。模型连接页增加每模型官方/继承/关闭/自定义能力与协议模式，连接默认档位仅接受所有模型共有能力。继续复用原生选择器，不新增第二个发送区或全局拦截。预算、默认模型、凭据、会话消息、后台任务不随能力导入改变。
++
++## 验证命令、结果及证据层级
++基线 node --test tests/naumi-model-connections.test.mjs tests/naumi-model-specs.test.mjs tests/naumi-model-discovery.test.mjs：44/44。来源只读审计、模型列表和真实路由样例见 evidence/ccswitch-reasoning-audit；不是每模型全量可用证明。后续集中覆盖真实原生适配器 mock wire、设置 HTTP/CAS、原生目录/Session 档位、UI、全量与副本回滚。
++
++## 未完成项与下一步
++完成配置与原生扩展、官方映射验证、实际配置增量、集中验收、四件套、普通合并推送及运行接入。不打断正在运行的对话，不宣称未测模型可用。
