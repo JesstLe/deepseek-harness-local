@@ -13,8 +13,12 @@ const name=z.string().trim().min(1).max(80).refine(v=>!/[\u0000-\u001f\u007f]/u.
 const id=z.string().min(1).max(200),revision=z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const appearanceSchema=z.object({shape:z.enum(BOT_FORMS.map(f=>f.id)),palette:z.enum(BOT_PALETTES.map(p=>p.id))}).strict();
 const botSchema=z.object({id,kind:z.enum(['agent','team']),name,purpose:z.string().trim().min(1).max(4000),status:z.enum(['active','archived']),revision,cwd:z.string().min(1),agentPreset:z.string().optional(),homeSessionId:id,sessionIds:z.array(id).min(1).max(1000),createdAt:z.string().datetime(),updatedAt:z.string().datetime(),appearance:appearanceSchema.optional()}).strict();
-const documentSchema=z.object({version:z.literal(1),revision:z.number().int().nonnegative(),bots:z.array(botSchema).max(1000)}).strict().superRefine((value,ctx)=>{
+const primarySetupSchema=z.object({requestId:z.uuid(),botId:id,sessionId:id,name,appearance:appearanceSchema.optional(),cwd:z.string().min(1),
+  profile:z.object({agentPreset:id.optional(),model:z.object({provider:id,model:id,reasoningEffort:id.optional()}).strict(),permissions:z.array(z.never()).max(0)}).strict()}).strict();
+const documentSchema=z.object({version:z.literal(1),revision:z.number().int().nonnegative(),bots:z.array(botSchema).max(1000),primaryBotId:id.optional(),primarySetup:primarySetupSchema.optional()}).strict().superRefine((value,ctx)=>{
   const bots=new Set(),sessions=new Set();for(const bot of value.bots){if(bots.has(bot.id)||!bot.sessionIds.includes(bot.homeSessionId))ctx.addIssue({code:'custom',message:'Invalid Bot identity'});bots.add(bot.id);for(const session of bot.sessionIds){if(sessions.has(session))ctx.addIssue({code:'custom',message:'Session belongs to two Bots'});sessions.add(session);}}
+  if(value.primaryBotId&&!value.bots.some(b=>b.id===value.primaryBotId&&b.status==='active')||value.primaryBotId&&value.primarySetup)ctx.addIssue({code:'custom',message:'Invalid primary Bot'});
+  if(value.primarySetup&&(bots.has(value.primarySetup.botId)||sessions.has(value.primarySetup.sessionId)))ctx.addIssue({code:'custom',message:'Invalid primary reservation'});
 });
 const clone=value=>structuredClone(value),fail=code=>{throw Error(code);};
 
@@ -31,6 +35,7 @@ export class BotDirectory {
   }
   assertReady(){if(this.closed)fail('BOT_DIRECTORY_CLOSED');if(this.failure)fail(this.failure);}
   list(){this.assertReady();return clone(this.value);}
+  primary(){this.assertReady();return clone(this.value.bots.find(b=>b.id===this.value.primaryBotId&&b.status==='active')??null);}
   forSession(sessionId){this.assertReady();const groupBotId=this.groupSessionOwner?.(sessionId);const bot=this.value.bots.find(b=>b.id===groupBotId||b.sessionIds.includes(sessionId));return bot?clone(bot):null;}
   subscribe(listener){this.listeners.add(listener);return()=>this.listeners.delete(listener);}
   transact(change){
@@ -57,6 +62,7 @@ export class BotDirectory {
         fail('BOT_SESSION_ALREADY_BOUND');
       }
       if(next.bots.some(b=>b.status==='active'&&b.name.toLocaleLowerCase()===fields.name.toLocaleLowerCase()))fail('BOT_NAME_EXISTS');
+      if(next.primarySetup?.name.toLocaleLowerCase()===fields.name.toLocaleLowerCase())fail('BOT_NAME_EXISTS');
       const time=this.now(),bot=botSchema.parse({id:'bot-'+this.uuid(),...fields,status:'active',revision:1,cwd,...(agentPreset?{agentPreset}:{}),homeSessionId:sessionId,sessionIds:[sessionId],createdAt:time,updatedAt:time});next.bots.push(bot);return {bot};
     });
   }
@@ -67,6 +73,8 @@ export class BotDirectory {
       const fields=Object.fromEntries(Object.entries(patch).filter(([key])=>key!=='expectedRevision'));
       if(!Object.keys(fields).length)fail('BOT_EMPTY_UPDATE');
       const nextName=fields.name??bot.name,nextStatus=fields.status??bot.status;
+      if(bot.id===next.primaryBotId&&nextStatus!=='active')fail('BOT_PRIMARY_REQUIRED');
+      if(next.primarySetup?.name.toLocaleLowerCase()===nextName.toLocaleLowerCase())fail('BOT_NAME_EXISTS');
       if(nextStatus==='active'&&next.bots.some(b=>b.id!==bot.id&&b.status==='active'&&b.name.toLocaleLowerCase()===nextName.toLocaleLowerCase()))fail('BOT_NAME_EXISTS');
       if(Object.entries(fields).every(([key,value])=>bot[key]===value))return {bot,unchanged:true};
       Object.assign(bot,fields,{revision:bot.revision+1,updatedAt:this.now()});return {bot};
@@ -91,7 +99,82 @@ export class BotDirectory {
       bot.sessionIds.push(sessionId);bot.revision++;bot.updatedAt=this.now();return {bot};
     });
   }
+  reservePrimary(input){
+    return this.transact(next=>{
+      if(next.primaryBotId)return {bot:{bot:next.bots.find(b=>b.id===next.primaryBotId),already:true},unchanged:true};
+      if(next.primarySetup){
+        const prior=next.primarySetup;
+        if(prior.requestId!==input.requestId)fail('BOT_PRIMARY_PENDING');
+        if(prior.name!==input.name||JSON.stringify(prior.appearance)!==JSON.stringify(input.appearance))fail('BOT_PRIMARY_REQUEST_CONFLICT');
+        return {bot:prior,unchanged:true};
+      }
+      if(next.revision!==input.expectedRevision)fail('BOT_CONFLICT');
+      if(next.bots.length>=1000)fail('BOT_DIRECTORY_FULL');
+      if(next.bots.some(b=>b.status==='active'&&b.name.toLocaleLowerCase()===input.name.toLocaleLowerCase()))fail('BOT_NAME_EXISTS');
+      next.primarySetup=primarySetupSchema.parse({requestId:input.requestId,botId:'bot-'+this.uuid(),sessionId:'session-'+this.uuid(),name:input.name,
+        ...(input.appearance?{appearance:input.appearance}:{}),cwd:input.cwd,profile:input.profile});return {bot:next.primarySetup};
+    });
+  }
+  completePrimary(requestId){
+    return this.transact(next=>{
+      if(next.primaryBotId)return {bot:next.bots.find(b=>b.id===next.primaryBotId),unchanged:true};
+      const pending=next.primarySetup;if(!pending||pending.requestId!==requestId)fail('BOT_PRIMARY_PENDING');
+      const time=this.now(),bot=botSchema.parse({id:pending.botId,kind:'agent',name:pending.name,
+        purpose:'作为用户的主助手接待需求，协调已有 Bot 的独立工作，并核对与汇总交付；新增 Bot 需用户明确要求。',status:'active',revision:1,
+        cwd:pending.cwd,...(pending.profile.agentPreset?{agentPreset:pending.profile.agentPreset}:{}),homeSessionId:pending.sessionId,sessionIds:[pending.sessionId],
+        ...(pending.appearance?{appearance:pending.appearance}:{}),createdAt:time,updatedAt:time});
+      next.bots.push(bot);next.primaryBotId=bot.id;delete next.primarySetup;return {bot};
+    });
+  }
+  choosePrimary(botId,expectedRevision){
+    return this.transact(next=>{
+      if(next.primaryBotId){if(next.primaryBotId!==botId)fail('BOT_PRIMARY_ALREADY_SET');return {bot:next.bots.find(b=>b.id===botId),unchanged:true};}
+      if(next.primarySetup)fail('BOT_PRIMARY_PENDING');if(next.revision!==expectedRevision)fail('BOT_CONFLICT');
+      const bot=next.bots.find(b=>b.id===botId);if(!bot)fail('BOT_NOT_FOUND');if(bot.status!=='active')fail('BOT_ARCHIVED');
+      next.primaryBotId=bot.id;return {bot};
+    });
+  }
   async close(){this.closed=true;await this.tail;this.listeners.clear();}
+}
+
+/** Owner/profile scoped bootstrap. It reuses the existing registry/runtime and
+ * persists a reservation BEFORE creating a native Session. No prompt/model call. */
+export class PrimaryBotService{
+  constructor(options){Object.assign(this,options);this.tail=Promise.resolve();}
+  execute(input){const run=this.tail.then(()=>this.perform(input));this.tail=run.catch(()=>{});return run;}
+  async perform(input){
+    if(input.action==='select-primary'){
+      const bot=this.directory.list().bots.find(b=>b.id===input.botId);if(!bot)fail('BOT_NOT_FOUND');
+      const runtime=this.getRuntime();if(!runtime)fail('BOT_PRIMARY_UNAVAILABLE');
+      const stored=await runtime.snapshot(bot.homeSessionId);if(!stored)fail('BOT_SESSION_NOT_FOUND');
+      if(stored.header?.origin==='subagent'||(stored.header?.delegationDepth??0)>0)fail('BOT_ROOT_SESSION_REQUIRED');
+      if((this.workspaceRegistry??this.context?.get('workspaceRegistry'))?.archivedSessionIds?.includes(bot.homeSessionId))fail('BOT_PRIMARY_HOME_ARCHIVED');
+      return this.directory.choosePrimary(bot.id,input.expectedRevision);
+    }
+    const existing=this.directory.primary();if(existing)return existing;
+    const runtime=this.getRuntime();if(!runtime)fail('BOT_PRIMARY_UNAVAILABLE');
+    let pending=this.directory.list().primarySetup;
+    if(pending){if(pending.requestId!==input.requestId)fail('BOT_PRIMARY_PENDING');
+      pending=await this.directory.reservePrimary({...input,cwd:pending.cwd,profile:pending.profile});
+    }else{
+      const registry=this.workspaceRegistry??this.context?.get('workspaceRegistry'),controller=this.workspaceController??this.context?.get('workspaceController');if(!registry)fail('BOT_WORKSPACE_REQUIRED');
+      let workspace=input.workspaceId?registry.get(input.workspaceId):registry.list()[0];
+      if(!workspace&&!input.workspaceId&&controller){await controller.initializeDefault(AbortSignal.timeout(10000));workspace=registry.list()[0];}
+      if(!workspace||!path.isAbsolute(workspace.path??''))fail('BOT_WORKSPACE_REQUIRED');
+      const selected=await this.agentPresets.resolve();
+      const profile={agentPreset:selected.id,model:(this.agentDefaultModel??this.context?.get('agentDefaultModel')).currentSelection(),permissions:[]};
+      pending=await this.directory.reservePrimary({...input,cwd:workspace.path,profile});
+    }
+    if(pending.already)return pending.bot;
+    await runtime.ensure(pending.sessionId,{create:true,cwd:pending.cwd,profile:pending.profile});
+    const stored=await runtime.snapshot(pending.sessionId);if(!stored)fail('BOT_PRIMARY_SESSION_PENDING');
+    if(path.resolve(stored.header.cwd).toLocaleLowerCase()!==path.resolve(pending.cwd).toLocaleLowerCase())fail('BOT_WORKSPACE_MISMATCH');
+    const registry=this.workspaceRegistry??this.context?.get('workspaceRegistry');
+    const workspace=registry?.list().find(w=>path.resolve(w.path).toLocaleLowerCase()===path.resolve(pending.cwd).toLocaleLowerCase());
+    if(!workspace)fail('BOT_WORKSPACE_REQUIRED');
+    if(workspace.attachSession)await workspace.attachSession(pending.sessionId);
+    return this.directory.completePrimary(pending.requestId);
+  }
 }
 
 export function createBotTools(ctx,directory){
@@ -113,13 +196,15 @@ export function installBots(ctx,{directory,collaborationOrigin}={}){
     const taskRuntime=installBotTasks(scope,store,{onReady:service=>{taskService=service;}});
     const groupRuntime=installBotGroups(scope,store,()=>taskService);
     const employeeRuntime=installEmployees(scope,store,{collaborationOrigin});
+    const primary=new PrimaryBotService({directory:store,context:scope,getRuntime:()=>taskService?.runtime,
+      workspaceRegistry:scope.get?.('workspaceRegistry'),workspaceController:scope.get?.('workspaceController'),agentPresets:scope.agentPresets,agentDefaultModel:scope.get?.('agentDefaultModel')});
     const installed=new Map(),streams=new Set();
     const install=agent=>{
       if(installed.has(agent)||!scope.agentTeams.tryMembership(agent))return;const disposers=[];
       try{
         for(const tool of createBotTools(scope,store))disposers.push(agent.ctx.tools.register(tool));
         disposers.push(agent.ctx.systemPrompt.section({name:'naumi:bots',order:agent.ctx.systemPrompt.getSectionOrder('TEAM_POLICY')+2,text:'Naumi has Thread and Bot navigation modes over the same Session engine. Only establish a persistent Bot when the user requests a reusable agent/team; use bot_create directly and choose its name and responsibilities yourself from that request. Creating a Bot is an existing product operation, not a software development task: do not search source code, run shell commands or edit internal files to create it. If creation fails, check bot_directory once for a saved identity, report the actual failure and stop this creation attempt; do not improvise a file-based replacement. A successful bot_create completes identity creation; report it concisely and wait for the user task, without additional setup interviews or claiming that external integrations were provisioned. Never promote every temporary teammate or ordinary chat into a Bot. Use bot_directory / bot_update / bot_use to manage the real directory. The name is not a model tool address. Starting a new task for an existing Bot creates another Session linked to the same Bot ID. Do not claim cross-session memory beyond the Bot purpose and the actually available linked resources/history.'}));
-        disposers.push(agent.ctx.systemPrompt.context({name:'naumi:bot-identity',order:agent.ctx.systemPrompt.getContextOrder('TEAM_IDENTITY')+1,required:true,text:()=>{try{const m=scope.agentTeams.membership(agent),bot=store.forSession(m.root.id);return bot?`Persistent Naumi Bot: ${JSON.stringify({id:bot.id,name:bot.name,kind:bot.kind,purpose:bot.purpose,status:bot.status})}\nThis is the identity for this task; preserve its stable ID across tasks. Use bot_update for name/purpose changes, not a conversation-title rename.`:'';}catch{return '';}}}));
+        disposers.push(agent.ctx.systemPrompt.context({name:'naumi:bot-identity',order:agent.ctx.systemPrompt.getContextOrder('TEAM_IDENTITY')+1,required:true,text:()=>{try{const m=scope.agentTeams.membership(agent),bot=store.forSession(m.root.id);return bot?`Persistent Naumi Bot: ${JSON.stringify({id:bot.id,name:bot.name,kind:bot.kind,purpose:bot.purpose,status:bot.status,isPrimary:store.primary()?.id===bot.id})}\nThis is the identity for this task; preserve its stable ID across tasks. Use bot_update for name/purpose changes, not a conversation-title rename. ${store.primary()?.id===bot.id?'You are this owner account primary reception Bot. Receive the user request, coordinate EXISTING Bots for independent work, promptly acknowledge durable dispatch and continue chatting. Amend the same task via bot_task_continue from its original sender Session. Do not create staff or external accounts unless requested; primary status grants no extra model, tool or filesystem permissions.':''}`:'';}catch{return '';}}}));
         installed.set(agent,()=>{for(const dispose of disposers.reverse())dispose();});
       }catch(error){for(const dispose of disposers.reverse())dispose();throw error;}
     };
@@ -143,13 +228,16 @@ export function installBots(ctx,{directory,collaborationOrigin}={}){
         let input;try{input=z.discriminatedUnion('action',[
           z.object({action:z.literal('bind'),botId:id,sessionId:id,expectedRevision:revision}).strict(),
           z.object({action:z.literal('appearance'),botId:id,expectedRevision:revision,appearance:appearanceSchema}).strict(),
+          z.object({action:z.literal('select-primary'),botId:id,expectedRevision:z.number().int().nonnegative()}).strict(),
+          z.object({action:z.literal('create-primary'),requestId:z.uuid(),expectedRevision:z.number().int().nonnegative(),name,appearance:appearanceSchema.optional(),workspaceId:id.optional()}).strict(),
         ]).parse(JSON.parse(text));}catch{send(400,{error:'BOT_INVALID_REQUEST'});return;}
         if(input.action==='appearance'){send(200,await store.appearance(input.botId,input.expectedRevision,input.appearance));return;}
+        if(['create-primary','select-primary'].includes(input.action)){send(200,await primary.execute(input));return;}
         const header=scope.sessions.get(input.sessionId)?.header??(await scope.sessionPersistence.stat(input.sessionId))?.header;
         if(!header){send(404,{error:'BOT_SESSION_NOT_FOUND'});return;}
         if(header.origin==='subagent'||(header.delegationDepth??0)>0){send(403,{error:'BOT_ROOT_SESSION_REQUIRED'});return;}
         send(200,await store.bind(input.botId,input.sessionId,input.expectedRevision,header.cwd));
-      }catch(error){const code=/^BOT_[A-Z_]+$/.test(error.message)?error.message:'BOT_DIRECTORY_UNAVAILABLE';send(code==='BOT_CONFLICT'?409:code==='BOT_NOT_FOUND'?404:code==='BOT_DIRECTORY_INVALID'||code==='BOT_DIRECTORY_UNAVAILABLE'?503:400,{error:code});}
+      }catch(error){const code=/^BOT_[A-Z_]+$/.test(error.message)?error.message:'BOT_DIRECTORY_UNAVAILABLE';send(/CONFLICT|ALREADY_SET|PRIMARY_PENDING/.test(code)?409:code==='BOT_NOT_FOUND'?404:code==='BOT_DIRECTORY_INVALID'||code==='BOT_DIRECTORY_UNAVAILABLE'||code==='BOT_PRIMARY_UNAVAILABLE'?503:400,{error:code});}
     }}));
     scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/bots/events',handler:(req,res)=>{
       if(!admit(req,res))return;if(req.method!=='GET'){res.writeHead(405).end();return;}

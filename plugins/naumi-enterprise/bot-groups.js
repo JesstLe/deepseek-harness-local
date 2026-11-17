@@ -25,6 +25,9 @@ export function installBotGroups(ctx, directory, getTasks) {
     try { store = new BotGroupStore(join(dirname(directory.file), 'bot-groups.sqlite')); }
     catch { scope.logger.warn('BOT_GROUP_STORAGE_UNAVAILABLE'); return; }
     const service = new BotGroupService({directory,store,getTasks,onError:() => scope.logger.warn('BOT_GROUP_BACKGROUND_ERROR')});
+    const alignPrimary=()=>service.alignPrimary();
+    alignPrimary();
+    scope.effect(()=>directory.subscribe?.(alignPrimary)??(()=>{}));
     const resolveOwner = sessionId => store.member(sessionId)?.botId;
     directory.groupSessionOwner = resolveOwner;
     const installed = new Map();

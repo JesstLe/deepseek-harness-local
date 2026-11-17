@@ -1,0 +1,10 @@
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {planBotWorkspaces} from '../scripts/plan-bot-workspaces.mjs';
+test('history planner assigns writer ownership, preserves relay viewers and never moves unknown files',()=>{
+ const home=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-workspace-plan-'));try{
+ fs.writeFileSync(path.join(home,'article.md'),'original');fs.writeFileSync(path.join(home,'shared.md'),'shared');fs.writeFileSync(path.join(home,'unknown.txt'),'unknown');fs.writeFileSync(path.join(home,'.env'),'fixture-only');
+ const bots=[{id:'a',name:'员工',cwd:home,homeSessionId:'sa',sessionIds:['sa']},{id:'b',name:'主管',cwd:home,homeSessionId:'sb',sessionIds:['sb']}],write=p=>[{type:'tool/call',data:{name:'write',callId:p,arguments:{path:p}}},{type:'tool/result',data:{message:{toolCallId:p}}}];
+ const events={sa:[...write('article.md'),...write('shared.md'),...write('.env')],sb:[{type:'deliverables/presented',data:{files:[{path:'article.md'}]}},...write('shared.md'),...write('removed.md')]};
+ const result=planBotWorkspaces({home,catalog:{revision:1,bots},eventsFor:id=>events[id]}),article=result.files.find(f=>f.source.endsWith('article.md'));
+ assert.equal(result.status,'PLAN_ONLY');assert.deepEqual(article.ownerBotIds,['a']);assert.deepEqual(article.viewerBotIds,['b']);assert.equal(article.status,'copy-candidate');assert.equal(article.sha256.length,64);assert.equal(result.files.find(f=>f.source.endsWith('shared.md')).status,'shared-review');assert.equal(result.files.find(f=>f.source.endsWith('.env')).status,'sensitive-review');assert.equal(result.files.find(f=>f.source.endsWith('removed.md')).status,'missing');assert.equal(result.unassigned.length,1);assert.equal(fs.readFileSync(path.join(home,'article.md'),'utf8'),'original');assert(!fs.existsSync(path.join(home,'naumi')));
+ }finally{assert(home.startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(home,{recursive:true,force:true});}
+});
