@@ -3,7 +3,7 @@ import {EXPERIENCE_EVENT,EXPERIENCE_ACTIONS,advancedEmployeeAccess} from './empl
 import {taskActivity,employeeTaskState,employeeTasks,receptionTarget} from './bot-task-model.js';
 import {MODE_KEY,navigationMode,botActivity,botSessions,botSummary,botTone,newBotTaskRequest,botCatalog,currentSessionId,botSelected} from './bot-sidebar-model.js';
 import {CHAT_PANEL,CHAT_EVENT,PIN_KEY,groupCatalog,conversationRows,roomPreview,roomWorking} from './bot-chat-model.js';
-import {PRIMARY_PANEL,primaryBot,enterBotMode} from './primary-bot.js';
+import {PRIMARY_PANEL,CREATE_BOT_EVENT,primaryBot,enterBotMode} from './primary-bot.js';
 
 export function installBotSidebar(ctx,React,Icon,createPortal){
   return ctx.inject(['remote.session'],scope=>installNavigation(scope,React,Icon,createPortal));
@@ -71,7 +71,7 @@ function installNavigation(ctx,React,Icon,createPortal){
       useEffect(()=>{if(!adding)return;const close=e=>{if(e.type==='keydown'&&e.key!=='Escape')return;if(e.type!=='keydown'&&addRef.current?.contains(e.target))return;setAdding(false);};document.addEventListener('pointerdown',close);document.addEventListener('keydown',close);return()=>{document.removeEventListener('pointerdown',close);document.removeEventListener('keydown',close);};},[adding]);
       const pin=id=>{setPinned(id);try{if(id)localStorage.setItem(PIN_KEY,id);else localStorage.removeItem(PIN_KEY);}catch{}};
       const bots=catalog.bots.filter(bot=>bot.status==='active'&&(!search||bot.name.toLocaleLowerCase().includes(search.toLocaleLowerCase())));
-      const create=()=>{setError(null);if(!primaryBot(catalog)){void enterBotMode(ctx,catalog).catch(()=>setError('目录尚未读取，请重试。'));return;}try{ctx.uiWorkspace.startSession(undefined,{prompt:'请根据我的需求创建一个可长期复用的 Bot（独立智能体或团队），由你自主确定名称与职责，并使用 bot_create 保存身份。不要预置固定岗位，也不要执行尚未确认的业务操作。\n\n我的需求：',whenDraftExists:'append'});}catch{setError('请先选择一个工作区');}};
+      const create=()=>{setError(null);if(!primaryBot(catalog)){void enterBotMode(ctx,catalog).catch(()=>setError('目录尚未读取，请重试。'));return;}window.dispatchEvent(new CustomEvent(CREATE_BOT_EVENT));};
       if(!surface)return null;
       return createPortal(h(React.Fragment,null,
         h('div',{className:'naumi-navigation-switch','data-naumi-navigation-owned':true,role:'group','aria-label':'导航模式'},h('button',{type:'button','aria-pressed':mode==='threads',onClick:()=>choose('threads'),title:'线程模式'},wide?'线程':h(Icon,{name:'chat',size:16})),h('button',{type:'button','aria-pressed':mode==='bot',onClick:()=>choose('bot'),title:'Bot 模式'},wide?'Bot':h(Icon,{name:'spark',size:16}))),
