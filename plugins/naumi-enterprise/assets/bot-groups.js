@@ -1,5 +1,6 @@
 import {filePreviewAddress,taskLabel,taskActivity} from './bot-task-model.js';
 import {botCatalog} from './bot-sidebar-model.js';
+import {createGroupMentions} from './bot-mentions.js';
 import {primaryBot} from './primary-bot.js';
 import {createBotAvatar} from './bot-avatar.js';
 import {createChatMarkdown} from './bot-chat-markdown.js';
@@ -7,6 +8,8 @@ import {groupCatalog,groupRequest,groupError,roomDraft,watchGroupReplies,roomWor
 
 export function createBotGroupsPage(ctx,React){
  const h=React.createElement,{useEffect,useState,useRef,useSyncExternalStore}=React,groups=groupCatalog(),catalog=botCatalog(),Avatar=createBotAvatar(React),Markdown=createChatMarkdown(React);
+ const mentionProvider=createGroupMentions(React,{roomFor:id=>groups.getSnapshot().rooms.find(r=>r.id===id),bots:()=>catalog.getSnapshot().bots});
+ ctx.inject(['inputTriggers'],scope=>scope.effect(()=>scope.inputTriggers.registerSource(mentionProvider.source)));
  const icon=(kind,size=18)=>h('svg',{width:size,height:size,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.6,strokeLinecap:'round',strokeLinejoin:'round','aria-hidden':true},h('path',{d:{edit:'m16 3 5 5-12 12-6 1 1-6Z M14 5l5 5',send:'m5 12 7-7 7 7 M12 5v14',users:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M16 3a4 4 0 0 1 0 8 M22 21v-2a4 4 0 0 0-3-3.9 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',files:'M14 3H6v18h12V7z M14 3v5h5 M9 12h6 M9 16h6',close:'m6 6 12 12 M18 6 6 18',at:'M16 8v6a2 2 0 0 0 4 0v-2a8 8 0 1 0-3 6 M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0'}[kind]??'M5 12h14'}));
  const action=(label,onClick,kind,props={})=>h('button',{type:'button',className:'nbc-icon','aria-label':label,title:label,onClick,...props},icon(kind));
  const openSession=id=>{ctx.layout.beginNavigation?.();ctx.uiWorkspace.openSession(id);};
@@ -39,22 +42,23 @@ export function createBotGroupsPage(ctx,React){
  }
  function NativeComposer({room,native,accessory,busy,onSubmit,onCancel}){
   const [binding,setBinding]=useState(null),[error,setError]=useState('');const callbacks=useRef({onSubmit,onCancel});callbacks.current={onSubmit,onCancel};
-  useEffect(()=>{let closed=false,ref,dispose;const controller=new AbortController();
+  useEffect(()=>{let closed=false,ref,dispose,stopMentions;const controller=new AbortController();
    void (async()=>{try{
     const prepared=await groupRequest(undefined,{signal:controller.signal,body:{action:'prepare',roomId:room.id}});if(closed)return;
     const sessions=ctx.get?.('sessions')??ctx.sessions;await sessions.refresh();if(closed)return;
     ref=sessions.retain(prepared.sessionId,{source:'naumiGroupComposer'});await ref.ready;if(closed)return;
     const conversation=ctx.get?.('conversation')??ctx.conversation;
     if(!conversation?.registerComposerTransport)throw Error('NATIVE_COMPOSER_EXTENSION_MISSING');
+    stopMentions=mentionProvider.bind(ctx.get?.('inputTriggers')??ctx.inputTriggers,prepared.sessionId,room.id);
     dispose=conversation.registerComposerTransport(prepared.sessionId,{submit:args=>callbacks.current.onSubmit(args),cancel:()=>callbacks.current.onCancel()});
     setBinding({sessionId:prepared.sessionId,reference:ref});
    }catch(e){if(!closed){console.error('Naumi group composer:',e);setError(e.message==='NATIVE_COMPOSER_EXTENSION_MISSING'?'原生输入区扩展尚未加载，请更新工作台。':groupError(e));}}})();
-   return()=>{closed=true;controller.abort();dispose?.();ref?.release();};
+   return()=>{closed=true;controller.abort();dispose?.();stopMentions?.();ref?.release();};
   },[room.id]);
   return h('div',{className:'nbc-native-dock','data-native-composer':binding?.sessionId??'loading'},error?h('div',{className:'nbc-error',role:'alert'},error):binding&&native?.SessionProvider?h(native.SessionProvider,{session:binding.reference},native.renderFactorySlot('naumi.group.composer',{groupBusy:busy,placeholder:'发送消息，@ 提及成员',accessory})):h('div',{className:'nbc-loading',role:'status'},'载入输入区…'));
  }
  function Conversation({room,bots,native}){
-  const [data,setData]=useState(null),[older,setOlder]=useState([]),[end,setEnd]=useState(false),[loadingOlder,setLoadingOlder]=useState(false),[draft,setDraft]=useState(()=>roomDraft(room.id)),[error,setError]=useState(''),[readError,setReadError]=useState(''),[sending,setSending]=useState(false),[mentions,setMentions]=useState(false),[drawer,setDrawer]=useState(null),[live,setLive]=useState({});
+  const [data,setData]=useState(null),[older,setOlder]=useState([]),[end,setEnd]=useState(false),[loadingOlder,setLoadingOlder]=useState(false),[draft,setDraft]=useState(()=>roomDraft(room.id)),[error,setError]=useState(''),[readError,setReadError]=useState(''),[sending,setSending]=useState(false),[drawer,setDrawer]=useState(null),[live,setLive]=useState({});
   const refresh=useRef(null),timeline=useRef(null),follow=useRef(true),alive=useRef(true),initial=useRef(true),flight=useRef(false),reader=useRef(null),submissionRef=useRef(null);const label=id=>bots.find(b=>b.id===id)?.name??'已归档成员';
   const update=value=>{const next={...value,submission:undefined};roomDraft(room.id,next);setDraft(next);submissionRef.current=null;setError('');};
   useEffect(()=>{alive.current=true;const controller=new AbortController();let pending=false;
@@ -74,7 +78,7 @@ export function createBotGroupsPage(ctx,React){
    const request=submissionRef.current;roomDraft(room.id,{...roomDraft(room.id),submission:request});
    try{await groupRequest(undefined,{signal,body:{...value,id:request.id}});submissionRef.current=null;
     if(roomDraft(room.id).submission?.id===request.id)roomDraft(room.id,{text:'',targets:[]});
-    if(alive.current){setDraft(roomDraft(room.id));setMentions(false);follow.current=true;void refresh.current?.();}void groups.refresh();return {kind:'success'};
+    if(alive.current){setDraft(roomDraft(room.id));follow.current=true;void refresh.current?.();}void groups.refresh();return {kind:'success'};
    }catch(e){if(alive.current)setError(groupError(e));return {kind:'error'};}finally{flight.current=false;if(alive.current)setSending(false);}
   };
   const stopReply=async()=>{setError('');try{for(const r of groupInterruptTargets(replies))await groupRequest(undefined,{body:{action:'interrupt',roomId:room.id,replyId:r.id}});void refresh.current?.();}catch(e){if(alive.current)setError(groupError(e));}};
@@ -86,12 +90,12 @@ export function createBotGroupsPage(ctx,React){
    if(row.type==='task-state')return h('div',{key:row.id,className:'nbc-task-receipt','data-task-id':row.taskId,'data-task-status':row.status},h('span',null,label(row.botId),' · ',taskLabel(row)),h('button',{type:'button',onClick:()=>selectTask((data?.tasks??[]).find(t=>t.id===row.taskId))},row.subject));
    return bubble(row);
   });
-  const accessory=h(React.Fragment,null,
+  const accessory=(error||draft.taskId||draft.targets.length>0)?h(React.Fragment,null,
    error&&h('div',{className:'nbc-error',role:'alert'},error),
    draft.taskId&&h('div',{className:'nbc-task-selection'},h('span',null,(data?.tasks??[]).find(t=>t.id===draft.taskId)?.subject??draft.taskId),action('取消任务关联',()=>update({...draft,taskId:null}),'close')),
-   h('div',{className:'nbc-group-controls'},action('点名成员',()=>setMentions(!mentions),'at',{'aria-expanded':mentions,disabled:sending||!!draft.taskId}),
-    (mentions||draft.targets.length>0)&&h('div',{className:'nbc-mentions','aria-label':'点名成员'},targets.map(m=>h('button',{type:'button',key:m.botId,'aria-pressed':draft.targets.includes(m.botId),disabled:sending||!!draft.taskId,onClick:()=>update({...draft,targets:draft.targets.includes(m.botId)?draft.targets.filter(id=>id!==m.botId):[...draft.targets,m.botId]})},'@'+label(m.botId)))))
-  );
+   h('div',{className:'nbc-group-controls'},
+    draft.targets.length>0&&h('div',{className:'nbc-mentions','aria-label':'点名成员'},targets.filter(m=>draft.targets.includes(m.botId)).map(m=>h('button',{type:'button',key:m.botId,'aria-pressed':draft.targets.includes(m.botId),disabled:sending||!!draft.taskId,onClick:()=>update({...draft,targets:draft.targets.includes(m.botId)?draft.targets.filter(id=>id!==m.botId):[...draft.targets,m.botId]})},h(Avatar,{bot:bots.find(b=>b.id===m.botId),staticPreview:true}),'@'+label(m.botId)))))
+  ):null;
   return h('section',{className:'nbc-conversation','aria-label':room.name},
    h('header',{className:'nbc-header'},h('div',{className:'nbc-title'},h(Faces,{members:room.members,bots}),h(GroupTitle,{room,working})),h('div',{className:'nbc-header-actions'},h('button',{type:'button',className:'nbc-members-button',onClick:()=>setDrawer(drawer==='members'?null:'members'),'aria-label':'群成员'},room.members.length,' 位成员',icon('users',17)),action('任务与文件',()=>setDrawer(drawer==='tasks'?null:'tasks'),'files',{'aria-expanded':drawer==='tasks'}))),
    h('div',{className:'nbc-main'},

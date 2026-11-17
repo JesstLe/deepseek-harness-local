@@ -1,0 +1,373 @@
+diff --git a/desktop/scripts/prepare-runtime.mjs b/desktop/scripts/prepare-runtime.mjs
+index afbd96a..b544a58 100644
+--- a/desktop/scripts/prepare-runtime.mjs
++++ b/desktop/scripts/prepare-runtime.mjs
+@@ -5,6 +5,7 @@ import {createHash,randomUUID} from 'node:crypto';
+ import {execFileSync} from 'node:child_process';
+ import {stageDingTalk} from './stage-dingtalk.mjs';
+ import {auditPackage} from '../../scripts/audit-enterprise-package.mjs';
++import {installAgentTriggers} from '../../scripts/native-agent-mentions-extension.mjs';
+ import {installNativeComposer} from '../../scripts/native-composer-extension.mjs';
+ const project=fileURLToPath(new URL('../..',import.meta.url));
+ const sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+@@ -39,6 +40,7 @@ export async function prepareRuntime({root=project,target=path.join(root,'runtim
+     // Only runtime dependencies and source plugins are input. No user home/profile/config is copied.
+     fs.cpSync(path.join(root,'node_modules'),path.join(staged,'node_modules'),{recursive:true,dereference:true,filter:source=>!source.split(path.sep).some(x=>['.cache','.bin','dingtalk-workspace-cli'].includes(x))&&!isRuntimeDevelopmentArtifact(source)});
+     installNativeComposer(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'));
++    installAgentTriggers(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js'));
+     fs.cpSync(path.join(root,'plugins'),path.join(staged,'plugins'),{recursive:true});
+     for(const [source,name]of [['naumi-enterprise','dsh-enterprise'],['naumi-ui-layout','dsh-ui-layout'],['naumi-sidebar-browser','dsh-sidebar-browser']])fs.cpSync(path.join(root,'plugins',source),path.join(staged,'node_modules/@naumi',name),{recursive:true});
+     fs.copyFileSync(process.execPath,path.join(staged,'node.exe'));
+diff --git a/docs/implementation/GROUP_INLINE_MENTIONS.md b/docs/implementation/GROUP_INLINE_MENTIONS.md
+new file mode 100644
+index 0000000..4e643ab
+--- /dev/null
++++ b/docs/implementation/GROUP_INLINE_MENTIONS.md
+@@ -0,0 +1,44 @@
++# 输入框内 Agent 点名
++
++## 模块与职责
++- 负责人：本任务主 Agent；功能迭代 1。
++- 分支 `codex/group-inline-mentions-20261117`，隔离 worktree `E:/Workspace/naumi-inline-mentions`。
++- 开工 fetch 后基线 main/origin/main：`7de781ffac355e360c4a418d2947da7873ea2367`。
++- 文件归属：bot-groups.js/css、host 资产登记、bot-mentions provider、原生 trigger 扩展生成器、sync/staging 装配、对应测试/脚本和本文及 evidence/group-inline-mentions。共享 checkout 的其他任务证据和工作树不动。
++
++## 公共接口、依赖方向、数据与生命周期归属
++现有输入器已提供原生 inputTriggers source、候选图标组件、原生 MenuView、Lexical span CAS 插入、IME、方向键/Enter/Tab/Escape 和撤销。直接复用这些实际状态与生命周期；不创建 textarea、第二个 popup、另一个编辑器或全局键盘拦截器。
++
++上游的 @ 语法限制普通词边界，且将 @ 路由到文件/Session 引用；它没有每 Session 的检测/provider 配置。因此只对固定上游 SHA 增加最小公开接口：
++
++```js
++const stop = inputTriggers.registerSessionTrigger(sessionId, {
++  trigger: '@', source: 'naumi-group-agents',
++  detect(draft, caret, guard, draftRev) { /* return hit, null, or undefined for native fallback */ }
++});
++```
++
++- 配置只属于显式群 composer Session；离开群清理并关闭菜单。私聊/线程不注册，保留原 @文件/Session 和 /命令。原生检测函数及 MenuView、仲裁、插入和提交字节保持不变。
++- `bot-mentions.js` 是 provider 薄适配层，只保存群 ID 和当前插入区间/版本/分隔信息，不另存文本草稿，不接触原生私有编辑器或复制原生行为。
++- 群内任意普通文本位置（开头、中文/英文句中、换行后）输入 @ 触发；候选来自当前群的 active Bot，支持名称包含搜索。其他群与已归档成员不入候选。
++- 候选 icon 直接复用 `createBotAvatar`，读取同一个 Bot 的 appearance 配色与形象；没有假图标/颜色副本。菜单无副标题或营销说明。
++- 选择结果交给原生 span-CAS 插入 `@名称 `，只替换 @ 到当前光标的查询片段；前后文、附件、撤销和原生草稿归属不变。英文紧邻前缀补一个普通空格，保证沿用既有 mentionedBots 路由；行尾也保留分隔，避免连续输入吞掉前一个接收人。
++- 删除提及即移除其文本路由，不另存隐式收件人列表。既有旧版手动点名草稿仍显示可移除的头像标签；新选择不产生隐藏 targets。
++- 原来的独立 @ 名字面板由原生输入候选替代。任务关联、停止、Queue、附件、模型位置、群改名及导航保持原链路。
++
++## 本次实现与迁移状态
++新增 `scripts/native-agent-mentions-extension.mjs`，严格校验上游和生成产物 SHA，幂等安装；使用原子替换断开包管理器 hardlink，并保存 `.naumi-original`。`sync-naumi` 与桌面 staging 都装配；现有原生 composer transport 扩展不改。
++
++## 验证命令、结果及证据层级
++- 定向单元/真实 native service + 群改名/协作/共享 catalog 32/32；包括 Session opt-in、恢复默认来源、stale pick/成员归档、防串群、中文/英文/emoji 光标、原菜单/IME/默认语法字节不变。
++- 独立 Harness + 真实原生 Lexical/原生候选 MenuView + 临时 SQLite。仅为测试浏览器精确替换原生 bundle 的同一上游模块；不改共享 node_modules。群提交截获为确定性 202，检查原生 transport 的真实文本与生产 mentionedBots 路由；不调用真实模型。
++- UI 初测暴露行尾换行使提及后无分隔的问题，已按原生引用的普通空格规则修复；验证脚本改用 innerText 观测换行；重复 Escape 后同 token 不重新打开是原生行为，测试通过实际清空再输入模拟新触发。
++- 完整基线、修改、回滚、UI、全量和实际加载结果记录于 `../../evidence/group-inline-mentions/VERIFICATION.txt`，不以本地夹具替代供应商模型业务验收。
++
++## 未完成项与下一步
++真实运行加载和 Git 收口以 DEPLOYMENT.json / VERIFICATION.txt 为准。安装包构建不在本切片执行；已更新后续 staging 装配。回滚只恢复本模块源码/依赖 bundle，不回滚群名、消息、任务、模型配置和用户草稿。
++
++## 并行主线整合
++已整合 origin/main `0282b7b` 的员工管理新增模块，相关文件与本任务互不覆盖；最终副本回滚基线同样更新为该 SHA，不撤销并行功能。初轮完整测试 587/587；整合后的全量及 22 项真实原生 UI 复测结果追加至验证记录。候选弹层检查后已收窄为 340px，并将实际复用的形象 SVG 显示为 32px，不改变原生 MenuView 的实现。
++
++整合后集中全量 599/599 通过。最终原生菜单 UI 22 项通过，零页面错误、零推理；主线既有员工管理/群改名场景与本次原生 Session 级 provider 共存。
+diff --git a/plugins/naumi-enterprise/assets/bot-groups.css b/plugins/naumi-enterprise/assets/bot-groups.css
+index 81db5cc..e9af791 100644
+--- a/plugins/naumi-enterprise/assets/bot-groups.css
++++ b/plugins/naumi-enterprise/assets/bot-groups.css
+@@ -16,3 +16,13 @@
+ .nbc-native-dock{flex:none;padding:12px 30px 24px;max-height:48%;overflow:visible}.nbc-native-dock>div{max-width:792px;margin-left:auto;margin-right:auto}.nbc-group-controls{display:flex;align-items:center;gap:8px}.nbc-group-controls .nbc-mentions{margin:0;flex:1}.nbc-task-selection{display:flex;align-items:center;gap:12px;border-left:2px solid #a498bf;padding:3px 8px;margin-bottom:7px;font-size:12px;color:#686075}.nbc-task-selection span{min-width:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.nbc-task-receipt{display:flex;align-items:center;gap:10px;align-self:center;max-width:100%;font-size:11px;color:#8a8e99}.nbc-task-receipt button{border:0;background:none;color:#75638f;max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:inherit;padding:3px}.nbc-task-link{border:0;background:none;color:#89739e;font-size:11px;padding:5px 2px;margin-top:3px}.nbc-attachment{display:block;font-size:12px;padding:4px 0}@media(max-width:800px){.nbc-native-dock{padding:10px 16px 17px}}
+ 
+ .nbc-group-title{min-width:0;position:relative}.nbc-title-line{display:flex;align-items:center;gap:6px;min-width:0}.nbc-title-line h1{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nbc-title-line .nbc-icon{flex:none;width:28px;height:28px}.nbc-rename{position:absolute;top:100%;left:0;z-index:12;display:flex;flex-wrap:wrap;gap:8px;width:min(380px,calc(100vw - 110px));padding:12px;background:#fff;border:1px solid #e6e5ed;border-radius:12px;box-shadow:0 10px 30px #29233d18}.nbc-rename input{flex:1;min-width:80px;width:150px;padding:8px;border:1px solid #dcd8e7;border-radius:7px;color:#3a3b49;background:#fff;font:inherit}.nbc-rename button{border:1px solid #e6e5ed;border-radius:7px;background:#fff;padding:7px 10px;font:inherit;color:#75648f;cursor:pointer}.nbc-rename button[type=submit]{background:#75648f;color:#fff;border-color:#75648f}.nbc-rename button:disabled{opacity:.5;cursor:default}.nbc-rename .nbc-error{width:100%;padding:0;margin:0}.nbc-rename input:focus-visible{outline:2px solid #a498bf;outline-offset:2px}
++
++/* Agent provider customizes only its native menu rows, not a second popup. */
++.nbc-native-dock [data-trigger-menu]:has(.nbc-agent-avatar){width:min(340px,100%);right:auto;border:1px solid #e8e5ef;border-radius:14px;padding:5px;background:#fff;box-shadow:0 12px 36px #29233d18}
++.nbc-native-dock [role=option]:has(.nbc-agent-avatar){min-height:48px;padding:7px 10px;gap:11px;border-radius:9px}
++.nbc-native-dock [role=option] span:has(>.nbc-agent-avatar){width:32px;height:32px;flex:none}
++.nbc-native-dock .nbc-agent-avatar{width:32px;height:32px;display:inline-block;flex:none}
++.nbc-native-dock [role=option]:has(.nbc-agent-avatar)>span:nth-child(2){max-width:calc(100% - 48px);font-size:13px;font-weight:500}
++.nbc-mentions .naumi-bot-avatar{width:23px;height:23px;flex:none}.nbc-mentions button{display:inline-flex;align-items:center;gap:6px}
++
++.nbc-native-dock [role=option] .nbc-agent-avatar>svg{width:32px;height:32px}
+diff --git a/plugins/naumi-enterprise/assets/bot-groups.js b/plugins/naumi-enterprise/assets/bot-groups.js
+index 80fa651..c23af8e 100644
+--- a/plugins/naumi-enterprise/assets/bot-groups.js
++++ b/plugins/naumi-enterprise/assets/bot-groups.js
+@@ -1,5 +1,6 @@
+ import {filePreviewAddress,taskLabel,taskActivity} from './bot-task-model.js';
+ import {botCatalog} from './bot-sidebar-model.js';
++import {createGroupMentions} from './bot-mentions.js';
+ import {primaryBot} from './primary-bot.js';
+ import {createBotAvatar} from './bot-avatar.js';
+ import {createChatMarkdown} from './bot-chat-markdown.js';
+@@ -7,6 +8,8 @@ import {groupCatalog,groupRequest,groupError,roomDraft,watchGroupReplies,roomWor
+ 
+ export function createBotGroupsPage(ctx,React){
+  const h=React.createElement,{useEffect,useState,useRef,useSyncExternalStore}=React,groups=groupCatalog(),catalog=botCatalog(),Avatar=createBotAvatar(React),Markdown=createChatMarkdown(React);
++ const mentionProvider=createGroupMentions(React,{roomFor:id=>groups.getSnapshot().rooms.find(r=>r.id===id),bots:()=>catalog.getSnapshot().bots});
++ ctx.inject(['inputTriggers'],scope=>scope.effect(()=>scope.inputTriggers.registerSource(mentionProvider.source)));
+  const icon=(kind,size=18)=>h('svg',{width:size,height:size,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.6,strokeLinecap:'round',strokeLinejoin:'round','aria-hidden':true},h('path',{d:{edit:'m16 3 5 5-12 12-6 1 1-6Z M14 5l5 5',send:'m5 12 7-7 7 7 M12 5v14',users:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M16 3a4 4 0 0 1 0 8 M22 21v-2a4 4 0 0 0-3-3.9 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',files:'M14 3H6v18h12V7z M14 3v5h5 M9 12h6 M9 16h6',close:'m6 6 12 12 M18 6 6 18',at:'M16 8v6a2 2 0 0 0 4 0v-2a8 8 0 1 0-3 6 M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0'}[kind]??'M5 12h14'}));
+  const action=(label,onClick,kind,props={})=>h('button',{type:'button',className:'nbc-icon','aria-label':label,title:label,onClick,...props},icon(kind));
+  const openSession=id=>{ctx.layout.beginNavigation?.();ctx.uiWorkspace.openSession(id);};
+@@ -39,22 +42,23 @@ export function createBotGroupsPage(ctx,React){
+  }
+  function NativeComposer({room,native,accessory,busy,onSubmit,onCancel}){
+   const [binding,setBinding]=useState(null),[error,setError]=useState('');const callbacks=useRef({onSubmit,onCancel});callbacks.current={onSubmit,onCancel};
+-  useEffect(()=>{let closed=false,ref,dispose;const controller=new AbortController();
++  useEffect(()=>{let closed=false,ref,dispose,stopMentions;const controller=new AbortController();
+    void (async()=>{try{
+     const prepared=await groupRequest(undefined,{signal:controller.signal,body:{action:'prepare',roomId:room.id}});if(closed)return;
+     const sessions=ctx.get?.('sessions')??ctx.sessions;await sessions.refresh();if(closed)return;
+     ref=sessions.retain(prepared.sessionId,{source:'naumiGroupComposer'});await ref.ready;if(closed)return;
+     const conversation=ctx.get?.('conversation')??ctx.conversation;
+     if(!conversation?.registerComposerTransport)throw Error('NATIVE_COMPOSER_EXTENSION_MISSING');
++    stopMentions=mentionProvider.bind(ctx.get?.('inputTriggers')??ctx.inputTriggers,prepared.sessionId,room.id);
+     dispose=conversation.registerComposerTransport(prepared.sessionId,{submit:args=>callbacks.current.onSubmit(args),cancel:()=>callbacks.current.onCancel()});
+     setBinding({sessionId:prepared.sessionId,reference:ref});
+    }catch(e){if(!closed){console.error('Naumi group composer:',e);setError(e.message==='NATIVE_COMPOSER_EXTENSION_MISSING'?'原生输入区扩展尚未加载，请更新工作台。':groupError(e));}}})();
+-   return()=>{closed=true;controller.abort();dispose?.();ref?.release();};
++   return()=>{closed=true;controller.abort();dispose?.();stopMentions?.();ref?.release();};
+   },[room.id]);
+   return h('div',{className:'nbc-native-dock','data-native-composer':binding?.sessionId??'loading'},error?h('div',{className:'nbc-error',role:'alert'},error):binding&&native?.SessionProvider?h(native.SessionProvider,{session:binding.reference},native.renderFactorySlot('naumi.group.composer',{groupBusy:busy,placeholder:'发送消息，@ 提及成员',accessory})):h('div',{className:'nbc-loading',role:'status'},'载入输入区…'));
+  }
+  function Conversation({room,bots,native}){
+-  const [data,setData]=useState(null),[older,setOlder]=useState([]),[end,setEnd]=useState(false),[loadingOlder,setLoadingOlder]=useState(false),[draft,setDraft]=useState(()=>roomDraft(room.id)),[error,setError]=useState(''),[readError,setReadError]=useState(''),[sending,setSending]=useState(false),[mentions,setMentions]=useState(false),[drawer,setDrawer]=useState(null),[live,setLive]=useState({});
++  const [data,setData]=useState(null),[older,setOlder]=useState([]),[end,setEnd]=useState(false),[loadingOlder,setLoadingOlder]=useState(false),[draft,setDraft]=useState(()=>roomDraft(room.id)),[error,setError]=useState(''),[readError,setReadError]=useState(''),[sending,setSending]=useState(false),[drawer,setDrawer]=useState(null),[live,setLive]=useState({});
+   const refresh=useRef(null),timeline=useRef(null),follow=useRef(true),alive=useRef(true),initial=useRef(true),flight=useRef(false),reader=useRef(null),submissionRef=useRef(null);const label=id=>bots.find(b=>b.id===id)?.name??'已归档成员';
+   const update=value=>{const next={...value,submission:undefined};roomDraft(room.id,next);setDraft(next);submissionRef.current=null;setError('');};
+   useEffect(()=>{alive.current=true;const controller=new AbortController();let pending=false;
+@@ -74,7 +78,7 @@ export function createBotGroupsPage(ctx,React){
+    const request=submissionRef.current;roomDraft(room.id,{...roomDraft(room.id),submission:request});
+    try{await groupRequest(undefined,{signal,body:{...value,id:request.id}});submissionRef.current=null;
+     if(roomDraft(room.id).submission?.id===request.id)roomDraft(room.id,{text:'',targets:[]});
+-    if(alive.current){setDraft(roomDraft(room.id));setMentions(false);follow.current=true;void refresh.current?.();}void groups.refresh();return {kind:'success'};
++    if(alive.current){setDraft(roomDraft(room.id));follow.current=true;void refresh.current?.();}void groups.refresh();return {kind:'success'};
+    }catch(e){if(alive.current)setError(groupError(e));return {kind:'error'};}finally{flight.current=false;if(alive.current)setSending(false);}
+   };
+   const stopReply=async()=>{setError('');try{for(const r of groupInterruptTargets(replies))await groupRequest(undefined,{body:{action:'interrupt',roomId:room.id,replyId:r.id}});void refresh.current?.();}catch(e){if(alive.current)setError(groupError(e));}};
+@@ -86,12 +90,12 @@ export function createBotGroupsPage(ctx,React){
+    if(row.type==='task-state')return h('div',{key:row.id,className:'nbc-task-receipt','data-task-id':row.taskId,'data-task-status':row.status},h('span',null,label(row.botId),' · ',taskLabel(row)),h('button',{type:'button',onClick:()=>selectTask((data?.tasks??[]).find(t=>t.id===row.taskId))},row.subject));
+    return bubble(row);
+   });
+-  const accessory=h(React.Fragment,null,
++  const accessory=(error||draft.taskId||draft.targets.length>0)?h(React.Fragment,null,
+    error&&h('div',{className:'nbc-error',role:'alert'},error),
+    draft.taskId&&h('div',{className:'nbc-task-selection'},h('span',null,(data?.tasks??[]).find(t=>t.id===draft.taskId)?.subject??draft.taskId),action('取消任务关联',()=>update({...draft,taskId:null}),'close')),
+-   h('div',{className:'nbc-group-controls'},action('点名成员',()=>setMentions(!mentions),'at',{'aria-expanded':mentions,disabled:sending||!!draft.taskId}),
+-    (mentions||draft.targets.length>0)&&h('div',{className:'nbc-mentions','aria-label':'点名成员'},targets.map(m=>h('button',{type:'button',key:m.botId,'aria-pressed':draft.targets.includes(m.botId),disabled:sending||!!draft.taskId,onClick:()=>update({...draft,targets:draft.targets.includes(m.botId)?draft.targets.filter(id=>id!==m.botId):[...draft.targets,m.botId]})},'@'+label(m.botId)))))
+-  );
++   h('div',{className:'nbc-group-controls'},
++    draft.targets.length>0&&h('div',{className:'nbc-mentions','aria-label':'点名成员'},targets.filter(m=>draft.targets.includes(m.botId)).map(m=>h('button',{type:'button',key:m.botId,'aria-pressed':draft.targets.includes(m.botId),disabled:sending||!!draft.taskId,onClick:()=>update({...draft,targets:draft.targets.includes(m.botId)?draft.targets.filter(id=>id!==m.botId):[...draft.targets,m.botId]})},h(Avatar,{bot:bots.find(b=>b.id===m.botId),staticPreview:true}),'@'+label(m.botId)))))
++  ):null;
+   return h('section',{className:'nbc-conversation','aria-label':room.name},
+    h('header',{className:'nbc-header'},h('div',{className:'nbc-title'},h(Faces,{members:room.members,bots}),h(GroupTitle,{room,working})),h('div',{className:'nbc-header-actions'},h('button',{type:'button',className:'nbc-members-button',onClick:()=>setDrawer(drawer==='members'?null:'members'),'aria-label':'群成员'},room.members.length,' 位成员',icon('users',17)),action('任务与文件',()=>setDrawer(drawer==='tasks'?null:'tasks'),'files',{'aria-expanded':drawer==='tasks'}))),
+    h('div',{className:'nbc-main'},
+diff --git a/plugins/naumi-enterprise/assets/bot-mentions.js b/plugins/naumi-enterprise/assets/bot-mentions.js
+new file mode 100644
+index 0000000..98bc09c
+--- /dev/null
++++ b/plugins/naumi-enterprise/assets/bot-mentions.js
+@@ -0,0 +1,35 @@
++import {createBotAvatar} from './bot-avatar.js';
++export const AGENT_SOURCE='naumi-group-agents';
++/** Pure detection only. Never mutates text or owns selection, composition or undo. */
++export function detectAgentMention(draft,caret,guard){
++ if(guard.tier==='frozen')return null;
++ if(!Number.isInteger(caret)||caret<0||caret>draft.length)return undefined;
++ const start=draft.lastIndexOf('@',caret-1);if(start<0||start>=caret)return undefined;
++ const query=draft.slice(start+1,caret);if(query.length>80||/[\s@/\\`"<>]/u.test(query))return undefined;
++ return {trigger:'@',query,quoted:false,position:draft.slice(0,start).trim()?'inline':'leading',span:{start,end:caret,draftRev:0}};
++}
++export function groupMentionBots(room,bots,query=''){
++ const members=new Set(room?.members.map(m=>m.botId)??[]),q=query.toLocaleLowerCase();
++ return bots.filter(b=>b.status==='active'&&members.has(b.id)&&b.name.toLocaleLowerCase().includes(q));
++}
++/** Owns only group-provider configuration; native inputTriggers owns the menu. */
++export function createGroupMentions(React,{roomFor,bots,Avatar=createBotAvatar(React)}){
++ const scopes=new Map(),icons=new Map();
++ const current=sessionId=>{const bound=scopes.get(sessionId);return bound?{bound,room:roomFor(bound.roomId)}:null;};
++ const source={name:AGENT_SOURCE,trigger:'@',order:-100,showGroupTitle:false,
++  async candidates(session,req){if(req.signal.aborted)return [];const state=current(session.sessionId);if(!state||req.quoted)return [];
++   return groupMentionBots(state.room,bots(),req.query).map(bot=>{let Icon=icons.get(bot.id);if(!Icon){Icon=()=>{const live=bots().find(b=>b.id===bot.id)??bot;return React.createElement(Avatar,{bot:live,staticPreview:true,className:'nbc-agent-avatar'});};icons.set(bot.id,Icon);}return {name:bot.name,value:bot.id,icon:Icon};});
++  },
++  onPick({session,candidate,span}){const state=current(session.sessionId);if(!state)return;const bot=groupMentionBots(state.room,bots()).find(b=>b.id===candidate.value);if(!bot)return;
++   const hit=state.bound.hit;if(!hit||hit.start!==span.start||hit.end!==span.end||hit.draftRev!==span.draftRev)return;
++   return {text:(hit.prefixSpace?' ':'')+'@'+bot.name+(hit.suffixSpace?' ':'')};
++  },
++ };
++ return {source,
++  bind(service,sessionId,roomId){if(scopes.has(sessionId))throw Error('GROUP_MENTIONS_IN_USE');if(!service?.registerSessionTrigger)throw Error('GROUP_MENTIONS_EXTENSION_MISSING');
++   const state={roomId,hit:null};scopes.set(sessionId,state);let stop;
++   try{stop=service.registerSessionTrigger(sessionId,{trigger:'@',source:AGENT_SOURCE,detect:(draft,caret,guard,rev)=>{const hit=detectAgentMention(draft,caret,guard);state.hit=hit?{...hit.span,draftRev:rev,prefixSpace:/[a-z0-9_./\\]$/i.test(draft.slice(0,hit.span.start)),suffixSpace:draft.charAt(caret)!==' '}:null;return hit;}});}catch(e){scopes.delete(sessionId);throw e;}
++   return ()=>{if(scopes.get(sessionId)===state){scopes.delete(sessionId);stop();}};
++  },
++ };
++}
+diff --git a/plugins/naumi-enterprise/host.js b/plugins/naumi-enterprise/host.js
+index a82f603..d44b1a8 100644
+--- a/plugins/naumi-enterprise/host.js
++++ b/plugins/naumi-enterprise/host.js
+@@ -37,6 +37,7 @@ export function apply(ctx,config) {
+   assets.set('bot-task-ui.js','text/javascript; charset=utf-8');
+   assets.set('bot-task-model.js','text/javascript; charset=utf-8');
+   assets.set('bot-task.css','text/css; charset=utf-8');
++  assets.set('bot-mentions.js','text/javascript; charset=utf-8');
+   assets.set('bot-chat-model.js','text/javascript; charset=utf-8');
+   assets.set('bot-chat-markdown.js','text/javascript; charset=utf-8');
+   assets.set('bot-groups.js','text/javascript; charset=utf-8');
+diff --git a/scripts/deploy-group-inline-mentions.mjs b/scripts/deploy-group-inline-mentions.mjs
+new file mode 100644
+index 0000000..5cada7f
+--- /dev/null
++++ b/scripts/deploy-group-inline-mentions.mjs
+@@ -0,0 +1,20 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync} from 'node:child_process';import {DatabaseSync} from 'node:sqlite';import {botLiveApi} from './bot-live-api.mjs';import {extendAgentTriggers,installAgentTriggers} from './native-agent-mentions-extension.mjs';
++const root=process.cwd(),runtime='E:/Workspace/naumi-desktop',mode=process.argv[2]??'prepare',checkpoint=path.join(runtime,'runtime/inline-mentions-deploy.json'),installed=path.join(runtime,'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise'),files=['host.js','assets/bot-groups.js','assets/bot-groups.css','assets/bot-mentions.js'],native='node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js',sha=b=>createHash('sha256').update(b).digest('hex'),norm=b=>b.toString().replaceAll('\r\n','\n');
++const read=p=>fs.existsSync(p)?fs.readFileSync(p):null,inventory=()=>Object.fromEntries(fs.readdirSync(installed,{recursive:true}).filter(f=>fs.statSync(path.join(installed,f)).isFile()).map(f=>[f.replaceAll('\\','/'),sha(fs.readFileSync(path.join(installed,f)))]));
++function groupRows(){const db=new DatabaseSync(path.join(runtime,'.dsh/naumi/bot-groups.sqlite'),{readOnly:true});try{const tables=['rooms','members','posts','replies','post_context','room_name_operations'],data=Object.fromEntries(tables.map(t=>[t,db.prepare('SELECT * FROM '+t+' ORDER BY rowid').all()]));assert(!data.replies.some(r=>['queued','starting','sent'].includes(r.state)),'GROUP_BUSY');return {hash:sha(JSON.stringify(data)),counts:Object.fromEntries(tables.map(t=>[t,data[t].length]))};}finally{db.close();}}
++if(mode==='prepare'){
++ assert.equal(execFileSync('git',['branch','--show-current'],{encoding:'utf8'}).trim(),'main');assert.equal(execFileSync('git',['status','--porcelain','--untracked-files=no'],{encoding:'utf8'}),'','TRACKED_MAIN_DIRTY');const api=await botLiveApi(runtime),sessions=await api.rpc('session/list',{_request:{}}),tasks=await api.json('/naumi/bot-tasks'),bots=await api.json('/naumi/bots'),models=await api.json('/naumi/model-connections');assert(!sessions.items.some(s=>s.running),'RUNNING_SESSIONS');assert(!tasks.tasks.some(t=>['queued','starting','running','waiting'].includes(t.status)),'ACTIVE_TASKS');
++ const backupDir=path.join(runtime,'runtime/inline-mentions-'+randomUUID());fs.mkdirSync(backupDir,{recursive:true});const rows=files.map(file=>{const before=read(path.join(installed,file)),after=fs.readFileSync(path.join(root,'plugins/naumi-enterprise',file));if(before)assert.equal(norm(before),norm(execFileSync('git',['show','7de781ffac355e360c4a418d2947da7873ea2367:plugins/naumi-enterprise/'+file])),'PLUGIN_DRIFT '+file);else assert.equal(file,'assets/bot-mentions.js');return {file,relative:'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise/'+file,before:before?sha(before):null,after:sha(after),beforeBytes:before,afterBytes:after};});const nativeBefore=fs.readFileSync(path.join(runtime,native)),nativeAfter=Buffer.from(extendAgentTriggers(nativeBefore.toString()));rows.push({file:'native-trigger-client.js',relative:native,before:sha(nativeBefore),after:sha(nativeAfter),beforeBytes:nativeBefore,afterBytes:nativeAfter});
++ for(const row of rows){for(const [name,bytes]of [['before',row.beforeBytes],['after',row.afterBytes]])if(bytes){const p=path.join(backupDir,name,row.file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);}delete row.beforeBytes;delete row.afterBytes;}
++ const protectedFiles=['.dsh/.credentials.yaml','.dsh/cordis.patch.yml','.dsh/profiles/web/package.json','.dsh/profiles/web/cordis.yml','.dsh/profiles/web/cordis.patch.yml','.dsh/naumi/bots.json','.dsh/naumi/bot-tasks.json','config/local.json','node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'];for(const f of fs.readdirSync(path.join(runtime,'.dsh/sessions'),{recursive:true}))if(f.endsWith('.jsonl.zstd'))protectedFiles.push('.dsh/sessions/'+f);const protectedHashes=Object.fromEntries(protectedFiles.filter(f=>read(path.join(runtime,f))).map(f=>[f,sha(read(path.join(runtime,f)))]));
++ const state={sourceCommit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),backupDir,rows,inventory:inventory(),protectedHashes,groups:groupRows(),sessions:sessions.items.length,tasksHash:sha(JSON.stringify(tasks)),botsHash:sha(JSON.stringify(bots)),modelsHash:sha(JSON.stringify(models)),phase:'prepared'};fs.writeFileSync(checkpoint,JSON.stringify(state,null,2));console.log('MENTION_DEPLOY_PREPARED files=5 running=0 backup=PASS');
++}else{
++ const state=JSON.parse(fs.readFileSync(checkpoint));execFileSync('git',['merge-base','--is-ancestor',state.sourceCommit,'HEAD']);
++ if(mode==='apply'||mode==='restore'){
++  assert(!fs.existsSync(path.join(runtime,'runtime/server.pid')),'SERVICE_MUST_BE_STOPPED');for(const r of state.rows){const actual=read(path.join(runtime,r.relative));assert.equal(actual?sha(actual):null,mode==='apply'?r.before:r.after,'RUNTIME_DRIFT '+r.file);}for(const r of state.rows){const target=path.join(runtime,r.relative);if(mode==='restore'&&!r.before){fs.unlinkSync(target);continue;}if(mode==='apply'&&r.relative===native){installAgentTriggers(target);continue;}const bytes=fs.readFileSync(path.join(state.backupDir,mode==='apply'?'after':'before',r.file)),temp=target+'.'+randomUUID()+'.tmp';fs.writeFileSync(temp,bytes);fs.renameSync(temp,target);}state.phase=mode==='apply'?'applied':'restored';fs.writeFileSync(checkpoint,JSON.stringify(state,null,2));console.log('MENTION_DEPLOY_'+state.phase.toUpperCase()+' files=5');
++ }else if(mode==='verify'){
++  const api=await botLiveApi(runtime),sessions=await api.rpc('session/list',{_request:{}});assert.equal(sessions.items.length,state.sessions);assert(!sessions.items.some(s=>s.running));for(const [f,h]of Object.entries(state.protectedHashes))assert.equal(sha(fs.readFileSync(path.join(runtime,f))),h,'PROTECTED_CHANGED '+f);const current=inventory();for(const [f,h]of Object.entries(state.inventory))if(!files.includes(f))assert.equal(current[f],h,'UNRELATED_PLUGIN '+f);for(const r of state.rows)assert.equal(sha(fs.readFileSync(path.join(runtime,r.relative))),r.after,'LOADED_FILE '+r.file);assert.equal(sha(JSON.stringify(await api.json('/naumi/bot-tasks'))),state.tasksHash);assert.equal(sha(JSON.stringify(await api.json('/naumi/bots'))),state.botsHash);assert.equal(sha(JSON.stringify(await api.json('/naumi/model-connections'))),state.modelsHash);assert.equal(groupRows().hash,state.groups.hash,'GROUP_ROWS_CHANGED');
++  const source=await (await api.request('/naumi/assets/bot-mentions.js')).text();assert(source.includes('naumi-group-agents'));const html=await(await api.request('/')).text(),marker=html.indexOf('__DSH_BOOT__'),boot=JSON.parse(html.slice(html.indexOf('=',marker)+1,html.indexOf('</script>',marker)).trim().replace(/;$/,''));const batch=boot.batches.find(b=>b.entries.includes('@deepseek-ai/dsh-client-ui-input-trigger'));assert(batch);assert((await(await api.request('/'+batch.url)).text()).includes('Naumi Session trigger policy v1'));
++  const record={status:'PASS',sourceCommit:state.sourceCommit,http:200,nativeAgentTriggerBundleServed:true,providerServed:true,groups:state.groups.counts,groupsAndMessagesUnchanged:true,tasksUnchanged:true,modelsUnchanged:true,botAppearancesUnchanged:true,nativeComposerUnchanged:true,protectedFilesUnchanged:Object.keys(state.protectedHashes).length,unrelatedPluginFilesUnchanged:Object.keys(state.inventory).filter(f=>!files.includes(f)).length,sessions:state.sessions,running:0,files:state.rows,modelCalls:0,backup:state.backupDir};fs.writeFileSync(path.join(root,'evidence/group-inline-mentions/DEPLOYMENT.json'),JSON.stringify(record,null,2)+'\n');state.phase='verified';fs.writeFileSync(checkpoint,JSON.stringify(state,null,2));console.log('MENTION_LIVE_PASS http=200 native_menu=LOADED provider=LOADED messages=UNCHANGED tasks=UNCHANGED models=UNCHANGED running=0 inference=0');
++ }else throw Error('UNKNOWN_MODE');
++}
+diff --git a/scripts/native-agent-mentions-extension.mjs b/scripts/native-agent-mentions-extension.mjs
+new file mode 100644
+index 0000000..afe4b35
+--- /dev/null
++++ b/scripts/native-agent-mentions-extension.mjs
+@@ -0,0 +1,39 @@
++import fs from 'node:fs';import path from 'node:path';import {createHash,randomUUID} from 'node:crypto';import {pathToFileURL} from 'node:url';
++export const INPUT_TRIGGER_SHA='3f57b79e1f5f9a2378caadba05c3fead8baf1aa4dc80e3ffcd3718774f0b887f';
++export const AGENT_TRIGGER_SHA='0614b5c819a88e9bd363bbca4f89ce4b56ad51eaa8729c87b91586c2024f0713';
++export const AGENT_TRIGGER_EXTENSION='Naumi Session trigger policy v1';
++const sha=s=>createHash('sha256').update(s).digest('hex');
++/** Add only a Session-scoped provider/detection extension. The native menu,
++ * focus, async cancellation, IME arbitration, revision CAS, Lexical insertion
++ * and undo remain untouched. Unregistered Sessions keep the upstream grammar. */
++export function extendAgentTriggers(original){
++ if(original.includes(AGENT_TRIGGER_EXTENSION)){if(sha(original)!==AGENT_TRIGGER_SHA)throw Error('AGENT_TRIGGER_EXTENSION_CHANGED');return original;}
++ if(sha(original)!==INPUT_TRIGGER_SHA)throw Error('AGENT_TRIGGER_UPSTREAM_CHANGED');let code=original;
++ const replace=(a,b)=>{if(code.split(a).length!==2)throw Error('AGENT_TRIGGER_ANCHOR_CHANGED');code=code.replace(a,b);};
++ replace('sources: [],\n\t\t\t\tcontrollers:',`sources: [],\n                // ${AGENT_TRIGGER_EXTENSION}\n                sessionTriggers: new Map(),\n\t\t\t\tcontrollers:`);
++ replace('super(ctx, "inputTriggers");',`super(ctx, "inputTriggers");\n                ctx.effect(()=>()=>this.live.sessionTriggers.clear());`);
++ replace('registerSource(src) {',`registerSessionTrigger(sessionId, policy) {
++                const {live}=this;
++                if(live.sessionTriggers.has(sessionId))throw Error('SESSION_TRIGGER_IN_USE');
++                if(policy.trigger!=='@'||typeof policy.detect!=='function'||!policy.source)throw Error('SESSION_TRIGGER_INVALID');
++                const dismiss=()=>{const binding=this.sessions().binding(sessionId);if(binding)live.controllers.get(binding)?.dismiss();};
++                live.sessionTriggers.set(sessionId,policy);dismiss();
++                return ()=>{if(live.sessionTriggers.get(sessionId)===policy){dismiss();live.sessionTriggers.delete(sessionId);}};
++            }
++            registerSource(src) {`);
++ replace('const raw = detectTrigger(draft, caret, guard);',`const raw = this.deps.detect ? this.deps.detect(draft,caret,guard,draftRev) : detectTrigger(draft,caret,guard);`);
++ replace('sessionId: id,\n\t\t\t\t\troster:',`sessionId: id,
++                    detect:(draft,caret,guard,rev)=>{
++                        const policy=live.sessionTriggers.get(id),hit=policy?.detect(draft,caret,guard,rev);
++                        return hit===undefined?detectTrigger(draft,caret,guard):hit;
++                    },
++\t\t\t\t\troster:`);
++ replace('live.sources.filter((s) => s.trigger === trigger)',`live.sources.filter((s) => s.trigger === trigger && (trigger!=='@'||!live.sessionTriggers.has(id)||s.name===live.sessionTriggers.get(id).source))`);
++ return code;
++}
++export function installAgentTriggers(file){
++ const before=fs.readFileSync(file,'utf8'),after=extendAgentTriggers(before);if(before===after)return {changed:false,sha256:sha(after)};
++ const backup=file+'.naumi-original';if(fs.existsSync(backup)&&sha(fs.readFileSync(backup))!==INPUT_TRIGGER_SHA)throw Error('AGENT_TRIGGER_BACKUP_CHANGED');if(!fs.existsSync(backup))fs.writeFileSync(backup,before);
++ const temp=file+'.'+randomUUID()+'.tmp';fs.writeFileSync(temp,after);fs.renameSync(temp,file);return {changed:true,originalSHA256:sha(before),sha256:sha(after)};
++}
++if(process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url)console.log('AGENT_TRIGGER_EXTENSION '+JSON.stringify(installAgentTriggers(path.resolve(process.argv[2]??'node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js'))));
+diff --git a/scripts/package-group-inline-mentions.mjs b/scripts/package-group-inline-mentions.mjs
+new file mode 100644
+index 0000000..f10c72e
+--- /dev/null
++++ b/scripts/package-group-inline-mentions.mjs
+@@ -0,0 +1,11 @@
++import fs from 'node:fs';import path from 'node:path';import {execFileSync,spawnSync} from 'node:child_process';import {createHash} from 'node:crypto';import assert from 'node:assert/strict';import {extendAgentTriggers,INPUT_TRIGGER_SHA} from './native-agent-mentions-extension.mjs';
++const root=process.cwd(),e=path.join(root,'evidence/group-inline-mentions'),base='0282b7b282f983174563817883fffd3105cd2ae7',temp=path.join(root,'runtime/inline-mentions-evidence-0282b7b'),original=path.join(temp,'baseline'),copy=path.join(temp,'rollback-copy'),sha=b=>createHash('sha256').update(b).digest('hex');fs.mkdirSync(temp,{recursive:true});
++const existing=['plugins/naumi-enterprise/host.js','plugins/naumi-enterprise/assets/bot-groups.js','plugins/naumi-enterprise/assets/bot-groups.css','scripts/sync-naumi.mjs','desktop/scripts/prepare-runtime.mjs'],added=['plugins/naumi-enterprise/assets/bot-mentions.js','scripts/native-agent-mentions-extension.mjs'],extra=['tests/naumi-group-inline-mentions.test.mjs','scripts/verify-group-inline-mentions-ui.mjs','scripts/deploy-group-inline-mentions.mjs','scripts/package-group-inline-mentions.mjs','docs/implementation/GROUP_INLINE_MENTIONS.md'];
++if(!fs.existsSync(original)){execFileSync('git',['archive','--format=zip','--output='+path.join(temp,'baseline.zip'),base]);execFileSync('python',['-c','import zipfile,sys;zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])',path.join(temp,'baseline.zip'),original]);fs.symlinkSync(path.join(root,'node_modules'),path.join(original,'node_modules'),'junction');}
++const manifest=existing.map(file=>{const bytes=execFileSync('git',['show',base+':'+file]),p=path.join(e,'original',file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);return {file,before:sha(bytes),after:sha(fs.readFileSync(path.join(root,file)))};});for(const file of added)manifest.push({file,before:null,after:sha(fs.readFileSync(path.join(root,file)))});
++const nativeFile=path.join(root,'node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js'),loaded=fs.readFileSync(nativeFile,'utf8'),nativeBefore=loaded.includes('Naumi Session trigger policy v1')?fs.readFileSync(nativeFile+'.naumi-original','utf8'):loaded,nativeAfter=extendAgentTriggers(nativeBefore);assert.equal(sha(nativeBefore),INPUT_TRIGGER_SHA);const nativePath='runtime/native-trigger-client.js';fs.mkdirSync(path.join(e,'original/runtime'),{recursive:true});fs.writeFileSync(path.join(e,'original',nativePath),nativeBefore);manifest.push({file:nativePath,before:sha(nativeBefore),after:sha(nativeAfter)});fs.writeFileSync(path.join(e,'HASHES.json'),JSON.stringify({base,files:manifest},null,2)+'\n');
++fs.writeFileSync(path.join(e,'DIFF_FILE.patch'),execFileSync('git',['diff',base,'--',...existing,...added,...extra]));
++fs.writeFileSync(path.join(e,'rollback.mjs'),`import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';import {createHash} from 'node:crypto';import assert from 'node:assert/strict';\nconst here=path.dirname(fileURLToPath(import.meta.url)),target=path.resolve(process.argv[2]??'');assert(fs.existsSync(path.join(target,'.inline-mentions-rollback-copy')),'COPY_MARKER_REQUIRED');const data=JSON.parse(fs.readFileSync(path.join(here,'HASHES.json'))),sha=b=>createHash('sha256').update(b).digest('hex');for(const r of data.files){const p=path.resolve(target,r.file);assert(p.startsWith(target+path.sep),'PATH_OUTSIDE_COPY');assert.equal(sha(fs.readFileSync(p)),r.after,'MODIFIED_HASH '+r.file);if(r.before)assert.equal(sha(fs.readFileSync(path.join(here,'original',r.file))),r.before);}for(const r of data.files){if(r.before)fs.copyFileSync(path.join(here,'original',r.file),path.join(target,r.file));else fs.unlinkSync(path.join(target,r.file));}for(const r of data.files){if(r.before)assert.equal(sha(fs.readFileSync(path.join(target,r.file))),r.before);else assert(!fs.existsSync(path.join(target,r.file)));}console.log('ROLLBACK_RESTORED files=8 hashes=PASS prior_group_rename=PRESERVED data=UNCHANGED');\n`);fs.writeFileSync(path.join(e,'ROLLBACK.sh'),'#!/usr/bin/env bash\nset -euo pipefail\nHERE="$(cd -- "$(dirname -- "$0")" && pwd)"\nnode "$HERE/rollback.mjs" "$1"\n',{mode:0o755});
++if(!fs.existsSync(copy)){fs.cpSync(original,copy,{recursive:true,filter:src=>!src.includes('node_modules')});fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');fs.writeFileSync(path.join(copy,'.inline-mentions-rollback-copy'),'task copy only\n');}for(const file of [...existing,...added]){fs.mkdirSync(path.dirname(path.join(copy,file)),{recursive:true});fs.copyFileSync(path.join(root,file),path.join(copy,file));}fs.mkdirSync(path.join(copy,'runtime'),{recursive:true});fs.writeFileSync(path.join(copy,nativePath),nativeAfter);
++function run(label,cmd,args,cwd){const r=spawnSync(cmd,args,{cwd,encoding:'utf8',windowsHide:true});fs.writeFileSync(path.join(e,label+'.txt'),(r.stdout??'')+(r.stderr??''));assert.equal(r.status,0,label);console.log(label+' exit=0');}const args=['--test','tests/naumi-unified-chat.test.mjs','tests/naumi-group-collaboration.test.mjs'];run('BASELINE',process.execPath,args,original);run('ROLLBACK_COMMAND','D:/DEV/Git/bin/bash.exe',[path.join(e,'ROLLBACK.sh').replaceAll('\\','/'),copy.replaceAll('\\','/')],root);run('ROLLBACK',process.execPath,args,copy);assert.equal(sha(fs.readFileSync(path.join(copy,nativePath))),INPUT_TRIGGER_SHA);assert(fs.readFileSync(path.join(copy,'plugins/naumi-enterprise/assets/bot-groups.js'),'utf8').includes('GroupTitle'));console.log('ROLLBACK_COMPATIBILITY trigger_api=absent group_rename=PRESERVED data=UNCHANGED');
++fs.mkdirSync(path.join(e,'native'),{recursive:true});fs.writeFileSync(path.join(e,'native/input-trigger-client.js'),nativeAfter);execFileSync('python',['-c','import zipfile,sys,pathlib;root=pathlib.Path(sys.argv[1]);z=zipfile.ZipFile(sys.argv[2],"w",zipfile.ZIP_DEFLATED);[z.write(root/f,f) for f in sys.argv[3:]]',root,path.join(e,'MODIFIED_FILE.zip'),...existing,...added,...extra,'evidence/group-inline-mentions/native/input-trigger-client.js']);console.log('ARTIFACTS_CREATED modified_zip=PASS patch=PASS rollback=PASS original_hashes=6');
+diff --git a/scripts/sync-naumi.mjs b/scripts/sync-naumi.mjs
+index 18acdd3..ef2d285 100644
+--- a/scripts/sync-naumi.mjs
++++ b/scripts/sync-naumi.mjs
+@@ -1,5 +1,6 @@
+ import fs from 'node:fs';
+ import path from 'node:path';
++import {installAgentTriggers} from './native-agent-mentions-extension.mjs';
+ import {installNativeComposer} from './native-composer-extension.mjs';
+ const packages=[['naumi-enterprise','@naumi/dsh-enterprise'],['naumi-ui-layout','@naumi/dsh-ui-layout'],['naumi-sidebar-browser','@naumi/dsh-sidebar-browser']];
+ const manifest='.dsh/profiles/web/package.json';
+@@ -28,3 +29,4 @@ const serialized=JSON.stringify(profile,null,2)+'\n';
+ if(fs.readFileSync(manifest,'utf8')!==serialized)fs.writeFileSync(manifest,serialized);
+ console.log('NAUMI_SYNC packages=3 bundle_enabled=1');
+ installNativeComposer(path.resolve('node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'));
++installAgentTriggers(path.resolve('node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js'));
+diff --git a/scripts/verify-group-inline-mentions-ui.mjs b/scripts/verify-group-inline-mentions-ui.mjs
+new file mode 100644
+index 0000000..66b66bc
+--- /dev/null
++++ b/scripts/verify-group-inline-mentions-ui.mjs
+@@ -0,0 +1,33 @@
++import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';import {spawn} from 'node:child_process';import {stringify} from 'yaml';import {chromium} from '../desktop/node_modules/playwright/index.mjs';import {BotDirectory} from '../plugins/naumi-enterprise/bots.js';import {extendAgentTriggers} from './native-agent-mentions-extension.mjs';import {mentionedBots} from '../plugins/naumi-enterprise/bot-group-service.js';import {BotGroupStore} from '../plugins/naumi-enterprise/bot-group-store.js';
++const root=process.cwd(),out=path.join(root,'evidence/group-inline-mentions'),temporary=path.join(root,'runtime','mention-fixture-'+randomUUID()),home=path.join(temporary,'home'),profile=path.join(home,'profiles/web');fs.mkdirSync(path.join(profile,'node_modules/@naumi'),{recursive:true});
++for(const[name,folder]of [['dsh-enterprise','naumi-enterprise'],['dsh-ui-layout','naumi-ui-layout'],['dsh-sidebar-browser','naumi-sidebar-browser']])fs.symlinkSync(path.join(root,'plugins',folder),path.join(profile,'node_modules/@naumi',name),'junction');fs.symlinkSync(path.join(root,'node_modules/@deepseek-ai'),path.join(profile,'node_modules/@deepseek-ai'),'junction');
++fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'naumi-mention-fixture',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}}));fs.writeFileSync(path.join(home,'cordis.patch.yml'),stringify([{id:'ui-theme',config:{preference:'light'}},{id:'session-log-deepseek',disabled:true}]));fs.writeFileSync(path.join(profile,'cordis.patch.yml'),stringify([{id:'ui-settings-general',config:{welcomeNoticeVersion:'2026-09-28.1'}}]));
++const directory=new BotDirectory(path.join(home,'naumi/bots.json'));for(const [i,name]of ['项目主管','研发助理','自媒体','外群助手'].entries())await directory.create({sessionId:'fixture-home-'+i,cwd:temporary},{name,kind:'agent',purpose:'群内点名验收'});const bots=directory.list().bots;for(const [i,b]of bots.entries())await directory.appearance(b.id,b.revision,{shape:['coordinator','executor','creator','observer'][i],palette:['orange','green','violet','slate'][i]});await directory.choosePrimary(bots[0].id,directory.list().revision);await directory.close();
++const sock=http.createServer();await new Promise(r=>sock.listen(0,'127.0.0.1',r));const port=sock.address().port;await new Promise(r=>sock.close(r));const base='http://127.0.0.1:'+port;let output='',browser;const child=spawn(process.execPath,[path.join(root,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'web','--host','127.0.0.1','--port',String(port),'--no-open'],{cwd:root,env:{...process.env,DSH_HOME:home,DSH_TELEMETRY_MODE:'DISABLED'},windowsHide:true});child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);const checks=[];function check(name,value){assert(value,name);checks.push(name);console.log('MENTION_UI_PASS '+name);}
++try{
++ let launch;for(let i=0;i<150;i++){launch=output.match(new RegExp('http://127\\.0\\.0\\.1:'+port+'/?\\?token=[A-Za-z0-9_~.%-]+'))?.[0];if(launch)break;if(child.exitCode!==null)throw Error('FIXTURE_BOOT_FAILED');await new Promise(r=>setTimeout(r,200));}assert(launch,'FIXTURE_BOOT_TIMEOUT');
++ const exchange=await fetch(launch,{redirect:'manual'}),cookie=exchange.headers.getSetCookie().map(v=>v.split(';')[0]).join('; ');async function call(url,body){const r=await fetch(base+url,{headers:{cookie,'Content-Type':'application/json','x-naumi-bot-groups':'1',origin:base},...body?{method:'POST',body:JSON.stringify(body)}:{}});const value=await r.json();assert(r.ok,JSON.stringify(value));return value;}async function rpc(method,args){const v=await call('/api/'+method,{type:'client-request',rpcId:'fixture',method,payload:{args}});assert(v.result.ok,JSON.stringify(v));return v.result.value;}
++ const session=await rpc('session/create',{request:{cwd:temporary}});const room=await call('/naumi/bot-groups',{action:'create',id:randomUUID(),name:'输入框点名验收',botIds:bots.slice(0,3).map(b=>b.id),defaultBotId:bots[0].id});const store=new BotGroupStore(path.join(home,'naumi/bot-groups.sqlite'));store.db.prepare('UPDATE members SET session_id=? WHERE room_id=? AND bot_id=?').run(session.sessionId,room.id,bots[0].id);store.close();
++ browser=await chromium.launch({headless:true,channel:'chrome'});const context=await browser.newContext({viewport:{width:1360,height:900},colorScheme:'light'}),page=await context.newPage(),errors=[],inference=[];page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(new URL(r.url()).pathname==='/api/session/prompt')inference.push(r.url());});const originalNative=fs.readFileSync(path.join(root,'node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js'),'utf8'),rawNative=originalNative.includes('Naumi Session trigger policy v1')?fs.readFileSync(path.join(root,'node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js.naumi-original'),'utf8'):originalNative;
++ const core=value=>value.replaceAll('\r\n','\n').replace(/\/\/# sourceMappingURL=[^\n]*/g,'').trim(),candidate=core(extendAgentTriggers(rawNative));let injected=0;const sends=[];
++ await page.route('**/*',async route=>{const r=route.request(),u=new URL(r.url());if(['http:','https:'].includes(u.protocol)&&u.origin!==base)return route.abort();
++  if(u.pathname==='/naumi/bot-groups'&&r.method()==='POST'){const b=r.postDataJSON();if(b.action==='post'){sends.push(b);return route.fulfill({status:202,contentType:'application/json',body:JSON.stringify({id:b.id,seq:sends.length})});}}
++  if(r.resourceType()==='script'){const response=await route.fetch(),text=await response.text(),norm=text.replaceAll('\r\n','\n');if(norm.includes(core(rawNative))){injected++;return route.fulfill({response,body:norm.replace(core(rawNative),()=>candidate)});}return route.fulfill({response});}
++  return route.continue();});await context.addInitScript(({id})=>{localStorage.setItem('naumi.navigationMode.v1','bot');sessionStorage.setItem('naumi.groupSelection.v1',id);sessionStorage.setItem('naumi.activePanel','naumi-conversation');},{id:room.id});await page.goto(launch);await page.getByRole('button',{name:'修改群名',exact:true}).waitFor();
++ const dock=page.locator('.nbc-native-dock'),editor=dock.locator('[contenteditable=true]').first(),options=page.getByRole('option');await editor.waitFor();check('native_session_extension_injected',injected===1);
++ const text=()=>editor.innerText().then(v=>v.replace(/\n+$/,''));const fill=async value=>{await editor.fill('');if(value)await editor.fill(value);await editor.press('End');};const pick=async name=>{await page.getByRole('option',{name,exact:true}).waitFor();await page.getByRole('option',{name,exact:true}).click();};
++ await fill('@');await page.getByRole('option',{name:'研发助理',exact:true}).waitFor();check('empty_at_lists_only_current_active_agents',await options.count()===3&&await page.getByRole('option',{name:'外群助手',exact:true}).count()===0);
++ await page.locator('.nbc-agent-avatar svg').first().waitFor();check('candidate_avatars_reuse_shape_and_palette',await page.locator('.nbc-agent-avatar[data-character=coordinator] svg').count()===1&&await page.locator('.nbc-agent-avatar[data-character=executor] svg').count()===1&&await page.locator('.nbc-agent-avatar[data-character=creator] svg').count()===1);await page.screenshot({path:path.join(out,'agent-candidates.png')});
++ await pick('研发助理');check('click_inserts_at_start_and_does_not_send',(await text()).includes('@研发助理')&&sends.length===0);await editor.press('Control+z');check('native_undo_restores_typed_trigger',(await text()).trim()==='@');
++ await fill('前文后文');await editor.press('Home');await editor.press('ArrowRight');await editor.press('ArrowRight');await page.keyboard.insertText('@');await pick('研发助理');check('mid_chinese_caret_preserves_prefix_and_suffix',(await text())==='前文@研发助理 后文');
++ await fill('helloTAIL');await editor.press('Home');for(let i=0;i<5;i++)await editor.press('ArrowRight');await page.keyboard.insertText('@');await pick('自媒体');check('mid_latin_caret_remains_backend_routable',(await text())==='hello @自媒体 TAIL'&&mentionedBots(await text(),bots)[0]===bots[2].id);
++ await fill('第一行');await editor.press('Shift+Enter');await page.keyboard.insertText('第二行@研');await page.getByRole('option',{name:'研发助理',exact:true}).waitFor();check('query_filters_names_and_multiline',await options.count()===1);await editor.press('Enter');check('enter_selects_without_accidental_submission',(await text()).includes('第一行\n第二行@研发助理')&&sends.length===0);
++ await fill('@');await page.getByRole('option',{name:'研发助理',exact:true}).waitFor();await editor.press('ArrowDown');await editor.press('Tab');check('arrow_and_tab_use_native_selection',(await text()).includes('@研发助理')&&sends.length===0);
++ await fill('@');await page.getByRole('option',{name:'研发助理',exact:true}).waitFor();await editor.press('Escape');check('escape_closes_without_eating_at',(await text()).trim()==='@'&&await options.count()===0);await page.keyboard.insertText('研');await page.getByRole('option',{name:'研发助理',exact:true}).waitFor();await editor.dispatchEvent('compositionstart');await editor.press('Enter');check('IME_enter_does_not_pick_or_send',sends.length===0&&!(await text()).includes('研发助理'));await editor.dispatchEvent('compositionend');await editor.press('Escape');
++ await fill('@不存在');await page.waitForTimeout(100);check('no_match_has_no_stale_agents',await options.count()===0);
++ await fill('先请@');await pick('项目主管');await page.keyboard.insertText('再请@');await pick('研发助理');const multi=await text();check('multiple_mentions_resolve_existing_routing',mentionedBots(multi,bots).join(',')===bots.slice(0,2).map(b=>b.id).join(','));await editor.press('Enter');await page.waitForFunction(()=>document.querySelector('.nbc-native-dock [contenteditable=true]')?.textContent==='');check('send_keeps_mentions_in_actual_native_transport',sends.length===1&&mentionedBots(sends[0].text,bots).length===2&&sends[0].botIds.length===0);
++ await fill('保留前文@');await pick('自媒体');const saved=await text();await page.reload();await editor.waitFor();await page.waitForFunction(()=>document.querySelector('.nbc-native-dock [contenteditable=true]')?.textContent.includes('自媒体'));check('mention_text_persists_through_native_draft_reload',await text()===saved);
++ const second=await call('/naumi/bot-groups',{action:'create',id:randomUUID(),name:'另一群',botIds:[bots[0].id,bots[2].id],defaultBotId:bots[0].id}),session2=await rpc('session/create',{request:{cwd:temporary}}),db2=new BotGroupStore(path.join(home,'naumi/bot-groups.sqlite'));db2.db.prepare('UPDATE members SET session_id=? WHERE room_id=? AND bot_id=?').run(session2.sessionId,second.id,bots[0].id);db2.close();await page.reload();await page.locator('[data-group-id="'+second.id+'"] .naumi-bot-open').click();await editor.waitFor();await fill('@');await page.getByRole('option',{name:'自媒体',exact:true}).waitFor();check('switch_group_has_own_roster_and_draft',await options.count()===2&&await page.getByRole('option',{name:'研发助理',exact:true}).count()===0);await editor.press('Escape');await page.locator('[data-group-id="'+room.id+'"] .naumi-bot-open').click();await page.waitForFunction(()=>document.querySelector('.nbc-native-dock [contenteditable=true]')?.textContent.includes('自媒体'));check('switch_back_restores_first_group_draft',await text()===saved);
++ for(const width of [1360,580,360]){await page.setViewportSize({width,height:900});await fill('@');await page.getByRole('option',{name:'研发助理',exact:true}).waitFor();check('native_popup_fits_viewport_'+width,await page.locator('[data-trigger-menu]').evaluate(el=>{const b=el.getBoundingClientRect();return b.left>=0&&b.right<=innerWidth+1&&b.top>=0;}));await editor.press('Escape');}await page.setViewportSize({width:1360,height:900});await fill('这段方案请@');await page.getByRole('option',{name:'研发助理',exact:true}).waitFor();await page.locator('.nbc-agent-avatar svg').first().waitFor();await page.screenshot({path:path.join(out,'agent-candidates.png')});
++ check('no_page_errors_or_model_calls',errors.length===0&&inference.length===0);fs.writeFileSync(path.join(out,'UI_HTTP.json'),JSON.stringify({status:'PASS',checks,pageErrors:errors,modelCalls:inference.length,interceptedGroupSends:sends.length,actualNativeMenu:true,actualNativeEditor:true},null,2)+'\n');console.log('MENTION_UI_COMPLETE checks='+checks.length+' errors='+errors.length+' inference=0');
++}finally{await browser?.close();child.kill();await new Promise(r=>child.exitCode!==null?r():child.once('close',r));fs.writeFileSync(path.join(out,'fixture.log'),output.replace(/\?token=[A-Za-z0-9_~.%-]+/g,'?token=REDACTED'));}
+diff --git a/tests/naumi-group-inline-mentions.test.mjs b/tests/naumi-group-inline-mentions.test.mjs
+new file mode 100644
+index 0000000..60760ff
+--- /dev/null
++++ b/tests/naumi-group-inline-mentions.test.mjs
+@@ -0,0 +1,10 @@
++import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import vm from 'node:vm';import {createHash} from 'node:crypto';import {detectAgentMention,groupMentionBots,createGroupMentions,AGENT_SOURCE} from '../plugins/naumi-enterprise/assets/bot-mentions.js';import {mentionedBots} from '../plugins/naumi-enterprise/bot-group-service.js';import {extendAgentTriggers,INPUT_TRIGGER_SHA,AGENT_TRIGGER_SHA} from '../scripts/native-agent-mentions-extension.mjs';
++const plain={tier:'plain'},bots=[{id:'a',name:'项目主管',status:'active'},{id:'b',name:'研发助理',status:'active'},{id:'c',name:'Review Agent',status:'active'},{id:'archived',name:'旧员工',status:'archived'},{id:'outside',name:'外群成员',status:'active'}],room={id:'r',members:bots.slice(0,4).map(b=>({botId:b.id}))};
++function provider(){let policy,stopCount=0,people=structuredClone(bots);const fakeReact={createElement:()=>null},p=createGroupMentions(fakeReact,{roomFor:id=>id==='r'?room:null,bots:()=>people,Avatar:()=>null}),service={registerSessionTrigger(id,value){assert.equal(id,'s');policy=value;return()=>stopCount++;}};return {p,service,people,get policy(){return policy;},get stopped(){return stopCount;}};}
++test('at detection follows the actual caret at start, Chinese/Latin sentence middle and multiline',()=>{for(const [text,caret,query,start]of [['@',1,'',0],['请@研检查',3,'研',1],['hello@Rev tail',9,'Rev',5],['第一行\n第二行@',8,'',7],['😀@研',4,'研',2]]){const hit=detectAgentMention(text,caret,plain);assert.equal(hit.query,query,text);assert.equal(hit.span.start,start,text);assert.equal(hit.span.end,caret);}assert.equal(detectAgentMention('before',0,plain),undefined);assert.equal(detectAgentMention('text @研 ',8,plain),undefined);assert.equal(detectAgentMention('@x',2,{tier:'frozen'}),null);assert.equal(detectAgentMention('@'+ 'x'.repeat(81),82,plain),undefined);assert.equal(detectAgentMention('/help',5,plain),undefined);});
++test('candidate roster is active current-group only, case-insensitive, identity-backed, with avatar components',async()=>{const f=provider(),stop=f.p.bind(f.service,'s','r');const req={query:'',signal:new AbortController().signal};const rows=await f.p.source.candidates({sessionId:'s'},req);assert.deepEqual(rows.map(r=>r.value),['a','b','c']);assert(rows.every(r=>typeof r.icon==='function'&&!r.description));assert.deepEqual((await f.p.source.candidates({sessionId:'s'},{...req,query:'review'})).map(r=>r.name),['Review Agent']);assert.deepEqual(await f.p.source.candidates({sessionId:'private'},req),[]);assert.deepEqual(await f.p.source.candidates({sessionId:'s'},{...req,signal:AbortSignal.abort()}),[]);stop();stop();assert.equal(f.stopped,1);assert.deepEqual(await f.p.source.candidates({sessionId:'s'},req),[]);});
++test('picks replace only native CAS span and remain routable after Latin text, suffix and deletions',()=>{const f=provider(),stop=f.p.bind(f.service,'s','r');const text='hello@研后文',hit=f.policy.detect(text,7,plain,3);const result=f.p.source.onPick({session:{sessionId:'s'},candidate:{value:'b'},span:{...hit.span,draftRev:3}});assert.equal(result.text,' @研发助理 ');const sent=text.slice(0,hit.span.start)+result.text+text.slice(hit.span.end);assert.equal(sent,'hello @研发助理 后文');assert.deepEqual(mentionedBots(sent,bots),['b']);assert.deepEqual(mentionedBots('hello 后文',bots),[]);assert.equal(f.p.source.onPick({session:{sessionId:'s'},candidate:{value:'b'},span:{...hit.span,draftRev:2}}),undefined);f.people.find(b=>b.id==='b').status='archived';assert.equal(f.p.source.onPick({session:{sessionId:'s'},candidate:{value:'b'},span:{...hit.span,draftRev:3}}),undefined);stop();});
++test('names with spaces and multiple mentions retain existing backend routing without hidden target state',()=>{assert.deepEqual(mentionedBots('请@Review Agent 核对，再请@研发助理 完成',bots),['c','b']);assert.deepEqual(mentionedBots('me@Review.test `/x@研发助理`',bots),[]);assert.deepEqual(groupMentionBots(null,bots),[]);});
++const nativeFile='node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js';const loaded=fs.readFileSync(nativeFile,'utf8'),original=loaded.includes('Naumi Session trigger policy v1')?fs.readFileSync(nativeFile+'.naumi-original','utf8'):loaded,patched=extendAgentTriggers(original),sha=s=>createHash('sha256').update(s).digest('hex');
++test('pinned native extension is idempotent and leaves menu, keyboard, IME, grammar and mutation pipeline byte-identical',()=>{assert.equal(sha(original),INPUT_TRIGGER_SHA);assert.equal(sha(patched),AGENT_TRIGGER_SHA);assert.equal(extendAgentTriggers(patched),patched);assert.throws(()=>extendAgentTriggers(original+' '),/UPSTREAM_CHANGED/);assert.throws(()=>extendAgentTriggers(patched+' '),/EXTENSION_CHANGED/);const menu=s=>s.slice(s.indexOf('//#region lib/types/client/MenuView.js'));assert.equal(menu(patched),menu(original));const grammar=s=>s.slice(s.indexOf('function boundaryOk'),s.indexOf('//#region lib/types/core/menu.js'));assert.equal(grammar(patched),grammar(original));for(const name of ['arbitrate(key, composing)','insert-text','span.draftRev'])assert.equal(patched.split(name).length,original.split(name).length);});
++test('real native service policy opts in one Session only, preserves default @ files and /, dismisses on release',()=>{const start=patched.indexOf('var InputTriggerService = class'),end=patched.indexOf('\n\t\t//#endregion',start),effects=[],bindings=new Map(),sessions={sessionOf:ctx=>ctx.session,binding:id=>bindings.get(id)};class Weak{values=new Set();map=new Map();get(k){return this.map.get(k);}set(k,v){this.map.set(k,v);this.values.add(v);}delete(k){this.values.delete(this.map.get(k));this.map.delete(k);}}class Controller{constructor(deps){this.deps=deps;this.dismisses=0;}sourceAdded(){}sourceRemoved(){}dismiss(){this.dismisses++;}dispose(){}}const Service=vm.runInNewContext(patched.slice(start,end)+';InputTriggerService',{_deepseek_ai_cordis:{Service:class{constructor(ctx){this.ctx=ctx;}}},WeakMapWithValues:Weak,InputTriggerController:Controller,detectTrigger:()=>({native:true})});const ctx={get:()=>sessions,on:()=>{},effect:fn=>effects.push(fn())},service=new Service(ctx);for(const id of ['group','private']){const scoped={session:{sessionId:id},effect:fn=>effects.push(fn())};bindings.set(id,{sessionId:id,session:scoped.session,ctx:scoped});}for(const src of [{name:AGENT_SOURCE,trigger:'@'},{name:'reference',trigger:'@'},{name:'commands',trigger:'/'}])service.registerSource(src);const group=service.sessionOf(bindings.get('group').ctx),privateController=service.sessionOf(bindings.get('private').ctx),stop=service.registerSessionTrigger('group',{trigger:'@',source:AGENT_SOURCE,detect:()=>null});assert.equal(group.deps.detect('@',1,plain,1),null);assert.equal(privateController.deps.detect('@',1,plain,1).native,true);assert.deepEqual(Array.from(group.deps.roster.sources('@'),s=>s.name),[AGENT_SOURCE]);assert.equal(privateController.deps.roster.sources('@').length,2);assert.equal(group.deps.roster.sources('/')[0].name,'commands');assert.throws(()=>service.registerSessionTrigger('group',{trigger:'@',source:AGENT_SOURCE,detect:()=>null}),/IN_USE/);stop();assert.equal(group.dismisses,2);assert.equal(group.deps.detect('@',1,plain,1).native,true);assert.equal(group.deps.roster.sources('@').length,2);});
