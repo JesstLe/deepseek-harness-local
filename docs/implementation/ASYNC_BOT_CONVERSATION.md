@@ -46,4 +46,8 @@ bot_dispatch({targetBotId:"bot-<实际目录 ID>",task:"生成活动文案",outp
 
 18 项真实 Harness 壳 UI 检查通过，使用受控只读任务投影和真实本地 SSE：任务卡、工作动画、独立新话题草稿、原模型位置、员工菜单、状态结束、减少动态效果、1000/580/360px 布局；0 page errors。该层不调用模型、不写业务。首次 UI 驱动误用了 context.emulateMedia，改用 page.emulateMedia，保留失败日志。
 
-实际模型并行聊天、main 固定提交本地加载和副本回滚另记在 `evidence/async-bot/VERIFICATION.txt`，不以 fixture 成功替代真实业务验收。安装 EXE 未在此切片自动发布。
+实际模型联调通过：主管第一轮 5425ms 结束，第二个独立话题 1340ms 结束，两次结束时目标任务均为 running。运营实际执行 25 秒等待工具后完成，主管收到唯一 next-turn 回传；第三轮才调用 get 读取已完成结果，首轮没有轮询等待。两条测试 Session 已归档，原 3 个 Bot 身份保留。该时间只是一条本地配置模型样本，不是延迟保证。
+
+固定 main `5613933399a9e6d9c81af516d6c6994ee8278f07` 已增量加载本地运行插件：10 文件变化、65 个无关文件哈希保持、package 保持；host/client 只应用本模块 delta，不覆盖其他运行差异。HTTP 200，Async=1、Delivery=1。加载后无 mock/无路由替换的真实 UI 11 项通过、0 页面错误，浏览器/context 已关闭。最终 67 sessions / 0 running / 3 bots / revision 15；新增 2 条均为已归档测试会话。服务正常运行，测试和重启窗口已释放。
+
+完整命令、收据、来源 SHA 与副本回滚记录见 `evidence/async-bot/VERIFICATION.txt`。安装 EXE 未重建，完整头像/角色模型留待单独设计。
