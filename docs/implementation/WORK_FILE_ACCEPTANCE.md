@@ -35,3 +35,7 @@
 不重放任务，不自审；未知或文件校验失败保留原账本并阻止新验收。企业保持现状。
 接续完整隔离真实日常使用，最终从固定main构建并验证含全部最新切片的安装/升级/卸载/更新。
 ```
+
+## 主线与加载收口
+
+源码普通merge/push main9c9488acbc8791dede1743085ef8447720024a33，从该固定提交加载7文件exit0/HTTP200/X-Naumi-Work-File-Acceptance=1。104sessions/0running/4bots/revision47保持；144无关运行文件、113权威会话/配置、44其他未跟踪证据保持；模型组、员工export（除观察exportedAt）、任务/群账本保持。加载前28真实任务中linkedGoals=0/linkedReadyFiles=0，因此没有对既有真实任务自动登记或迁移；真实模型0、真实文件交付创建0、企业配置变化0。package只追加employee-task-files.js，不整份覆盖。窗口已释放。源码、主线、隔离原生链路、运行加载和副本回滚已收口；最终真实使用和完整安装包仍接续。
