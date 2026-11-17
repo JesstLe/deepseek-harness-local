@@ -1,9 +1,9 @@
 diff --git a/docs/implementation/GROUP_RENAME.md b/docs/implementation/GROUP_RENAME.md
 new file mode 100644
-index 0000000..d76d7ea
+index 0000000..9fcdc8a
 --- /dev/null
 +++ b/docs/implementation/GROUP_RENAME.md
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,50 @@
 +# 群组改名
 +
 +## 模块与职责
@@ -48,6 +48,12 @@ index 0000000..d76d7ea
 +共享 main 在提交间新增 `6192368`（primary Bot 模块）。本任务已普通 merge 为 `e664224`，随后将最新 main 同步到任务 worktree；primary 的默认接待、群成员与 UI 逻辑原样保留。最终回滚基线调整为 `6192368`，避免源代码回滚撤销别人的新增模块。当前运行的并行主线加载已包含三个群后端文件和群页面 JS，本任务发布仅补齐缺失的 catalog 和 CSS（以部署哈希比对为准），不重复重启服务。初次检测服务正处于并行发布间隙，读取失败；之后确认 92 Sessions、running=0 才继续。
 +
 +最终整合全量：`node --test tests/*.test.mjs desktop/tests/*.test.cjs`，581/581，通过；整合后的真实 Harness 页面复测 11 项通过，零 pageerror、零推理。
++
++发布验证脚本首次比较持久化 JSON 与 SQLite null-prototype 行对象时，deepStrictEqual 仅因对象原型差异失败（业务数据未变、尚未发起改名）；改用完整行序列化 SHA256 比较，避免日志展开用户消息。仅复测发布验证脚本，不重复业务全量。
++
++## 运行验收结果
++
++main 固定插件来源 `b18bfdc`，发布验证脚本整合 `f077de9`。实际仅补齐 `bot-chat-model.js`、`bot-groups.css` 两个静态资源，无服务重启。唯一群 `dd7f92b1-af98-4101-8feb-154d1b6ffac2` 经同源 owner API 从 aa 改为工作群，并重新打开 API 与 SQLite 核对名称；成员仍为 3，全部原消息/回复/任务、101 个受保护文件、97 个其他插件文件不变。92 个 Sessions、running=0，未发起推理。证据见 DEPLOYMENT.json。当前用户页面刷新即可加载新入口；未另跑付费模型自然语言推理来声称模型行为验收。源代码回滚已在另一副本 10/10 验证，旧 reader 仍能读取已改群名，不回滚业务数据。
 diff --git a/plugins/naumi-enterprise/assets/bot-chat-model.js b/plugins/naumi-enterprise/assets/bot-chat-model.js
 index 565c03f..afb55cb 100644
 --- a/plugins/naumi-enterprise/assets/bot-chat-model.js
@@ -235,7 +241,7 @@ index c3c0a93..934862b 100644
          const requestAttachments=input.attachments??[];
 diff --git a/scripts/deploy-group-rename.mjs b/scripts/deploy-group-rename.mjs
 new file mode 100644
-index 0000000..4a158f8
+index 0000000..8010ec6
 --- /dev/null
 +++ b/scripts/deploy-group-rename.mjs
 @@ -0,0 +1,21 @@
@@ -250,13 +256,13 @@ index 0000000..4a158f8
 + const db=new DatabaseSync(path.join(runtime,'.dsh/naumi/bot-groups.sqlite'),{readOnly:true});try{await backup(db,path.join(backupDir,'groups-before.sqlite'));}finally{db.close();}
 + const state={sourceCommit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),backupDir,rows,inventory:inventory(),protectedHashes,groups,sessions:sessions.items.length,tasksHash:sha(JSON.stringify(tasks)),botsHash:sha(JSON.stringify(bots)),modelsHash:sha(JSON.stringify(models)),operationId:randomUUID(),phase:'prepared'};fs.writeFileSync(checkpoint,JSON.stringify(state,null,2));console.log('RENAME_DEPLOY_PREPARED files=6 running=0 backup=PASS');
 +}else{
-+ const state=JSON.parse(fs.readFileSync(checkpoint));assert.equal(execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),state.sourceCommit,'SOURCE_CHANGED');
++ const state=JSON.parse(fs.readFileSync(checkpoint));execFileSync('git',['merge-base','--is-ancestor',state.sourceCommit,'HEAD']);for(const r of state.rows)assert.equal(sha(fs.readFileSync(path.join(root,'plugins/naumi-enterprise',r.file))),r.after,'SOURCE_CHANGED '+r.file);
 + if(mode==='apply'||mode==='restore'){
 +  const changed=state.rows.filter(r=>r.before!==r.after);if(!changed.every(r=>r.file.startsWith('assets/')))assert(!fs.existsSync(path.join(runtime,'runtime/server.pid')),'SERVICE_MUST_BE_STOPPED');for(const r of state.rows){const expected=mode==='apply'?r.before:r.after;assert.equal(sha(fs.readFileSync(path.join(installed,r.file))),expected,'RUNTIME_CHANGED '+r.file);}for(const r of changed)fs.copyFileSync(path.join(state.backupDir,mode==='apply'?'after':'before',r.file),path.join(installed,r.file));state.phase=mode==='apply'?'applied':'restored';fs.writeFileSync(checkpoint,JSON.stringify(state,null,2));console.log('RENAME_DEPLOY_'+state.phase.toUpperCase()+' files=6');
 + }else if(mode==='verify'){
 +  const api=await botLiveApi(runtime),sessions=await api.rpc('session/list',{_request:{}});assert.equal(sessions.items.length,state.sessions);assert(!sessions.items.some(s=>s.running));for(const [f,h]of Object.entries(state.protectedHashes))assert.equal(sha(fs.readFileSync(path.join(runtime,f))),h,'PROTECTED_CHANGED '+f);const current=inventory();for(const [f,h]of Object.entries(state.inventory))if(!files.includes(f))assert.equal(current[f],h,'UNRELATED_RUNTIME '+f);for(const r of state.rows)assert.equal(current[r.file],r.after);
-+  assert.equal(sha(JSON.stringify(await api.json('/naumi/bot-tasks'))),state.tasksHash);assert.equal(sha(JSON.stringify(await api.json('/naumi/bots'))),state.botsHash);assert.equal(sha(JSON.stringify(await api.json('/naumi/model-connections'))),state.modelsHash);assert.deepEqual(groupSnapshot(),state.groups);
-+  const listed=await api.json('/naumi/bot-groups'),matches=listed.rooms.filter(r=>r.name==='aa');assert.equal(matches.length,1,'EXACT_UNIQUE_GROUP_REQUIRED');assert.equal(matches[0].id,'dd7f92b1-af98-4101-8feb-154d1b6ffac2');const before=matches[0],after=await api.json('/naumi/bot-groups',{action:'rename',operationId:state.operationId,roomId:before.id,expectedName:before.name,name:'工作群'},'x-naumi-bot-groups');assert.deepEqual(after,{...before,name:'工作群'});assert.equal((await api.json('/naumi/bot-groups')).rooms.find(r=>r.id===before.id).name,'工作群');const afterRows=groupSnapshot(),wanted=structuredClone(state.groups);wanted.rooms.find(r=>r.id===before.id).name='工作群';assert.deepEqual(afterRows,wanted);
++  assert.equal(sha(JSON.stringify(await api.json('/naumi/bot-tasks'))),state.tasksHash);assert.equal(sha(JSON.stringify(await api.json('/naumi/bots'))),state.botsHash);assert.equal(sha(JSON.stringify(await api.json('/naumi/model-connections'))),state.modelsHash);assert.equal(sha(JSON.stringify(groupSnapshot())),sha(JSON.stringify(state.groups)),'GROUP_ROWS_CHANGED');
++  const listed=await api.json('/naumi/bot-groups'),matches=listed.rooms.filter(r=>r.name==='aa');assert.equal(matches.length,1,'EXACT_UNIQUE_GROUP_REQUIRED');assert.equal(matches[0].id,'dd7f92b1-af98-4101-8feb-154d1b6ffac2');const before=matches[0],after=await api.json('/naumi/bot-groups',{action:'rename',operationId:state.operationId,roomId:before.id,expectedName:before.name,name:'工作群'},'x-naumi-bot-groups');assert.deepEqual(after,{...before,name:'工作群'});assert.equal((await api.json('/naumi/bot-groups')).rooms.find(r=>r.id===before.id).name,'工作群');const afterRows=groupSnapshot(),wanted=structuredClone(state.groups);wanted.rooms.find(r=>r.id===before.id).name='工作群';assert.equal(sha(JSON.stringify(afterRows)),sha(JSON.stringify(wanted)),'GROUP_ROWS_CHANGED_AFTER_RENAME');
 +  const source=await (await api.request('/naumi/assets/bot-groups.js')).text();assert(source.includes('修改群名')&&source.includes('GroupTitle'));const record={status:'PASS',sourceCommit:state.sourceCommit,http:200,changedField:'rooms.name',roomId:before.id,before:'aa',after:'工作群',membersPreserved:true,groupAndMessageRowsPreserved:true,protectedFilesUnchanged:Object.keys(state.protectedHashes).length,unrelatedPluginFilesUnchanged:Object.keys(state.inventory).filter(f=>!files.includes(f)).length,sessions:state.sessions,running:0,files:state.rows,modelCalls:0,copiedFiles:state.rows.filter(r=>r.before!==r.after).map(r=>r.file),backup:state.backupDir};fs.writeFileSync(path.join(root,'evidence/group-rename/DEPLOYMENT.json'),JSON.stringify(record,null,2)+'\n');state.phase='verified';fs.writeFileSync(checkpoint,JSON.stringify(state,null,2));console.log('RENAME_LIVE_PASS name=工作群 http=200 members=UNCHANGED messages=UNCHANGED tasks=UNCHANGED models=UNCHANGED running=0');
 + }else throw Error('UNKNOWN_MODE');
 +}

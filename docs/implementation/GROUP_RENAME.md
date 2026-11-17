@@ -44,3 +44,7 @@
 最终整合全量：`node --test tests/*.test.mjs desktop/tests/*.test.cjs`，581/581，通过；整合后的真实 Harness 页面复测 11 项通过，零 pageerror、零推理。
 
 发布验证脚本首次比较持久化 JSON 与 SQLite null-prototype 行对象时，deepStrictEqual 仅因对象原型差异失败（业务数据未变、尚未发起改名）；改用完整行序列化 SHA256 比较，避免日志展开用户消息。仅复测发布验证脚本，不重复业务全量。
+
+## 运行验收结果
+
+main 固定插件来源 `b18bfdc`，发布验证脚本整合 `f077de9`。实际仅补齐 `bot-chat-model.js`、`bot-groups.css` 两个静态资源，无服务重启。唯一群 `dd7f92b1-af98-4101-8feb-154d1b6ffac2` 经同源 owner API 从 aa 改为工作群，并重新打开 API 与 SQLite 核对名称；成员仍为 3，全部原消息/回复/任务、101 个受保护文件、97 个其他插件文件不变。92 个 Sessions、running=0，未发起推理。证据见 DEPLOYMENT.json。当前用户页面刷新即可加载新入口；未另跑付费模型自然语言推理来声称模型行为验收。源代码回滚已在另一副本 10/10 验证，旧 reader 仍能读取已改群名，不回滚业务数据。
