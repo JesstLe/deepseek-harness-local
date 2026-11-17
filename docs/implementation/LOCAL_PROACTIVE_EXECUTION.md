@@ -40,3 +40,5 @@
 本切片不关闭D2身份/历史工作区迁移、D3自然目标确认/跨Bot目标与任务关联/二进制固定版本、真实供应商验收和D5最终安装/更新分发。Goal当前active，企业模块保持现状。
 
 D1运行接续：4静态资源已从main406277c加载，HTTP200/117无关文件hash保持/无重启。D4首轮完整回归684/685，唯一失败为未改动的desktop backend测试临时目录清理EPERM；同名定向复测1/1通过，原失败保留，不把它算全仓通过。最终整合后集中复测另记。独立壳最终16项通过，2次loopback原PiAiAdapter请求，0真实供应商/企业登记；SIGKILL恢复UNKNOWN与不重放、owner核对通过。首次强杀观察器把signalCode已结束误判exitCode仍null，最终等待已修正，初次exit13与最终exit0分别留证。
+
+整合主线406277c→ba4ee2a（模型审计最终证据与暂缓的常驻自主Bot愿景保留），功能计数1。node --test --test-concurrency=4 tests/*.test.mjs desktop/tests/*.test.cjs：686/686，exit0；没有跳过测试，降低跨文件并发以避免Windows临时目录句柄争用。本地固定触发/明确批准工作不是BOT-AUTONOMY-001长期自主规划，该愿景仍暂缓。
