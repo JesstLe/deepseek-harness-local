@@ -15,8 +15,8 @@ foreach($item in $manifest){
 }
 & node (Join-Path $PSScriptRoot 'check-bot-runtime.mjs') $runtime '2'
 if($LASTEXITCODE -ne 0){throw 'RUNTIME_NOT_IDLE_OR_UNVERIFIED'}
-& (Join-Path $runtime 'Stop-DeepSeek.ps1')
+& (Join-Path $runtime 'Stop-Naumi.ps1')
 foreach($item in $manifest){Copy-Item -LiteralPath (Join-Path $root "plugins/naumi-enterprise/$($item.path)") -Destination (Join-Path $target $item.path)}
-& (Join-Path $runtime 'Start-DeepSeek.ps1')
+& (Join-Path $runtime 'Start-Naumi.ps1')
 foreach($item in $manifest){if((Get-FileHash -LiteralPath (Join-Path $target $item.path)).Hash.ToLowerInvariant() -ne $item.modifiedSHA256){throw 'DEPLOY_HASH_MISMATCH'}}
 Write-Output 'DEPLOY employee_modules=5 hashes=PASS unrelated_files=UNCHANGED'

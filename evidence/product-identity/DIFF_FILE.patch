@@ -1,0 +1,770 @@
+diff --git a/.gitattributes b/.gitattributes
+index f4628e9..613b1d9 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -164,3 +164,36 @@ plugins/naumi-ui-layout/UPSTREAM.json text eol=lf
+ 
+ /plugins/naumi-enterprise/assets/grok-ball.js -text
+ /plugins/naumi-enterprise/third-party/grok-ball/LICENSE -text
++
++# Naumi product identity source/evidence byte stability.
++/README.md text eol=lf
++/DEPLOYMENT.md text eol=lf
++/Start-Naumi.ps1 text eol=lf
++/plugins/naumi-enterprise/host.js text eol=lf
++/plugins/naumi-enterprise/client.js text eol=lf
++/plugins/naumi-enterprise/package.json text eol=lf
++/plugins/naumi-enterprise/product-version.js text eol=lf
++/plugins/naumi-enterprise/assets/product-identity.js text eol=lf
++/plugins/naumi-enterprise/assets/product-copy-keys.js text eol=lf
++/plugins/naumi-enterprise/assets/product-identity.css text eol=lf
++/plugins/naumi-ui-layout/client.js text eol=lf
++/plugins/naumi-ui-layout/UPSTREAM.json text eol=lf
++/scripts/build-naumi-layout.mjs text eol=lf
++/scripts/audit-product-identity.mjs text eol=lf
++/scripts/verify-http.mjs text eol=lf
++/scripts/ccswitch-scan.py text eol=lf
++/scripts/deploy-bot-communication.ps1 text eol=lf
++/scripts/deploy-bot-lifecycle.ps1 text eol=lf
++/scripts/deploy-employee-center.ps1 text eol=lf
++/scripts/deploy-employee-foundation.ps1 text eol=lf
++/scripts/deploy-employee-sync.ps1 text eol=lf
++/scripts/install-naumi-shortcut.ps1 text eol=lf
++/scripts/verify-product-identity.mjs text eol=lf
++/scripts/deploy-product-identity.mjs text eol=lf
++/scripts/product-identity-evidence.mjs text eol=lf
++/tests/naumi-enterprise.test.mjs text eol=lf
++/tests/naumi-product-identity.test.mjs text eol=lf
++/docs/implementation/PRODUCT_IDENTITY.md text eol=lf
++/evidence/product-identity/** -text whitespace=cr-at-eol
++/evidence/product-identity/ROLLBACK.sh text eol=lf
++/evidence/product-identity/DIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab,cr-at-eol
+diff --git a/DEPLOYMENT.md b/DEPLOYMENT.md
+index d72a690..fcac46e 100644
+--- a/DEPLOYMENT.md
++++ b/DEPLOYMENT.md
+@@ -1,4 +1,4 @@
+-# Naumi Desktop 本地部署
++# Naumi 本地部署
+ 
+ ## 部署方式
+ 
+@@ -9,7 +9,7 @@
+ - 部署目录：`E:/Workspace/naumi-desktop`。
+ - 数据目录：`E:/Workspace/naumi-desktop/.dsh`，不提交 Git。
+ - 配置文件：`config/local.json`；默认关闭遥测环境变量，只监听本机。
+-- 浅色主题：`.dsh/cordis.patch.yml` 中 `ui-theme.preference=light`；DeepSeek 会话日志上传关闭。
++- 浅色主题：`.dsh/cordis.patch.yml` 中 `ui-theme.preference=light`；上游会话日志上传关闭。
+ - GitHub 私有备份：https://github.com/JesstLe/naumi-desktop。
+ 
+ ## 操作
+@@ -29,9 +29,9 @@ cd E:\Workspace\naumi-desktop
+ 
+ ## 模型与工作区
+ 
+-Web UI 的 **Settings → Models** 接收 DeepSeek API Key，应用将密钥存入 `.dsh/.credentials.yaml`。自定义 OpenAI 兼容服务使用 **Add model provider → Custom model API**，分别填写 API 地址、协议、模型 ID 和凭据。凭据文件、会话、日志和进程信息均排除在 Git 之外。
++在 **设置 → 模型连接** 中按分组填写 API URL、API Key、接口协议与模型 ID。支持 OpenAI Chat Completions、OpenAI Responses 与 Anthropic Messages；不需要供应商账户登录。密钥由本机凭据服务保存，不回显到设置页面，不写入普通配置文件。
+ 
+-首次进入页面后选择工作区；建议选择具体项目目录，而不是整个磁盘。已从 CC Switch 导入 8 个分组、38 条模型路由，逐条通过实际 Harness 最小请求；现有 DeepSeek Account 登录和默认模型未更改。分组、排除项和回滚说明见 `CCSWITCH.md`。
++模型选择保留在会话原位置。已有 CC Switch 分组保持原身份与凭据引用；实际模型可用性按供应商实时状态单独核验，不把目录数量当可用性证据。凭据、会话、日志和进程信息均排除在 Git 之外。首次进入页面选择具体项目目录作为工作区。
+ 
+ ## 配置回滚
+ 
+@@ -42,6 +42,6 @@ Web UI 的 **Settings → Models** 接收 DeepSeek API Key，应用将密钥存
+ - 已完成：官方来源确认、版本选择、独立目录、配置修改、配置副本回滚、启停脚本、桌面入口、依赖安装、服务启动、HTTP/静态资源/鉴权验收、重复启动检测、停止释放端口及重新启动。
+ - 安装说明：首次下载连接重置，缓存重试成功；仅为五个指定版本的依赖开启安装脚本，随后 `npm rebuild` 成功。
+ - 源码下载：两次 Git 传输出现 early EOF；本次运行使用官方 npm 成品，不依赖源码 checkout。
+-- 本轮追加完成：只读读取 CC Switch、分组导入有效凭据、实际模型请求验证、保留账号登录及默认模型、配置与凭据副本回滚验证。
++- 本轮追加完成：只读读取 CC Switch、分组导入有效凭据、实际模型请求验证、完成供应商账户解耦及自定义模型连接、配置与凭据副本回滚验证。
+ - 未配置开机自启；OpenCode Go 过期密钥、连接中断的局域网反代及其他缺少 API Key 的条目未作为有效路由导入。
+ - 验证明细：`VERIFICATION.txt`。
+diff --git a/README.md b/README.md
+index f30610f..689eb45 100644
+--- a/README.md
++++ b/README.md
+@@ -1,12 +1,11 @@
+-# Naumi Desktop
++# Naumi
+ 
+-Naumi 企业协作平台：本机 Web 工作台 + Windows 桌面端 + 企业协作插件，基于官方
+-`@deepseek-ai/dsh` 运行包（版本精确锁定）构建。仓库：<https://github.com/JesstLe/naumi-desktop>
++Naumi 企业协作工作台，支持本机 Web 与 Windows 桌面端。仓库：<https://github.com/JesstLe/naumi-desktop>
+ 
+ ## 快速开始
+ 
+ ```powershell
+-npm ci --no-audit --no-fund   # 安装运行时（@deepseek-ai/dsh 精确锁定）
++npm ci --no-audit --no-fund   # 安装锁定版本的依赖
+ npm start                     # 后台启动 Web 工作台 http://127.0.0.1:3080
+ npm stop                      # 校验 PID 后停止
+ npm run verify                # HTTP 健康检查
+@@ -14,7 +13,7 @@ npm run verify                # HTTP 健康检查
+ 
+ - `Start-Naumi.ps1 -Open`：后台启动并打开带本次启动令牌的浏览器入口；数据在 `.dsh`（不入 Git）。
+ - `Start-NaumiDesktop.ps1`：启动 Windows 桌面端（Electron + NSIS 安装器）。
+-- 模型凭据在 Settings → Models 配置，凭据/会话/日志均不入 Git。
++- 自定义 URL、API Key 与模型分组在 设置 → 模型连接 配置，凭据/会话/日志均不入 Git。
+ 
+ ## 桌面端构建与发布
+ 
+diff --git a/Start-Naumi.ps1 b/Start-Naumi.ps1
+index 237dd48..c421475 100644
+--- a/Start-Naumi.ps1
++++ b/Start-Naumi.ps1
+@@ -46,7 +46,7 @@ for ($i=0; $i -lt 90; $i++) {
+     if ($server.HasExited) { throw "Server exited $($server.ExitCode). See logs/server.err.log." }
+     try {
+         $response = Invoke-WebRequest (Get-LaunchUrl) -TimeoutSec 2 -SessionVariable bootSession
+-        if ($response.StatusCode -eq 200 -and $response.Content -match 'DeepSeek|deepseek|<div id="root"') {
++        if ($response.StatusCode -eq 200 -and $response.Content -match '<title>Naumi(?:[^<]*)</title>') {
+             Write-Output "RUNNING PID=$($server.Id) URL=$url HTTP=200"
+             $launchUrl = Get-LaunchUrl
+             "[InternetShortcut]`r`nURL=$launchUrl" | Set-Content -Encoding utf8 (Join-Path $root 'runtime/Open Naumi Workbench.url')
+diff --git a/docs/implementation/PRODUCT_IDENTITY.md b/docs/implementation/PRODUCT_IDENTITY.md
+new file mode 100644
+index 0000000..84cdd10
+--- /dev/null
++++ b/docs/implementation/PRODUCT_IDENTITY.md
+@@ -0,0 +1,26 @@
++# Naumi 产品标识统一
++
++日期：2026-11-17。基线68b4bb462fd2d3df04524f4097b723b60933bb5c。分支codex/naumi-product-identity-20261117，独立工作树E:/Workspace/naumi-product-identity。模块计数1。
++
++## 模块与职责
++统一用户可见的产品身份，不替换模型供应商身份、真实模型ID、用户消息/文件/模型输出或第三方开源版权。仅追加host/client品牌注册，原始目录未提交验收文件由协作线程保留。
++
++## 公共接口、依赖方向、数据/状态/事务归属
++product-identity.js在现有Locale公开translate边界对44个明确namespace/key（62个客户端模块静态扫描，40个生成键＋4个明确语义适配键）标签作产品适配；既有bind闭包逐次调用translate，保留语言切换、插值与动态错误状态，不扫描DOM或重写聊天内容。释放时仅撤销本包装，后续包装保持原样。作用域限定chat状态/过期账号提示、插件安装安全提示、Office预览提示、产品版本与退休账号模型标签。语言包/用户语言选择不复制、不增加语言选项；全部8种原语言生效。
++运行图标仅替换原native running组件的装饰图形，原状态计时、可访问状态、布局和动效偏好保持；使用原Naumi SVG和轻量opacity动效，无截图/轮询。
++
++## 本次实现与迁移状态
++- 标签页/窗口产品名统一Naumi；设置显示Naumi桌面产品版本，不把底座版本当产品版本。
++- 去除“深度求索中”和运行鲸尾；过期官方登录错误引导更新模型连接API Key，而不是伪造Naumi供应商登录。
++- 插件信任和Office预览提示中的产品名统一Naumi，原安全意义不变。
++- 启动/HTTP健康检查验证Naumi标识；5个历史维护脚本改用真实存在的Start/Stop-Naumi；CC Switch导入User-Agent更名。
++- 桌面旧工程DeepSeek Harness/Naumi企业协作快捷方式合并为带logo的单一Naumi原生桌面入口，原件留私有runtime备份并在另一副本检验恢复。README/部署说明更新自定义连接现状；历史证据不追改，依赖命名、模型标识、许可证原样保留。
++
++## 验证命令、结果及证据层级
++基线426/426；新增10项覆盖8语言原提示、静态字典全键、插值不改写、原绑定与释放、版本打包、快捷方式副本与logo；整合退休账号兼容主线后集中结果见evidence/product-identity/VERIFICATION.txt。隔离真实Harness/本地SSE模型/Chrome26项通过，实际原生运行图标与Naumi文案、产品版本已打开截图核验，无真实供应商调用；候选/正式运行分别记录。
++
++## 未完成项与下一步
++本切片不重新制作安装包，不改变任何模型配置、权限、任务/记忆或企业业务数据。新安装包构建自动使用同一品牌资产；实际运行加载单独记录。
++
++## 主线同步与诊断
++基线68b4bb4；模块完成后整合d5033d4（Bot新动效），再提交本模块并普通merge e089a7a（退休账号上下文兼容），package新增压缩peer依赖与product-version.js均保留，不改对方任务代码。UI验证先修正新会话按钮/富文本输入器定位并创建隔离工作区，随后修正多请求SSE释放；失败轮不计通过。
+diff --git a/plugins/naumi-enterprise/assets/product-copy-keys.js b/plugins/naumi-enterprise/assets/product-copy-keys.js
+new file mode 100644
+index 0000000..b89d4dc
+--- /dev/null
++++ b/plugins/naumi-enterprise/assets/product-copy-keys.js
+@@ -0,0 +1,67 @@
++// Generated by scripts/audit-product-identity.mjs from pinned UI dictionaries.
++export const PRODUCT_TEMPLATE_KEYS={
++  "chat": [
++    "chat.deepDiving",
++    "chat.deepDivingFor",
++    "message.failure.interrupted"
++  ],
++  "common": [
++    "brand.localBuild"
++  ],
++  "conversation": [
++    "error.sessionInUse"
++  ],
++  "creationRecommendations": [
++    "restart-required"
++  ],
++  "entryCustomization": [
++    "createPrompt.conversation",
++    "createPrompt.rightbar",
++    "createPrompt.sidebar"
++  ],
++  "model": [
++    "error.sessionInUse"
++  ],
++  "pluginManager": [
++    "installBundledTitle",
++    "installDoneRestart",
++    "installGuideSafety",
++    "installProblemShipped",
++    "installUpgradeNotice",
++    "reasonIncompatibleInstall",
++    "reasonIncompatibleInstalled",
++    "reasonIncompatibleVersion",
++    "reasonIncompatibleVersionUnnamed",
++    "reasonUnsupportedPlatform",
++    "restartNotice",
++    "restartReasonHostModule",
++    "restartReasonModuleComparison",
++    "restartReasonPackageMoved",
++    "sourceTargetSpec",
++    "sourceTargetVersion",
++    "updateLostDetail",
++    "versionsBlocked",
++    "versionsBlockedDetail"
++  ],
++  "pluginMarket": [
++    "exempted",
++    "incompatible",
++    "noCompatibleVersion",
++    "statusProvided"
++  ],
++  "pluginRecommendations": [
++    "restart-required",
++    "version-error"
++  ],
++  "settings.agentPreset": [
++    "createPluginDescription",
++    "presetCordisDescription",
++    "sectionIntro"
++  ],
++  "sidebarBrowser": [
++    "error.application-origin"
++  ],
++  "sidebarOffice": [
++    "unavailable"
++  ]
++};
+diff --git a/plugins/naumi-enterprise/assets/product-identity.css b/plugins/naumi-enterprise/assets/product-identity.css
+new file mode 100644
+index 0000000..98de373
+--- /dev/null
++++ b/plugins/naumi-enterprise/assets/product-identity.css
+@@ -0,0 +1,6 @@
++/* The native running component keeps its timing, layout, status and a11y.
++   Replace only its decorative vendor image, including the reduced-motion fallback. */
++body[data-naumi="enterprise"] [data-chat-running] [class$="_runningIcon"]{background:url('/naumi/assets/symbol.svg') center/contain no-repeat;animation:naumi-running-pulse 1.8s ease-in-out infinite}
++body[data-naumi="enterprise"] [data-chat-running] [class$="_runningIcon"]>*{display:none!important}
++@keyframes naumi-running-pulse{0%,100%{opacity:.65}50%{opacity:1}}
++@media(prefers-reduced-motion:reduce){body[data-naumi="enterprise"] [data-chat-running] [class$="_runningIcon"]{animation:none;opacity:1}}
+diff --git a/plugins/naumi-enterprise/assets/product-identity.js b/plugins/naumi-enterprise/assets/product-identity.js
+new file mode 100644
+index 0000000..320f780
+--- /dev/null
++++ b/plugins/naumi-enterprise/assets/product-identity.js
+@@ -0,0 +1,42 @@
++import {PRODUCT_TEMPLATE_KEYS} from './product-copy-keys.js';
++/** Only product-owned UI dictionary keys cross this boundary. User content,
++ * model names/IDs, tool output, file contents and arbitrary parameters never do.
++ * Native bindings call locale.translate dynamically in the pinned runtime.
++ */
++export const PRODUCT_COPY_KEYS=Object.freeze({
++ ...Object.fromEntries(Object.entries(PRODUCT_TEMPLATE_KEYS).map(([ns,keys])=>[ns,new Set(keys)])),
++ chat:new Set([...(PRODUCT_TEMPLATE_KEYS.chat??[]),'chat.deepDiving','chat.deepDivingFor','message.failure.accountSignedOut','message.failure.accountSignInRequired']),
++ pluginManager:new Set([...(PRODUCT_TEMPLATE_KEYS.pluginManager??[]),'installGuideSafety']),
++ sidebarOffice:new Set([...(PRODUCT_TEMPLATE_KEYS.sidebarOffice??[]),'unavailable']),
++ settings:new Set(['general.currentVersion']),
++ model:new Set([...(PRODUCT_TEMPLATE_KEYS.model??[]),'provider.account','error.sessionInUse']),
++});
++const retiredAccount={zh:'旧账号模型（未配置）',en:'Legacy account model (unconfigured)',ja:'旧アカウントモデル（未設定）',es:'Modelo de cuenta anterior (sin configurar)',fr:'Ancien modèle de compte (non configuré)',de:'Altes Kontomodell (nicht konfiguriert)',ru:'Старая модель аккаунта (не настроена)',pt:'Modelo de conta anterior (não configurado)'};
++const connectionCopy={
++ zh:'模型连接已失效，请在设置中更新 API Key。',
++ en:'The model connection is no longer valid. Update its API Key in Settings.',
++ ja:'モデル接続が無効です。設定で API Key を更新してください。',
++ es:'La conexión del modelo ya no es válida. Actualiza su API Key en Ajustes.',
++ fr:'La connexion au modèle est invalide. Mettez à jour sa clé API dans les paramètres.',
++ de:'Die Modellverbindung ist ungültig. Aktualisiere den API Key in den Einstellungen.',
++ ru:'Подключение к модели недействительно. Обновите API Key в настройках.',
++ pt:'A conexão do modelo não é mais válida. Atualize sua API Key nas configurações.',
++};
++export function productCopy(namespace,key,template,locale,version){
++ if(!PRODUCT_COPY_KEYS[namespace]?.has(key))return template;
++ if(namespace==='model'&&key==='provider.account')return retiredAccount[String(locale).split('-')[0]]??retiredAccount.en;
++ if(namespace==='settings')return 'Naumi '+version;
++ if(namespace==='chat'&&key.startsWith('message.failure.'))return connectionCopy[String(locale).split('-')[0]]??connectionCopy.en;
++ return template.replace(/DeepSeek Harness/g,'Naumi').replace(/深度求索中/g,'Naumi 正在处理').replace(/\bDSH\b/g,'Naumi');
++}
++export function installProductIdentity(ctx,{version='0.3.2'}={}){
++ const locale=ctx.locale,original=locale.translate,own=Object.getOwnPropertyDescriptor(locale,'translate');
++ function translate(namespace,key,params){
++  const template=original.call(this,namespace,key);
++  const text=productCopy(namespace,key,template,this.getSnapshot().active,version);
++  if(!params)return text;
++  return text.replace(/\{(\w+)\}/g,(match,name)=>name in params?String(params[name]):match);
++ }
++ Object.defineProperty(locale,'translate',{configurable:true,writable:true,value:translate});
++ return()=>{if(locale.translate!==translate)return;if(own)Object.defineProperty(locale,'translate',own);else delete locale.translate;};
++}
+diff --git a/plugins/naumi-enterprise/client.js b/plugins/naumi-enterprise/client.js
+index 0af996c..c9b6062 100644
+--- a/plugins/naumi-enterprise/client.js
++++ b/plugins/naumi-enterprise/client.js
+@@ -1,5 +1,10 @@
+ /** Async presentation-only module; the original enterprise app below stays intact. */
+ function installNaumiContextUI(ctx,React,createPortal,Icon){
++  ctx.effect(()=>{
++    let dispose,closed=false;
++    void import('/naumi/assets/product-identity.js').then(module=>{if(!closed)dispose=module.installProductIdentity(ctx,{version:window.__NAUMI__?.productVersion});}).catch(error=>console.error('Naumi product identity:',error));
++    return()=>{closed=true;dispose?.();};
++  });
+   ctx.effect(()=>{
+     let dispose,closed=false;
+     void import('/naumi/assets/model-connections.js').then(module=>{if(!closed)dispose=module.installModelConnectionsUI(ctx,React);}).catch(error=>console.error('Naumi model connections:',error));
+diff --git a/plugins/naumi-enterprise/host.js b/plugins/naumi-enterprise/host.js
+index 058079c..22114a2 100644
+--- a/plugins/naumi-enterprise/host.js
++++ b/plugins/naumi-enterprise/host.js
+@@ -1,3 +1,4 @@
++import {PRODUCT_VERSION} from './product-version.js';
+ import {installModelConnections} from './model-connections.js';
+ import {readFile} from 'node:fs/promises';
+ import {fileURLToPath} from 'node:url';
+@@ -23,6 +24,9 @@ export function apply(ctx,config) {
+   installBots(ctx,{collaborationOrigin});
+   const designOrigin=validateOrigin(config.designOrigin);
+   const assets=new Map([['employee-enterprise-work.js','text/javascript; charset=utf-8'],['employee-memory-maintenance.js','text/javascript; charset=utf-8'],['employee-sync-panel.js','text/javascript; charset=utf-8'],['employee-center.js','text/javascript; charset=utf-8'],['employee-center-model.js','text/javascript; charset=utf-8'],['employee-center.css','text/css; charset=utf-8'],['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml'],['browser-client.js','text/javascript; charset=utf-8'],['browser-native-client.js','text/javascript; charset=utf-8'],['browser-native.css','text/css; charset=utf-8'],['browser-scheduler.js','text/javascript; charset=utf-8'],['browser.css','text/css; charset=utf-8'],['team-panel.css','text/css; charset=utf-8'],['team-panel.js','text/javascript; charset=utf-8'],['team-panel-model.js','text/javascript; charset=utf-8'],['bot-sidebar.js','text/javascript; charset=utf-8'],['bot-sidebar-model.js','text/javascript; charset=utf-8'],['bot-sidebar.css','text/css; charset=utf-8']]);
++  assets.set('product-copy-keys.js','text/javascript; charset=utf-8');
++  assets.set('product-identity.js','text/javascript; charset=utf-8');
++  assets.set('product-identity.css','text/css; charset=utf-8');
+   assets.set('model-connections.js','text/javascript; charset=utf-8');
+   assets.set('model-connections.css','text/css; charset=utf-8');
+   assets.set('employee-experience.js','text/javascript; charset=utf-8');
+@@ -62,8 +66,8 @@ export function apply(ctx,config) {
+     finally{res.off('close',onClose);}
+   }}));
+   ctx.on('webserver/index-inject',table=>{
+-    table.push({kind:'global',name:'__NAUMI__',value:{collaborationOrigin,designOrigin,version:'0.3.0'}});
+-    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/model-connections.css"><link rel="stylesheet" href="/naumi/assets/employee-center.css"><link rel="stylesheet" href="/naumi/assets/employee-experience.css"><link rel="stylesheet" href="/naumi/assets/browser.css"><link rel="stylesheet" href="/naumi/assets/browser-native.css"><link rel="stylesheet" href="/naumi/assets/team-panel.css"><link rel="stylesheet" href="/naumi/assets/bot-sidebar.css"><link rel="stylesheet" href="/naumi/assets/bot-task.css"><link rel="stylesheet" href="/naumi/assets/bot-avatar.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
++    table.push({kind:'global',name:'__NAUMI__',value:{collaborationOrigin,designOrigin,version:'0.3.0',product:'Naumi',productVersion:PRODUCT_VERSION}});
++    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/product-identity.css"><link rel="stylesheet" href="/naumi/assets/model-connections.css"><link rel="stylesheet" href="/naumi/assets/employee-center.css"><link rel="stylesheet" href="/naumi/assets/employee-experience.css"><link rel="stylesheet" href="/naumi/assets/browser.css"><link rel="stylesheet" href="/naumi/assets/browser-native.css"><link rel="stylesheet" href="/naumi/assets/team-panel.css"><link rel="stylesheet" href="/naumi/assets/bot-sidebar.css"><link rel="stylesheet" href="/naumi/assets/bot-task.css"><link rel="stylesheet" href="/naumi/assets/bot-avatar.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
+   });
+-  ctx.effect(()=>ctx.webServer.tapIndex(html=>html.replace(/<title>[^<]*<\/title>/i,'<title>Naumi · 企业协作</title>').replace(/<link[^>]+rel="(?:shortcut )?icon"[^>]*href="(?!\/naumi\/)[^"]*"[^>]*>/g,'')));
++  ctx.effect(()=>ctx.webServer.tapIndex(html=>html.replace(/<title>[^<]*<\/title>/i,'<title>Naumi</title>').replace(/<link[^>]+rel="(?:shortcut )?icon"[^>]*href="(?!\/naumi\/)[^"]*"[^>]*>/g,'')));
+ }
+diff --git a/plugins/naumi-enterprise/package.json b/plugins/naumi-enterprise/package.json
+index 91f11d5..24d1d8f 100644
+--- a/plugins/naumi-enterprise/package.json
++++ b/plugins/naumi-enterprise/package.json
+@@ -56,7 +56,8 @@
+     "dingtalk-skills",
+     "desktop-identity.js",
+     "desktop-enterprise.js",
+-    "model-connections.js"
++    "model-connections.js",
++    "product-version.js"
+   ],
+   "dsh": {
+     "bundle": {
+diff --git a/plugins/naumi-enterprise/product-version.js b/plugins/naumi-enterprise/product-version.js
+new file mode 100644
+index 0000000..2cef7f0
+--- /dev/null
++++ b/plugins/naumi-enterprise/product-version.js
+@@ -0,0 +1 @@
++export const PRODUCT_VERSION="0.3.2";
+diff --git a/plugins/naumi-ui-layout/UPSTREAM.json b/plugins/naumi-ui-layout/UPSTREAM.json
+index fd273f0..340e207 100644
+--- a/plugins/naumi-ui-layout/UPSTREAM.json
++++ b/plugins/naumi-ui-layout/UPSTREAM.json
+@@ -2,7 +2,7 @@
+   "package": "@deepseek-ai/dsh-client-ui-layout",
+   "version": "0.2.2-rc.1",
+   "originalSHA256": "338bcbdea1180e56b0a8e86788d1e75b09296cbe7ba042a06cdc91028001cf93",
+-  "modifiedSHA256": "a7eb243617562d24e1c870bd392527d3d1c1a026785b492642f141ae077383e3",
++  "modifiedSHA256": "fb37792fe0bda54d19048f4c3917ffc6fc7e391875a590860c7a4a527509544e",
+   "substitutions": [
+     "browser module registration id",
+     "product title constant"
+diff --git a/plugins/naumi-ui-layout/client.js b/plugins/naumi-ui-layout/client.js
+index 6b9ed70..5261ff5 100644
+--- a/plugins/naumi-ui-layout/client.js
++++ b/plugins/naumi-ui-layout/client.js
+@@ -326,7 +326,7 @@ window.__ModuleLoader__.load({
+ 			const onRightbarDrag = (0, react.useCallback)((dx) => {
+ 				actions.setRightbar(rightbarBase.current - dx);
+ 			}, [actions]);
+-			const productTitle = "Naumi · 企业协作";
++			const productTitle = "Naumi";
+ 			const rightbarMax = cols.rightbar === 0 ? 0 : clampWidth(rightbarPreference, 300, viewport * RIGHTBAR_MAX_RATIO);
+ 			const sidebarWidth = drawer ? Math.min(layoutInfo.sidebar || 280, Math.max(0, viewport - 48)) : cols.sidebar;
+ 			const sidebar = (0, react.useMemo)(() => renderSlot("sidebar", {
+diff --git a/scripts/audit-product-identity.mjs b/scripts/audit-product-identity.mjs
+new file mode 100644
+index 0000000..ab58ff9
+--- /dev/null
++++ b/scripts/audit-product-identity.mjs
+@@ -0,0 +1,22 @@
++import fs from 'node:fs';import path from 'node:path';import {fileURLToPath,pathToFileURL} from 'node:url';import {parse} from 'acorn';
++const root=fileURLToPath(new URL('../',import.meta.url));
++const vendorProduct=/DeepSeek Harness|深度求索|\bDSH\b/;
++const inactive=['dsh-client-ui-settings-account','dsh-client-ui-settings-models','dsh-client-ui-settings-session-log','dsh-client-ui-settings-web-search','dsh-client-ui-brand-official'];
++export function buildProductCopyKeys({write=true}={}){
++ const namespaces={},findings=[];let modules=0;
++ for(const pkg of fs.readdirSync(path.join(root,'node_modules/@deepseek-ai')).filter(p=>p.startsWith('dsh-client')&&!inactive.includes(p))){
++  const file=path.join(root,'node_modules/@deepseek-ai',pkg,'lib/client.js');if(!fs.existsSync(file))continue;const source=fs.readFileSync(file,'utf8'),ast=parse(source,{ecmaVersion:'latest'}),variables=new Map(),calls=[];modules++;
++  const visit=n=>{if(!n||typeof n!=='object')return;if(n.type==='VariableDeclarator'&&n.id.type==='Identifier')variables.set(n.id.name,n.init);if(n.type==='CallExpression'&&n.callee.type==='MemberExpression'&&n.callee.property.name==='register'&&(n.callee.object.type==='MemberExpression'&&n.callee.object.property.name==='locale'||n.callee.object.type==='Identifier'&&n.callee.object.name==='locale'))calls.push(n);for(const v of Object.values(n)){if(Array.isArray(v))v.forEach(visit);else if(v&&typeof v==='object')visit(v);}};visit(ast);
++  const resolve=n=>n?.type==='Identifier'?variables.get(n.name):n;
++  for(const call of calls){const ns=resolve(call.arguments[0])?.value,dictionaries=resolve(call.arguments[1]);if(typeof ns!=='string'||dictionaries?.type!=='ObjectExpression')continue;
++   for(const language of dictionaries.properties){const languageId=language.key?.name??language.key?.value,dict=resolve(language.value);if(dict?.type!=='ObjectExpression')continue;for(const p of dict.properties){const key=p.key?.name??p.key?.value,value=p.value?.value;if(typeof key==='string'&&typeof value==='string'&&vendorProduct.test(value)){
++    namespaces[ns]??=new Set();namespaces[ns].add(key);findings.push({module:pkg,namespace:ns,key,language:languageId});
++   }}}
++  }
++ }
++ const keys=Object.fromEntries(Object.entries(namespaces).sort(([a],[b])=>a.localeCompare(b)).map(([ns,keys])=>[ns,[...keys].sort()]));
++ const report={modules,keys:Object.values(keys).reduce((n,k)=>n+k.length,0),namespaces:keys,findings,inactiveModules:inactive,scope:'static UI dictionary keys only; no user content, model identity, dependency namespace or licenses'};
++ if(write)fs.writeFileSync(path.join(root,'plugins/naumi-enterprise/assets/product-copy-keys.js'),'// Generated by scripts/audit-product-identity.mjs from pinned UI dictionaries.\nexport const PRODUCT_TEMPLATE_KEYS='+JSON.stringify(keys,null,2)+';\n');
++ return report;
++}
++if(process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url){const report=buildProductCopyKeys();const e=path.join(root,'evidence/product-identity');fs.mkdirSync(e,{recursive:true});fs.writeFileSync(path.join(e,'BRAND_AUDIT.json'),JSON.stringify(report,null,2)+'\n');console.log('PRODUCT_AUDIT modules='+report.modules+' keys='+report.keys+' namespaces='+Object.keys(report.namespaces).length+' inactive_modules='+inactive.length);}
+diff --git a/scripts/build-naumi-layout.mjs b/scripts/build-naumi-layout.mjs
+index d4e38bf..8e0b330 100644
+--- a/scripts/build-naumi-layout.mjs
++++ b/scripts/build-naumi-layout.mjs
+@@ -1,3 +1,4 @@
++import {buildProductCopyKeys} from './audit-product-identity.mjs';
+ import fs from 'node:fs';
+ import crypto from 'node:crypto';
+ import path from 'node:path';
+@@ -6,8 +7,11 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+ const original=fs.readFileSync(path.join(root,'node_modules/@deepseek-ai/dsh-client-ui-layout/lib/client.js'),'utf8');
+ const marker='const productTitle = "DeepSeek Harness";';
+ if(original.split(marker).length!==2)throw Error('Upstream layout changed: expected exactly one product title; review before rebuilding');
+-const built=original.replace('id: "@deepseek-ai/dsh-client-ui-layout"','id: "@naumi/dsh-ui-layout"').replace(marker,'const productTitle = "Naumi · 企业协作";');
++const built=original.replace('id: "@deepseek-ai/dsh-client-ui-layout"','id: "@naumi/dsh-ui-layout"').replace(marker,'const productTitle = "Naumi";');
+ const hash=x=>crypto.createHash('sha256').update(x).digest('hex');
+ fs.writeFileSync(path.join(root,'plugins/naumi-ui-layout/client.js'),built);
+ fs.writeFileSync(path.join(root,'plugins/naumi-ui-layout/UPSTREAM.json'),JSON.stringify({package:'@deepseek-ai/dsh-client-ui-layout',version:'0.2.2-rc.1',originalSHA256:hash(original),modifiedSHA256:hash(built),substitutions:['browser module registration id','product title constant']},null,2)+'\n');
++buildProductCopyKeys();
++const productVersion=JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json'),'utf8')).version;
++fs.writeFileSync(path.join(root,'plugins/naumi-enterprise/product-version.js'),'export const PRODUCT_VERSION='+JSON.stringify(productVersion)+';\n');
+ console.log('NAUMI_LAYOUT substitutions=2 upstream_unchanged=1');
+diff --git a/scripts/ccswitch-scan.py b/scripts/ccswitch-scan.py
+index f1763e7..e259a0d 100644
+--- a/scripts/ccswitch-scan.py
++++ b/scripts/ccswitch-scan.py
+@@ -13,7 +13,7 @@ def save(path, value):
+     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding='utf8')
+ 
+ def request(url, key, protocol, payload=None, timeout=25):
+-    headers = {'User-Agent': 'DeepSeek-Harness-Local/CCSwitch-Import', 'Content-Type': 'application/json'}
++    headers = {'User-Agent': 'Naumi/CCSwitch-Import', 'Content-Type': 'application/json'}
+     if protocol == 'anthropic-messages':
+         headers.update({'x-api-key': key, 'Authorization': 'Bearer ' + key, 'anthropic-version': '2023-06-01'})
+     else:
+diff --git a/scripts/deploy-bot-communication.ps1 b/scripts/deploy-bot-communication.ps1
+index 0cbde3c..ccc1bf0 100644
+--- a/scripts/deploy-bot-communication.ps1
++++ b/scripts/deploy-bot-communication.ps1
+@@ -12,8 +12,8 @@ foreach($item in $manifest){
+ }
+ & node (Join-Path $PSScriptRoot 'check-bot-runtime.mjs') $RuntimeRoot '2'
+ if($LASTEXITCODE -ne 0){throw 'RUNNING_TASKS_OR_UNVERIFIED_RUNTIME'}
+-& (Join-Path $RuntimeRoot 'Stop-DeepSeek.ps1')
++& (Join-Path $RuntimeRoot 'Stop-Naumi.ps1')
+ foreach($item in $manifest){Copy-Item -LiteralPath (Join-Path $root "plugins/naumi-enterprise/$($item.path)") -Destination (Join-Path $target $item.path)}
+-& (Join-Path $RuntimeRoot 'Start-DeepSeek.ps1')
++& (Join-Path $RuntimeRoot 'Start-Naumi.ps1')
+ foreach($item in $manifest){if((Get-FileHash -LiteralPath (Join-Path $target $item.path)).Hash.ToLowerInvariant() -ne $item.modifiedSHA256){throw 'DEPLOY_HASH_MISMATCH'}}
+ Write-Output 'DEPLOY bot_modules=6 hashes=PASS other_source_files=UNCHANGED'
+diff --git a/scripts/deploy-bot-lifecycle.ps1 b/scripts/deploy-bot-lifecycle.ps1
+index f11e98c..9b532ca 100644
+--- a/scripts/deploy-bot-lifecycle.ps1
++++ b/scripts/deploy-bot-lifecycle.ps1
+@@ -15,9 +15,9 @@ if($current -ne $manifest.originalSHA256 -and $current -ne $manifest.modifiedSHA
+ if($LASTEXITCODE -ne 0){throw 'RUNTIME_NOT_IDLE_OR_UNVERIFIED'}
+ if($current -ne $manifest.modifiedSHA256){
+   Copy-Item -LiteralPath $target -Destination (Join-Path $evidence 'original/runtime-bots.js')
+-  & (Join-Path $runtime 'Stop-DeepSeek.ps1')
++  & (Join-Path $runtime 'Stop-Naumi.ps1')
+   Copy-Item -LiteralPath $modified -Destination $target
+-  & (Join-Path $runtime 'Start-DeepSeek.ps1')
++  & (Join-Path $runtime 'Start-Naumi.ps1')
+ }
+ & node (Join-Path $PSScriptRoot 'check-bot-runtime.mjs') $runtime '2'
+ if($LASTEXITCODE -ne 0){throw 'RUNTIME_POSTCHECK_FAILED'}
+diff --git a/scripts/deploy-employee-center.ps1 b/scripts/deploy-employee-center.ps1
+index d2d8c54..fd5b4d2 100644
+--- a/scripts/deploy-employee-center.ps1
++++ b/scripts/deploy-employee-center.ps1
+@@ -4,8 +4,8 @@ if(!$target.StartsWith($runtime+[IO.Path]::DirectorySeparatorChar,[StringCompari
+ $manifest=Get-Content -Raw -LiteralPath (Join-Path $e 'hashes.json')|ConvertFrom-Json
+ foreach($m in $manifest){$source=Join-Path $root "plugins/naumi-enterprise/$($m.path)";$file=Join-Path $target $m.path;if((Get-FileHash -LiteralPath $source).Hash.ToLowerInvariant() -ne $m.modifiedSHA256){throw 'SOURCE_CHANGED'};if($m.originalSHA256){if(!(Test-Path -LiteralPath $file) -or (Get-FileHash -LiteralPath $file).Hash.ToLowerInvariant() -ne $m.originalSHA256){throw "RUNTIME_CHANGED $($m.path)"}}elseif(Test-Path -LiteralPath $file){throw 'NEW_FILE_ALREADY_EXISTS'}}
+ & node (Join-Path $PSScriptRoot 'check-bot-runtime.mjs') $runtime '2';if($LASTEXITCODE -ne 0){throw 'RUNTIME_NOT_IDLE_OR_UNVERIFIED'}
+-& (Join-Path $runtime 'Stop-DeepSeek.ps1')
++& (Join-Path $runtime 'Stop-Naumi.ps1')
+ foreach($m in $manifest){Copy-Item -LiteralPath (Join-Path $root "plugins/naumi-enterprise/$($m.path)") -Destination (Join-Path $target $m.path)}
+-& (Join-Path $runtime 'Start-DeepSeek.ps1')
++& (Join-Path $runtime 'Start-Naumi.ps1')
+ foreach($m in $manifest){if((Get-FileHash -LiteralPath (Join-Path $target $m.path)).Hash.ToLowerInvariant() -ne $m.modifiedSHA256){throw 'DEPLOY_HASH_MISMATCH'}}
+ Write-Output 'DEPLOY employee_center=1 work_api=1 files=10 hashes=PASS'
+diff --git a/scripts/deploy-employee-foundation.ps1 b/scripts/deploy-employee-foundation.ps1
+index 4702973..e59b959 100644
+--- a/scripts/deploy-employee-foundation.ps1
++++ b/scripts/deploy-employee-foundation.ps1
+@@ -15,8 +15,8 @@ foreach($item in $manifest){
+ }
+ & node (Join-Path $PSScriptRoot 'check-bot-runtime.mjs') $runtime '2'
+ if($LASTEXITCODE -ne 0){throw 'RUNTIME_NOT_IDLE_OR_UNVERIFIED'}
+-& (Join-Path $runtime 'Stop-DeepSeek.ps1')
++& (Join-Path $runtime 'Stop-Naumi.ps1')
+ foreach($item in $manifest){Copy-Item -LiteralPath (Join-Path $root "plugins/naumi-enterprise/$($item.path)") -Destination (Join-Path $target $item.path)}
+-& (Join-Path $runtime 'Start-DeepSeek.ps1')
++& (Join-Path $runtime 'Start-Naumi.ps1')
+ foreach($item in $manifest){if((Get-FileHash -LiteralPath (Join-Path $target $item.path)).Hash.ToLowerInvariant() -ne $item.modifiedSHA256){throw 'DEPLOY_HASH_MISMATCH'}}
+ Write-Output 'DEPLOY employee_modules=5 hashes=PASS unrelated_files=UNCHANGED'
+diff --git a/scripts/deploy-employee-sync.ps1 b/scripts/deploy-employee-sync.ps1
+index 145b7c9..66dfedb 100644
+--- a/scripts/deploy-employee-sync.ps1
++++ b/scripts/deploy-employee-sync.ps1
+@@ -9,9 +9,9 @@ foreach($m in $manifest){$relative=$m.path.Replace('plugins/naumi-enterprise/','
+  if((Get-FileHash -LiteralPath $src).Hash.ToLowerInvariant() -ne $m.modifiedSHA256){throw 'SOURCE_CHANGED'}
+  if(Test-Path -LiteralPath $file){$actual=(Get-FileHash -LiteralPath $file).Hash.ToLowerInvariant();$old=@($prior|Where-Object key -eq $m.key);if($actual -ne $m.originalSHA256 -and ($old.Count -ne 1 -or $actual -ne $old[0].modifiedSHA256)){throw "RUNTIME_CHANGED $relative"}}elseif($m.originalSHA256){throw "RUNTIME_MISSING $relative"}}
+ & node (Join-Path $PSScriptRoot 'check-bot-runtime.mjs') $runtime '2';if($LASTEXITCODE -ne 0){throw 'RUNTIME_NOT_IDLE'}
+-& (Join-Path $runtime 'Stop-DeepSeek.ps1')
++& (Join-Path $runtime 'Stop-Naumi.ps1')
+ foreach($m in $manifest){$relative=$m.path.Replace('plugins/naumi-enterprise/','');Copy-Item -LiteralPath (Join-Path $source $m.path) -Destination (Join-Path $target $relative)}
+-& (Join-Path $runtime 'Start-DeepSeek.ps1')
++& (Join-Path $runtime 'Start-Naumi.ps1')
+ $changed=@($manifest|ForEach-Object{(Join-Path $target $_.path.Replace('plugins/naumi-enterprise/',''))});$unrelated=@()
+ foreach($file in $before.Keys){if($file -notin $changed -and (Get-FileHash -LiteralPath $file).Hash -ne $before[$file]){$unrelated+=$file}}
+ if($unrelated.Count){throw 'UNRELATED_RUNTIME_CHANGE'}
+diff --git a/scripts/deploy-product-identity.mjs b/scripts/deploy-product-identity.mjs
+new file mode 100644
+index 0000000..eb412c9
+--- /dev/null
++++ b/scripts/deploy-product-identity.mjs
+@@ -0,0 +1,24 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';
++const root=process.cwd(),runtime=path.resolve(process.argv[2]??root),base=path.join(runtime,'.dsh/profiles/web/node_modules/@naumi'),e=path.join(root,'evidence/product-identity'),sha=b=>createHash('sha256').update(b).digest('hex'),norm=p=>fs.readFileSync(p,'utf8').replaceAll('\r\n','\n');
++assert.equal(execFileSync('git',['branch','--show-current'],{encoding:'utf8'}).trim(),'main');assert.equal(execFileSync('git',['status','--porcelain'],{encoding:'utf8'}),'','DIRTY_MAIN');assert(fs.realpathSync(base).startsWith(fs.realpathSync(runtime)+path.sep));
++const files=['dsh-enterprise/host.js','dsh-enterprise/client.js','dsh-enterprise/package.json','dsh-enterprise/product-version.js','dsh-enterprise/assets/product-identity.js','dsh-enterprise/assets/product-copy-keys.js','dsh-enterprise/assets/product-identity.css','dsh-ui-layout/client.js','dsh-ui-layout/UPSTREAM.json'],backup=path.join(runtime,'runtime','product-identity-load-'+randomUUID());fs.mkdirSync(backup,{recursive:true});
++const inventory=()=>{const result={};for(const dir of ['dsh-enterprise','dsh-ui-layout'])for(const f of fs.readdirSync(path.join(base,dir),{recursive:true})){const p=path.join(base,dir,f);if(fs.statSync(p).isFile())result[(dir+'/'+f).replaceAll('\\','/')]=sha(fs.readFileSync(p));}return result;};const before=inventory(),rows=[];
++for(const file of files){const dest=path.join(base,file),source=path.join(root,'plugins',file.replace('dsh-enterprise','naumi-enterprise').replace('dsh-ui-layout','naumi-ui-layout')),original=fs.existsSync(dest)?fs.readFileSync(dest):null;let next=fs.readFileSync(source);
++ if(original){const b=path.join(backup,'before',file);fs.mkdirSync(path.dirname(b),{recursive:true});fs.writeFileSync(b,original);}
++ if(file==='dsh-enterprise/host.js'){
++  let actual=norm(dest);assert(!actual.includes('PRODUCT_VERSION'));actual="import {PRODUCT_VERSION} from './product-version.js';\n"+actual;
++  const marker="  assets.set('model-connections.js'";assert(actual.includes(marker));actual=actual.replace(marker,"  assets.set('product-copy-keys.js','text/javascript; charset=utf-8');\n  assets.set('product-identity.js','text/javascript; charset=utf-8');\n  assets.set('product-identity.css','text/css; charset=utf-8');\n"+marker);
++  const value="version:'0.3.0'";assert(actual.includes(value));actual=actual.replace(value,value+",product:'Naumi',productVersion:PRODUCT_VERSION");const css='<link rel="stylesheet" href="/naumi/assets/style.css">';assert(actual.includes(css));actual=actual.replace(css,css+'<link rel="stylesheet" href="/naumi/assets/product-identity.css">');assert(actual.includes('<title>Naumi · 企业协作</title>'));actual=actual.replace('<title>Naumi · 企业协作</title>','<title>Naumi</title>');next=Buffer.from(actual);
++ }
++ if(file==='dsh-enterprise/client.js'){
++  let actual=norm(dest);assert(!actual.includes("import('/naumi/assets/product-identity.js')"));const marker='function installNaumiContextUI(ctx,React,createPortal,Icon){';assert(actual.includes(marker));const updated=norm(source),start=updated.indexOf(marker)+marker.length,end=updated.indexOf("  ctx.effect(()=>{",updated.indexOf("import('/naumi/assets/product-identity.js')"));assert(end>start);next=Buffer.from(actual.replace(marker,marker+updated.slice(start,end).trimEnd()+'\n'));
++ }
++ if(file==='dsh-enterprise/package.json'){const p=JSON.parse(original);assert(p.files.includes('model-connections.js'));assert(p.files.includes('bot-deliverables.js'));assert(!p.files.includes('product-version.js'));p.files.push('product-version.js');next=Buffer.from(JSON.stringify(p,null,2)+'\n');}
++ if(file==='dsh-ui-layout/client.js')assert.equal(norm(dest).replace('const productTitle = "Naumi · 企业协作";','const productTitle = "Naumi";'),norm(source),'UNRELATED_LAYOUT_CHANGE');
++ const p=path.join(backup,'after',file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,next);rows.push({file,originalSHA256:original?sha(original):null,deployedSHA256:sha(next)});
++}
++function shell(file){const r=spawnSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-File',path.join(runtime,file)],{encoding:'utf8',windowsHide:true,timeout:150000});process.stdout.write(r.stdout??'');assert.equal(r.status,0,r.stderr);}
++execFileSync(process.execPath,[path.join(root,'scripts/check-bot-runtime.mjs'),runtime,'2'],{stdio:'inherit'});let complete=false;
++try{shell('Stop-Naumi.ps1');for(const r of rows)fs.copyFileSync(path.join(backup,'after',r.file),path.join(base,r.file));shell('Start-Naumi.ps1');const after=inventory();for(const r of rows)assert.equal(after[r.file],r.deployedSHA256);for(const[file,h]of Object.entries(before))if(!files.includes(file))assert.equal(after[file],h,'UNRELATED_FILE_CHANGED '+file);complete=true;
++ fs.writeFileSync(e+'/DEPLOYMENT.json',JSON.stringify({status:'PASS',mainCommit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),files:rows,unrelatedFilesUnchanged:Object.keys(before).filter(f=>!files.includes(f)).length,unrelatedChanged:0,packageDeltaOnly:true,modelConfigurationUntouched:true,backup},null,2)+'\n');console.log('DEPLOY product_identity=1 files=9 unrelated_changed=0 package_delta=1 model_config=untouched');
++}finally{if(!complete){try{shell('Stop-Naumi.ps1');}catch{}for(const r of rows){const p=path.join(base,r.file);if(r.originalSHA256)fs.copyFileSync(path.join(backup,'before',r.file),p);else if(fs.existsSync(p))fs.unlinkSync(p);}shell('Start-Naumi.ps1');console.log('DEPLOY_FAILED original_runtime_restored=1');}}
+diff --git a/scripts/install-naumi-shortcut.ps1 b/scripts/install-naumi-shortcut.ps1
+new file mode 100644
+index 0000000..6b504d3
+--- /dev/null
++++ b/scripts/install-naumi-shortcut.ps1
+@@ -0,0 +1,38 @@
++param([string]$Root=(Split-Path $PSScriptRoot -Parent),[string]$DesktopPath=[Environment]::GetFolderPath('Desktop'))
++$ErrorActionPreference='Stop'
++$root=[IO.Path]::GetFullPath($Root)
++$desktop=[IO.Path]::GetFullPath($DesktopPath)
++foreach($p in @('Start-NaumiDesktop.ps1','desktop/app/assets/naumi.ico')){if(!(Test-Path -LiteralPath (Join-Path $root $p))){throw 'NAUMI_SHORTCUT_SOURCE_MISSING'}}
++if(!(Test-Path -LiteralPath $desktop -PathType Container)){throw 'NAUMI_DESKTOP_MISSING'}
++$shell=New-Object -ComObject WScript.Shell
++$recognized=@()
++foreach($name in @('DeepSeek Harness.lnk','Naumi 企业协作.lnk','Naumi.lnk')){
++ $p=Join-Path $desktop $name
++ if(!(Test-Path -LiteralPath $p)){continue}
++ $link=$shell.CreateShortcut($p)
++ $ours=$link.Arguments.Contains('"'+(Join-Path $root 'Start-Naumi.ps1')+'"') -or $link.Arguments.Contains('"'+(Join-Path $root 'Start-NaumiDesktop.ps1')+'"')
++ $legacy=$name -eq 'DeepSeek Harness.lnk' -and $link.WorkingDirectory -eq (Join-Path (Split-Path $root -Parent) 'deepseek-harness-local') -and $link.Arguments.Contains('Start-DeepSeek.ps1')
++ if($ours -or $legacy){$recognized+=$p}elseif($name -eq 'Naumi.lnk'){throw 'NAUMI_SHORTCUT_ALREADY_OWNED'}
++}
++$backup=Join-Path $root ('runtime/product-shortcut-'+[guid]::NewGuid().ToString('N'))
++New-Item -ItemType Directory -Path $backup | Out-Null
++$hashes=@()
++foreach($p in $recognized){Copy-Item -LiteralPath $p -Destination $backup;$hashes+=@{name=(Split-Path $p -Leaf);sha256=(Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash}}
++$target=Join-Path $desktop 'Naumi.lnk'
++$fresh=$shell.CreateShortcut($target)
++$fresh.TargetPath=(Get-Command pwsh.exe).Source
++$fresh.Arguments='-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "'+(Join-Path $root 'Start-NaumiDesktop.ps1')+'"'
++$fresh.WorkingDirectory=$root
++$fresh.IconLocation=(Join-Path $root 'desktop/app/assets/naumi.ico')+',0'
++$fresh.Description='Naumi'
++$fresh.Save()
++$check=$shell.CreateShortcut($target)
++if($check.WorkingDirectory -ne $root -or !$check.Arguments.Contains('Start-NaumiDesktop.ps1') -or !$check.IconLocation.Contains('naumi.ico')){throw 'NAUMI_SHORTCUT_VERIFY_FAILED'}
++foreach($p in $recognized){if($p -ne $target){Remove-Item -LiteralPath $p}}
++# Restore only a second copy to prove original shortcut bytes are recoverable.
++$copy=Join-Path $backup 'rollback-copy';New-Item -ItemType Directory -Path $copy | Out-Null
++Copy-Item -LiteralPath $target -Destination $copy
++Remove-Item -LiteralPath (Join-Path $copy 'Naumi.lnk')
++foreach($r in $hashes){Copy-Item -LiteralPath (Join-Path $backup $r.name) -Destination $copy;if((Get-FileHash -LiteralPath (Join-Path $copy $r.name) -Algorithm SHA256).Hash -ne $r.sha256){throw 'NAUMI_SHORTCUT_ROLLBACK_HASH_FAILED'}}
++@{status='PASS';shortcut=$target;originals=$hashes;backup=$backup;rollbackCopy='PASS';modifiedShortcutRetained=$true} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $backup 'receipt.json') -Encoding utf8
++Write-Output "NAUMI_SHORTCUT canonical=1 legacy_removed=$(@($recognized | Where-Object {$_ -ne $target}).Count) logo=1 rollback_copy=PASS"
+diff --git a/scripts/product-identity-evidence.mjs b/scripts/product-identity-evidence.mjs
+new file mode 100644
+index 0000000..8606a4f
+--- /dev/null
++++ b/scripts/product-identity-evidence.mjs
+@@ -0,0 +1,35 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';
++const root=process.cwd(),e=path.join(root,'evidence/product-identity'),baseline='e089a7a7d465062e42bda2b4192a05918665780b',sha=b=>createHash('sha256').update(b).digest('hex');
++const files=['.gitattributes', 'README.md', 'DEPLOYMENT.md', 'Start-Naumi.ps1', 'plugins/naumi-enterprise/host.js', 'plugins/naumi-enterprise/client.js', 'plugins/naumi-enterprise/package.json', 'plugins/naumi-enterprise/product-version.js', 'plugins/naumi-enterprise/assets/product-identity.js', 'plugins/naumi-enterprise/assets/product-copy-keys.js', 'plugins/naumi-enterprise/assets/product-identity.css', 'plugins/naumi-ui-layout/client.js', 'plugins/naumi-ui-layout/UPSTREAM.json', 'scripts/build-naumi-layout.mjs', 'scripts/audit-product-identity.mjs', 'scripts/verify-http.mjs', 'scripts/ccswitch-scan.py', 'scripts/deploy-bot-communication.ps1', 'scripts/deploy-bot-lifecycle.ps1', 'scripts/deploy-employee-center.ps1', 'scripts/deploy-employee-foundation.ps1', 'scripts/deploy-employee-sync.ps1', 'scripts/install-naumi-shortcut.ps1', 'scripts/verify-product-identity.mjs', 'scripts/deploy-product-identity.mjs', 'scripts/product-identity-evidence.mjs', 'tests/naumi-enterprise.test.mjs', 'tests/naumi-product-identity.test.mjs', 'docs/implementation/PRODUCT_IDENTITY.md'];
++const mode=process.argv[2];
++if(mode==='prepare'){
++ fs.mkdirSync(e,{recursive:true});const manifest=[];
++ for(const file of files){const bytes=fs.readFileSync(path.join(root,file)),modified=path.join(e,'modified',file);fs.mkdirSync(path.dirname(modified),{recursive:true});fs.writeFileSync(modified,bytes);let old=null;
++  try{old=execFileSync('git',['show',baseline+':'+file],{stdio:['ignore','pipe','ignore']});}catch{}
++  if(old){const target=path.join(e,'original',file);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,old);}
++  manifest.push({file,originalSHA256:old?sha(old):null,modifiedSHA256:sha(bytes)});
++ }
++ fs.writeFileSync(e+'/hashes.json',JSON.stringify(manifest,null,2)+'\n');
++ // The index contains this task's explicit paths only; no credentials/configuration directories.
++ fs.writeFileSync(e+'/DIFF_FILE.patch',execFileSync('git',['diff','--cached','--binary',baseline,'--',...files]));
++ execFileSync('python',['-c',`import pathlib,zipfile; p=pathlib.Path(r'${e}'); z=zipfile.ZipFile(p/'MODIFIED_FILE.zip','w',zipfile.ZIP_DEFLATED); [z.write(f,f.relative_to(p).as_posix()) for d in ['original','modified'] for f in sorted((p/d).rglob('*')) if f.is_file()]; z.write(p/'hashes.json','hashes.json'); z.close()`]);
++ console.log('ARTIFACTS originals='+manifest.filter(x=>x.originalSHA256).length+' modified='+manifest.length+' hashes=PASS');
++}else if(mode==='rollback'){
++ assert(process.argv.includes('--test'),'COPY_TEST_REQUIRED');const manifest=JSON.parse(fs.readFileSync(e+'/hashes.json')),temp=path.join(root,'runtime','custom-model-rollback-'+randomUUID());fs.mkdirSync(temp,{recursive:true});const archive=path.join(temp,'baseline.tar'),copy=path.join(temp,'copy');fs.mkdirSync(copy);fs.writeFileSync(archive,execFileSync('git',['archive','HEAD'],{maxBuffer:100*1024*1024}));execFileSync(process.platform==='win32'?'C:/Windows/System32/tar.exe':'tar',['-xf',archive,'-C',copy]);
++ for(const m of manifest){const p=path.join(copy,m.file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.copyFileSync(path.join(e,'modified',m.file),p);assert.equal(sha(fs.readFileSync(p)),m.modifiedSHA256);}
++ // Apply the rollback to a real modified source copy, never the active checkout/runtime.
++ for(const m of manifest){const p=path.join(copy,m.file);if(m.originalSHA256){fs.copyFileSync(path.join(e,'original',m.file),p);assert.equal(sha(fs.readFileSync(p)),m.originalSHA256);}else fs.unlinkSync(p);}
++ fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');fs.symlinkSync(path.join(root,'desktop/node_modules'),path.join(copy,'desktop/node_modules'),'junction');
++ const tests=spawnSync(process.execPath,['--test','tests/*.test.mjs','desktop/tests/*.test.cjs'],{cwd:copy,encoding:'utf8',windowsHide:true,timeout:180000,maxBuffer:10*1024*1024});fs.writeFileSync(e+'/ROLLBACK_TESTS.log',(tests.stdout??'')+(tests.stderr??''));assert.equal(tests.status,0,'ROLLBACK_TESTS_FAILED');const count=(tests.stdout.match(/(?:ℹ |# )tests (\d+)/)??[])[1];assert(count);
++ const before=fs.readFileSync(path.join(copy,'plugins/naumi-enterprise/cordis.patch.yml'),'utf8');assert(before.includes('- id: deepseek-account'));assert(!fs.existsSync(path.join(copy,'plugins/naumi-enterprise/assets/product-identity.js')));assert(fs.readFileSync(path.join(copy,'plugins/naumi-ui-layout/client.js'),'utf8').includes('const productTitle = "Naumi · 企业协作";'));assert(fs.existsSync(path.join(copy,'plugins/naumi-enterprise/model-connections.js')));assert.equal(sha(fs.readFileSync(path.join(copy,'plugins/naumi-enterprise/bot-deliverables.js'))),sha(fs.readFileSync(path.join(root,'plugins/naumi-enterprise/bot-deliverables.js'))));
++ for(const m of manifest)assert.equal(sha(fs.readFileSync(path.join(root,m.file))),m.modifiedSHA256,'ACTIVE_SOURCE_CHANGED');
++ const output=`ROLLBACK_COPY restored=${manifest.filter(x=>x.originalSHA256).length} removed=${manifest.filter(x=>!x.originalSHA256).length} tests=${count} hashes=PASS\nROLLBACK_BEHAVIOR previous_branding=restored custom_model_settings=retained file_deliverables=retained\nROLLBACK modified_source=retained live_data=untouched`;
++ fs.writeFileSync(e+'/ROLLBACK_RESULT.json',JSON.stringify({status:'PASS',tests:Number(count),exit:0,output},null,2)+'\n');console.log(output);
++}else if(mode==='reopen'){
++ const manifest=JSON.parse(fs.readFileSync(e+'/hashes.json'));
++ for(const m of manifest){assert.equal(sha(fs.readFileSync(path.join(root,m.file))),m.modifiedSHA256);assert.equal(sha(fs.readFileSync(path.join(e,'modified',m.file))),m.modifiedSHA256);if(m.originalSHA256)assert.equal(sha(fs.readFileSync(path.join(e,'original',m.file))),m.originalSHA256);}
++ execFileSync('python',['-c',`import pathlib,zipfile,json,hashlib; p=pathlib.Path(r'${e}'); z=zipfile.ZipFile(p/'MODIFIED_FILE.zip'); m=json.loads(z.read('hashes.json')); assert m==json.loads((p/'hashes.json').read_text()); [(lambda b,h: (_ for _ in ()).throw(AssertionError()) if hashlib.sha256(b).hexdigest()!=h else None)(z.read('modified/'+r['file']),r['modifiedSHA256']) for r in m]; assert z.testzip() is None`]);
++ const verification=fs.readFileSync(e+'/VERIFICATION.txt','utf8');for(const name of ['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh']){fs.readFileSync(e+'/'+name);assert(verification.includes('E:\\Workspace\\naumi-desktop\\evidence\\product-identity\\'+name));}
++ assert(fs.readFileSync(e+'/DIFF_FILE.patch','utf8').includes('product-identity.js'));execFileSync('D:/DEV/Git/bin/bash.exe',['-n',e+'/ROLLBACK.sh']);assert.equal(JSON.parse(fs.readFileSync(e+'/ROLLBACK_RESULT.json')).status,'PASS');
++ console.log('REOPEN files='+manifest.length+' zip=PASS hashes=PASS patch=PASS verification=PASS rollback=PASS');
++}else throw Error('EXPECTED prepare|rollback|reopen');
+diff --git a/scripts/verify-http.mjs b/scripts/verify-http.mjs
+index 0d7e44a..c7366a0 100644
+--- a/scripts/verify-http.mjs
++++ b/scripts/verify-http.mjs
+@@ -11,7 +11,8 @@ assert.ok(cookie);
+ const page = await fetch(base, { headers: { cookie } });
+ assert.equal(page.status, 200);
+ const html = await page.text();
+-assert.match(html, /DeepSeek|deepseek/);
++assert.match(html, /<title>Naumi<\/title>/);
++assert.match(html, /__NAUMI__/);
+ assert.match(html, /const preference = "light"/);
+ const assets = [...new Set([...html.matchAll(/(?:src|href)="([^"]+\.(?:js|css)(?:\?[^"]*)?)"/g)].map(match => match[1]))];
+ assert.ok(assets.length, 'No built JS/CSS assets');
+diff --git a/scripts/verify-product-identity.mjs b/scripts/verify-product-identity.mjs
+new file mode 100644
+index 0000000..2597053
+--- /dev/null
++++ b/scripts/verify-product-identity.mjs
+@@ -0,0 +1,74 @@
++import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import assert from 'node:assert/strict';import {randomUUID,createHash} from 'node:crypto';import {spawn} from 'node:child_process';import {stringify,parse} from 'yaml';import {chromium} from '../desktop/node_modules/playwright/index.mjs';
++const root=process.cwd(),e=path.join(root,'evidence/product-identity');fs.mkdirSync(e,{recursive:true});
++const temporary=path.join(root,'runtime','custom-model-fixture-'+randomUUID()),home=path.join(temporary,'home'),profile=path.join(home,'profiles/web');fs.mkdirSync(path.join(profile,'node_modules/@naumi'),{recursive:true});
++const sha=b=>createHash('sha256').update(b).digest('hex');
++for(const[name,folder]of [['dsh-enterprise','naumi-enterprise'],['dsh-ui-layout','naumi-ui-layout'],['dsh-sidebar-browser','naumi-sidebar-browser']])fs.symlinkSync(path.join(root,'plugins',folder),path.join(profile,'node_modules/@naumi',name),'junction');
++fs.symlinkSync(path.join(root,'node_modules/@deepseek-ai'),path.join(profile,'node_modules/@deepseek-ai'),'junction');
++fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'naumi-custom-fixture',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}}));
++fs.writeFileSync(path.join(home,'cordis.patch.yml'),stringify([{id:'ui-theme',config:{preference:'light'}},{id:'session-log-deepseek',disabled:true}]));
++const upstreamRequests=[];let holdResponse=false;const pendingResponses=[];
++const upstream=http.createServer(async(req,res)=>{let body='';for await(const b of req)body+=b;upstreamRequests.push({path:req.url,authorization:req.headers.authorization,body:body?JSON.parse(body):null});
++ if(req.url==='/v1/chat/completions'){res.writeHead(200,{'Content-Type':'text/event-stream'});const finish=()=>res.end('data: '+JSON.stringify({id:'fixture-chat',object:'chat.completion.chunk',created:1,model:'fixture-model',choices:[{index:0,delta:{role:'assistant',content:'OK'},finish_reason:null}]})+'\n\ndata: '+JSON.stringify({id:'fixture-chat',object:'chat.completion.chunk',created:1,model:'fixture-model',choices:[{index:0,delta:{},finish_reason:'stop'}],usage:{prompt_tokens:1,completion_tokens:1,total_tokens:2}})+'\n\ndata: [DONE]\n\n');if(holdResponse){pendingResponses.push(finish);res.flushHeaders();}else finish();return;}
++ res.writeHead(404).end();
++});await new Promise(r=>upstream.listen(0,'127.0.0.1',r));const apiURL='http://127.0.0.1:'+upstream.address().port+'/v1';
++const originalProfile={displayName:'原有分组',api:'openai-completions',baseURL:apiURL,apiKeyEnv:'NAUMI_FIXTURE_KEY',models:[{id:'fixture-model',name:'原有模型',contextWindow:128000,maxTokens:1024,reasoningEfforts:false}]};
++fs.writeFileSync(path.join(profile,'cordis.patch.yml'),stringify([{id:'ui-settings-general',config:{welcomeNoticeVersion:'2026-09-28.1'}},{id:'llm-pi-ai',config:{providers:{existing:originalProfile}}}]));
++const socket=http.createServer();await new Promise(r=>socket.listen(0,'127.0.0.1',r));const port=socket.address().port;await new Promise(r=>socket.close(r));const base='http://127.0.0.1:'+port;
++const env={...process.env,DSH_HOME:home,DSH_TELEMETRY_MODE:'DISABLED',NAUMI_FIXTURE_KEY:'original-fixture-key'};
++let output='',browser;const child=spawn(process.execPath,[path.join(root,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'web','--host','127.0.0.1','--port',String(port),'--no-open'],{cwd:root,env,windowsHide:true});child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);
++const checks=[];function check(name,condition){assert(condition,name);checks.push(name);console.log('AUTH_PASS '+name);}
++try{
++ let launch;for(let i=0;i<180;i++){launch=output.match(new RegExp('http://127\\.0\\.0\\.1:'+port+'/?\\?token=[A-Za-z0-9_~.%-]+'))?.[0];if(launch)break;if(child.exitCode!==null)throw Error('FIXTURE_BOOT_FAILED '+output.replace(/token=[A-Za-z0-9_~.%-]+/g,'token=REDACTED').slice(-4000));await new Promise(r=>setTimeout(r,500));}assert(launch,'FIXTURE_BOOT_TIMEOUT '+output.slice(-1500));
++ const exchange=await fetch(launch,{redirect:'manual'}),cookie=exchange.headers.getSetCookie().map(v=>v.split(';')[0]).join('; ');assert(cookie);const headers={cookie,'Content-Type':'application/json','x-naumi-model-connections':'1',origin:base};
++ async function call(body){const r=await fetch(base+'/naumi/model-connections',{headers,...body?{method:'POST',body:JSON.stringify(body)}:{}});return {status:r.status,value:await r.json()};}
++ async function rpc(method,args={}){const r=await fetch(base+'/api/'+method,{method:'POST',headers,body:JSON.stringify({type:'client-request',rpcId:randomUUID(),method,payload:{args}})});const t=await r.text();try{return JSON.parse(t);}catch{return {http:r.status};}}
++ let result=await call();check('actual_host_owner_http',result.status===200&&result.value.groups.length===1);const before=result.value;
++ check('existing_group_metadata_preserved',before.groups[0].id==='existing'&&before.groups[0].models[0].name==='原有模型'&&before.groups[0].configured);
++ const account=await rpc('account/watch',{});check('official_account_remote_unmounted',!account.result?.ok);
++ const html=await (await fetch(base,{headers})).text();check('account_and_official_models_not_in_boot_roster',!html.includes('@deepseek-ai/dsh-client-ui-settings-account')&&!html.includes('@deepseek-ai/dsh-client-ui-settings-models'));
++ result=await call({action:'save',id:'custom-team',expectedRevision:before.revision,displayName:'团队连接',baseURL:apiURL,api:'openai-completions',apiKey:'custom-fixture-key',models:[{id:'fixture-model'}]});check('actual_settings_save_live',result.status===200&&result.value.groups.length===2);
++ let persisted=parse(fs.readFileSync(path.join(profile,'cordis.patch.yml'),'utf8')).find(x=>x.id==='llm-pi-ai').config.providers;
++ check('existing_group_bytes_unchanged',sha(JSON.stringify(persisted.existing))===sha(JSON.stringify(originalProfile)));
++ check('key_stored_outside_profile',!fs.readFileSync(path.join(profile,'cordis.patch.yml'),'utf8').includes('custom-fixture-key')&&fs.readFileSync(path.join(home,'.credentials.yaml'),'utf8').includes('custom-fixture-key'));
++ check('key_never_returned',!JSON.stringify(result).includes('custom-fixture-key'));
++ const stale=await call({action:'remove',id:'existing',expectedRevision:before.revision});check('actual_revision_conflict',stale.status===409);
++ // Real headless Harness pipeline uses the same profile/credentials and new custom adapter route.
++ const overlay=path.join(temporary,'probe.yml');fs.writeFileSync(overlay,stringify([{id:'agent-default-model',config:{provider:'custom-team',model:'fixture-model'}},{id:'credentials',disabled:false}]));
++ // The headless profile needs the same model config and the account-free product bundle.
++ const hp=path.join(home,'profiles/headless');fs.mkdirSync(hp,{recursive:true});fs.writeFileSync(path.join(hp,'package.json'),JSON.stringify({name:'naumi-headless-fixture',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-headless']}}}));fs.symlinkSync(path.join(profile,'node_modules'),path.join(hp,'node_modules'),'junction');fs.writeFileSync(path.join(hp,'cordis.patch.yml'),stringify([{id:'llm-pi-ai',config:{providers:persisted}},...['deepseek-account','llm-deepseek','llm-deepseek-account','session-log-deepseek','web-search-deepseek','web-deepseek-api'].map(id=>({id,disabled:true}))]));
++ const probe=await new Promise(resolve=>{const p=spawn(process.execPath,[path.join(root,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'--profile','headless','--patch',overlay,'Reply exactly OK. Do not use tools.'],{cwd:root,env,windowsHide:true});let text='';p.stdout.on('data',b=>text+=b);p.stderr.on('data',b=>text+=b);const timer=setTimeout(()=>p.kill(),60000);p.on('close',code=>{clearTimeout(timer);resolve({code,text});});});
++ if(probe.code!==0)fs.writeFileSync(path.join(temporary,'failed-probe.log'),probe.text.replaceAll('custom-fixture-key','REDACTED'));
++ check('custom_url_key_real_harness_model_call',probe.code===0&&/\bOK\b/.test(probe.text)&&upstreamRequests.some(r=>r.path==='/v1/chat/completions'&&r.authorization==='Bearer custom-fixture-key'&&r.body.model==='fixture-model'));
++ browser=await chromium.launch({headless:true,channel:'chrome'});const context=await browser.newContext({viewport:{width:1360,height:900},colorScheme:'light'}),page=await context.newPage(),errors=[],outbound=[];page.on('pageerror',e=>errors.push(e.message));
++ await page.route('**/*',route=>{const u=new URL(route.request().url());if(['http:','https:'].includes(u.protocol)&&u.origin!==base){outbound.push(u.hostname);return route.abort();}return route.continue();});
++ await page.goto(launch);await page.waitForFunction(()=>document.body.getAttribute('data-naumi')==='enterprise');
++ // Open native settings with the native launcher. No replacement page or injected React renderer.
++ const settingsButton=page.getByRole('button',{name:/设置|Settings/}).first();await settingsButton.click();
++ const modelsNav=page.getByRole('button',{name:'模型连接',exact:true});await modelsNav.click();const panel=page.locator('.nm-connections');await panel.getByRole('heading',{name:'团队连接',exact:true}).waitFor();
++ check('real_settings_slot_and_light_ui',await panel.isVisible()&&await panel.evaluate(el=>getComputedStyle(el).backgroundColor==='rgb(255, 255, 255)'));
++ check('no_official_login_or_onboarding',await page.getByText(/登录 DeepSeek|DeepSeek 账号|DeepSeek Account|Sign in to DeepSeek/).count()===0);
++ await panel.getByRole('button',{name:'添加连接',exact:true}).click();await panel.getByLabel('分组名称',{exact:true}).fill('界面验证');await panel.getByLabel('API URL',{exact:true}).fill(apiURL);await panel.getByLabel('API Key',{exact:true}).fill('ui-fixture-key');await panel.getByLabel('模型 ID（每行一个）',{exact:true}).fill('fixture-model');await panel.getByRole('button',{name:'保存',exact:true}).click();await panel.getByRole('heading',{name:'界面验证',exact:true}).waitFor();check('ui_save_reaches_actual_settings_and_credentials',(await call()).value.groups.some(g=>g.displayName==='界面验证'&&g.configured));
++ const card=panel.locator('article').filter({has:page.getByRole('heading',{name:'界面验证',exact:true})});await card.getByRole('button',{name:'编辑',exact:true}).click();check('existing_key_not_echoed',await panel.getByLabel('API Key',{exact:true}).inputValue()==='');
++ await panel.getByLabel('分组名称',{exact:true}).fill('保留冲突草稿');const latest=(await call()).value;await call({action:'save',id:'other',expectedRevision:latest.revision,displayName:'并发修改',baseURL:apiURL,api:'openai-responses',apiKey:'parallel-fixture-key',models:[{id:'fixture-model'}]});await panel.getByRole('button',{name:'保存',exact:true}).click();await panel.getByRole('button',{name:'重新载入',exact:true}).waitFor();check('ui_conflict_keeps_draft',await panel.getByLabel('分组名称',{exact:true}).inputValue()==='保留冲突草稿'&&await panel.getByRole('button',{name:'保存',exact:true}).isDisabled());await panel.getByRole('button',{name:'重新载入',exact:true}).click();await panel.getByRole('heading',{name:'并发修改',exact:true}).waitFor();
++ await panel.getByRole('button',{name:'添加连接',exact:true}).click();for(const width of [1360,580,360]){await page.setViewportSize({width,height:900});check('responsive_'+width,await panel.evaluate(el=>el.scrollWidth<=el.clientWidth+2));}
++ await page.screenshot({path:path.join(e,'model-connections-narrow.png')});await page.setViewportSize({width:1360,height:900});await page.screenshot({path:path.join(e,'model-connections.png')});
++
++ check('product_tab_title',await page.title()==='Naumi');
++ await page.getByRole('button',{name:'通用设置',exact:true}).click();
++ await page.getByText('Naumi 0.3.2',{exact:true}).waitFor();check('product_version_not_engine_version',await page.getByText('Naumi 0.3.2',{exact:true}).isVisible());
++ await page.keyboard.press('Escape');
++ const workspaceResult=await rpc('workspace/create',{request:{path:temporary}});assert(workspaceResult.result?.ok,JSON.stringify(workspaceResult));await page.getByRole('button',{name:'AI 协作',exact:true}).click();
++ await page.getByRole('button',{name:'选择工作区',exact:true}).click();await page.getByText(path.basename(temporary),{exact:true}).last().click();
++ const input=page.locator('[contenteditable="true"]').first();await input.waitFor();holdResponse=true;await input.fill('Reply exactly OK. Do not use tools.');await input.press('Enter');
++ const running=page.locator('[data-chat-running]:not([data-holding])').first();await running.waitFor({state:'visible'});
++ await page.waitForFunction(()=>document.querySelector('[data-chat-running]:not([data-holding])')?.textContent.includes('Naumi 正在处理'));
++ check('native_running_copy_is_naumi',(await running.innerText()).includes('Naumi 正在处理'));
++ const icon=running.locator('[class$="_runningIcon"]');check('native_running_logo_is_naumi',await icon.evaluate(el=>getComputedStyle(el).backgroundImage.includes('/naumi/assets/symbol.svg')&&[...el.children].every(c=>getComputedStyle(c).display==='none')));
++ await page.emulateMedia({reducedMotion:'reduce'});check('running_logo_reduced_motion',await icon.evaluate(el=>getComputedStyle(el).animationName==='none'));await page.emulateMedia({reducedMotion:'no-preference'});
++ await page.screenshot({path:path.join(e,'running-naumi.png')});check('visible_product_identity_only',!/DeepSeek|深度求索/.test(await page.locator('body').innerText()));
++ for(let i=0;!pendingResponses.length&&i<200;i++)await new Promise(r=>setTimeout(r,50));assert(pendingResponses.length,'LOCAL_SUPPLIER_REQUEST_NOT_REACHED');holdResponse=false;for(const finish of pendingResponses.splice(0))finish();await running.waitFor({state:'hidden'});
++ check('no_browser_page_errors',errors.length===0);check('no_vendor_network_requests',!outbound.some(h=>/deepseek/.test(h)));
++ fs.writeFileSync(path.join(e,'INTEGRATION.json'),JSON.stringify({checks,passed:checks.length,pageErrors:errors,upstream:'isolated-http-sse-fixture',realSupplierCalls:0,liveEmployeeWrites:0,officialAccountMounted:false},null,2)+'\n');console.log('PRODUCT_IDENTITY_COMPLETE checks='+checks.length+' errors='+errors.length+' supplier_calls=0');
++}catch(error){const page=browser?.contexts()[0]?.pages()[0];if(page){await page.screenshot({path:path.join(temporary,'failed-page.png')});fs.writeFileSync(path.join(temporary,'failed-ui.txt'),(await page.locator('body').innerText())+'\nBUTTONS\n'+(await page.getByRole('button').allTextContents()).join('|'));}throw error;}finally{await browser?.close();child.kill();await new Promise(r=>child.exitCode!==null?r():child.once('close',r));upstream.closeAllConnections();await new Promise(r=>upstream.close(r));
++ // Keep private fixture for diagnostic reproducibility; it is under ignored runtime, never packaged.
++}
+diff --git a/tests/naumi-enterprise.test.mjs b/tests/naumi-enterprise.test.mjs
+index 74d63c8..475b866 100644
+--- a/tests/naumi-enterprise.test.mjs
++++ b/tests/naumi-enterprise.test.mjs
+@@ -47,9 +47,9 @@ test('network failure remains unavailable, without last-user cached data',async(
+   try{const {routes}=harness();const r=await invoke(routes.get('/naumi/workspace'),{cookie:'design_ops_session='+'a'.repeat(32)});assert.equal(r.status,502);assert.equal(r.body,'{"error":"COLLABORATION_UNAVAILABLE"}');}finally{global.fetch=previous;}
+ });
+ test('assets are allowlisted, traversal and upload are not served',async()=>{const {routes}=harness();assert.equal((await invoke(routes.get('/naumi/assets'),{url:'/naumi/assets/../../secret',method:'GET'})).status,404);assert.equal((await invoke(routes.get('/naumi/assets'),{url:'/naumi/assets/symbol.svg',method:'POST'})).status,404);const r=await invoke(routes.get('/naumi/assets'),{url:'/naumi/assets/symbol.svg'});assert.equal(r.status,200);assert.match(r.body.toString(),/<svg/);});
+-test('index title and globals are branded without user or credential fields',()=>{const {ctx,injections}=harness();const rows=[];injections[0](rows);assert.equal(rows[0].name,'__NAUMI__');assert.deepEqual(Object.keys(rows[0].value),['collaborationOrigin','designOrigin','version']);assert.match(ctx.index('<title>DeepSeek Harness</title>'),/Naumi · 企业协作/);});
++test('index title and globals are branded without user or credential fields',()=>{const {ctx,injections}=harness();const rows=[];injections[0](rows);assert.equal(rows[0].name,'__NAUMI__');assert.deepEqual(Object.keys(rows[0].value),['collaborationOrigin','designOrigin','version','product','productVersion']);assert.match(ctx.index('<title>DeepSeek Harness</title>'),/<title>Naumi<\/title>/);});
+ test('branded layout preserves the exact original AppFrame apart from two declared substitutions',()=>{
+   const upstream=fs.readFileSync('node_modules/@deepseek-ai/dsh-client-ui-layout/lib/client.js','utf8');
+   const branded=fs.readFileSync('plugins/naumi-ui-layout/client.js','utf8');
+-  assert.equal(branded.replace('id: "@naumi/dsh-ui-layout"','id: "@deepseek-ai/dsh-client-ui-layout"').replace('const productTitle = "Naumi · 企业协作";','const productTitle = "DeepSeek Harness";'),upstream);
++  assert.equal(branded.replace('id: "@naumi/dsh-ui-layout"','id: "@deepseek-ai/dsh-client-ui-layout"').replace('const productTitle = "Naumi";','const productTitle = "DeepSeek Harness";'),upstream);
+ });
+diff --git a/tests/naumi-product-identity.test.mjs b/tests/naumi-product-identity.test.mjs
+new file mode 100644
+index 0000000..b75d42f
+--- /dev/null
++++ b/tests/naumi-product-identity.test.mjs
+@@ -0,0 +1,19 @@
++import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import {parse} from 'acorn';import path from 'node:path';import os from 'node:os';import {execFileSync} from 'node:child_process';
++import {productCopy,installProductIdentity,PRODUCT_COPY_KEYS} from '../plugins/naumi-enterprise/assets/product-identity.js';
++import {buildProductCopyKeys} from '../scripts/audit-product-identity.mjs';
++import {PRODUCT_VERSION} from '../plugins/naumi-enterprise/product-version.js';
++const languages=['zh','en','ja','es','fr','de','ru','pt'];
++test('all eight languages preserve real plugin trust and Office guidance while replacing product identity',()=>{for(const [pkg,ns,key]of [['dsh-client-ui-plugin-manager','pluginManager','installGuideSafety'],['dsh-client-ui-sidebar-documentpreview','sidebarOffice','unavailable']]){
++ const ast=parse(fs.readFileSync('node_modules/@deepseek-ai/'+pkg+'/lib/client.js','utf8'),{ecmaVersion:'latest'}),values=[];function walk(n){if(!n||typeof n!=='object')return;if(n.type==='Property'&&(n.key.name??n.key.value)===key&&n.value.type==='Literal'&&/DeepSeek Harness/.test(n.value.value))values.push(n.value.value);for(const v of Object.values(n)){if(Array.isArray(v))v.forEach(walk);else if(v&&typeof v==='object')walk(v);}}walk(ast);assert.equal(values.length,8);values.forEach((s,i)=>{const result=productCopy(ns,key,s,languages[i],PRODUCT_VERSION);assert.equal(result,s.replaceAll('DeepSeek Harness','Naumi'));assert(!result.includes('DeepSeek'));});
++}});
++test('expired vendor-account errors direct users to API keys rather than inventing a Naumi supplier login',()=>{for(const locale of languages)for(const key of ['message.failure.accountSignedOut','message.failure.accountSignInRequired']){const s=productCopy('chat',key,'DeepSeek',locale,PRODUCT_VERSION);assert(!/DeepSeek|登录|Sign in|log in/.test(s));assert(/API/.test(s));}});
++test('brand scope never edits user messages, supplier IDs, code, templates, links or model names',()=>{for(const ns of ['conversation','models','tools','user','pluginManager'])for(const value of ['DeepSeek Harness','deepseek-chat','https://api.deepseek.com/v1','DEEPSEEK_API_KEY','@deepseek-ai/dsh','用户正在讨论DeepSeek'])assert.equal(productCopy(ns,'user.content',value,'zh',PRODUCT_VERSION),value);assert(Object.values(PRODUCT_COPY_KEYS).reduce((n,s)=>n+s.size,0)>=9);});
++test('native bound translators created before installation see branding and interpolation, then recover on disposal',()=>{const locale={active:'zh-Naumi',getSnapshot(){return {active:this.active};},translate(ns,key,params){const text=key==='chat.deepDivingFor'?'深度求索中，用时 {duration} ···':'原标签';return params?text.replace('{duration}',params.duration):text;},bind(ns){return (key,params)=>this.translate(ns,key,params);}},t=locale.bind('chat'),original=locale.translate;const dispose=installProductIdentity({locale},{version:PRODUCT_VERSION});assert.equal(t('chat.deepDivingFor',{duration:'3秒'}),'Naumi 正在处理，用时 3秒 ···');assert.equal(locale.translate('settings','general.currentVersion',{version:'0.2.2-rc.1'}),'Naumi '+PRODUCT_VERSION);assert.equal(t('other'),'原标签');dispose();assert.equal(locale.translate,original);assert.equal(t('chat.deepDivingFor',{duration:'3秒'}),'深度求索中，用时 3秒 ···');});
++test('disposing branding does not clobber a later translation decorator',()=>{const locale={translate:()=>'',getSnapshot:()=>({active:'zh'})},dispose=installProductIdentity({locale});const later=()=> 'later';locale.translate=later;dispose();assert.equal(locale.translate,later);});
++test('product version is generated from the desktop manifest and packaged without losing peer modules',()=>{assert.equal(PRODUCT_VERSION,JSON.parse(fs.readFileSync('desktop/package.json')).version);const pkg=JSON.parse(fs.readFileSync('plugins/naumi-enterprise/package.json'));for(const f of ['product-version.js','model-connections.js','bot-deliverables.js'])assert(pkg.files.includes(f));const host=fs.readFileSync('plugins/naumi-enterprise/host.js','utf8');for(const f of ['product-identity.js','product-identity.css'])assert(host.includes(f));});
++test('running logo changes are scoped, reuse the Naumi SVG and honor reduced motion without DOM rewriting',()=>{const css=fs.readFileSync('plugins/naumi-enterprise/assets/product-identity.css','utf8'),js=fs.readFileSync('plugins/naumi-enterprise/assets/product-identity.js','utf8');assert(css.includes('[data-chat-running] [class$="_runningIcon"]'));assert(css.includes('/naumi/assets/symbol.svg'));assert(css.includes('prefers-reduced-motion:reduce'));for(const x of ['MutationObserver','innerHTML','textContent','localStorage','fetch(','setInterval'])assert(!js.includes(x));});
++test('maintenance entry points and smoke checks use real Naumi identity, not the engine branding',()=>{for(const f of ['deploy-bot-communication.ps1','deploy-bot-lifecycle.ps1','deploy-employee-center.ps1','deploy-employee-foundation.ps1','deploy-employee-sync.ps1']){const s=fs.readFileSync('scripts/'+f,'utf8');assert(!/Start-DeepSeek|Stop-DeepSeek/.test(s));assert(s.includes('Start-Naumi.ps1'));assert(s.includes('Stop-Naumi.ps1'));}assert(!fs.readFileSync('scripts/verify-http.mjs','utf8').includes('/DeepSeek|deepseek/'));assert(!fs.readFileSync('Start-Naumi.ps1','utf8').includes("'DeepSeek|deepseek"));});
++
++test('desktop consolidation verifies a canonical native launcher and rollback on a second copy',{skip:process.platform!=='win32'},()=>{const folder=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-shortcut-test-')),root=process.cwd(),q=s=>"'"+s.replaceAll("'","''")+"'";try{const setup="$w=New-Object -ComObject WScript.Shell; $s=$w.CreateShortcut("+q(path.join(folder,'Naumi 企业协作.lnk'))+"); $s.TargetPath='D:/DEV/PowerShell/pwsh.exe'; $s.Arguments='-File \""+path.join(root,'Start-Naumi.ps1')+"\"'; $s.WorkingDirectory="+q(root)+"; $s.Save()";execFileSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-Command',setup]);const result=execFileSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-File','scripts/install-naumi-shortcut.ps1','-Root',root,'-DesktopPath',folder],{encoding:'utf8'});assert(result.includes('NAUMI_SHORTCUT canonical=1 legacy_removed=1 logo=1 rollback_copy=PASS'));assert(fs.existsSync(path.join(folder,'Naumi.lnk')));assert(!fs.existsSync(path.join(folder,'Naumi 企业协作.lnk')));}finally{assert(path.resolve(folder).startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(folder,{recursive:true,force:true});}});
++
++test('generated brand allowlist covers every scanned active dictionary key without mutating interpolation values',()=>{const report=buildProductCopyKeys({write:false});assert(report.modules>30);for(const[ns,keys]of Object.entries(report.namespaces))for(const key of keys){assert(PRODUCT_COPY_KEYS[ns]?.has(key),ns+':'+key);assert(!/DeepSeek Harness|深度求索|\bDSH\b/.test(productCopy(ns,key,'DeepSeek Harness / DSH / 深度求索中','zh',PRODUCT_VERSION)));}const locale={translate:()=> 'DeepSeek Harness {value}',getSnapshot:()=>({active:'zh'})},dispose=installProductIdentity({locale});assert.equal(locale.translate('pluginManager','installGuideSafety',{value:'DeepSeek Harness DSH'}),'Naumi DeepSeek Harness DSH');dispose();});
