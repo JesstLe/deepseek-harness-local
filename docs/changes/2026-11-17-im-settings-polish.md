@@ -6,12 +6,12 @@
 
 公共接口、依赖方向、数据/状态/事务归属：沿用 createIMSettings/installIMSettingsUI、settings.section 与 /naumi/im；连接、配对、成员和回执命令及 CAS 不变。密钥仍只在当前表单，持久化归原 credentials。页面内共享平台选择组件、状态标记、图标和字段组件，不改设置外壳/导航/品牌/其他页面。
 
-本次实现与迁移状态：界面实现与集中验证已完成，正在进行副本回滚及主线/运行核验。文件归属 assets/im-settings.js、assets/im-settings.css、本页定向UI验证/单元测试、仅双静态资源的部署脚本与本记录；其他任务不写这些文件。
+本次实现与迁移状态：界面实现、集中验证、副本回滚及本地实际运行验收已完成。文件归属 assets/im-settings.js、assets/im-settings.css、本页定向UI验证/单元测试、仅双静态资源的部署脚本与本记录；其他任务不写这些文件。
 设计：去掉虚线空框和重复添加按钮；空态直接为双平台选择卡；已有连接采用清晰状态、操作层级与开关；配置/配对/成员/回执统一面板语言，浅色、精细边框、真实平台图形、小屏单列、键盘可操作。
 
 验证命令、结果及证据层级：基线 node --test tests/naumi-im-*.test.mjs → tests22/pass22/fail0，exit0。完成一个UI模块后集中验证功能及真实渲染，不调用模型或真实平台。
 
-未完成项与下一步：副本回滚、主线与实际运行增量加载及最终截图交付。迭代计数1（本页完整产品化切片）。
+未完成项与下一步：本切片无额外后端迁移；真实外部账号收发不属于本次视觉改造的新增验收。迭代计数1（本页完整产品化切片）。
 
 
 ## 本轮实现
@@ -34,3 +34,12 @@
 保护 secret 不回填、CAS 冲突保留草稿、解绑/补发需显式确认；不要修改后端执行链路。
 按空态、连接、表单、配对、成员和回执验证 1360/580/360 布局，并打开实际截图检查。
 ```
+
+
+## 实际加载与交付
+固定 main `44ebad60ab96338c3cdd332593d360a4471698c1` 仅热加载 assets/im-settings.js、assets/im-settings.css；117个其他运行插件文件和4个受保护配置/凭据/账本文件哈希保持；restart=0，IM revision=0，连接与绑定没有变化。
+`node scripts/deploy-im-settings-polish.mjs` → IM_POLISH_LOADED=PASS assets=2 http=200 untouched=117 protected=4 restart=0 im_revision=0，exit0。
+`node evidence/im-settings-polish/verify-live-ui.mjs` → IM_POLISH_LIVE_UI=PASS checks=11 errors=0 writes=0 mocks=0，exit0。
+实际运行截图 desktop/form/mobile 已逐张打开检查，不是效果图。源码副本7文件回滚后原IM22/22恢复；当前运行与修改快照保持新版。
+UI测试临时profile已移至系统临时目录；交付树只保留源码快照、日志、截图、哈希与回滚脚本，不包含临时profile、credentials或SQLite运行目录。
+Git普通合并/推送完成；最终证据与回滚脚本见 evidence/im-settings-polish/VERIFICATION.txt。本轮不构建安装EXE。
