@@ -1,9 +1,9 @@
 diff --git a/docs/implementation/OFFICIAL_MODEL_SPECS.md b/docs/implementation/OFFICIAL_MODEL_SPECS.md
 new file mode 100644
-index 0000000..644d822
+index 0000000..8e04cfc
 --- /dev/null
 +++ b/docs/implementation/OFFICIAL_MODEL_SPECS.md
-@@ -0,0 +1,31 @@
+@@ -0,0 +1,35 @@
 +# 官方模型参数与可配置预算
 +
 +日期：2026-11-17。负责人：本任务。基线8995df9da41b6a36483a1b84277396892968d69c；独立分支codex/official-model-specs-20261117，工作树E:/Workspace/naumi-official-model-specs。功能迭代1。
@@ -35,6 +35,10 @@ index 0000000..644d822
 +## 未完成项与下一步
 +
 +本次不探测真实供应商推理、不确认套餐、不改付费路由、不发布安装包。实际本机配置迁移、保留项、运行接入和Git主线状态按验证文件追加；旧版安装包不会因Git合并自动更新。
++
++主线同步与集中验收：8995df9 → origin/main 318cfbb → task 19d7673，保留安装器/产品版本并行改动。定向42/42、实际设置UI/HTTP16/16、副本27/27通过；首轮全量473项中原桌面进程夹具FIXTURE_EXIT失败保留，单模块31项复测通过；整合最新主线后482/482通过，未修改桌面生命周期代码。功能迭代仍为1。
++
++实际校准发现并修正settings规范化问题：value投影包含默认input/compat，整数组写回会物化隐式字段。已清理76个新增隐式字段、保留预算；校准改为仅写两个数值叶子，普通保存从user原始模型元数据继承。增加两项回归与真实YAML断言，定向44/44、UI17/17、最终全量484/484通过；原失败与修复证据保留。
 diff --git a/plugins/naumi-enterprise/assets/model-connections.css b/plugins/naumi-enterprise/assets/model-connections.css
 index e4dbaa7..6492114 100644
 --- a/plugins/naumi-enterprise/assets/model-connections.css
@@ -85,7 +89,7 @@ index 37c0cc8..3af563f 100644
     data?.groups.length?h('div',{className:'nm-list'},...data.groups.map(g=>h('article',{key:g.id},h('div',{className:'nm-group-head'},h('h3',null,g.displayName),h('span',{className:g.configured?'nm-ready':'nm-missing'},g.configured?'已配置':'待配置')),h('div',{className:'nm-url'},g.baseURL),h('div',{className:'nm-chips'},...g.models.slice(0,8).map(m=>h('span',{key:m.id},m.name??m.id)),g.models.length>8&&h('span',null,'+'+(g.models.length-8))),h('footer',null,confirm===g.id?h(React.Fragment,null,h('span',null,'移除此连接？'),h('button',{disabled:locked,onClick:()=>submit({action:'remove',id:g.id})},'确认移除'),h('button',{disabled:busy,onClick:()=>setConfirm(null)},'取消')):h(React.Fragment,null,h('button',{disabled:locked||!g.editable||!g.configured,onClick:()=>{edit(g);void fetchModels(g,'');}},'获取模型列表'),h('button',{disabled:locked||!g.editable,onClick:()=>edit(g)},'编辑'),h('button',{disabled:locked,onClick:()=>setConfirm(g.id)},'移除')))))):
     data&&h('div',{className:'nm-empty'},h('button',{disabled:locked,onClick:()=>edit()},'添加模型连接')));
 diff --git a/plugins/naumi-enterprise/model-connections.js b/plugins/naumi-enterprise/model-connections.js
-index 537c846..936ebd7 100644
+index 537c846..ddd7eb8 100644
 --- a/plugins/naumi-enterprise/model-connections.js
 +++ b/plugins/naumi-enterprise/model-connections.js
 @@ -1,10 +1,12 @@
@@ -111,27 +115,31 @@ index 537c846..936ebd7 100644
   async repairDefault(removed){
    const current=this.ctx.agentDefaultModel.currentSelection();
    const p=this.namespace().value.providers??{},own=p[current.provider];
-@@ -65,8 +67,13 @@ export class ModelConnections{
+@@ -65,16 +67,24 @@ export class ModelConnections{
   }
   execute(input){const run=this.queue.then(()=>this.write(input));this.queue=run.catch(()=>{});return run;}
   async write(input){
 -  const parsed=z.union([save,remove]).safeParse(input);if(!parsed.success)throw error('MODEL_INVALID_REQUEST');const p=parsed.data;
 +  const parsed=z.union([save,remove,refresh]).safeParse(input);if(!parsed.success)throw error('MODEL_INVALID_REQUEST');const p=parsed.data;
    const ns=this.namespace();if(!this.ctx.settings.writable)throw error('MODEL_SETTINGS_READ_ONLY',403);if(ns.revision!==p.expectedRevision)throw error('MODEL_SETTINGS_CONFLICT',409);
+-  const previous=ns.value.providers?.[p.id];let newRef;
 +  if(p.action==='refresh-specs'){
-+   const result=refreshModelSpecs(ns.value.providers??{}),ids=[...new Set(result.changes.map(row=>row.group))];
-+   if(ids.length)await this.ctx.settings.mutate('llm-pi-ai',ids.map(id=>({op:'set',path:['providers',id,'models'],value:result.providers[id].models})),ns.revision);
++   const result=refreshModelSpecs(ns.value.providers??{});
++   // Describe.value is schema-normalized (including implicit input/compat defaults).
++   // Write only the two requested numeric leaves, never materialize a whole model array.
++   const ops=result.changes.flatMap(row=>{const index=ns.value.providers[row.group].models.findIndex(m=>m.id===row.model);return ['contextWindow','maxTokens'].map(key=>({op:'set',path:['providers',row.group,'models',String(index),key],value:row.after[key]}));});
++   if(ops.length)await this.ctx.settings.mutate('llm-pi-ai',ops,ns.revision);
 +   return {...await this.read(),specRefresh:{changed:result.changes.length,changes:result.changes,unknown:result.unknown,conditional:result.conditional}};
 +  }
-   const previous=ns.value.providers?.[p.id];let newRef;
++  const previous=ns.value.providers?.[p.id],stored=ns.user?.providers?.[p.id]??previous;let newRef;
    if(p.action==='remove'){
     if(!previous)throw error('MODEL_GROUP_NOT_FOUND',404);
-@@ -74,7 +81,7 @@ export class ModelConnections{
+    await this.ctx.settings.mutate('llm-pi-ai',[{op:'unset',path:['providers',p.id]}],ns.revision);
    }else{
     if(new Set(p.models.map(m=>m.id)).size!==p.models.length)throw error('MODEL_DUPLICATE_ID');
     if(!p.apiKey&&!previous?.apiKeyEnv)throw error('MODEL_KEY_REQUIRED');
 -   const profile={...previous,displayName:p.displayName,baseURL:endpoint(p.baseURL),api:p.api,models:p.models.map(m=>({...previous?.models?.find(old=>old.id===m.id),...m})),apiKeyEnv:previous?.apiKeyEnv};
-+   const profile={...previous,displayName:p.displayName,baseURL:endpoint(p.baseURL),api:p.api,models:p.models.map(m=>configureModelSpec(m,previous?.models?.find(old=>old.id===m.id),previous??{})),apiKeyEnv:previous?.apiKeyEnv};
++   const profile={...stored,displayName:p.displayName,baseURL:endpoint(p.baseURL),api:p.api,models:p.models.map(m=>configureModelSpec(m,(stored?.models??previous?.models)?.find(old=>old.id===m.id),previous??{})),apiKeyEnv:previous?.apiKeyEnv};
     if(p.apiKey){if(/[\r\n\u0000-\u001f\u007f]/.test(p.apiKey))throw error('MODEL_KEY_INVALID');newRef='NAUMI_MODEL_'+randomUUID().replaceAll('-','').toUpperCase();profile.apiKeyEnv=newRef;await this.ctx.credentials.set(newRef,p.apiKey);}
     try{await this.ctx.settings.mutate('llm-pi-ai',[{op:'set',path:['providers',p.id],value:profile}],ns.revision);}
     catch(e){if(newRef)try{await this.ctx.credentials.unset(newRef);}catch{throw error('MODEL_SAVE_CLEANUP_FAILED',500);}throw e;}
@@ -1631,11 +1639,11 @@ index 0000000..1d876f8
 +target=Path(os.environ.get('NAUMI_SPEC_OUTPUT',ROOT/'plugins/naumi-enterprise/official-model-specs.json'));target.write_text(json.dumps(payload,ensure_ascii=False,indent=2)+'\n',encoding='utf8');(P.parent/'SOURCE_MANIFEST.json').write_text(json.dumps([r for r in records.values() if r['finalUrl'] in {u for m in MODELS.values() for u in [m['source'],m.get('outputSource')]}],ensure_ascii=False,indent=2)+'\n',encoding='utf8');print('OFFICIAL_CATALOG models='+str(len(MODELS))+' providers='+str(len(set(x['provider'] for x in MODELS.values())))+' source_hashes=retained');print(json.dumps({p:sum(x['provider']==p for x in MODELS.values()) for p in sorted(set(x['provider'] for x in MODELS.values()))},ensure_ascii=False))
 diff --git a/scripts/deploy-official-model-specs.mjs b/scripts/deploy-official-model-specs.mjs
 new file mode 100644
-index 0000000..7666e79
+index 0000000..6f83963
 --- /dev/null
 +++ b/scripts/deploy-official-model-specs.mjs
 @@ -0,0 +1,20 @@
-+import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync} from 'node:child_process';import {parse} from 'yaml';import {botLiveApi} from './bot-live-api.mjs';import {refreshModelSpecs} from '../plugins/naumi-enterprise/model-specs.js';
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync} from 'node:child_process';import {parse} from 'yaml';import {isDeepStrictEqual} from 'node:util';import {botLiveApi} from './bot-live-api.mjs';import {refreshModelSpecs} from '../plugins/naumi-enterprise/model-specs.js';
 +const root=process.cwd(),e=path.join(root,'evidence/official-model-specs'),target=path.join(root,'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise'),profile=path.join(root,'.dsh/profiles/web/cordis.patch.yml'),credentials=path.join(root,'.dsh/.credentials.yaml'),stateFile=path.join(root,'.dsh/official-model-specs-deployment.json'),mode=process.argv[2];
 +const hash=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex'),save=(p,v)=>{const tmp=p+'.tmp';fs.writeFileSync(tmp,JSON.stringify(v,null,2)+'\n');fs.renameSync(tmp,p);},read=p=>JSON.parse(fs.readFileSync(p)),providers=file=>parse(fs.readFileSync(file,'utf8')).find(row=>row.id==='llm-pi-ai').config.providers;
 +const files=['model-connections.js','assets/model-connections.js','assets/model-connections.css','model-specs.js','official-model-specs.json','package.json'];
@@ -1649,11 +1657,11 @@ index 0000000..7666e79
 + const s=read(stateFile);assert.equal(s.phase,'prepared');for(const f of files){const p=path.join(target,f);if(f==='package.json'){const pkg=JSON.parse(fs.readFileSync(p));for(const name of ['model-specs.js','official-model-specs.json'])if(!pkg.files.includes(name))pkg.files.push(name);fs.writeFileSync(p,JSON.stringify(pkg,null,2)+'\n');}else fs.copyFileSync(path.join(root,'plugins/naumi-enterprise',f),p);}
 + for(const[f,h]of Object.entries(s.old))if(!files.includes(f))assert.equal(hash(path.join(target,f)),h,'Unrelated file changed: '+f);s.phase='files';save(stateFile,s);console.log('SPEC_FILES updated=6 unrelated_changed=0');
 +}else if(mode==='migrate'){
-+ const s=read(stateFile);assert.equal(s.phase,'files');assert.equal(hash(credentials),s.credentialHash);assert.deepEqual(providers(profile),providers(path.join(s.backup,'original-profile.yml')),'Provider config changed since preparation');const expected=refreshModelSpecs(providers(profile)),api=await botLiveApi(root),current=await api.json('/naumi/model-connections');assert.equal(current.specs.models.length,86);
-+ const value=await api.json('/naumi/model-connections',{action:'refresh-specs',expectedRevision:current.revision},'x-naumi-model-connections');assert.equal(value.specRefresh.changed,expected.changes.length);assert.deepEqual(providers(profile),expected.providers);assert.equal(hash(credentials),s.credentialHash);const afterSettings=await api.rpc('settings/describe',{});assert.deepEqual(afterSettings.namespaces.find(n=>n.ns==='agent-default-model').value,s.defaultModel);
++ const s=read(stateFile);assert.equal(s.phase,'files');assert.equal(hash(credentials),s.credentialHash);const original=providers(path.join(s.backup,'original-profile.yml')),expected=refreshModelSpecs(original),alreadyApplied=isDeepStrictEqual(providers(profile),expected.providers);if(!alreadyApplied)assert.deepEqual(providers(profile),original,'Provider config changed since preparation');const api=await botLiveApi(root),current=await api.json('/naumi/model-connections');assert.equal(current.specs.models.length,86);
++ const value=alreadyApplied?{...current,specRefresh:{changed:expected.changes.length,changes:expected.changes,unknown:expected.unknown,conditional:expected.conditional}}:await api.json('/naumi/model-connections',{action:'refresh-specs',expectedRevision:current.revision},'x-naumi-model-connections');assert.equal(value.specRefresh.changed,expected.changes.length);assert.deepEqual(providers(profile),expected.providers);assert.equal(hash(credentials),s.credentialHash);const afterSettings=await api.rpc('settings/describe',{});assert.deepEqual(afterSettings.namespaces.find(n=>n.ns==='agent-default-model').value,s.defaultModel);
 + for(const file of files.filter(f=>f!=='package.json'))assert.equal(hash(path.join(target,file)),hash(path.join(root,'plugins/naumi-enterprise',file)));for(const[f,h]of Object.entries(s.old))if(!files.includes(f))assert.equal(hash(path.join(target,f)),h,'Unrelated runtime changed: '+f);
 + fs.copyFileSync(profile,path.join(s.backup,'modified-profile.yml'));const rollbackCopy=path.join(s.backup,'rollback-test-profile.yml');fs.copyFileSync(profile,rollbackCopy);fs.copyFileSync(path.join(s.backup,'original-profile.yml'),rollbackCopy);assert.equal(hash(rollbackCopy),hash(path.join(s.backup,'original-profile.yml')));assert.equal(hash(profile),hash(path.join(s.backup,'modified-profile.yml')));
-+ const sessions=await api.rpc('session/list',{_request:{}}),running=sessions.items.filter(row=>row.running).length;const receipt={status:'PASS',mainCommit:s.mainCommit,changedRuntimeFiles:files,unrelatedChanged:0,groups:value.groups.length,models:value.groups.reduce((n,g)=>n+g.models.length,0),changedModels:value.specRefresh.changed,changes:value.specRefresh.changes,unknown:value.specRefresh.unknown,conditional:value.specRefresh.conditional,credentialsUnchanged:true,defaultModelUnchanged:true,configRollbackCopy:'PASS',activeModifiedRetained:true,sessions:sessions.items.length,running,modelCalls:0,backup:s.backup};save(path.join(e,'DEPLOYMENT.json'),receipt);s.phase='complete';save(stateFile,s);console.log('SPEC_LIVE groups='+receipt.groups+' models='+receipt.models+' calibrated='+receipt.changedModels+' unknown='+receipt.unknown.length+' credentials=unchanged defaults=unchanged config_rollback=PASS model_calls=0');
++ const sessions=await api.rpc('session/list',{_request:{}}),running=sessions.items.filter(row=>row.running).length;const receipt={status:'PASS',mainCommit:s.mainCommit,verifiedMainCommit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),changedRuntimeFiles:files,unrelatedChanged:0,groups:value.groups.length,models:value.groups.reduce((n,g)=>n+g.models.length,0),changedModels:value.specRefresh.changed,changes:value.specRefresh.changes,unknown:value.specRefresh.unknown,conditional:value.specRefresh.conditional,credentialsUnchanged:true,defaultModelUnchanged:true,resumedAfterNumericLeafRepair:alreadyApplied,configRollbackCopy:'PASS',activeModifiedRetained:true,sessions:sessions.items.length,running,modelCalls:0,backup:s.backup};save(path.join(e,'DEPLOYMENT.json'),receipt);s.phase='complete';save(stateFile,s);console.log('SPEC_LIVE groups='+receipt.groups+' models='+receipt.models+' calibrated='+receipt.changedModels+' unknown='+receipt.unknown.length+' credentials=unchanged defaults=unchanged config_rollback=PASS model_calls=0');
 +}else throw Error('Use prepare|files|migrate; each phase persists its recovery intent');
 diff --git a/scripts/refresh-official-model-specs.py b/scripts/refresh-official-model-specs.py
 new file mode 100644
@@ -1707,7 +1715,7 @@ index 0000000..bb6064e
 +import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash} from 'node:crypto';import {execFileSync} from 'node:child_process';const e='evidence/official-model-specs',hash=b=>createHash('sha256').update(b).digest('hex'),rows=JSON.parse(fs.readFileSync(e+'/hashes.json'));for(const r of rows){assert.equal(hash(fs.readFileSync(r.file)),r.modifiedSHA256);assert.equal(hash(fs.readFileSync(path.join(e,'modified',r.file))),r.modifiedSHA256);if(r.originalSHA256)assert.equal(hash(fs.readFileSync(path.join(e,'original',r.file))),r.originalSHA256);}for(const name of ['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh'])assert(fs.readFileSync(e+'/'+name).length);execFileSync('D:/DEV/Git/bin/bash.exe',['-n',e+'/ROLLBACK.sh']);execFileSync('python',['-X','utf8','-c',`import zipfile; z=zipfile.ZipFile('${e}/MODIFIED_FILE.zip'); assert z.testzip() is None; s=zipfile.ZipFile('${e}/OFFICIAL_SOURCES.zip'); assert s.testzip() is None`]);console.log('REOPEN artifacts=4 source_hashes=PASS originals=PASS source_archive=PASS rollback=PASS');
 diff --git a/scripts/verify-official-model-specs.mjs b/scripts/verify-official-model-specs.mjs
 new file mode 100644
-index 0000000..cb401b3
+index 0000000..ac33a9d
 --- /dev/null
 +++ b/scripts/verify-official-model-specs.mjs
 @@ -0,0 +1,24 @@
@@ -1728,7 +1736,7 @@ index 0000000..cb401b3
 + await panel.getByRole('button',{name:'校准官方参数',exact:true}).click();await panel.getByRole('status').filter({hasText:'已校准 2 个模型'}).waitFor();let live=(await call()).value;check('ui_calibrates_known_models_and_keeps_unknowns',live.groups[0].models[0].contextWindow===1050000&&live.groups[0].models[1].contextWindow===1000000&&live.groups[0].models[2].contextWindow===128000);check('output_budget_not_raised_to_model_maximum',live.groups[0].models[1].maxTokens===16384);
 + await panel.getByRole('button',{name:'编辑',exact:true}).click();const row=panel.getByRole('region',{name:'gpt-6.1-sol 参数',exact:true});check('official_limit_source_is_visible',await row.getByRole('link',{name:'OpenAI · 官方',exact:true}).getAttribute('href')==='https://developers.openai.com/api/docs/models/gpt-6.1-sol.md');
 + const ctxField=panel.getByLabel('gpt-6.1-sol 上下文预算',{exact:true}),outField=panel.getByLabel('gpt-6.1-sol 输出预算',{exact:true});await ctxField.fill('1050001');await panel.getByRole('button',{name:'保存',exact:true}).click();check('browser_blocks_out_of_range_context',await ctxField.evaluate(el=>!el.checkValidity()));check('invalid_form_does_not_persist',(await call()).value.revision===live.revision);
-+ await ctxField.fill('600000');await outField.fill('32000');await panel.getByRole('button',{name:'保存',exact:true}).click();await panel.getByRole('heading',{name:'测试连接',exact:true}).waitFor();live=(await call()).value;check('custom_budgets_persist_through_actual_settings',live.groups[0].models[0].contextWindow===600000&&live.groups[0].models[0].maxTokens===32000);const persisted=parse(fs.readFileSync(path.join(profile,'cordis.patch.yml'),'utf8')).find(x=>x.id==='llm-pi-ai').config.providers.existing;check('configuration_file_contains_real_numbers',persisted.models[0].contextWindow===600000&&persisted.models[0].maxTokens===32000&&persisted.apiKeyEnv==='DISCOVERY_FIXTURE_KEY');
++ await ctxField.fill('600000');await outField.fill('32000');await panel.getByRole('button',{name:'保存',exact:true}).click();await panel.getByRole('heading',{name:'测试连接',exact:true}).waitFor();live=(await call()).value;check('custom_budgets_persist_through_actual_settings',live.groups[0].models[0].contextWindow===600000&&live.groups[0].models[0].maxTokens===32000);const persisted=parse(fs.readFileSync(path.join(profile,'cordis.patch.yml'),'utf8')).find(x=>x.id==='llm-pi-ai').config.providers.existing;check('configuration_file_contains_real_numbers',persisted.models[0].contextWindow===600000&&persisted.models[0].maxTokens===32000&&persisted.apiKeyEnv==='DISCOVERY_FIXTURE_KEY');check('raw_model_metadata_is_not_materialized',persisted.models.every(m=>!Object.hasOwn(m,'input')&&!Object.hasOwn(m,'compat')));
 + const invalid=await call({action:'save',id:'existing',expectedRevision:live.revision,displayName:'测试连接',baseURL:apiURL,api:'openai-completions',models:[{id:'gpt-6.1-sol',contextWindow:2000000,maxTokens:128000}]});check('server_independently_rejects_bypassed_ui',invalid.status===400&&invalid.value.error==='MODEL_CONTEXT_RANGE');check('failed_range_write_leaves_revision_unchanged',(await call()).value.revision===live.revision);
 + await panel.getByRole('button',{name:'编辑',exact:true}).click();await row.getByRole('button',{name:'官方值',exact:true}).click();check('restore_official_context_respects_input_plus_output',await ctxField.inputValue()==='954000'&&await outField.inputValue()==='32000');await outField.fill('16000');check('lower_output_also_lowers_input_compatible_context',await ctxField.inputValue()==='938000');await ctxField.fill('600000');await outField.fill('32000');
 + for(const width of [1360,580,360]){await page.setViewportSize({width,height:1080});check('responsive_'+width,await panel.evaluate(el=>el.scrollWidth<=el.clientWidth+2));}
@@ -1737,12 +1745,12 @@ index 0000000..cb401b3
 +}finally{await browser?.close();child.kill();await new Promise(r=>child.exitCode!==null?r():child.once('close',r));upstream.closeAllConnections();await new Promise(r=>upstream.close(r));}
 diff --git a/tests/naumi-model-specs.test.mjs b/tests/naumi-model-specs.test.mjs
 new file mode 100644
-index 0000000..06f448d
+index 0000000..60637be
 --- /dev/null
 +++ b/tests/naumi-model-specs.test.mjs
-@@ -0,0 +1,23 @@
+@@ -0,0 +1,30 @@
 +import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import {officialModelSpecs,officialSpec,configureModelSpec,modelSpecView,refreshModelSpecs} from '../plugins/naumi-enterprise/model-specs.js';import {ModelConnections} from '../plugins/naumi-enterprise/model-connections.js';
-+function fixture(providers={team:{displayName:'Team',api:'openai-responses',baseURL:'https://fixture.example/v1',apiKeyEnv:'SHARED',defaultContextWindow:128000,defaultMaxTokens:16384,models:[{id:'gpt-6.1-sol',contextWindow:400000,maxTokens:128000,custom:'retained'},{id:'glm-5.3'},{id:'deepseek-flash'},{id:'custom-uncensored',contextWindow:200000,maxTokens:16000}]}}){let revision=3,failed=false,keyWrites=0,defaultWrites=0;const ctx={settings:{writable:true,describe:()=>[{ns:'llm-pi-ai',revision,value:{providers:structuredClone(providers)}}],async mutate(ns,ops,expected){assert.equal(expected,revision);if(failed)throw Error('disk failure');for(const op of ops){if(op.path.length===3)providers[op.path[1]][op.path[2]]=structuredClone(op.value);else providers[op.path[1]]=structuredClone(op.value);}revision++;}},credentials:{describe:async()=>({configured:true,writable:true}),set:async()=>{keyWrites++;},unset:async()=>{}},agentDefaultModel:{currentSelection:()=>({provider:'team',model:'gpt-6.1-sol'}),saveSelection:async()=>{defaultWrites++;}}};return {ctx,service:new ModelConnections(ctx),get providers(){return providers;},get revision(){return revision;},get keyWrites(){return keyWrites;},get defaultWrites(){return defaultWrites;},fail(){failed=true;}};}
++function fixture(providers={team:{displayName:'Team',api:'openai-responses',baseURL:'https://fixture.example/v1',apiKeyEnv:'SHARED',defaultContextWindow:128000,defaultMaxTokens:16384,models:[{id:'gpt-6.1-sol',contextWindow:400000,maxTokens:128000,custom:'retained'},{id:'glm-5.3'},{id:'deepseek-flash'},{id:'custom-uncensored',contextWindow:200000,maxTokens:16000}]}}){let revision=3,failed=false,keyWrites=0,defaultWrites=0;const ctx={settings:{writable:true,describe:()=>[{ns:'llm-pi-ai',revision,value:{providers:structuredClone(providers)}}],async mutate(ns,ops,expected){assert.equal(expected,revision);if(failed)throw Error('disk failure');for(const op of ops){let node={providers};for(const key of op.path.slice(0,-1))node=node[key];node[op.path.at(-1)]=structuredClone(op.value);}revision++;}},credentials:{describe:async()=>({configured:true,writable:true}),set:async()=>{keyWrites++;},unset:async()=>{}},agentDefaultModel:{currentSelection:()=>({provider:'team',model:'gpt-6.1-sol'}),saveSelection:async()=>{defaultWrites++;}}};return {ctx,service:new ModelConnections(ctx),get providers(){return providers;},get revision(){return revision;},get keyWrites(){return keyWrites;},get defaultWrites(){return defaultWrites;},fail(){failed=true;}};}
 +test('official catalog covers exact main-provider models with source URL, timestamp and hash',()=>{assert(officialModelSpecs.models.length>=80);assert(new Set(officialModelSpecs.models.map(m=>m.provider)).size>=12);const seen=new Set();for(const row of officialModelSpecs.models){assert(!seen.has(row.id));seen.add(row.id);assert.match(row.source,/^https:\/\//);assert.match(row.sourceSHA256,/^[a-f0-9]{64}$/);assert.equal(row.checkedAt,'2026-11-17');assert(Number.isSafeInteger(row.contextWindow)&&row.contextWindow>0);if(row.maxOutputTokens!==null)assert(row.maxOutputTokens>0);}});
 +test('OpenAI exact total/input/output limits come from the official page, not the old blanket 400K',()=>{const m=officialSpec('gpt-6.1-sol');assert.equal(m.contextWindow,1050000);assert.equal(m.maxInputTokens,922000);assert.equal(m.maxOutputTokens,128000);const source=fs.readFileSync('evidence/official-model-specs/sources/openai-gpt-6.1-sol.txt','utf8');for(const text of ['1,050,000 context window','Maximum input tokens: 922,000','128,000 max output tokens'])assert(source.includes(text));});
 +test('explicit Gemini token counts and documented K/M labels are distinguished',()=>{assert.equal(officialSpec('gemini-4-carbon').contextWindow,1048576);assert.equal(officialSpec('gemini-4-carbon').maxOutputTokens,65536);assert.equal(officialSpec('glm-5.3').contextLabel,'1M');assert.equal(officialSpec('glm-5.3').precision,'documented-unit');assert.equal(officialSpec('deepseek-flash').maxOutputTokens,384000);});
@@ -1763,4 +1771,11 @@ index 0000000..06f448d
 + const provider=await ctx.plugin({apply(scope){scope.provide('llm',{registerConfigurableProviders:()=>({replace(){}}),registerModelDiscovery:()=>()=>{},registerAdapter:(_routes,value)=>{adapter=value;return {replace(){}};}});scope.provide('credentials',{resolve:async()=>({value:'fixture-key'})});}});
 + const model=configureModelSpec({id:'gpt-6.1-sol',contextWindow:600000,maxTokens:32000});const plugin=await ctx.plugin(pi,{providers:{verified:{api:'openai-responses',baseURL:'https://fixture.invalid/v1',models:[model]}}});
 + try{assert(adapter);const resolved=await adapter.resolveModel('verified','gpt-6.1-sol');assert.equal(resolved.context.contextWindow,600000);assert.equal(resolved.defaultMaxTokens,32000);}finally{await plugin.dispose();await provider.dispose();}
++});
++
++test('calibration writes only numeric leaves and never materializes normalized input/compat defaults',async()=>{
++ const f=fixture(),base=f.ctx.settings.describe;f.ctx.settings.describe=()=>base().map(ns=>({...ns,user:{providers:structuredClone(f.providers)},value:{...ns.value,providers:Object.fromEntries(Object.entries(ns.value.providers).map(([id,p])=>[id,{...p,models:p.models.map(m=>({...m,input:[],compat:{chatTemplateArgs:{},chatTemplateKwargs:{}}}))}]))}}));const original=f.ctx.settings.mutate;f.ctx.settings.mutate=async(ns,ops,rev)=>{for(const op of ops){assert.equal(op.path.length,5);assert(['contextWindow','maxTokens'].includes(op.path.at(-1)));}return original(ns,ops,rev);};await f.service.execute({action:'refresh-specs',expectedRevision:3});for(const m of f.providers.team.models){assert(!Object.hasOwn(m,'input'));assert(!Object.hasOwn(m,'compat'));}
++});
++test('saving a custom budget preserves raw user model metadata instead of resolved schema defaults',async()=>{
++ const f=fixture(),base=f.ctx.settings.describe;f.ctx.settings.describe=()=>base().map(ns=>({...ns,user:{providers:structuredClone(f.providers)},value:{...ns.value,providers:Object.fromEntries(Object.entries(ns.value.providers).map(([id,p])=>[id,{...p,models:p.models.map(m=>({...m,input:[],compat:{chatTemplateArgs:{},chatTemplateKwargs:{}}}))}]))}}));await f.service.execute({action:'save',id:'team',expectedRevision:3,displayName:'Team',baseURL:'https://fixture.example/v1',api:'openai-responses',models:[{id:'gpt-6.1-sol',contextWindow:600000,maxTokens:32000}]});const m=f.providers.team.models[0];assert.equal(m.contextWindow,600000);assert(!Object.hasOwn(m,'input'));assert(!Object.hasOwn(m,'compat'));assert.equal(m.custom,'retained');
 +});
