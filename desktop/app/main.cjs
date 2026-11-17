@@ -58,6 +58,7 @@ app.whenReady().then(async()=>{
  ipcMain.handle('naumi:retry',e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');void boot();});
  ipcMain.handle('naumi:update-state',e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');return updates?updates.snapshot():{enabled:false,status:'disabled',currentVersion:app.getVersion(),version:null,notes:'',progress:null,error:null};});
  ipcMain.handle('naumi:update-check',async e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');return updates?updates.check():{ok:false,error:'UPDATE_FEED_UNCONFIGURED'};});
+ ipcMain.handle('naumi:update-install',async e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');return updates?updates.install():{ok:false,error:'UPDATE_FEED_UNCONFIGURED'};});
  ipcMain.handle('naumi:connection-state',e=>{if(!localPage(e,['connect.html','startup.html']))trusted(e);if(!settings?.isolated)return {available:false};return {available:true,...workspaceSummary(identityUserData??app.getPath('userData'))};});
  ipcMain.handle('naumi:connection-settings',async e=>{
   if(!localPage(e,['startup.html']))trusted(e);if(!settings?.isolated||booting||connecting)return {ok:false,error:'WORKSPACE_SETTINGS_BUSY'};
@@ -168,11 +169,13 @@ async function assertAccountIdle(){
  if(backend?.owned)await assertWorkspaceIdle(settings,(url,options)=>primarySession.fetch(url,options));
 }
 function maintenanceBlocked(){if(maintenanceTicket&&Date.now()>=maintenanceUntil){maintenanceTicket=null;}return !!maintenanceTicket;}
-function canInstallUpdate(){
+async function canInstallUpdate(){
  if(closing||booting||connecting)return {ok:false,reason:'WORKSPACE_BUSY'};
  if(maintenanceBlocked())return {ok:false,reason:'INSTALL_MAINTENANCE_ACTIVE'};
  if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0)return {ok:false,reason:'WORKSPACE_OPERATIONS_IN_FLIGHT'};
- return {ok:true};
+ const ticket=randomUUID().replaceAll('-','')+randomUUID().replaceAll('-','');
+ try{await performMaintenance('quiesce',ticket);return {ok:true,release:()=>performMaintenance('resume',ticket)};}
+ catch{return {ok:false,reason:'INSTALL_ACTIVITY_UNKNOWN'};}
 }
 async function showUpdateNotice(snapshot){
  if(!window||window.isDestroyed())return 1;

@@ -1,0 +1,610 @@
+diff --git a/.gitattributes b/.gitattributes
+index 68045fb..cf9d3f4 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -226,6 +226,10 @@ plugins/naumi-ui-layout/UPSTREAM.json text eol=lf
+ /evidence/unified-bot-chat/ROLLBACK.sh text eol=lf
+ 
+ # Unified Naumi account session and reference login presentation.
++
++/evidence/desktop-updates/** -text whitespace=cr-at-eol
++/evidence/desktop-updates/DIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab,cr-at-eol
++/evidence/desktop-updates/ROLLBACK.sh text eol=lf
+ /desktop/app/identity* text eol=lf
+ /desktop/app/identity-style/** -text
+ /desktop/app/main.cjs text eol=lf
+diff --git a/desktop/app/main.cjs b/desktop/app/main.cjs
+index f2b371c..253b485 100644
+--- a/desktop/app/main.cjs
++++ b/desktop/app/main.cjs
+@@ -58,6 +58,7 @@ app.whenReady().then(async()=>{
+  ipcMain.handle('naumi:retry',e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');void boot();});
+  ipcMain.handle('naumi:update-state',e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');return updates?updates.snapshot():{enabled:false,status:'disabled',currentVersion:app.getVersion(),version:null,notes:'',progress:null,error:null};});
+  ipcMain.handle('naumi:update-check',async e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');return updates?updates.check():{ok:false,error:'UPDATE_FEED_UNCONFIGURED'};});
++ ipcMain.handle('naumi:update-install',async e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');return updates?updates.install():{ok:false,error:'UPDATE_FEED_UNCONFIGURED'};});
+  ipcMain.handle('naumi:connection-state',e=>{if(!localPage(e,['connect.html','startup.html']))trusted(e);if(!settings?.isolated)return {available:false};return {available:true,...workspaceSummary(identityUserData??app.getPath('userData'))};});
+  ipcMain.handle('naumi:connection-settings',async e=>{
+   if(!localPage(e,['startup.html']))trusted(e);if(!settings?.isolated||booting||connecting)return {ok:false,error:'WORKSPACE_SETTINGS_BUSY'};
+@@ -168,11 +169,13 @@ async function assertAccountIdle(){
+  if(backend?.owned)await assertWorkspaceIdle(settings,(url,options)=>primarySession.fetch(url,options));
+ }
+ function maintenanceBlocked(){if(maintenanceTicket&&Date.now()>=maintenanceUntil){maintenanceTicket=null;}return !!maintenanceTicket;}
+-function canInstallUpdate(){
++async function canInstallUpdate(){
+  if(closing||booting||connecting)return {ok:false,reason:'WORKSPACE_BUSY'};
+  if(maintenanceBlocked())return {ok:false,reason:'INSTALL_MAINTENANCE_ACTIVE'};
+  if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0)return {ok:false,reason:'WORKSPACE_OPERATIONS_IN_FLIGHT'};
+- return {ok:true};
++ const ticket=randomUUID().replaceAll('-','')+randomUUID().replaceAll('-','');
++ try{await performMaintenance('quiesce',ticket);return {ok:true,release:()=>performMaintenance('resume',ticket)};}
++ catch{return {ok:false,reason:'INSTALL_ACTIVITY_UNKNOWN'};}
+ }
+ async function showUpdateNotice(snapshot){
+  if(!window||window.isDestroyed())return 1;
+diff --git a/desktop/app/preload.cjs b/desktop/app/preload.cjs
+index b02854f..a8cc1bc 100644
+--- a/desktop/app/preload.cjs
++++ b/desktop/app/preload.cjs
+@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('naumiDesktop',{
+   resumeWorkspace:()=>ipcRenderer.invoke('naumi:connection-resume'),
+   updateState:()=>ipcRenderer.invoke('naumi:update-state'),
+   checkUpdates:()=>ipcRenderer.invoke('naumi:update-check'),
++  installUpdate:()=>ipcRenderer.invoke('naumi:update-install'),
+   onUpdateState:listener=>subscribe('naumi:update-state',listener),
+   openIdentityRegistration:origin=>ipcRenderer.invoke('naumi:identity-register',origin),
+   identityState:()=>ipcRenderer.invoke('naumi:identity-state'),
+diff --git a/desktop/app/updates.cjs b/desktop/app/updates.cjs
+index e583ada..ec828b5 100644
+--- a/desktop/app/updates.cjs
++++ b/desktop/app/updates.cjs
+@@ -22,7 +22,7 @@ function normalizeNotes(notes){
+ }
+ function createDesktopUpdates({app,updater,notify,canInstall=()=>({ok:true}),broadcast=()=>{},log=()=>{},startupDelayMs=15000,intervalMs=24*60*60*1000,fetcher=fetch,feedTimeoutMs=8000}){
+  if(!app||typeof app.getVersion!=='function'||!updater||typeof notify!=='function')throw Error('UPDATE_MODULE_INVALID');
+- const state={enabled:false,status:'disabled',currentVersion:app.getVersion(),version:null,notes:'',progress:null,error:null};
++ const state={enabled:false,status:'disabled',currentVersion:app.getVersion(),version:null,notes:'',progress:null,error:null,lastChecked:null};
+  const listeners=new Set();let started=false,timer=null,interval=null,retryTimer=null,feedBase=null,appliedFeedBase=null,candidateIndex=0;
+  const candidates=()=>{const override=feedOverride();return override?.url?[override.url]:DEFAULT_FEED_BASES;};
+  async function resolveFeedBase(){
+@@ -37,30 +37,51 @@ function createDesktopUpdates({app,updater,notify,canInstall=()=>({ok:true}),bro
+   }
+   return null;
+  }
+- const snapshot=()=>({enabled:state.enabled,status:state.status,currentVersion:state.currentVersion,version:state.version,notes:state.notes,progress:state.progress?{...state.progress}:null,error:state.error});
++ const snapshot=()=>({enabled:state.enabled,status:state.status,currentVersion:state.currentVersion,version:state.version,notes:state.notes,progress:state.progress?{...state.progress}:null,error:state.error,lastChecked:state.lastChecked});
+  const publish=patch=>{Object.assign(state,patch);const value=snapshot();for(const listener of listeners)try{listener(value)}catch{}broadcast(value);return value;};
+  async function announce(){
+   const value=snapshot();let choice;
+   try{choice=await notify(value);}catch(error){log('notify failed',error);return;}
+   if(choice!==0)return;
+-  const gate=canInstall();if(!gate?.ok){log('install deferred',gate);return;}
+-  try{updater.quitAndInstall(true,true);}catch(error){log('install failed',error);publish({error:'UPDATE_INSTALL_FAILED'});}
++  await install();
++ }
++ let installing=false,installGate=null,installError=null,releaseFlight=null;
++ function releaseInstallGate(){
++  if(!installGate)return releaseFlight;
++  const gate=installGate;installGate=null;
++  releaseFlight=Promise.resolve().then(()=>gate.release?.()).catch(error=>log('install resume failed',error));
++  return releaseFlight;
++ }
++ async function install(){
++  if(state.status!=='ready')return {ok:false,error:'UPDATE_NOT_READY'};
++  if(installing)return {ok:false,error:'UPDATE_INSTALL_BUSY'};
++  installing=true;let gate,handedOff=false;
++  try{
++   gate=await canInstall();
++   if(!gate?.ok){log('install deferred',gate);publish({error:'UPDATE_INSTALL_BUSY'});return {ok:false,error:'UPDATE_INSTALL_BUSY'};}
++   installGate=gate;installError=null;publish({error:null});updater.quitAndInstall(true,true);
++   if(installError)throw installError;
++   handedOff=true;return {ok:true};
++  }catch(error){log('install failed',error);await releaseInstallGate();publish({error:'UPDATE_INSTALL_FAILED'});return {ok:false,error:'UPDATE_INSTALL_FAILED'};}
++  finally{if(!handedOff)installing=false;}
+  }
+  function start(){
+   if(started)return {ok:true};
+   const override=feedOverride();if(override?.error)return {ok:false,error:override.error};
+-  started=true;updater.autoDownload=false;updater.autoInstallOnAppQuit=true;
++  started=true;updater.autoDownload=false;updater.autoInstallOnAppQuit=false;
+   updater.on('checking-for-update',()=>publish({status:'checking',error:null}));
+   updater.on('update-available',info=>{
+    publish({status:'downloading',version:typeof info?.version==='string'?info.version:null,notes:normalizeNotes(info?.releaseNotes),progress:null,error:null});
+    Promise.resolve(updater.downloadUpdate()).catch(error=>{log('download failed',error);publish({status:'idle',error:'UPDATE_DOWNLOAD_FAILED'});});
+   });
+-  updater.on('update-not-available',()=>publish({status:'idle',version:null,notes:'',progress:null,error:null}));
++  updater.on('update-not-available',()=>publish({status:'idle',version:null,notes:'',progress:null,error:null,lastChecked:Date.now()}));
+   updater.on('download-progress',progress=>publish({progress:{percent:Math.max(0,Math.min(100,Number(progress?.percent)||0)),transferred:Number(progress?.transferred)||0,total:Number(progress?.total)||0,bytesPerSecond:Number(progress?.bytesPerSecond)||0}}));
+   updater.on('update-downloaded',()=>{publish({status:'ready',error:null});void announce();});
+   updater.on('error',error=>{
+    log('updater error',error);
+-   publish({status:state.status==='ready'||state.status==='downloading'?state.status:'idle',error:'UPDATE_CHECK_FAILED'});
++   if(installing&&state.status==='ready'){installError=error;installing=false;void releaseInstallGate();publish({error:'UPDATE_INSTALL_FAILED'});return;}
++   const wasDownloading=state.status==='downloading';
++   publish({status:state.status==='ready'?'ready':'idle',error:wasDownloading?'UPDATE_DOWNLOAD_FAILED':'UPDATE_CHECK_FAILED'});
+    if(!feedOverride()&&!retryTimer){retryTimer=setTimeout(()=>{retryTimer=null;feedBase=null;void check();},10000);if(retryTimer.unref)retryTimer.unref();}
+   });
+   publish({enabled:true,status:'idle',error:null});
+@@ -70,10 +91,12 @@ function createDesktopUpdates({app,updater,notify,canInstall=()=>({ok:true}),bro
+  }
+  async function check(){
+   if(!started){const result=start();if(!result.ok)return result;}
+-  if(state.status==='checking'||state.status==='downloading')return {ok:true,status:state.status};
++  if(state.status==='checking'||state.status==='downloading'||state.status==='ready')return {ok:true,status:state.status};
++  publish({status:'checking',error:null});
+   if(!feedBase){
+    const base=await resolveFeedBase();
+-   if(!base)return {ok:false,error:'UPDATE_FEED_UNREACHABLE'};
++   if(!started)return {ok:false,error:'UPDATE_STOPPED'};
++   if(!base){publish({status:'idle',error:'UPDATE_FEED_UNREACHABLE'});return {ok:false,error:'UPDATE_FEED_UNREACHABLE'};}
+    if(base!==appliedFeedBase){updater.setFeedURL({provider:'generic',url:base});appliedFeedBase=base;}
+   }
+   try{await updater.checkForUpdates();return {ok:true,status:state.status};}
+@@ -83,6 +106,6 @@ function createDesktopUpdates({app,updater,notify,canInstall=()=>({ok:true}),bro
+   if(timer)clearTimeout(timer);if(interval)clearInterval(interval);if(retryTimer)clearTimeout(retryTimer);timer=interval=retryTimer=null;started=false;feedBase=appliedFeedBase=null;
+   updater.removeAllListeners();publish({enabled:false,status:'disabled',version:null,notes:'',progress:null,error:null});
+  }
+- return {start,check,snapshot,stop,onState(listener){listeners.add(listener);return ()=>listeners.delete(listener);}};
++ return {start,check,install,snapshot,stop,onState(listener){listeners.add(listener);return ()=>listeners.delete(listener);}};
+ }
+ module.exports={createDesktopUpdates,feedOverride,normalizeNotes,defaultFeedBases:DEFAULT_FEED_BASES};
+diff --git a/desktop/tests/updates.test.cjs b/desktop/tests/updates.test.cjs
+index 19c57f8..29001da 100644
+--- a/desktop/tests/updates.test.cjs
++++ b/desktop/tests/updates.test.cjs
+@@ -31,7 +31,7 @@ test('feed override accepts https and loopback only, never credentials',()=>{
+ test('update lifecycle reaches ready, notifies once and installs silently',async()=>{
+  const {updates,updater,notified}=harness();
+  assert.deepEqual(updates.start(),{ok:true});
+- assert.equal(updater.autoDownload,false);assert.equal(updater.autoInstallOnAppQuit,true);
++ assert.equal(updater.autoDownload,false);assert.equal(updater.autoInstallOnAppQuit,false);
+  updater.emit('update-available',{version:'0.3.0',releaseNotes:'<b>自动更新</b>'});
+  let state=updates.snapshot();
+  assert.equal(state.status,'downloading');assert.equal(state.version,'0.3.0');assert.equal(state.notes,'自动更新');assert.equal(updater.downloads,1);
+@@ -97,3 +97,52 @@ test('publish script extracts exactly the requested changelog section',async()=>
+   assert.throws(()=>injectReleaseNotes(manifest,'  '),/RELEASE_NOTES_INVALID/);
+   assert.throws(()=>injectReleaseNotes('not yaml','x'),/RELEASE_MANIFEST_INVALID/);
+ });
++
++test('manual checks lock before manifest probing and expose offline state',async()=>{
++ let resolve,requests=0;const {updates,updater}=harness({fetcher:()=>{requests++;return new Promise(r=>resolve=r);}});
++ updates.start();const first=updates.check();assert.equal(updates.snapshot().status,'checking');
++ assert.deepEqual(await updates.check(),{ok:true,status:'checking'});assert.equal(requests,1);
++ resolve({ok:true,text:async()=>manifest});await first;assert.equal(updater.checks,1);updates.stop();
++ const dead=harness({fetcher:feedFetcher([new Error('offline')])});dead.updates.start();await dead.updates.check();
++ assert.equal(dead.updates.snapshot().status,'idle');assert.equal(dead.updates.snapshot().error,'UPDATE_FEED_UNREACHABLE');dead.updates.stop();
++});
++
++test('ready update reopens without download and async install gate is fail closed and retryable',async()=>{
++ const {updates,updater}=harness({choice:1,gate:Promise.resolve({ok:false})});
++ updates.start();updater.emit('update-downloaded');await new Promise(r=>setImmediate(r));
++ assert.deepEqual(await updates.check(),{ok:true,status:'ready'});assert.equal(updater.checks,0);assert.equal(updater.downloads,0);
++ assert.deepEqual(await updates.install(),{ok:false,error:'UPDATE_INSTALL_BUSY'});assert.equal(updater.installs,0);assert.equal(updates.snapshot().status,'ready');
++ updates.stop();
++});
++
++test('async installation serializes clicks, resumes on failure, and retries without download',async()=>{
++ const updater=new FakeUpdater();let release=0,allow=false,finish;
++ const updates=createDesktopUpdates({app:{getVersion:()=> '0.3.3'},updater,notify:async()=>1,canInstall:async()=>{if(!allow)return {ok:false};await new Promise(r=>finish=r);return {ok:true,release:async()=>{release++;}};},startupDelayMs:100000});
++ updates.start();assert.deepEqual(await updates.install(),{ok:false,error:'UPDATE_NOT_READY'});updater.emit('update-downloaded');
++ assert.equal((await updates.install()).error,'UPDATE_INSTALL_BUSY');allow=true;
++ updater.quitAndInstall=()=>{throw Error('fixture failure');};const failed=updates.install();await new Promise(r=>setImmediate(r));
++ assert.equal((await updates.install()).error,'UPDATE_INSTALL_BUSY');finish();assert.equal((await failed).error,'UPDATE_INSTALL_FAILED');assert.equal(release,1);assert.equal(updates.snapshot().status,'ready');
++ updater.quitAndInstall=()=>{updater.installs++;};const success=updates.install();await new Promise(r=>setImmediate(r));finish();assert.equal((await success).ok,true);assert.equal(updater.installs,1);assert.equal(release,1);
++ assert.equal((await updates.install()).error,'UPDATE_INSTALL_BUSY');assert.equal(updater.downloads,0);updates.stop();
++});
++
++test('download errors are retryable and lastChecked only follows confirmed no-update',async()=>{
++ const {updates,updater}=harness();updates.start();assert.equal(updates.snapshot().lastChecked,null);
++ updater.emit('update-available',{version:'0.3.4'});updater.emit('error',Error('download'));assert.equal(updates.snapshot().status,'idle');assert.equal(updates.snapshot().error,'UPDATE_DOWNLOAD_FAILED');
++ updater.emit('update-not-available');assert.ok(updates.snapshot().lastChecked>0);updates.stop();
++});
++
++test('electron-updater emitted installation errors release the maintenance gate, not only thrown errors',async()=>{
++ let released=0;const updater=new FakeUpdater(),updates=createDesktopUpdates({app:{getVersion:()=> '0.3.3'},updater,notify:async()=>1,canInstall:async()=>({ok:true,release:async()=>released++}),startupDelayMs:100000});
++ updates.start();updater.emit('update-downloaded');updater.quitAndInstall=()=>updater.emit('error',Error('installer failure'));
++ assert.equal((await updates.install()).error,'UPDATE_INSTALL_FAILED');assert.equal(released,1);assert.equal(updates.snapshot().status,'ready');
++ updater.quitAndInstall=()=>{updater.installs++;};assert.equal((await updates.install()).ok,true);assert.equal(updater.installs,1);
++ updater.emit('error',Error('spawn failure'));await new Promise(r=>setImmediate(r));assert.equal(released,2);assert.equal(updates.snapshot().error,'UPDATE_INSTALL_FAILED');updates.stop();
++});
++
++test('republishing uploads assets separately from release edit',async()=>{
++ const {releaseCommands}=await import(pathToFileURL(path.resolve(__dirname,'../../scripts/publish-desktop-update.mjs')).href);
++ const params={tag:'v0.3.4',notesFile:'notes.md',installer:'setup.exe',manifest:'latest.yml'};
++ const commands=releaseCommands({...params,existing:true});assert.deepEqual(commands.map(c=>c.slice(0,2)),[['release','edit'],['release','upload']]);assert.ok(!commands[0].includes('--clobber'));assert.ok(commands[1].includes('--clobber'));
++ assert.ok(releaseCommands({...params,existing:false,prerelease:true})[0].includes('--prerelease'));
++});
+diff --git a/docs/changes/2026-11-17-desktop-update-entry.md b/docs/changes/2026-11-17-desktop-update-entry.md
+new file mode 100644
+index 0000000..984b31c
+--- /dev/null
++++ b/docs/changes/2026-11-17-desktop-update-entry.md
+@@ -0,0 +1,41 @@
++# 设置右侧的桌面更新入口
++
++## 模块与职责
++
++- 负责人：本线程；任务 `codex/desktop-update-entry`。
++- 基线 main/origin/main：`7f823fe361d082635684c135ce5fdfe3b2e3db18`。
++- 独立目录：`E:/Workspace/naumi-desktop-updates`。功能切片计数：1。
++- 文件归属：desktop-updates UI 资产、client 异步安装段、host 对应资产注册；桌面 updates/main/preload；发布脚本及本模块测试/文档/证据。不修改群聊、任务数据、模型与身份认证。
++
++## 公共接口、依赖与状态归属
++
++- 复用 `sidebar.footer.action` 原生 list slot，保留原生 `sidebar.settings` single slot 的组件/操作，未替换设置。
++- 用户最终指定「设置右边」，因此更新按钮与设置同一行。上游没有右侧专属 seat，最小 CSS grid 适配只在包含该按钮的 native footer 生效；依赖 pinned sidebar 的 `_footArea/_settingsArea/_footerActions` 样式契约，测试校验这些契约。其他 footer action 保留独立整行。
++- 折叠模式沿用原生 rail 生命周期；Windows titlebar 模式原生会隐藏整个折叠 footer，不强行改变其布局。
++- renderer 只调用 `naumiDesktop.updateState/checkUpdates/installUpdate/onUpdateState`。无 Native API 的网页不显示无效按钮。
++- 更新源、版本探测、下载、SHA512 校验依然由已有 electron-updater 管理；不新增账号、token 或另一套更新服务。
++- 安装前复用已有 signed maintenance `quiesce`，对 owned/isolated runtime 原子检查任务空闲并封新任务准入。忙碌、活动未知、外连 backend 均保持 ready、不退出。
++
++## 本次实现与迁移状态
++
++1. 设置右侧常驻「检查更新」按钮；点击检查并展示轻量版本面板、下载进度、纯文本日志、错误重试、重启并更新。
++2. 订阅先于初始读取，流事件优先于迟到的旧 snapshot；关闭/卸载退订；支持 Escape、外部点击、焦点返回和 resize 关闭。
++3. 源探测前即进入 checking，避免手动与定时重复探测。失败恢复 idle，可重试。已下载 ready 不重复检查或下载。
++4. 独立 `install()` 可在「稍后」之后重新安装。异步门禁拒绝后保留 ready，安装抛错或 electron-updater 发出 error 时释放本次维护锁；并发点击只交接安装一次。
++5. `autoInstallOnAppQuit=false`，所有安装必须显式经门禁。普通退出不会绕过空闲核验自动安装。
++6. 修复已有 Release 的重传命令：`gh release edit` 修改说明，再 `gh release upload --clobber` 上传资产；无实际发版。
++
++## 验证命令、结果及证据层级
++
++- 基线：`node --test desktop/tests/updates.test.cjs`，10/10，通过，exit 0。
++- 首轮并行全仓 538/539，一个既有 backend SIGKILL fixture 报 `FIXTURE_EXIT`；未修改该模块。它在基线与新版单独复查均 31/31，串行全仓 539/539。补充 updater 以 error 事件报告安装失败的边界测试后，最终集中回归与副本回滚结果见 `evidence/desktop-updates/VERIFICATION.txt`。
++- 生产更新组件交互 15/15：同排右侧定位、设置原动作、检查、进度、ready重开、安装忙碌/重试、文本日志、Escape/焦点、外点、resize、折叠与退订。
++- 只读核对公开 Release：`v0.3.2`，资产 `latest.yml` + `Naumi-Setup-0.3.2-x64.exe`；公开 feed HTTP 200、version 0.3.2、manifest 字段合法。未上传任何资产。截图中的 0.3.4 是受控测试数据。
++- UI 使用生产组件与 pinned native footer CSS，受控桥接状态；不是现有员工安装版或真实远端更新验收。
++- 不调用模型、不下载真实安装包、不重启 3080、不操作任务账本。
++
++## 未完成项与下一步
++
++- 本切片不提升版本号，不覆盖既有 0.3.3 安装包，不创建 GitHub Release。
++- main 合入后，下一次按固定 main 构建新版本并发布 `latest.yml` + 安装包，安装该版本的员工才能使用该入口；旧包只有已具备的后台检查能力。
++- 生产下载、系统安装及重启后版本验收要在实际发版时执行，与本次源码/隔离组件验收分开记录。
+diff --git a/docs/implementation/DESKTOP_AUTO_UPDATE.md b/docs/implementation/DESKTOP_AUTO_UPDATE.md
+index 3d80185..8b50e24 100644
+--- a/docs/implementation/DESKTOP_AUTO_UPDATE.md
++++ b/docs/implementation/DESKTOP_AUTO_UPDATE.md
+@@ -35,7 +35,7 @@ ghfast.top 0.77、ghproxy.net 0.34。镜像列表固化在 `updates.cjs` 的
+ - 启动 15 秒后首次检查，之后每 24 小时复查一次；`naumiDesktop.checkUpdates()` 支持手动触发
+ - 发现新版本 → 后台静默下载（进度经 `naumiDesktop.onUpdateState` 推送）
+ - 下载完成 → 弹窗展示更新日志 + 当前版本 → 新版本，按钮：立即重启更新 / 稍后
+-- **安装门禁**：仅在空闲（无连接中/启动中/关闭中、无维护锁、无运行中的浏览器队列或企业任务）时才执行 `quitAndInstall`；忙碌时保持已就绪状态，下次手动触发或退出时自动安装（autoInstallOnAppQuit）
++- **安装门禁**：仅在空闲（无连接中/启动中/关闭中、无维护锁、无运行中的浏览器队列或企业任务）时，复用 signed maintenance quiesce 原子检查 owned/isolated 后端的运行任务并封新任务准入，再执行 `quitAndInstall`；忙碌或活动未知时保持已就绪状态，可稍后通过「重启并更新」重试。`autoInstallOnAppQuit=false`，普通退出不绕过门禁安装。
+ - 与 0.2.2 安装器维护协议协同：更新重启走正常退出流程，NSIS 端 preflight 负责 quiesce 残留后端
+ 
+ ## 安全边界
+@@ -65,3 +65,12 @@ npm run release -- --prerelease
+ - `desktop/app/preload.cjs` `naumiDesktop.updateState/checkUpdates/onUpdateState`
+ - `scripts/publish-desktop-update.mjs` 发布脚本（CHANGELOG 小节提取 + latest.yml releaseNotes 注入）
+ - `desktop/tests/updates.test.cjs` 单元测试
++
++## 可见检查入口（2026-11-17）
++
++- 位置：左侧底部「设置」右侧，同一行，不新增导航。
++- 使用 `sidebar.footer.action` 原生扩展点，最小 grid 适配保留原设置组件。普通网页无 Native API 时不展示。
++- 点击即检查；面板显示当前/目标版本、检查/下载状态、百分比、纯文本更新说明、错误重试和「重启并更新」。ready 再次打开不重复下载。
++- IPC：新增 `naumiDesktop.installUpdate()`；状态新增 `lastChecked`，只在确认无更新时展示「已是最新版本」。
++- 开发壳未启用更新器时显示「安装版支持更新」，不伪报最新。
++- 实现与证据边界见 [本次记录](../changes/2026-11-17-desktop-update-entry.md)。
+diff --git a/plugins/naumi-enterprise/assets/desktop-updates.css b/plugins/naumi-enterprise/assets/desktop-updates.css
+new file mode 100644
+index 0000000..9c76585
+--- /dev/null
++++ b/plugins/naumi-enterprise/assets/desktop-updates.css
+@@ -0,0 +1,10 @@
++/* Native footer seat, with settings retained on the left. Pinned sidebar CSS contract. */
++[class*="_footArea"]:has(.nup-trigger[data-wide="true"]){display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:4px}
++[class*="_footArea"]:has(.nup-trigger[data-wide="true"])>[class*="_settingsArea"]{grid-column:1;grid-row:1;width:auto;min-width:0}
++[class*="_footArea"]:has(.nup-trigger[data-wide="true"])>[class*="_footerActions"]{display:contents}
++[class*="_footArea"]:has(.nup-trigger[data-wide="true"])>[class*="_footerActions"]>:not(.nup-trigger){grid-column:1/-1}
++.nup-trigger{grid-column:2;grid-row:1;position:relative;display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;padding:0 10px;border:0;border-radius:8px;background:transparent;color:#767983;font:inherit;font-size:12px;white-space:nowrap;cursor:pointer;flex:none;-webkit-app-region:no-drag}
++.nup-trigger:hover{color:#4e405e;background:#eeebf3}.nup-trigger:focus-visible,.nup-panel button:focus-visible{outline:2px solid #9683b6;outline-offset:2px}.nup-trigger[data-wide="false"]{padding:0;width:36px}
++.nup-dot{width:5px;height:5px;position:absolute;right:5px;top:5px;background:#8970a8;border-radius:50%}
++.nup-panel{position:fixed;z-index:1000;box-sizing:border-box;width:332px;max-width:calc(100vw - 24px);max-height:calc(100vh - 90px);overflow:auto;padding:20px;background:#fff;color:#29252f;border:1px solid #e9e5ee;border-radius:16px;box-shadow:0 12px 45px #2a173b1a;font:13px/1.6 "Segoe UI","Microsoft YaHei",sans-serif}
++.nup-panel header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}.nup-panel header strong{font-size:18px;font-weight:650;letter-spacing:-.6px}.nup-panel .nup-close{border:0;background:transparent;color:#99939e;font-size:23px;line-height:24px;border-radius:6px;cursor:pointer;padding:0 4px}.nup-status{font-size:15px;font-weight:600}.nup-version{display:flex;align-items:center;gap:10px;color:#99939e;font-variant-numeric:tabular-nums;margin-top:4px}.nup-version span{color:#77608d}.nup-download{display:flex;gap:12px;align-items:center;margin-top:17px;color:#77608d;font-size:12px}.nup-download progress{width:100%;height:5px;accent-color:#9683b6;border:0;border-radius:10px;overflow:hidden}.nup-download progress::-webkit-progress-bar{background:#f1edf6}.nup-download progress::-webkit-progress-value{background:#9683b6;border-radius:10px}.nup-notes{font:inherit;white-space:pre-wrap;overflow-wrap:anywhere;max-height:200px;overflow:auto;margin:17px 0 0;padding-top:14px;border-top:1px solid #f0edf4;color:#77717f}.nup-panel footer{display:flex;justify-content:flex-end;margin-top:20px}.nup-action{border:1px solid #e5deee;background:#f4f0f9;color:#69537f;padding:7px 14px;border-radius:8px;cursor:pointer;font:inherit;font-size:12px}.nup-action:hover{background:#ebe3f3}.nup-action:disabled{cursor:default;opacity:.5}
+diff --git a/plugins/naumi-enterprise/assets/desktop-updates.js b/plugins/naumi-enterprise/assets/desktop-updates.js
+new file mode 100644
+index 0000000..11126db
+--- /dev/null
++++ b/plugins/naumi-enterprise/assets/desktop-updates.js
+@@ -0,0 +1,45 @@
++/** Desktop-only presentation over the native updater; no network/update logic in the renderer. */
++export function createUpdateStore(api) {
++  let state={enabled:false,status:'loading',currentVersion:'',version:null,notes:'',progress:null,error:null},revision=0,closed=false,pending=null;
++  const listeners=new Set();
++  const publish=value=>{if(closed)return;state={...state,...value};revision++;for(const fn of listeners)fn();};
++  const off=api.onUpdateState(publish),initialRevision=revision;
++  Promise.resolve().then(()=>api.updateState()).then(value=>{if(revision===initialRevision)publish(value);}).catch(()=>{if(revision===initialRevision)publish({status:'idle',error:'UPDATE_STATE_FAILED'});});
++  const run=method=>{
++    if(pending)return pending;
++    pending=Promise.resolve().then(()=>api[method]()).then(result=>{if(!result?.ok)publish({status:state.status==='ready'?'ready':'idle',error:result?.error||'UPDATE_CHECK_FAILED'});return result;}).catch(()=>{publish({status:state.status==='ready'?'ready':'idle',error:'UPDATE_CONNECTION_FAILED'});return {ok:false};}).finally(()=>{pending=null;});
++    return pending;
++  };
++  return {getSnapshot:()=>state,subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn);},check:()=>run('checkUpdates'),install:()=>run('installUpdate'),dispose(){closed=true;off?.();listeners.clear();}};
++}
++
++export function updateView(state) {
++  const status=state.status;
++  let title=status==='loading'?'正在读取版本':!state.enabled?'安装版支持更新':status==='checking'?'正在检查更新':status==='downloading'?'正在下载更新':status==='ready'?'更新已就绪':state.lastChecked?'已是最新版本':'检查更新';
++  if(state.error)title=state.error==='UPDATE_INSTALL_BUSY'?'任务运行中，稍后更新':state.error==='UPDATE_FEED_UNCONFIGURED'?'安装版支持更新':state.error==='UPDATE_INSTALL_FAILED'?'安装未完成，请重试':state.error==='UPDATE_DOWNLOAD_FAILED'?'下载失败，请重试':'检查失败，请重试';
++  return {title,busy:['loading','checking','downloading'].includes(status),percent:Math.round(Math.max(0,Math.min(100,Number(state.progress?.percent)||0))),ready:status==='ready'};
++}
++
++export function installDesktopUpdatesUI(ctx,React,createPortal,api=globalThis.naumiDesktop) {
++  if(!api?.updateState||!api?.checkUpdates||!api?.onUpdateState)return()=>{};
++  const h=React.createElement,store=createUpdateStore(api);
++  function Updates({wide}) {
++    const state=React.useSyncExternalStore(store.subscribe,store.getSnapshot),view=updateView(state),[open,setOpen]=React.useState(false),[position,setPosition]=React.useState({left:16,bottom:60});
++    const trigger=React.useRef(null),panel=React.useRef(null),id=React.useId();
++    const close=()=>{setOpen(false);trigger.current?.focus();};
++    React.useEffect(()=>{
++      if(!open)return;
++      const rect=trigger.current.getBoundingClientRect();setPosition({left:Math.max(12,Math.min(rect.left,innerWidth-344)),bottom:Math.max(12,innerHeight-rect.top+10)});
++      panel.current?.querySelector('button')?.focus();
++      const outside=e=>{if(!panel.current?.contains(e.target)&&!trigger.current?.contains(e.target))setOpen(false);};
++      const key=e=>{if(e.key==='Escape'){e.preventDefault();close();}};
++      const resize=close;
++      document.addEventListener('pointerdown',outside);document.addEventListener('keydown',key);window.addEventListener('resize',resize);
++      return()=>{document.removeEventListener('pointerdown',outside);document.removeEventListener('keydown',key);window.removeEventListener('resize',resize);};
++    },[open]);
++    const icon=h('svg',{width:16,height:16,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.6,strokeLinecap:'round',strokeLinejoin:'round','aria-hidden':true},h('path',{d:'M20 7v5h-5 M4 17v-5h5 M19 10a7 7 0 0 0-12-5L4 8 M5 14a7 7 0 0 0 12 5l3-3'}));
++    return h(React.Fragment,null,h('button',{ref:trigger,type:'button',className:'nup-trigger','data-wide':String(wide),'aria-label':'检查更新',title:'检查更新','aria-haspopup':'dialog','aria-expanded':open,'aria-controls':open?id:undefined,onClick:()=>{if(open){close();return;}setOpen(true);if(!view.ready)void store.check();}},icon,wide&&h('span',null,'检查更新'),view.ready&&h('i',{className:'nup-dot'})),open&&createPortal(h('section',{ref:panel,id,role:'dialog','aria-label':'Naumi 更新',className:'nup-panel',style:position},h('header',null,h('strong',null,'Naumi'),h('button',{type:'button',className:'nup-close','aria-label':'关闭更新面板',onClick:close},'×')),h('div',{className:'nup-status',role:'status','aria-live':'polite'},view.title),h('div',{className:'nup-version'},state.currentVersion?'v'+state.currentVersion:'',state.version&&h('span',null,'→ v'+state.version)),state.status==='downloading'&&h('div',{className:'nup-download'},h('progress',{max:100,value:view.percent,'aria-label':'更新下载进度'}),h('span',null,view.percent+'%')),state.notes&&h('pre',{className:'nup-notes'},state.notes),h('footer',null,h('button',{type:'button',className:'nup-action',disabled:view.busy||!state.enabled||(!api.installUpdate&&view.ready),onClick:()=>void(view.ready?store.install():store.check())},view.ready?'重启并更新':view.busy?'检查中…':'重新检查'))),document.body));
++  }
++  const off=ctx.slots.inject('sidebar.footer.action',()=>ctx.slots.register({name:'sidebar.footer.action',id:'naumi-updates',order:100},Updates));
++  return()=>{off?.();store.dispose();};
++}
+diff --git a/plugins/naumi-enterprise/client.js b/plugins/naumi-enterprise/client.js
+index f7208ae..58bfb6c 100644
+--- a/plugins/naumi-enterprise/client.js
++++ b/plugins/naumi-enterprise/client.js
+@@ -1,5 +1,10 @@
+ /** Async presentation-only module; the original enterprise app below stays intact. */
+ function installNaumiContextUI(ctx,React,createPortal,Icon){
++  ctx.effect(()=>{
++    let dispose,closed=false;
++    void import('/naumi/assets/desktop-updates.js').then(module=>{if(!closed)dispose=module.installDesktopUpdatesUI(ctx,React,createPortal);}).catch(error=>console.error('Naumi updates:',error));
++    return()=>{closed=true;dispose?.();};
++  });
+   ctx.effect(()=>{
+     let dispose,closed=false;
+     void import('/naumi/assets/product-identity.js').then(module=>{if(!closed)dispose=module.installProductIdentity(ctx,{version:window.__NAUMI__?.productVersion});}).catch(error=>console.error('Naumi product identity:',error));
+diff --git a/plugins/naumi-enterprise/host.js b/plugins/naumi-enterprise/host.js
+index 76bdce4..0550e64 100644
+--- a/plugins/naumi-enterprise/host.js
++++ b/plugins/naumi-enterprise/host.js
+@@ -26,6 +26,8 @@ export function apply(ctx,config) {
+   const assets=new Map([['employee-enterprise-work.js','text/javascript; charset=utf-8'],['employee-memory-maintenance.js','text/javascript; charset=utf-8'],['employee-sync-panel.js','text/javascript; charset=utf-8'],['employee-center.js','text/javascript; charset=utf-8'],['employee-center-model.js','text/javascript; charset=utf-8'],['employee-center.css','text/css; charset=utf-8'],['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml'],['browser-client.js','text/javascript; charset=utf-8'],['browser-native-client.js','text/javascript; charset=utf-8'],['browser-native.css','text/css; charset=utf-8'],['browser-scheduler.js','text/javascript; charset=utf-8'],['browser.css','text/css; charset=utf-8'],['team-panel.css','text/css; charset=utf-8'],['team-panel.js','text/javascript; charset=utf-8'],['team-panel-model.js','text/javascript; charset=utf-8'],['bot-sidebar.js','text/javascript; charset=utf-8'],['bot-sidebar-model.js','text/javascript; charset=utf-8'],['bot-sidebar.css','text/css; charset=utf-8']]);
+   assets.set('product-copy-keys.js','text/javascript; charset=utf-8');
+   assets.set('product-identity.js','text/javascript; charset=utf-8');
++  assets.set('desktop-updates.js','text/javascript; charset=utf-8');
++  assets.set('desktop-updates.css','text/css; charset=utf-8');
+   assets.set('product-identity.css','text/css; charset=utf-8');
+   assets.set('model-connections.js','text/javascript; charset=utf-8');
+   assets.set('model-connections.css','text/css; charset=utf-8');
+@@ -71,7 +73,7 @@ export function apply(ctx,config) {
+   }}));
+   ctx.on('webserver/index-inject',table=>{
+     table.push({kind:'global',name:'__NAUMI__',value:{collaborationOrigin,designOrigin,version:'0.3.0',product:'Naumi',productVersion:PRODUCT_VERSION}});
+-    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/bot-groups.css">'});
++    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/bot-groups.css"><link rel="stylesheet" href="/naumi/assets/desktop-updates.css">'});
+     table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/product-identity.css"><link rel="stylesheet" href="/naumi/assets/model-connections.css"><link rel="stylesheet" href="/naumi/assets/employee-center.css"><link rel="stylesheet" href="/naumi/assets/employee-experience.css"><link rel="stylesheet" href="/naumi/assets/browser.css"><link rel="stylesheet" href="/naumi/assets/browser-native.css"><link rel="stylesheet" href="/naumi/assets/team-panel.css"><link rel="stylesheet" href="/naumi/assets/bot-sidebar.css"><link rel="stylesheet" href="/naumi/assets/bot-task.css"><link rel="stylesheet" href="/naumi/assets/bot-avatar.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
+   });
+   ctx.effect(()=>ctx.webServer.tapIndex(html=>html.replace(/<title>[^<]*<\/title>/i,'<title>Naumi</title>').replace(/<link[^>]+rel="(?:shortcut )?icon"[^>]*href="(?!\/naumi\/)[^"]*"[^>]*>/g,'')));
+diff --git a/scripts/check-desktop-updates-ui.mjs b/scripts/check-desktop-updates-ui.mjs
+new file mode 100644
+index 0000000..e7a3c7e
+--- /dev/null
++++ b/scripts/check-desktop-updates-ui.mjs
+@@ -0,0 +1,26 @@
++import fs from 'node:fs';import path from 'node:path';import{fileURLToPath}from'node:url';
++const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),out=path.join(root,'evidence/desktop-updates'),{id}=JSON.parse(fs.readFileSync(path.join(out,'browser-space.json'))),task=await taskSpace(id),page=(await task.pages())[0],checks=[];
++const check=(name,ok)=>{if(!ok)throw Error('UPDATE_UI_FAILED '+name);checks.push(name);};
++check('settings_left_updates_right_same_row',await page.evaluate(()=>{const s=document.querySelector('[aria-label="设置"]').getBoundingClientRect(),u=document.querySelector('[aria-label="检查更新"]').getBoundingClientRect();return u.left>s.right-1&&Math.abs(s.top-u.top)<2;}));
++await page.click('[aria-label="设置"]');check('native_settings_action_unchanged',await page.evaluate(()=>fixture.settings===1));
++await page.click('[aria-label="检查更新"]');await page.waitForSelector('.nup-panel');check('click_checks_once_and_confirms_latest',await page.evaluate(()=>fixture.checks===1&&document.querySelector('[role="status"]').textContent==='已是最新版本'));
++await page.keyboard.press('Escape');check('escape_closes_and_returns_focus',await page.evaluate(()=>!document.querySelector('.nup-panel')&&document.activeElement.getAttribute('aria-label')==='检查更新'));
++await page.evaluate(()=>{fixture.mode='hold';});await page.click('[aria-label="检查更新"]');await page.waitForSelector('.nup-action[disabled]');check('pending_check_disables_repeat_action',await page.evaluate(()=>document.querySelector('[role="status"]').textContent==='正在检查更新'));
++await page.evaluate(()=>fixture.emit({status:'downloading',version:'0.3.4',notes:'- 优化工作台\n- 修复窗口布局',progress:{percent:62.4}}));await page.waitForSelector('progress[value="62"]');
++check('live_download_progress_and_versions',await page.evaluate(()=>document.querySelector('.nup-version').textContent.includes('0.3.4')&&document.querySelector('.nup-download').textContent==='62%'));
++await page.screenshot({path:path.join(out,'download.png')});
++await page.evaluate(()=>fixture.emit({status:'ready',progress:{percent:100}}));await page.waitForSelector('.nup-action:not([disabled])');await page.keyboard.press('Escape');
++const before=await page.evaluate(()=>fixture.checks);await page.click('[aria-label="检查更新"]');check('ready_reopen_does_not_recheck_or_redownload',await page.evaluate(count=>fixture.checks===count,before));
++await page.evaluate(()=>{fixture.mode='busy';});await page.click('.nup-action');await page.waitForFunction(()=>document.querySelector('[role="status"]').textContent.includes('任务运行中'));
++check('busy_install_retains_ready_and_retry',await page.evaluate(()=>fixture.installs===1&&!document.querySelector('.nup-action').disabled&&document.querySelector('.nup-action').textContent==='重启并更新'));
++await page.evaluate(()=>{fixture.mode='latest';});await page.click('.nup-action');check('explicit_install_retry_uses_native_api',await page.evaluate(()=>fixture.installs===2));
++await page.evaluate(()=>fixture.emit({status:'ready',error:null}));await page.screenshot({path:path.join(out,'ready.png')});
++await page.evaluate(()=>fixture.emit({status:'idle',error:'UPDATE_FEED_UNREACHABLE',version:null,notes:''}));check('offline_failure_is_visible_and_retryable',await page.evaluate(()=>document.querySelector('[role="status"]').textContent==='检查失败，请重试'&&!document.querySelector('.nup-action').disabled));
++await page.click('.nup-action');await page.waitForFunction(()=>document.querySelector('[role="status"]').textContent==='已是最新版本');
++await page.evaluate(()=>fixture.emit({status:'ready',notes:'<img src=x onerror="window.bad=1">'}));check('release_notes_are_text_not_html',await page.evaluate(()=>!document.querySelector('.nup-notes img')&&!window.bad&&document.querySelector('.nup-notes').textContent.startsWith('<img')));
++await page.click('h1');check('outside_click_dismisses',await page.evaluate(()=>!document.querySelector('.nup-panel')));
++await page.evaluate(()=>fixture.collapse());await page.waitForSelector('.nup-trigger[data-wide="false"]');check('collapsed_rail_accessible_icon_only',await page.evaluate(()=>document.querySelector('.nup-trigger').textContent===''&&document.querySelector('.nup-trigger').getBoundingClientRect().width===36));
++await page.click('[aria-label="检查更新"]');await page.waitForSelector('.nup-panel');await page.cdp('Emulation.setDeviceMetricsOverride',{width:800,height:620,deviceScaleFactor:1,mobile:false});await page.waitForFunction(()=>!document.querySelector('.nup-panel'));check('resize_closes_cleanly',true);
++await page.evaluate(()=>fixture.web());await page.waitForFunction(()=>!document.querySelector('.nup-trigger'));check('web_has_no_dead_entry_and_unsubscribes',await page.evaluate(()=>fixture.off===1&&fixture.errors.length===0));
++fs.writeFileSync(path.join(out,'UI.txt'),'UI checks='+checks.length+' pass='+checks.length+' fail=0 model_calls=0 installs=fixture_only\n'+checks.map(n=>'PASS '+n).join('\n')+'\n');
++console.log(fs.readFileSync(path.join(out,'UI.txt'),'utf8'));console.log(await page.snapshot());
+diff --git a/scripts/desktop-update-evidence.mjs b/scripts/desktop-update-evidence.mjs
+new file mode 100644
+index 0000000..d1f04ae
+--- /dev/null
++++ b/scripts/desktop-update-evidence.mjs
+@@ -0,0 +1,37 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID}from'node:crypto';import{execFileSync,spawnSync}from'node:child_process';
++const root=process.cwd(),dir=path.join(root,'evidence/desktop-updates'),baseline='7f823fe361d082635684c135ce5fdfe3b2e3db18',sha=b=>createHash('sha256').update(b).digest('hex');
++const files=['.gitattributes','desktop/app/main.cjs','desktop/app/preload.cjs','desktop/app/updates.cjs','desktop/tests/updates.test.cjs','plugins/naumi-enterprise/client.js','plugins/naumi-enterprise/host.js','plugins/naumi-enterprise/assets/desktop-updates.js','plugins/naumi-enterprise/assets/desktop-updates.css','scripts/publish-desktop-update.mjs','scripts/render-desktop-updates.mjs','scripts/verify-desktop-updates-ui.mjs','scripts/check-desktop-updates-ui.mjs','scripts/desktop-update-evidence.mjs','tests/desktop-update-ui.test.mjs','docs/implementation/DESKTOP_AUTO_UPDATE.md','docs/changes/2026-11-17-desktop-update-entry.md'];
++const mode=process.argv[2];
++if(mode==='prepare'){
++ const records=[];
++ for(const file of files){const modified=fs.readFileSync(path.join(root,file));let original=null;try{original=execFileSync('git',['show',baseline+':'+file],{stdio:['ignore','pipe','ignore']});}catch{}
++  for(const [kind,bytes]of[['modified',modified],['original',original]])if(bytes){const target=path.join(dir,kind,file);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,bytes);}
++  records.push({file,originalSHA256:original?sha(original):null,modifiedSHA256:sha(modified)});
++ }
++ fs.writeFileSync(path.join(dir,'manifest.json'),JSON.stringify({baseline,files:records},null,2)+'\n');
++ fs.writeFileSync(path.join(dir,'DIFF_FILE.patch'),execFileSync('git',['diff','--cached','--binary',baseline,'--',...files],{maxBuffer:10*1024*1024}));
++ execFileSync('python',['-c',`import pathlib,zipfile;p=pathlib.Path(r'${dir}');z=zipfile.ZipFile(p/'MODIFIED_FILE.zip','w',zipfile.ZIP_DEFLATED);[z.write(f,f.relative_to(p).as_posix()) for d in ['original','modified'] for f in sorted((p/d).rglob('*')) if f.is_file()];z.write(p/'manifest.json','manifest.json');z.close()`]);
++ console.log('ARTIFACTS files='+records.length+' original_hashes=PASS modified_hashes=PASS');
++}else if(mode==='rollback'){
++ assert(process.argv.includes('--test'),'COPY_TEST_REQUIRED');const manifest=JSON.parse(fs.readFileSync(path.join(dir,'manifest.json'))).files;
++ const parent=path.join(root,'runtime','desktop-update-rollback-'+randomUUID()),copy=path.join(parent,'copy');fs.mkdirSync(copy,{recursive:true});const tar=path.join(parent,'baseline.tar');
++ fs.writeFileSync(tar,execFileSync('git',['archive',baseline],{maxBuffer:200*1024*1024}));execFileSync('C:/Windows/System32/tar.exe',['-xf',tar,'-C',copy]);
++ for(const m of manifest){const target=path.join(copy,m.file);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(path.join(dir,'modified',m.file),target);assert.equal(sha(fs.readFileSync(target)),m.modifiedSHA256);}
++ for(const m of manifest){const target=path.join(copy,m.file);if(m.originalSHA256){fs.copyFileSync(path.join(dir,'original',m.file),target);assert.equal(sha(fs.readFileSync(target)),m.originalSHA256);}else fs.unlinkSync(target);}
++ fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');fs.symlinkSync(path.join(root,'desktop/node_modules'),path.join(copy,'desktop/node_modules'),'junction');
++ const command=['--test','--test-concurrency=1','tests/*.test.mjs','desktop/tests/*.test.cjs'],result=spawnSync(process.execPath,command,{cwd:copy,encoding:'utf8',windowsHide:true,timeout:240000,maxBuffer:15*1024*1024});
++ fs.writeFileSync(path.join(dir,'ROLLBACK.txt'),(result.stdout??'')+(result.stderr??''));assert.equal(result.status,0,'ROLLBACK_TESTS_FAILED');
++ const tests=Number((result.stdout.match(/(?:ℹ |# )tests (\d+)/)??[])[1]);assert(tests);
++ assert(!fs.existsSync(path.join(copy,'plugins/naumi-enterprise/assets/desktop-updates.js')));assert(!fs.readFileSync(path.join(copy,'desktop/app/preload.cjs'),'utf8').includes('installUpdate:'));assert(fs.readFileSync(path.join(copy,'desktop/app/updates.cjs'),'utf8').includes('autoInstallOnAppQuit=true'));
++ for(const m of manifest)assert.equal(sha(fs.readFileSync(path.join(root,m.file))),m.modifiedSHA256,'CURRENT_MODIFIED_CHANGED');
++ execFileSync('git',['apply','--reverse','--check',path.join(dir,'DIFF_FILE.patch')]);
++ const output='ROLLBACK tests='+tests+' pass='+tests+' fail=0 exit=0\nRESTORED update_entry=absent native_updater=baseline settings=retained hashes=PASS\nCURRENT update_entry=settings_right source=modified service3080=untouched';
++ fs.writeFileSync(path.join(dir,'ROLLBACK_RESULT.json'),JSON.stringify({status:'PASS',tests,exit:0,copy,command:'node '+command.join(' '),output},null,2)+'\n');console.log(output);
++}else if(mode==='reopen'){
++ const manifest=JSON.parse(fs.readFileSync(path.join(dir,'manifest.json'))).files;
++ for(const m of manifest){assert.equal(sha(fs.readFileSync(path.join(root,m.file))),m.modifiedSHA256);assert.equal(sha(fs.readFileSync(path.join(dir,'modified',m.file))),m.modifiedSHA256);if(m.originalSHA256)assert.equal(sha(fs.readFileSync(path.join(dir,'original',m.file))),m.originalSHA256);}
++ execFileSync('python',['-c',`import pathlib,zipfile,json,hashlib;p=pathlib.Path(r'${dir}');z=zipfile.ZipFile(p/'MODIFIED_FILE.zip');assert z.testzip() is None;m=json.loads(z.read('manifest.json'));assert all(hashlib.sha256(z.read('modified/'+r['file'])).hexdigest()==r['modifiedSHA256'] for r in m['files'])`]);
++ const report=fs.readFileSync(path.join(dir,'VERIFICATION.txt'),'utf8');for(const name of ['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh']){assert(fs.readFileSync(path.join(dir,name)).length>0);assert(report.includes('E:/Workspace/naumi-desktop/evidence/desktop-updates/'+name));}
++ assert.equal(JSON.parse(fs.readFileSync(path.join(dir,'ROLLBACK_RESULT.json'))).status,'PASS');assert(fs.readFileSync(path.join(dir,'UI.txt'),'utf8').includes('pass=15 fail=0'));execFileSync('D:/DEV/Git/bin/bash.exe',['-n',path.join(dir,'ROLLBACK.sh')]);
++ execFileSync('git',['apply','--reverse','--check',path.join(dir,'DIFF_FILE.patch')]);console.log('REOPEN files='+manifest.length+' zip_crc=PASS hashes=PASS patch=PASS verification=PASS rollback=PASS ui=15/15');
++}else throw Error('EXPECTED prepare|rollback|reopen');
+diff --git a/scripts/publish-desktop-update.mjs b/scripts/publish-desktop-update.mjs
+index 9568eb2..c1b62e7 100644
+--- a/scripts/publish-desktop-update.mjs
++++ b/scripts/publish-desktop-update.mjs
+@@ -47,6 +47,14 @@ function argValue(name) {
+   return index >= 0 ? process.argv[index + 1] : undefined;
+ }
+ 
++export function releaseCommands({existing,tag,notesFile,installer,manifest,prerelease=false}) {
++  const repo=['--repo',REPO];
++  return existing ? [
++    ['release','edit',tag,...repo,'--notes-file',notesFile],
++    ['release','upload',tag,...repo,installer,manifest,'--clobber'],
++  ] : [['release','create',tag,...repo,'--title','Naumi Desktop '+tag,'--notes-file',notesFile,...(prerelease?['--prerelease']:[]),installer,manifest]];
++}
++
+ function run(command, args, {cwd = root, env} = {}) {
+   const shell = process.platform === 'win32' && /\.cmd$/i.test(command);
+   const result = spawnSync(command, args, {cwd, env, stdio: 'inherit', shell});
+@@ -81,10 +89,7 @@ function main() {
+   const tag = 'v' + version;
+   const ghArgs = ['--repo', REPO];
+   const existing = capture('gh', ['release', 'view', tag, ...ghArgs]);
+-  const common = existing.ok
+-    ? ['release', 'edit', tag, ...ghArgs, '--notes-file', notesFile, String(installer), String(manifest), '--clobber']
+-    : ['release', 'create', tag, ...ghArgs, '--title', 'Naumi Desktop ' + tag, '--notes-file', notesFile, ...(args.includes('--prerelease') ? ['--prerelease'] : []), String(installer), String(manifest)];
+-  run('gh', common);
++  for(const command of releaseCommands({existing:existing.ok,tag,notesFile,installer,manifest,prerelease:args.includes('--prerelease')}))run('gh',command);
+   const size = (fs.statSync(installer).size / 1024 / 1024).toFixed(1);
+   console.log(`RELEASE ${tag} artifacts=Naumi-Setup-${version}-x64.exe(${size}MB)+latest.yml(with releaseNotes) feed=github:${REPO}`);
+ }
+diff --git a/scripts/render-desktop-updates.mjs b/scripts/render-desktop-updates.mjs
+new file mode 100644
+index 0000000..88b538a
+--- /dev/null
++++ b/scripts/render-desktop-updates.mjs
+@@ -0,0 +1,19 @@
++// Render the shipped component over the pinned native sidebar footer CSS contract.
++import fs from 'node:fs';import path from 'node:path';import {createRequire} from 'node:module';
++const root=process.cwd(),out=path.resolve(process.argv[2]??'evidence/desktop-updates'),deps=path.resolve(process.argv[3]??'E:/Workspace/naumi/node_modules'),require=createRequire(path.join(deps,'../package.json')),{build}=require('esbuild');
++fs.mkdirSync(out,{recursive:true});
++const native=fs.readFileSync('node_modules/@deepseek-ai/dsh-client-ui-sidebar/lib/client.js','utf8');
++const css=JSON.parse(native.match(/const css = (".*");/)[1]);
++const code=`import React from 'react';import{createRoot}from'react-dom/client';import{createPortal}from'react-dom';import{installDesktopUpdatesUI}from'./plugins/naumi-enterprise/assets/desktop-updates.js';
++const h=React.createElement,root=createRoot(document.getElementById('root'));let Updates,wide=true;const listeners=new Set();window.fixture={checks:0,installs:0,settings:0,off:0,errors:[],mode:'latest'};
++window.addEventListener('error',e=>fixture.errors.push(e.message));window.addEventListener('unhandledrejection',e=>fixture.errors.push(String(e.reason)));
++let state={enabled:true,status:'idle',currentVersion:'0.3.3',version:null,error:null};const publish=value=>{state={...state,...value};for(const fn of listeners)fn(state);};fixture.emit=publish;
++window.naumiDesktop={updateState:async()=>state,onUpdateState:fn=>{listeners.add(fn);return()=>{listeners.delete(fn);fixture.off++;};},checkUpdates:async()=>{fixture.checks++;publish({status:'checking',error:null});if(fixture.mode==='hold')return {ok:true};if(fixture.mode==='offline'){publish({status:'idle',error:'UPDATE_FEED_UNREACHABLE'});return {ok:false,error:'UPDATE_FEED_UNREACHABLE'};}publish({status:'idle',lastChecked:Date.now()});return {ok:true};},installUpdate:async()=>{fixture.installs++;return fixture.mode==='busy'?{ok:false,error:'UPDATE_INSTALL_BUSY'}:{ok:true};}};
++const ctx={slots:{inject:(_name,fn)=>fn(),register:(options,component)=>{Updates=component;return()=>{Updates=null;render();};}}};let off=installDesktopUpdatesUI(ctx,React,createPortal);
++fixture.web=()=>{off();off=installDesktopUpdatesUI(ctx,React,createPortal,{});render();};fixture.collapse=()=>{wide=!wide;render();};fixture.unmount=()=>root.unmount();
++function App(){return h('div',{className:'fixture-shell'},h('aside',{className:'fixture-sidebar',style:{width:wide?252:68}},h('img',{className:'fixture-brand',src:${JSON.stringify('data:image/svg+xml;charset=utf-8,'+encodeURIComponent(fs.readFileSync('plugins/naumi-enterprise/assets/wordmark.svg','utf8')))},width:95,alt:'Naumi'}),wide&&h('nav',null,...['工作台','项目与需求','交付中心','设计中心','系统连接'].map((text,i)=>h('div',{key:text},h('span',null,['▦','◇','✓','✧','↗'][i]),text))),h('div',{className:'fixture-spacer'}),h('div',{className:'hHd-Xa_footArea'},h('div',{className:'hHd-Xa_footerActions'},Updates&&h(Updates,{wide})),h('div',{className:'hHd-Xa_settingsArea'},h('button',{type:'button',className:'fixture-settings',onClick:()=>fixture.settings++,'aria-label':'设置'},h('span',null,'⚙'),wide&&'设置')))),h('main',null,h('h1',null,'工作台')));}
++function render(){root.render(h(App));}render();`;
++const result=await build({bundle:true,write:false,format:'iife',define:{'process.env.NODE_ENV':'"production"'},nodePaths:[deps],stdin:{contents:code,resolveDir:root},logLevel:'silent'});
++const base='*{box-sizing:border-box}html,body,#root{height:100%;margin:0;font-family:Segoe UI,Microsoft YaHei,sans-serif}.fixture-shell{display:flex;height:100vh;color:#343039}.fixture-sidebar{background:#f8f9fb;border-right:1px solid #eeedf1;display:flex;flex-direction:column;padding:24px 12px 14px}.fixture-brand{margin:0 10px 30px}.fixture-sidebar nav{display:grid;gap:24px;padding:0 12px;color:#85818d;font-size:12px}.fixture-sidebar nav div{display:flex;align-items:center;gap:13px}.fixture-sidebar nav span{width:20px;font-size:18px;color:#8c8794}.fixture-spacer{flex:1}.fixture-settings{display:flex;align-items:center;gap:8px;min-height:36px;border:0;background:transparent;border-radius:8px;color:#767983;padding:0 12px;font:inherit;font-size:12px;width:100%;cursor:pointer}.fixture-settings:hover{background:#eeebf3}.fixture-settings>span{font-size:16px}main{flex:1;background:#fff;padding:40px}h1{font-weight:550;font-size:22px;margin:0}';
++fs.writeFileSync(path.join(out,'fixture.html'),'<!doctype html><html lang="zh"><meta charset="utf-8"><title>Naumi 更新入口 · 组件验收</title><style>'+css+base+fs.readFileSync('plugins/naumi-enterprise/assets/desktop-updates.css','utf8')+'</style><div id="root"></div><script>'+result.outputFiles[0].text.replaceAll('</script','<\\/script')+'</script></html>');
++console.log('RENDER production_update_component=1 native_footer_css=1 fixture_bridge=1 model_calls=0');
+diff --git a/scripts/verify-desktop-updates-ui.mjs b/scripts/verify-desktop-updates-ui.mjs
+new file mode 100644
+index 0000000..187a138
+--- /dev/null
++++ b/scripts/verify-desktop-updates-ui.mjs
+@@ -0,0 +1,8 @@
++// Run via ego-browser nodejs -e "await import('file:///.../scripts/verify-desktop-updates-ui.mjs')"
++import fs from 'node:fs';import path from 'node:path';import{fileURLToPath,pathToFileURL}from'node:url';
++const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),out=path.join(root,'evidence/desktop-updates');
++const existing=(await listTaskSpaces()).find(s=>s.name==='Naumi 更新入口验收'),task=existing?await taskSpace(existing.id):await taskSpace('Naumi 更新入口验收'),page=(await task.pages())[0];
++fs.writeFileSync(path.join(out,'browser-space.json'),JSON.stringify({id:task.spaceId}));
++await page.cdp('Emulation.setDeviceMetricsOverride',{width:1100,height:720,deviceScaleFactor:1,mobile:false});
++await page.goto(pathToFileURL(path.join(out,'fixture.html')).href);await page.waitForSelector('button[aria-label="检查更新"]');
++console.log({taskSpaceId:task.spaceId});console.log(await page.snapshot());
+diff --git a/tests/desktop-update-ui.test.mjs b/tests/desktop-update-ui.test.mjs
+new file mode 100644
+index 0000000..d0fa78c
+--- /dev/null
++++ b/tests/desktop-update-ui.test.mjs
+@@ -0,0 +1,67 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import vm from 'node:vm';
++import {createUpdateStore,updateView,installDesktopUpdatesUI} from '../plugins/naumi-enterprise/assets/desktop-updates.js';
++const tick=()=>new Promise(r=>setImmediate(r));
++
++test('web has no dead update entry and desktop uses the native list slot only',()=>{
++ assert.equal(typeof installDesktopUpdatesUI({},null,null,{}),'function');
++ let registration,closed=0,unsub=0;
++ const api={onUpdateState:()=>()=>unsub++,updateState:async()=>({enabled:true,status:'idle'}),checkUpdates:async()=>({ok:true})};
++ const off=installDesktopUpdatesUI({slots:{inject:(name,fn)=>{assert.equal(name,'sidebar.footer.action');return fn();},register:(options,component)=>{registration={options,component};return()=>closed++;}}},{},null,api);
++ assert.equal(registration.options.id,'naumi-updates');off();assert.equal(closed,1);assert.equal(unsub,1);
++});
++
++test('native stream wins over a stale initial read and all subscriptions are disposed',async()=>{
++ let resolve,listener,off=0;
++ const store=createUpdateStore({onUpdateState:fn=>{listener=fn;return()=>off++;},updateState:()=>new Promise(r=>resolve=r)});
++ await tick();listener({enabled:true,status:'downloading',version:'0.3.4'});resolve({enabled:true,status:'idle'});await tick();assert.equal(store.getSnapshot().status,'downloading');
++ const before=store.getSnapshot();store.dispose();listener({status:'ready'});assert.equal(store.getSnapshot(),before);assert.equal(off,1);
++});
++
++test('UI commands serialize and IPC failures are visible and retryable',async()=>{
++ let listener,resolve,calls=0,fail=true;
++ const store=createUpdateStore({onUpdateState:fn=>{listener=fn;return()=>{};},updateState:async()=>({enabled:true,status:'idle'}),checkUpdates:()=>{calls++;return new Promise(r=>resolve=r);},installUpdate:async()=>{if(fail)throw Error('disconnected');return {ok:true};}});
++ await tick();const first=store.check(),second=store.check();assert.equal(first,second);await tick();assert.equal(calls,1);
++ listener({status:'checking'});resolve({ok:false,error:'UPDATE_FEED_UNREACHABLE'});await first;assert.equal(store.getSnapshot().error,'UPDATE_FEED_UNREACHABLE');
++ await store.install();assert.equal(store.getSnapshot().error,'UPDATE_CONNECTION_FAILED');fail=false;assert.equal((await store.install()).ok,true);store.dispose();
++});
++
++test('view distinguishes unchecked, confirmed latest, progress, disabled, busy and ready',()=>{
++ assert.equal(updateView({enabled:true,status:'idle'}).title,'检查更新');
++ assert.equal(updateView({enabled:true,status:'idle',lastChecked:1}).title,'已是最新版本');
++ assert.equal(updateView({enabled:false,status:'disabled'}).title,'安装版支持更新');
++ assert.equal(updateView({enabled:true,status:'downloading',progress:{percent:150}}).percent,100);
++ assert.equal(updateView({enabled:true,status:'ready',error:'UPDATE_INSTALL_BUSY'}).title,'任务运行中，稍后更新');
++ assert.equal(updateView({enabled:true,status:'ready'}).ready,true);
++});
++
++test('native footer layout is additive, settings-left/update-right, with asset wiring',()=>{
++ const css=fs.readFileSync('plugins/naumi-enterprise/assets/desktop-updates.css','utf8'),ui=fs.readFileSync('plugins/naumi-enterprise/assets/desktop-updates.js','utf8');
++ const upstream=fs.readFileSync('node_modules/@deepseek-ai/dsh-client-ui-sidebar/lib/client.js','utf8');
++ for(const name of ['_footArea','_settingsArea','_footerActions'])assert.ok(upstream.includes(name),name);
++ assert.match(css,/_settingsArea.*grid-column:1;grid-row:1/);assert.match(css,/\.nup-trigger\{grid-column:2;grid-row:1/);
++ assert.ok(!ui.includes('MutationObserver'));assert.ok(!ui.includes('innerHTML'));assert.ok(!ui.includes('fetch('));
++ const host=fs.readFileSync('plugins/naumi-enterprise/host.js','utf8'),client=fs.readFileSync('plugins/naumi-enterprise/client.js','utf8');
++ for(const asset of ['desktop-updates.js','desktop-updates.css'])assert.ok(host.includes(asset));assert.ok(client.includes('installDesktopUpdatesUI'));
++});
++
++test('actual native gate atomically quiesces owned backend and fails closed on busy/unknown',async()=>{
++ const main=fs.readFileSync('desktop/app/main.cjs','utf8');
++ const gate=main.slice(main.indexOf('async function canInstallUpdate()'),main.indexOf('async function showUpdateNotice'));
++ const maintenance=main.slice(main.indexOf('async function performMaintenance('),main.indexOf('function isAlive('));
++ const calls=[],ctx={closing:false,booting:false,connecting:false,bridge:{runtime:{queues:new Map()}},enterprise:{running:0},settings:{isolated:true},backend:{owned:true},maintenanceTicket:null,maintenanceUntil:0,maintenanceBlocked:()=>false,randomUUID:()=> 'fixture',maintenanceRequest:async(...args)=>{calls.push(args);}};
++ vm.createContext(ctx);vm.runInContext(gate+maintenance,ctx);
++ ctx.enterprise.running=1;assert.equal((await ctx.canInstallUpdate()).ok,false);assert.equal(calls.length,0);ctx.enterprise.running=0;
++ ctx.backend.owned=false;assert.equal((await ctx.canInstallUpdate()).ok,false);assert.equal(calls.length,0);ctx.backend.owned=true;
++ const accepted=await ctx.canInstallUpdate();assert.equal(accepted.ok,true);assert.equal(calls[0][1],'quiesce');await accepted.release();assert.equal(calls[1][1],'resume');assert.equal(ctx.maintenanceTicket,null);
++ ctx.maintenanceRequest=async()=>{throw Error('INSTALL_RUNNING_TASKS');};assert.equal((await ctx.canInstallUpdate()).ok,false);assert.equal(ctx.maintenanceTicket,null);
++});
++
++test('update IPC remains main-window/main-frame scoped and preload exposes no generic IPC',()=>{
++ const main=fs.readFileSync('desktop/app/main.cjs','utf8');for(const channel of ['naumi:update-state','naumi:update-check','naumi:update-install']){
++  const line=main.split('\n').find(x=>x.includes("ipcMain.handle('"+channel+"'"));assert.ok(line.includes('e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame'));
++ }
++ const preload=fs.readFileSync('desktop/app/preload.cjs','utf8');assert.ok(preload.includes("installUpdate:()=>ipcRenderer.invoke('naumi:update-install')"));assert.ok(!preload.includes("exposeInMainWorld('ipc"));
++});
