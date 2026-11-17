@@ -5,6 +5,7 @@ const protocols=['openai-completions','openai-responses','anthropic-messages'];
 const model=z.object({id:z.string().trim().min(1).max(512),name:z.string().trim().max(160).optional()}).strict();
 const save=z.object({action:z.literal('save'),id:z.string().regex(/^[a-z][a-z0-9_-]{0,79}$/),expectedRevision:z.number().int().nonnegative(),displayName:z.string().trim().min(1).max(120),baseURL:z.string().trim().min(1).max(2048),api:z.enum(protocols),models:z.array(model).min(1).max(200),apiKey:z.string().trim().min(1).max(16000).optional()}).strict();
 const remove=z.object({action:z.literal('remove'),id:z.string().min(1).max(80),expectedRevision:z.number().int().nonnegative()}).strict();
+const discover=z.object({action:z.literal('discover'),id:z.string().min(1).max(80).optional(),baseURL:z.string().trim().min(1).max(2048),api:z.enum(protocols),apiKey:z.string().trim().min(1).max(16000).optional()}).strict();
 const error=(code,status=400)=>Object.assign(new Error(code),{code,status});
 export function endpoint(value){
  let u;try{u=new URL(value);}catch{throw error('MODEL_URL_INVALID');}
@@ -18,7 +19,37 @@ const official=id=>['deepseek-official','deepseek-account'].includes(id);
  * A rotated key gets a fresh reference, so a failed CAS never changes a working route's key.
  */
 export class ModelConnections{
- constructor(ctx){this.ctx=ctx;this.queue=Promise.resolve();}
+ constructor(ctx,{request=fetch,timeoutMs=12000}={}){this.ctx=ctx;this.queue=Promise.resolve();this.request=request;this.timeoutMs=timeoutMs;this.discoveries=0;}
+ async discover(input,{signal}={}){
+  const parsed=discover.safeParse(input);if(!parsed.success)throw error('MODEL_INVALID_REQUEST');const p=parsed.data,base=endpoint(p.baseURL);
+  const previous=p.id?this.namespace().value.providers?.[p.id]:undefined;
+  // A saved credential is reusable only for the same origin, never for a newly typed host.
+  if(!p.apiKey&&previous?.apiKeyEnv&&new URL(endpoint(previous.baseURL)).origin!==new URL(base).origin)throw error('MODEL_DISCOVERY_KEY_ORIGIN_CHANGED');
+  const key=p.apiKey??(previous?.apiKeyEnv?(await this.ctx.credentials.resolve(previous.apiKeyEnv))?.value:undefined);
+  if(!key)throw error('MODEL_KEY_REQUIRED');if(/[\r\n\u0000-\u001f\u007f]/.test(key))throw error('MODEL_KEY_INVALID');
+  if(this.discoveries>=3)throw error('MODEL_DISCOVERY_BUSY',429);
+  this.discoveries++;const timeout=AbortSignal.timeout(this.timeoutMs),combined=AbortSignal.any([timeout,...signal?[signal]:[]]);
+  const headers={accept:'application/json',...p.api==='anthropic-messages'?{'x-api-key':key,'anthropic-version':'2023-06-01'}:{authorization:'Bearer '+key}};
+  const suffixes=/\/v1$/.test(new URL(base).pathname)?['/models']:p.api==='anthropic-messages'?['/v1/models','/models']:['/models','/v1/models'];
+  const models=new Map();let url=new URL(base+suffixes[0]),bytes=0;
+  try{
+   for(let page=0;page<10;page++){
+    let response=await this.request(url,{method:'GET',headers,redirect:'manual',credentials:'omit',signal:combined});
+    if(page===0&&[404,405].includes(response.status)&&suffixes.length>1){await response.body?.cancel();url=new URL(base+suffixes[1]);response=await this.request(url,{method:'GET',headers,redirect:'manual',credentials:'omit',signal:combined});}
+    if(!response.ok){await response.body?.cancel();throw error([401,403].includes(response.status)?'MODEL_DISCOVERY_AUTH':response.status===404||response.status===405?'MODEL_DISCOVERY_UNSUPPORTED':response.status===429?'MODEL_DISCOVERY_RATE_LIMITED':response.status>=300&&response.status<400?'MODEL_DISCOVERY_REDIRECT':'MODEL_DISCOVERY_FAILED',502);}
+    const reader=response.body?.getReader();if(!reader)throw error('MODEL_DISCOVERY_INVALID',502);const chunks=[];
+    try{for(;;){const {done,value}=await reader.read();if(done)break;bytes+=value.length;if(bytes>1048576)throw error('MODEL_DISCOVERY_TOO_LARGE',502);chunks.push(Buffer.from(value));}}finally{await reader.cancel().catch(()=>{});}
+    let body;try{body=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw error('MODEL_DISCOVERY_INVALID',502);}
+    if(!Array.isArray(body?.data)||body.has_more!==undefined&&typeof body.has_more!=='boolean')throw error('MODEL_DISCOVERY_INVALID',502);
+    for(const row of body.data){const result=model.safeParse({id:row?.id,...typeof row?.display_name==='string'?{name:row.display_name}: {}});if(!result.success||/[\u0000-\u001f\u007f]/.test(result.data.id))throw error('MODEL_DISCOVERY_INVALID',502);models.set(result.data.id,result.data);if(models.size>2000)throw error('MODEL_DISCOVERY_TOO_LARGE',502);}
+    if(!body.has_more)return {models:[...models.values()]};
+    if(typeof body.last_id!=='string'||!body.last_id||body.last_id.length>512||body.last_id===url.searchParams.get('after_id'))throw error('MODEL_DISCOVERY_INVALID',502);
+    url.searchParams.set('after_id',body.last_id);
+   }
+   throw error('MODEL_DISCOVERY_TOO_LARGE',502);
+  }catch(e){if(timeout.aborted)throw error('MODEL_DISCOVERY_TIMEOUT',504);if(signal?.aborted)throw error('MODEL_DISCOVERY_CANCELLED',499);if(/^MODEL_/.test(e.code??''))throw e;throw error('MODEL_DISCOVERY_FAILED',502);}
+  finally{this.discoveries--;}
+ }
  namespace(){const ns=this.ctx.settings.describe({redactSecrets:true}).find(n=>n.ns==='llm-pi-ai');if(!ns)throw error('MODEL_SETTINGS_UNAVAILABLE',503);return ns;}
  async read(){const ns=this.namespace(),groups=[];for(const[id,p]of Object.entries(ns.value.providers??{})){
   const info=p.apiKeyEnv?await this.ctx.credentials.describe(p.apiKeyEnv):{configured:false,writable:true};
@@ -68,7 +99,10 @@ export function installModelConnections(ctx){
     if(!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type']??'')){send(415,{error:'JSON_REQUIRED'});return;}
     let bytes=0,text='';for await(const b of req){bytes+=b.length;if(bytes>131072){send(413,{error:'MODEL_BODY_TOO_LARGE'});return;}text+=b;}
     let input;try{input=JSON.parse(text);}catch{throw error('MODEL_INVALID_REQUEST');}
-    send(200,await service.execute(input));
+    if(input?.action==='discover'){
+     const ac=new AbortController(),close=()=>{if(!res.writableEnded)ac.abort();};res.on('close',close);
+     try{send(200,await service.discover(input,{signal:ac.signal}));}finally{res.off('close',close);}
+    }else send(200,await service.execute(input));
    }catch(e){const conflict=e.code==='SETTINGS_CONFLICT';send(conflict?409:e.status??500,{error:conflict?'MODEL_SETTINGS_CONFLICT':/^MODEL_[A-Z_]+$/.test(e.code??'')?e.code:'MODEL_SAVE_FAILED'});}
   }}));
  });

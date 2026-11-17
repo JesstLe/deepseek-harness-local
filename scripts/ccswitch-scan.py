@@ -13,7 +13,7 @@ def save(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding='utf8')
 
 def request(url, key, protocol, payload=None, timeout=25):
-    headers = {'User-Agent': 'DeepSeek-Harness-Local/CCSwitch-Import', 'Content-Type': 'application/json'}
+    headers = {'User-Agent': 'Naumi/CCSwitch-Import', 'Content-Type': 'application/json'}
     if protocol == 'anthropic-messages':
         headers.update({'x-api-key': key, 'Authorization': 'Bearer ' + key, 'anthropic-version': '2023-06-01'})
     else:

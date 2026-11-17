@@ -21,7 +21,7 @@ async function request(url, {signal,body}={}) {
 
 export function createBotGroupsPage(ctx, React) {
   const h = React.createElement;
-  const {useEffect,useState,useRef} = React;
+  const {useEffect,useState,useRef,useId} = React;
   const button = (label,props) => h('button',{type:'button',className:'naumi-btn',...props},label);
   const openSession = sessionId => ctx.uiWorkspace.openSession(sessionId);
   const openFile = file => {
@@ -59,6 +59,7 @@ export function createBotGroupsPage(ctx, React) {
     const [pending,setPending] = useState(false);
     const [error,setError] = useState('');
     const operation = useRef(null);
+    const defaultBotField = useId();
     const reset = () => { operation.current = null; setError(''); };
     const submit = async event => {
       event.preventDefault();
@@ -81,7 +82,8 @@ export function createBotGroupsPage(ctx, React) {
             setSelected(current => event.target.checked ? [...current,bot.id] : current.filter(id => id !== bot.id));
             if (!event.target.checked && defaultBot === bot.id) setDefaultBot('');
           }}),bot.name))),
-      h('label',{className:'nbg-field'},'默认接话者',h('select',{value:defaultBot,disabled:pending,onChange:event => { reset(); setDefaultBot(event.target.value); }},
+      h('div',{className:'nbg-field'},h('label',{htmlFor:defaultBotField},'默认接话者'),
+        h('select',{id:defaultBotField,value:defaultBot,disabled:pending,onChange:event => { reset(); setDefaultBot(event.target.value); }},
         h('option',{value:''},'每次点名'),bots.filter(bot => selected.includes(bot.id)).map(bot => h('option',{key:bot.id,value:bot.id},bot.name)))),
       error && h('p',{role:'alert',className:'nbg-error'},error),
       h('div',{className:'nbg-actions'},button('取消',{onClick:onCancel,disabled:pending}),

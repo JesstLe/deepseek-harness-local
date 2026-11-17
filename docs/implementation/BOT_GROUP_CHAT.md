@@ -23,3 +23,11 @@
 - 相关 JS 通过 `node --check`，`npm pack --dry-run --json ./plugins/naumi-enterprise` 确认新增模块及样式进入插件包。
 - `node --test tests/naumi-bots.test.mjs tests/naumi-async-bot.test.mjs tests/naumi-bot-http-runtime.test.mjs` 未进入用例，当前环境缺少 Cordis、Harness 和 Zod，npm 注册表连接也不可用。真实 Harness 模型运行、浏览器操作与安装版验收待补。
 - 原 checkout 的 Git 元数据不可写，单独 checkout 用于实现。`git fetch origin main` 在隔离 checkout 遭遇 GitHub 连接失败。通过 GitHub 读取主线 `68b4bb462fd2d3df04524f4097b723b60933bb5c` 源码，三方核对 `bots.js` 与 `host.js` 的重叠改动。
+
+### 第二轮验收
+
+- 群聊范围新增 HTTP 回归与浏览器验证脚本。创建群聊表单的「默认接话者」采用独立的标签和控件关联。此轮为验收和入口修复，不新增功能迭代计数。
+- `node --test tests/naumi-bot-groups.test.mjs tests/naumi-bot-groups-http.test.mjs` 通过 8 项。HTTP 测试直接调用生产请求处理器，使用真实 Zod 和 SQLite。请求流和身份准入由测试夹具提供，覆盖 owner、同源、字段校验、请求上限、重试去重、独立 Session 与任务回执。
+- `node scripts/verify-bot-groups-ui.mjs <node_modules路径>` 通过。使用 Chrome、真实 React、生产导航注册与群聊页面，浏览器请求转交生产处理器。验证 1280px 与 400px 下的建群、选择默认接话者、同时点名两位成员、刷新保留消息、打开任务和传递文件资源地址。Harness 布局服务、模型回复和任务账本为夹具，文件内容读取仍需在真实安装版验证。依赖目录应包含 Playwright、React、React DOM 和 esbuild。
+- 验证基线为主线 `b3868edac97afde49a03dabd45caf62db1007849`。与主线有重叠的 `client.js`、`host.js`、插件 `package.json` 同时保留产品标识、会话压缩依赖与群聊入口和打包条目，合并候选复跑通过。同步到 `e63e1d382739c3046eb99549d77284bb15863a05`，其间只有验收证据文件变动。
+- 真实 Harness、安装版和实际模型回合的验收仍待执行。本机缺少固定版本的 `@deepseek-ai/dsh` 与 Cordis，锁文件的离线安装因缓存缺包失败，Node 本机 HTTP 连接也受当前环境限制。此轮测试使用本机已有的 Zod `4.6.6`。待可启动后，用两只实际 Bot 验证回复、任务文件内容及重开恢复，再执行主线整合。

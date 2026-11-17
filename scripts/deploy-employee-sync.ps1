@@ -9,9 +9,9 @@ foreach($m in $manifest){$relative=$m.path.Replace('plugins/naumi-enterprise/','
  if((Get-FileHash -LiteralPath $src).Hash.ToLowerInvariant() -ne $m.modifiedSHA256){throw 'SOURCE_CHANGED'}
  if(Test-Path -LiteralPath $file){$actual=(Get-FileHash -LiteralPath $file).Hash.ToLowerInvariant();$old=@($prior|Where-Object key -eq $m.key);if($actual -ne $m.originalSHA256 -and ($old.Count -ne 1 -or $actual -ne $old[0].modifiedSHA256)){throw "RUNTIME_CHANGED $relative"}}elseif($m.originalSHA256){throw "RUNTIME_MISSING $relative"}}
 & node (Join-Path $PSScriptRoot 'check-bot-runtime.mjs') $runtime '2';if($LASTEXITCODE -ne 0){throw 'RUNTIME_NOT_IDLE'}
-& (Join-Path $runtime 'Stop-DeepSeek.ps1')
+& (Join-Path $runtime 'Stop-Naumi.ps1')
 foreach($m in $manifest){$relative=$m.path.Replace('plugins/naumi-enterprise/','');Copy-Item -LiteralPath (Join-Path $source $m.path) -Destination (Join-Path $target $relative)}
-& (Join-Path $runtime 'Start-DeepSeek.ps1')
+& (Join-Path $runtime 'Start-Naumi.ps1')
 $changed=@($manifest|ForEach-Object{(Join-Path $target $_.path.Replace('plugins/naumi-enterprise/',''))});$unrelated=@()
 foreach($file in $before.Keys){if($file -notin $changed -and (Get-FileHash -LiteralPath $file).Hash -ne $before[$file]){$unrelated+=$file}}
 if($unrelated.Count){throw 'UNRELATED_RUNTIME_CHANGE'}
