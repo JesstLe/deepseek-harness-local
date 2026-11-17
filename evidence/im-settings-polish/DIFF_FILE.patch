@@ -1,0 +1,507 @@
+diff --git a/.gitattributes b/.gitattributes
+index 77a66bb..f6a5b4f 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -271,3 +271,8 @@ plugins/naumi-enterprise/third-party/ds-bot-im/** -text
+ /evidence/im-gateway/*.log -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
+ /evidence/im-gateway/DIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab,cr-at-eol
+ /evidence/im-gateway/ROLLBACK.sh text eol=lf
++# IM settings product-polish evidence keeps exact rollback bytes.
++/evidence/im-settings-polish/** -text whitespace=cr-at-eol
++/evidence/im-settings-polish/*.log -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
++/evidence/im-settings-polish/DIFF_FILE.patch -text whitespace=-blank-at-eol,-space-before-tab,cr-at-eol
++/evidence/im-settings-polish/ROLLBACK.sh text eol=lf
+diff --git a/docs/changes/2026-11-17-im-settings-polish.md b/docs/changes/2026-11-17-im-settings-polish.md
+new file mode 100644
+index 0000000..8dcdfb8
+--- /dev/null
++++ b/docs/changes/2026-11-17-im-settings-polish.md
+@@ -0,0 +1,36 @@
++# 消息接入界面产品化
++
++模块与职责：仅重新设计 IM 设置页的视觉和操作层级，不扩展 IM 后端与账号权限。
++负责人：本任务主代理。独立分支 codex/im-settings-polish-20261117，工作区 E:/Workspace/naumi-im-settings-polish。
++基线 main/origin/main：2ae583ae00c8d112adc85be84fd38c75f6896ed7；2026-11-17 fetch 后创建。
++
++公共接口、依赖方向、数据/状态/事务归属：沿用 createIMSettings/installIMSettingsUI、settings.section 与 /naumi/im；连接、配对、成员和回执命令及 CAS 不变。密钥仍只在当前表单，持久化归原 credentials。页面内共享平台选择组件、状态标记、图标和字段组件，不改设置外壳/导航/品牌/其他页面。
++
++本次实现与迁移状态：界面实现与集中验证已完成，正在进行副本回滚及主线/运行核验。文件归属 assets/im-settings.js、assets/im-settings.css、本页定向UI验证/单元测试、仅双静态资源的部署脚本与本记录；其他任务不写这些文件。
++设计：去掉虚线空框和重复添加按钮；空态直接为双平台选择卡；已有连接采用清晰状态、操作层级与开关；配置/配对/成员/回执统一面板语言，浅色、精细边框、真实平台图形、小屏单列、键盘可操作。
++
++验证命令、结果及证据层级：基线 node --test tests/naumi-im-*.test.mjs → tests22/pass22/fail0，exit0。完成一个UI模块后集中验证功能及真实渲染，不调用模型或真实平台。
++
++未完成项与下一步：副本回滚、主线与实际运行增量加载及最终截图交付。迭代计数1（本页完整产品化切片）。
++
++
++## 本轮实现
++- 两张整卡可点的平台选择卡替换虚线空框与重复添加入口；平台矢量图形、柔和背景、细边框和轻量悬停。不新增图片/字体依赖。
++- 连接列表变为状态与操作分层的横卡：状态点、原生语义开关、编辑/验证次级操作、配对主操作；验证中显示真实请求反馈。
++- 表单统一分组、字段、底部操作区；飞书/Lark 用原生 radio 分段；密钥显隐只在当前表单，取消/保存清除本地密钥状态。
++- 配对分为选择与发送两步，真实有效期、复制反馈、过期状态；成员、解绑、UNKNOWN 回执继续复用原命令/CAS，未改后端权限或重发语义。
++- 输入与选择器 label/control 显式关联；键盘焦点、减少动画、小屏单列均保留。
++
++## 集中验证
++`node --test tests/naumi-im-*.test.mjs tests/naumi-enterprise.test.mjs tests/naumi-context-ui.test.mjs` → tests54/pass54/fail0，exit0。
++`node scripts/verify-im-settings-ui.mjs`（IM_EVIDENCE 指向本模块证据目录）→ IM_UI_COMPLETE checks=32 errors=0 inference=0，exit0。
++前段为隔离真实 Harness Host、HTTP、SQLite/credentials 保存两个停用测试连接；后段为同一真实组件的受控 HTTP 状态 fixture，覆盖验证、群配对、复制、成员/CAS草稿、确认解绑、显式 UNKNOWN 补发、开关、Lark 与 reduced-motion。不是外部平台账号收发测试。
++截图逐张打开检查：empty/form/connection desktop、mobile、pair。首次空态脚本误把尚未返回数据的骨架当空态，改为等待真实卡片；扩展用例定位到原生会话树后改为场景内选择器，并修正 select 的显式 label 关联，保留初始日志。
++
++## 可复用界面约束
++```text
++改进 Naumi IM 设置页时，只使用原 createIMSettings 状态与 /naumi/im 命令。
++空态呈现可操作平台选择，不叠加宣传语或重复入口；已有连接的编辑、验证、启停、配对分层。
++保护 secret 不回填、CAS 冲突保留草稿、解绑/补发需显式确认；不要修改后端执行链路。
++按空态、连接、表单、配对、成员和回执验证 1360/580/360 布局，并打开实际截图检查。
++```
+diff --git a/plugins/naumi-enterprise/assets/im-settings.css b/plugins/naumi-enterprise/assets/im-settings.css
+index a60db71..bdcb2eb 100644
+--- a/plugins/naumi-enterprise/assets/im-settings.css
++++ b/plugins/naumi-enterprise/assets/im-settings.css
+@@ -1,3 +1,172 @@
+-.nim-settings{max-width:960px;margin:0 auto;padding:8px 0 36px;color:#202b3e;color-scheme:light;font-size:14px;line-height:1.5}.nim-settings *{box-sizing:border-box}.nim-header,.nim-panel-heading{display:flex;align-items:center;justify-content:space-between;gap:16px}.nim-header{margin-bottom:28px}.nim-settings h2{font-size:23px;letter-spacing:-.6px;margin:0;font-weight:650}.nim-settings h3{font-size:15px;margin:0;font-weight:620}.nim-settings section>h3{margin:28px 0 14px}.nim-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.nim-settings button{min-height:35px;border:1px solid #dfe5ed;border-radius:9px;padding:6px 13px;background:#fff;color:#34425a;cursor:pointer;font:inherit;font-size:13px;font-weight:550;transition:background .15s,border-color .15s}.nim-settings button:hover:not(:disabled){background:#f2f6fc;border-color:#b7c7de}.nim-settings button:focus-visible,.nim-settings input:focus-visible,.nim-settings select:focus-visible,.nim-settings textarea:focus-visible{outline:3px solid #bfd5ff;outline-offset:2px}.nim-settings button:disabled{opacity:.45;cursor:default}.nim-settings .nim-primary{background:#285de3;color:#fff;border-color:#285de3}.nim-settings .nim-primary:hover:not(:disabled){background:#194bc8}.nim-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.nim-panel{border:1px solid #e2e8f1;border-radius:17px;padding:22px;background:#fff;box-shadow:0 4px 14px #20386004}.nim-panel footer{margin-top:22px}.nim-identity{display:flex;align-items:center;gap:11px;min-width:0}.nim-identity h3{overflow-wrap:anywhere}.nim-platform{display:grid;place-items:center;flex:none;width:38px;height:38px;background:#eaf3ff;color:#1972e9;border-radius:12px;font-weight:700;font-size:18px}.nim-platform[data-platform=feishu]{background:#eef0ff;color:#5065e8}.nim-status{font-size:12px;white-space:nowrap;color:#737f91;background:#f1f4f8;border-radius:20px;padding:4px 9px}.nim-status[data-state=ready]{background:#eaf8f1;color:#238158}.nim-status[data-state=error]{background:#fff0ed;color:#b44934}.nim-status[data-state=retrying],.nim-status[data-state=connecting]{background:#fff7e4;color:#9a7220}.nim-app{display:block;overflow-wrap:anywhere;font:12px/1.5 ui-monospace,monospace;color:#6d7c92;margin:17px 0 0 49px}.nim-form,.nim-pair{max-width:640px;margin-bottom:20px}.nim-form .nim-panel-heading,.nim-pair .nim-panel-heading{margin-bottom:20px}.nim-settings a{color:#285de3;text-decoration:none;font-size:12px}.nim-field{display:flex;flex-direction:column;gap:8px;margin:16px 0;min-width:0}.nim-field>span{font-size:12px;font-weight:600;color:#506079}.nim-settings input,.nim-settings select,.nim-settings textarea{width:100%;min-height:40px;border:1px solid #dfe5ed;border-radius:9px;background:#fff;padding:8px 11px;color:#202b3e;font:inherit}.nim-settings input:disabled,.nim-settings select:disabled{background:#f6f8fb}.nim-pair{margin-top:20px}.nim-pair-fields{display:grid;grid-template-columns:1fr 2fr;gap:16px}.nim-code{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;padding:16px;margin-top:18px;background:#f2f6fd;border:1px solid #dfE9fb;border-radius:12px}.nim-code code{font:13px/1.8 ui-monospace,monospace;overflow-wrap:anywhere;user-select:all}.nim-code span{font-size:12px;color:#6c7c91;width:100%}.nim-binding{margin-bottom:12px}.nim-binding-route{display:flex;align-items:center;gap:12px;color:#68778e;margin-top:12px}.nim-binding-route code{overflow-wrap:anywhere;font-size:12px}.nim-settings .nim-danger{color:#bf483d}.nim-error,.nim-notice{display:flex;justify-content:space-between;gap:14px;align-items:center;padding:13px 16px;border-radius:12px;margin-bottom:18px;background:#fff0ed;color:#ab3d30}.nim-notice{background:#eaf8f1;color:#238158}.nim-receipt{display:flex;justify-content:space-between;gap:16px;align-items:center;margin-bottom:12px}.nim-empty{border:1px dashed #d8e3f3;border-radius:18px;min-height:230px;display:flex;gap:18px;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(145deg,#fafcff,#f5f8ff)}.nim-empty>span{font-size:27px;color:#285de3}.nim-empty strong{font-size:16px;font-weight:550}@media(max-width:680px){.nim-grid{grid-template-columns:1fr}.nim-header{align-items:flex-start;flex-direction:column;gap:14px}.nim-panel{padding:17px}.nim-pair-fields{grid-template-columns:1fr;gap:0}.nim-receipt{align-items:flex-start;flex-direction:column}.nim-settings{padding-inline:2px}.nim-app{margin-left:0}}
++/* Message integrations: a focused product surface inside the native settings shell. */
++.nim-settings{
++ --nim-ink:#202b3d;--nim-muted:#8791a3;--nim-line:#e9edf3;--nim-soft:#f7f9fc;--nim-blue:#3567ed;
++ color:var(--nim-ink);color-scheme:light;max-width:960px;margin:0 auto;padding:10px 0 40px;font-size:13px;line-height:1.5;
++ -webkit-font-smoothing:antialiased;
++}
++.nim-settings *{box-sizing:border-box}
++.nim-settings h2,.nim-settings h3,.nim-settings p,.nim-settings fieldset,.nim-settings legend{margin:0;padding:0}
++.nim-settings h2{font-size:23px;line-height:1.3;font-weight:650;letter-spacing:-.65px}
++.nim-settings h3{font-size:15px;font-weight:620;letter-spacing:-.2px}
++.nim-header{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:38px;margin-bottom:28px}
++.nim-settings button,.nim-settings a{-webkit-tap-highlight-color:transparent}
++.nim-settings button{font:inherit;display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:35px;padding:7px 12px;border:1px solid #e1e6ee;border-radius:8px;background:white;color:#4a566c;font-size:12px;font-weight:550;cursor:pointer;white-space:nowrap;transition:background .16s,border-color .16s,box-shadow .16s,transform .16s}
++.nim-settings button svg{flex:none}
++.nim-settings button:hover:not(:disabled){background:#f7f9fd;border-color:#ccd6e7;color:#263d69}
++.nim-settings button:active:not(:disabled){transform:translateY(1px)}
++.nim-settings button:disabled{opacity:.4;cursor:not-allowed}
++.nim-settings :is(button,a,input,select,textarea):focus-visible{outline:3px solid #adc7ff;outline-offset:3px}
++.nim-settings .nim-primary{background:var(--nim-blue);border-color:var(--nim-blue);color:white;box-shadow:0 2px 3px #3567ed16,inset 0 1px 0 #ffffff24}
++.nim-settings .nim-primary:hover:not(:disabled){background:#2557dc;border-color:#2557dc;color:white;box-shadow:0 3px 9px #3567ed25}
++.nim-settings .nim-quiet{background:transparent;border-color:transparent;box-shadow:none;color:#68758a}
++.nim-settings .nim-quiet:hover:not(:disabled){border-color:transparent;background:#f1f4f9;color:#344967}
++.nim-settings .nim-icon-button{width:31px;height:31px;min-height:31px;flex:none;padding:0;background:transparent;border-color:transparent;box-shadow:none;color:#8a96aa;border-radius:7px}
++.nim-settings .nim-icon-button:hover:not(:disabled){background:#eef3fb;border-color:transparent;color:#3961a3}
++.nim-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
++.nim-panel{background:#fff;border:1px solid var(--nim-line);border-radius:14px;box-shadow:0 2px 5px #20386002;overflow:hidden}
++.nim-panel-heading,.nim-identity{display:flex;align-items:center;gap:11px}
++.nim-panel-heading{justify-content:space-between}
++.nim-platform{display:inline-flex;width:46px;height:46px;flex:none;border-radius:13px;align-items:center;justify-content:center;background:linear-gradient(145deg,#24a1ff,#087bf2);box-shadow:0 3px 8px #188cf020,inset 0 0 0 1px #ffffff1f}
++.nim-platform svg{width:37px;height:37px;display:block}
++.nim-platform[data-platform=feishu]{background:linear-gradient(145deg,#4089fc,#4365ee);box-shadow:0 3px 8px #4978e526,inset 0 0 0 1px #ffffff20}
++.nim-platform-small{width:32px;height:32px;border-radius:9px}
++.nim-platform-small svg{width:27px;height:27px}
++/* Empty state is the actual platform selector, not a decorative placeholder. */
++.nim-empty{padding:2px 0}
++.nim-providers{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:17px}
++.nim-settings .nim-provider{position:relative;display:flex;flex-direction:column;gap:0;align-items:stretch;min-width:0;height:246px;padding:0;overflow:hidden;border:1px solid #e4eaf3;border-radius:16px;background:white;text-align:left;box-shadow:0 4px 12px #19386603;white-space:normal}
++.nim-settings .nim-provider:hover:not(:disabled){background:white;border-color:#b8cef7;box-shadow:0 9px 26px #284e8d0d;transform:translateY(-2px)}
++.nim-settings .nim-provider:active:not(:disabled){transform:translateY(0)}
++.nim-provider-art{height:146px;display:grid;place-items:center;position:relative;isolation:isolate;background:radial-gradient(ellipse at 50% 64%,#edf6ff 0,transparent 67%)}
++.nim-provider[data-platform=feishu] .nim-provider-art{background:radial-gradient(ellipse at 50% 64%,#eef2ff 0,transparent 67%)}
++.nim-provider-art .nim-platform{width:57px;height:57px;border-radius:16px;box-shadow:0 8px 16px #188cf028,inset 0 1px 1px #ffffff4d;transform:rotate(-6deg)}
++.nim-provider[data-platform=feishu] .nim-provider-art .nim-platform{transform:rotate(6deg);box-shadow:0 8px 16px #4978e52b,inset 0 1px 1px #ffffff4d}
++.nim-provider-art .nim-platform svg{width:46px;height:46px}
++.nim-provider-orbit{position:absolute;width:102px;height:102px;border:1px solid #e4eefb;border-radius:50%;z-index:-1}
++.nim-provider-orbit:before,.nim-provider-orbit:after{content:'';position:absolute;width:4px;height:4px;border-radius:50%;background:#c9def9}
++.nim-provider-orbit:before{top:4px;left:22px}.nim-provider-orbit:after{bottom:5px;right:20px}
++.nim-provider-name{font-size:16px;line-height:24px;font-weight:620;color:#29364d;text-align:center;letter-spacing:-.2px;padding:0 12px 18px}
++.nim-provider-action{display:flex;justify-content:space-between;align-items:center;padding:14px 19px;margin-top:auto;border-top:1px solid #edf1f7;color:#6c7c96;font-size:12px;background:linear-gradient(180deg,#fff,#fafcff)}
++.nim-provider-action svg{color:#93a4be;transition:transform .16s}
++.nim-provider:hover:not(:disabled) .nim-provider-action{color:var(--nim-blue)}
++.nim-provider:hover:not(:disabled) .nim-provider-action svg{transform:translateX(3px);color:var(--nim-blue)}
++.nim-add-panel{margin-bottom:18px}
++.nim-providers-compact{gap:12px}
++.nim-settings .nim-providers-compact .nim-provider{height:auto;display:grid;grid-template-columns:38px minmax(0,1fr) 18px;padding:14px;align-items:center;column-gap:10px;border-radius:12px}
++.nim-providers-compact .nim-provider-art{height:38px;background:none!important;display:flex}
++.nim-providers-compact .nim-provider-art .nim-platform{width:35px;height:35px;border-radius:10px;transform:none!important;box-shadow:none}
++.nim-providers-compact .nim-provider-art .nim-platform svg{width:29px;height:29px}
++.nim-providers-compact .nim-provider-orbit{display:none}
++.nim-providers-compact .nim-provider-name{font-size:13px;text-align:left;padding:0}
++.nim-providers-compact .nim-provider-action{padding:0;border:0;margin:0;background:none;font-size:0;line-height:0}
++/* Connection cards have one prominent destination action; secondary controls recede. */
++.nim-grid{display:flex;flex-direction:column;gap:13px}
++.nim-connection-main{padding:21px 21px 19px;display:grid;grid-template-columns:46px minmax(0,1fr) auto;align-items:center;gap:13px}
++.nim-connection-identity{min-width:0}
++.nim-connection-identity h3{overflow-wrap:anywhere;line-height:1.5}
++.nim-app{display:block;overflow-wrap:anywhere;color:#6f7f96;font:11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;margin-top:4px;letter-spacing:.1px}
++.nim-status{display:inline-flex;align-items:center;gap:5px;color:#68778e;font-size:11px;line-height:20px;font-weight:500;white-space:nowrap;padding:2px 8px;border-radius:6px;background:#f5f7fa}
++.nim-status i{width:5px;height:5px;border-radius:50%;background:#b7c0cf;flex:none}
++.nim-status[data-state=ready]{background:#edf8f2;color:#2d7e61}.nim-status[data-state=ready] i{background:#46ad85}
++.nim-status[data-state=error]{background:#fdf1ef;color:#ad5949}.nim-status[data-state=error] i{background:#dc8877}
++.nim-status[data-state=connecting],.nim-status[data-state=retrying]{background:#fff8e9;color:#8d6e23}.nim-status[data-state=connecting] i,.nim-status[data-state=retrying] i{background:#d9b963}
++.nim-connection-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;border-top:1px solid #f0f3f7;background:#fcfdff;padding:9px 14px}
++.nim-connection-footer .nim-actions{flex-wrap:nowrap}
++.nim-settings .nim-pair-button{min-height:32px;background:#edf3ff;color:#4b71c6;border-color:transparent;padding:5px 13px}
++.nim-settings .nim-pair-button:hover:not(:disabled){background:#e2ecff;border-color:transparent;color:#2b58ba}
++.nim-settings .nim-switch{height:19px;min-height:19px;width:33px;padding:2px;border:0;background:#dce2eb;border-radius:20px;position:relative;box-shadow:inset 0 1px 2px #75849b12;margin-right:8px;flex:none}
++.nim-settings .nim-switch span{display:block;width:15px;height:15px;background:#fff;border-radius:50%;position:absolute;left:2px;top:2px;box-shadow:0 1px 3px #56677a26;transition:transform .18s}
++.nim-settings .nim-switch[aria-checked=true]{background:var(--nim-blue)}
++.nim-settings .nim-switch[aria-checked=true] span{transform:translateX(14px)}
++.nim-settings .nim-switch:hover:not(:disabled){background:#cad3e1;border:0}
++.nim-settings .nim-switch[aria-checked=true]:hover:not(:disabled){background:#2457dc}
++/* Configuration and pairing share the same inset controls and footer rhythm. */
++.nim-form{margin-bottom:22px}
++.nim-form-heading{display:flex;align-items:center;gap:10px;padding:19px 20px;border-bottom:1px solid var(--nim-line);background:linear-gradient(180deg,#fff,#fcfdff)}
++.nim-form-heading>.nim-icon-button{margin-left:-6px;margin-right:0;width:24px}
++.nim-form-heading h3{white-space:nowrap}
++.nim-external{display:inline-flex;align-items:center;gap:5px;margin-left:auto;text-decoration:none;font-size:11px;white-space:nowrap;color:#71829c}
++.nim-external:hover{color:var(--nim-blue)}
++.nim-form-body{padding:7px 27px 24px}
++.nim-field{display:flex;flex-direction:column;gap:8px;margin:19px 0 0;min-width:0}
++.nim-field>span:first-child,.nim-field>label,.nim-region legend{font-size:12px;font-weight:550;color:#69768b;line-height:19px}
++.nim-settings input,.nim-settings select,.nim-settings textarea{width:100%;min-width:0;height:41px;border:1px solid #e2e8f1;border-radius:8px;background:#fbfcfe;padding:9px 12px;color:#334158;font:inherit;font-size:13px;box-shadow:0 1px 2px #132d4b02;transition:border-color .15s,background .15s,box-shadow .15s}
++.nim-settings :is(input,select,textarea):hover:not(:disabled){border-color:#cbd7e8}
++.nim-settings :is(input,select,textarea):focus{background:#fff;border-color:#94b3f6;box-shadow:0 0 0 3px #3567ed0b;outline:none}
++.nim-settings input:disabled,.nim-settings select:disabled{color:#929db0;background:#f5f7fa;cursor:not-allowed}
++.nim-settings input::placeholder{color:#b4bdcb;font-size:12px}
++.nim-settings textarea{height:auto;min-height:91px;resize:vertical;line-height:1.65}
++.nim-form-divider{height:1px;background:#f0f3f7;margin:23px 0 2px}
++.nim-secret{position:relative;display:block}
++.nim-secret input{padding-right:45px;display:block}
++.nim-secret>.nim-icon-button{position:absolute;right:5px;top:5px}
++.nim-region{border:0;min-width:0;margin-top:19px!important}
++.nim-region legend{margin-bottom:8px}
++.nim-segments{display:inline-flex;padding:3px;background:#f0f3f8;border:1px solid #e9eef5;border-radius:9px;gap:3px}
++.nim-segments label{position:relative;display:inline-flex;align-items:center;justify-content:center;padding:5px 28px;min-height:29px;font-size:12px;color:#9aa4b4;cursor:pointer;border-radius:6px;font-weight:550}
++.nim-segments label[data-selected=true]{background:#fff;color:#4f6386;box-shadow:0 1px 4px #2c3e5c0d}
++.nim-settings .nim-segments input{position:absolute;opacity:0;width:1px;height:1px;margin:0;min-height:0;padding:0;border:0}
++.nim-segments label:has(input:focus-visible){outline:3px solid #adc7ff;outline-offset:2px}
++.nim-segments label:has(input:disabled){cursor:default}
++.nim-form-footer{display:flex;justify-content:flex-end;align-items:center;gap:8px;padding:14px 25px;border-top:1px solid var(--nim-line);background:#fcfdff}
++.nim-form-footer .nim-primary{min-width:76px}
++.nim-pair{margin-top:18px;padding:21px 23px 18px}
++.nim-steps{display:flex;align-items:center;list-style:none;gap:25px;margin:25px 0 4px;padding:0}
++.nim-steps li{display:flex;align-items:center;gap:7px;color:#7e8da4;font-size:11px;position:relative}
++.nim-steps li:first-child:after{content:'';height:1px;width:14px;background:#dfe6f1;position:absolute;right:-19px;top:10px}
++.nim-steps li>span{display:grid;place-items:center;width:19px;height:19px;border-radius:50%;background:#f0f3f9;color:#adb8ca;font-size:10px;font-weight:600}
++.nim-steps li[data-active=true],.nim-steps li[data-complete=true]{color:#627fab}
++.nim-steps li[data-active=true]>span,.nim-steps li[data-complete=true]>span{color:#5b83d6;background:#eaf1ff}
++.nim-pair-fields{display:grid;grid-template-columns:1fr 1.7fr;gap:15px}
++.nim-pair-footer{justify-content:flex-end;margin-top:19px}
++.nim-code{margin-top:22px;padding:15px 16px;border:1px solid #e1eafb;border-radius:10px;background:#f7faff}
++.nim-code-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:11px}
++.nim-code-heading strong{font-weight:500;color:#7388ab}
++.nim-code-heading>span{display:flex;align-items:center;gap:4px;color:#9caac1;font-size:10px;white-space:nowrap}
++.nim-code-value{display:flex;align-items:center;gap:8px;margin-top:13px}
++.nim-code-value code{flex:1;min-width:0;color:#45679f;font:12px/1.7 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere;user-select:all}
++.nim-code[data-expired=true]{background:#fafbfc;border-color:#edf0f5}
++.nim-code[data-expired=true] code{color:#a9b2c0}
++/* Bound conversations are rows, not another competing grid of primary actions. */
++.nim-section-title{display:flex;align-items:center;margin:29px 0 13px}
++.nim-section-title h3{font-size:12px;font-weight:600;color:#8c98ad;letter-spacing:0}
++.nim-binding{margin-bottom:11px}
++.nim-binding-main{display:flex;align-items:center;gap:12px;padding:17px 19px}
++.nim-binding-identity{flex:1;min-width:0}
++.nim-binding-identity>strong{display:block;font-size:13px;font-weight:550;overflow-wrap:anywhere;color:#52627b}
++.nim-binding-route{display:flex;align-items:center;gap:5px;margin-top:4px;font-size:11px;color:#78889f;flex-wrap:wrap}
++.nim-binding-footer{display:flex;align-items:center;justify-content:space-between;padding:5px 12px;border-top:1px solid #f0f3f7}
++.nim-binding-footer button{font-size:11px;min-height:31px}
++.nim-settings .nim-unbind{color:#a4adbd}
++.nim-settings .nim-danger{color:#c16b5c;background:#fff6f4;border-color:#fae5e1}
++.nim-members-form{padding:0 20px 18px;border-top:1px solid #f0f3f7}
++.nim-members-form>.nim-actions{justify-content:flex-end;margin-top:13px}
++.nim-receipt{display:flex;align-items:center;justify-content:space-between;gap:13px;margin-bottom:10px;padding:15px 17px;border-color:#f0e9dc;background:#fffdfa;flex-wrap:wrap}
++.nim-receipt-summary{display:flex;align-items:center;gap:11px;min-width:0}
++.nim-receipt-icon{display:grid;place-items:center;flex:none;width:31px;height:31px;color:#bc9c66;background:#fbf4e6;border-radius:9px}
++.nim-receipt-summary strong{font-size:12px;font-weight:550;color:#8a785a}
++.nim-receipt-target{display:block;font-size:11px;color:#b6ab98;margin-top:2px;overflow-wrap:anywhere}
++.nim-settings .nim-receipt-button{border-color:#eee5d6;color:#a18a66;background:#fff;font-size:11px}
++.nim-reconcile{width:100%;justify-content:flex-end;border-top:1px solid #f0e9dc;padding-top:12px;margin-top:2px;gap:5px}
++.nim-reconcile button{font-size:11px;padding:6px 9px}
++.nim-error,.nim-notice{display:flex;align-items:center;gap:9px;padding:12px 14px;border-radius:9px;margin-bottom:18px;background:#fff3f0;color:#b36b5b;font-size:12px}
++.nim-error>svg,.nim-notice>svg{flex:none}.nim-error>span{flex:1}.nim-settings .nim-inline{min-height:25px;padding:2px;border:0;background:none;color:inherit;font-size:11px}
++.nim-notice{background:#eef9f3;color:#4a9675}
++.nim-skeleton{display:grid;grid-template-columns:1fr 1fr;gap:17px}.nim-skeleton span{height:246px;background:linear-gradient(110deg,#f7f9fc,#f1f5fa,#f7f9fc);border:1px solid #f0f3f8;border-radius:16px}
++.nim-sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
++@media(max-width:680px){
++ .nim-settings{padding-top:6px}.nim-header{margin-bottom:23px}.nim-settings h2{font-size:22px}.nim-provider-art{height:126px}.nim-settings .nim-provider{height:224px}.nim-providers{gap:12px}.nim-provider-name{font-size:15px}.nim-provider-action{padding:13px 15px}
++ .nim-form-heading{padding:17px 17px;gap:8px}.nim-form-body{padding:5px 20px 22px}.nim-form-footer{padding:13px 18px}.nim-connection-main{padding:18px;gap:11px}.nim-connection-footer{padding:8px 11px}.nim-connection-footer button{padding:6px 9px}.nim-pair{padding:18px}.nim-binding-main{padding:16px}.nim-grid{gap:12px}
++}
++@media(max-width:420px){
++ .nim-providers{grid-template-columns:1fr}.nim-settings .nim-provider{height:112px;display:grid;grid-template-columns:74px minmax(0,1fr) 38px;align-items:center;padding:14px 18px;gap:11px;border-radius:13px;text-align:left}
++ .nim-provider-art{height:74px;background:none!important}.nim-provider-art .nim-platform{width:46px;height:46px;border-radius:13px}.nim-provider-art .nim-platform svg{width:38px;height:38px}.nim-provider-orbit{width:69px;height:69px}.nim-provider-name{padding:0;text-align:left;font-size:16px}.nim-provider-action{padding:0;margin:0;display:flex;border:0;background:none;font-size:0;justify-content:center}.nim-provider-action svg{width:18px;height:18px}
++ .nim-settings .nim-providers-compact .nim-provider{height:76px;padding:14px 18px;grid-template-columns:38px minmax(0,1fr) 18px}.nim-providers-compact .nim-provider-art{height:38px}
++ .nim-header{gap:8px}.nim-header>.nim-primary{padding:6px 10px;font-size:11px}.nim-connection-main{grid-template-columns:40px minmax(0,1fr);gap:4px 11px}.nim-connection-main>.nim-platform{grid-row:span 2;width:40px;height:40px;border-radius:11px}.nim-connection-main>.nim-status{grid-column:2;justify-self:start;margin-top:6px}.nim-connection-identity h3{font-size:14px}
++ .nim-connection-footer>.nim-actions{gap:3px}.nim-settings .nim-switch{margin-right:4px}.nim-settings .nim-pair-button{padding:5px 9px}.nim-connection-footer .nim-quiet{gap:4px;padding-inline:7px;font-size:11px}
++ .nim-form-heading{gap:7px;padding-inline:14px}.nim-form-heading h3{font-size:14px}.nim-external{font-size:10px;gap:3px}.nim-external svg{width:12px}.nim-form-body{padding-inline:18px}.nim-pair-fields{grid-template-columns:1fr;gap:0}.nim-code{padding:13px}.nim-code-heading{align-items:flex-start;flex-direction:column;gap:5px}.nim-code-value code{font-size:11px}
++ .nim-binding-main{gap:9px;flex-wrap:wrap}.nim-binding-main>.nim-status{margin-left:41px}.nim-binding-identity{min-width:calc(100% - 50px)}.nim-settings .nim-reconcile button{padding:6px 7px;font-size:10px}.nim-skeleton{grid-template-columns:1fr}.nim-skeleton span{height:112px}
++}
++@media(prefers-reduced-motion:reduce){.nim-settings *{transition:none!important;animation:none!important}.nim-settings .nim-provider:hover:not(:disabled){transform:none}}
+ 
+-.nim-grid footer button{padding:6px 10px;font-size:12px}
++.nim-spinner{display:inline-block;width:13px;height:13px;flex:none;border:1.5px solid #cad6ed;border-top-color:#5b7fc1;border-radius:50%;animation:nim-spin .7s linear infinite}@keyframes nim-spin{to{transform:rotate(360deg)}}
+diff --git a/plugins/naumi-enterprise/assets/im-settings.js b/plugins/naumi-enterprise/assets/im-settings.js
+index 661e217..65a2206 100644
+--- a/plugins/naumi-enterprise/assets/im-settings.js
++++ b/plugins/naumi-enterprise/assets/im-settings.js
+@@ -1,52 +1,84 @@
+ const statuses={disabled:'已停用',connecting:'连接中',ready:'已连接',retrying:'重连中',error:'连接异常'};
+ const errors={IM_CONFLICT:'配置已变化，请刷新后重试',IM_SECRET_REQUIRED:'请填写应用密钥',IM_CHECK_FAILED:'连接验证失败，请核对应用配置',IM_PAIR_REQUIRED:'请重新配对',IM_GROUP_ALREADY_BOUND:'此群已有消息接入',IM_ACCOUNT_IMMUTABLE:'应用身份不可更换，请新建连接',IM_TARGET_KIND:'私聊请选择 Bot，群聊请选择群组',IM_CONNECTION_DISABLED:'请先启用连接'};
+-async function request(body,signal){const r=await fetch('/naumi/im',{credentials:'same-origin',cache:'no-store',signal,...body?{method:'POST',headers:{'content-type':'application/json','x-naumi-im':'1'},body:JSON.stringify(body)}:{}});const v=await r.json();if(!r.ok)throw Object.assign(Error(errors[v.error]??'消息接入暂不可用'),{status:r.status});return v;}
++const platforms={dingtalk:{name:'钉钉',app:'Client ID',secret:'Client Secret',url:'https://open-dev.dingtalk.com/'},feishu:{name:'飞书 / Lark',app:'App ID',secret:'App Secret',url:'https://open.feishu.cn/app'}};
++const paths={plus:'M12 5v14M5 12h14',arrow:'M5 12h14m-5-5 5 5-5 5',back:'m14 6-6 6 6 6',external:'M14 4h6v6M20 4l-9 9M10 5H5a1 1 0 0 0-1 1v13a1 1 0 0 0 1 1h13a1 1 0 0 0 1-1v-5',close:'m6 6 12 12M18 6 6 18',edit:'m15 5 4 4M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15z',check:'m5 12 4 4L19 6',verify:'m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6z M8 12l3 3 5-6',link:'M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-2 2M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l2-2',copy:'M9 8V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-3M5 8h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2z',eye:'M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0',hidden:'m3 3 18 18M10 5c1-.2 1.4-.2 2-.2 6 0 10 7.2 10 7.2s-1.3 2.3-3.4 4.2M6.4 6.4C3.7 8.3 2 12 2 12s4 7 10 7c1.5 0 3-.4 4.3-1M10 10a3 3 0 0 0 4 4',people:'M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M14 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0M19 8a3 3 0 0 1 0 6M22 21v-2a4 4 0 0 0-3-3.8',chat:'M21 11a8 8 0 0 1-8 8H7l-5 3V11a9 9 0 0 1 19 0z M7 10h9M7 14h6',alert:'M12 8v5m0 4h.01M10.3 4 2 18a2 2 0 0 0 1.7 3h16.6a2 2 0 0 0 1.7-3L13.7 4a2 2 0 0 0-3.4 0',refresh:'M20 7v5h-5M4 17v-5h5M19 10a7 7 0 0 0-12-5L4 8M5 14a7 7 0 0 0 12 5l3-3',clock:'M12 8v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0',key:'m15 7 2 2M14 10l-9 9H2v-3l9-9M21 6a5 5 0 1 1-10 0 5 5 0 0 1 10 0'};
++async function request(body,signal){
++ const r=await fetch('/naumi/im',{credentials:'same-origin',cache:'no-store',signal,...body?{method:'POST',headers:{'content-type':'application/json','x-naumi-im':'1'},body:JSON.stringify(body)}:{}});
++ const v=await r.json();if(!r.ok)throw Object.assign(Error(errors[v.error]??'消息接入暂不可用'),{status:r.status});return v;
++}
+ 
+ export function createIMSettings(React){
+  const h=React.createElement,{useState,useEffect,useRef}=React;
++ function Icon({name,size=16,...props}){return h('svg',{width:size,height:size,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.65,strokeLinecap:'round',strokeLinejoin:'round','aria-hidden':true,...props},h('path',{d:paths[name]??paths.link}));}
++ function PlatformMark({platform,small=false}){
++  return h('span',{className:'nim-platform'+(small?' nim-platform-small':''),'data-platform':platform,'aria-hidden':true},h('svg',{viewBox:'0 0 40 40',fill:'none'},platform==='dingtalk'?
++   h('path',{d:'M8 9.5c-.9-.4-1.7.6-1.1 1.4l6.3 8.4 7.7 2-6.1 1.1c-.8.2-1.1 1.1-.5 1.6l5 3.8-2.1 7.1c-.3 1 .9 1.7 1.5.9L33.4 17c.6-.8-.1-1.8-1-1.6l-7.1 1.7L8 9.5z',fill:'white'}):
++   h(React.Fragment,null,h('path',{d:'M7 11c3.8-.7 8.5.4 12.3 3.2l12.5 9.2c1.6 1.2 1.8 3.5.4 4.8l-1.3 1.2L10.3 17.7C7.9 16.3 6.9 14.1 7 11z',fill:'white'}),h('path',{d:'m20.4 14.5 8.5-4.8c2.5-1.4 4.5-1.2 5.7-.2l-7.8 12.6-6.4-7.6z',fill:'#87F3DF'}),h('path',{d:'m10.4 18 17.3 9.8-7.1 3.8c-4.2 2.2-7.4 1.7-11.5-.3l-4-2L10.4 18z',fill:'#C6E8FF'}))));
++ }
++ function Status({state,label}){return h('span',{className:'nim-status','data-state':state},h('i',null),label??statuses[state]??state);}
+  return function IMSettings(){
+-  const [data,setData]=useState(null),[draft,setDraft]=useState(null),[secret,setSecret]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[pairing,setPairing]=useState(null),[pair,setPair]=useState(null),[confirm,setConfirm]=useState(null),[userEdit,setUserEdit]=useState(null),[notice,setNotice]=useState('');
+-  const alive=useRef(false),flight=useRef(false),form=useRef(null);
+-  useEffect(()=>{alive.current=true;const ac=new AbortController();const load=()=>{if(!flight.current)request(null,ac.signal).then(v=>{if(alive.current){setData(prior=>prior?.revision>v.revision?prior:v);setError('');}}).catch(e=>{if(alive.current&&!ac.signal.aborted){if([401,403].includes(e.status))setData(null);setError(e.message);}});};load();const timer=setInterval(load,5000);return()=>{alive.current=false;clearInterval(timer);ac.abort();};},[]);
++  const [data,setData]=useState(null),[draft,setDraft]=useState(null),[secret,setSecret]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[pairing,setPairing]=useState(null),[pair,setPair]=useState(null),[confirm,setConfirm]=useState(null),[userEdit,setUserEdit]=useState(null),[notice,setNotice]=useState(''),[adding,setAdding]=useState(false),[reveal,setReveal]=useState(false),[copied,setCopied]=useState(false),[now,setNow]=useState(Date.now()),[operation,setOperation]=useState(null);
++  const alive=useRef(false),flight=useRef(false),form=useRef(null),copyTimer=useRef(null);
++  useEffect(()=>{
++   alive.current=true;const ac=new AbortController();
++   const load=()=>{if(!flight.current)request(null,ac.signal).then(v=>{if(alive.current){setData(prior=>prior?.revision>v.revision?prior:v);setError('');}}).catch(e=>{if(alive.current&&!ac.signal.aborted){if([401,403].includes(e.status))setData(null);setError(e.message);}});};
++   load();const timer=setInterval(load,5000);return()=>{alive.current=false;clearInterval(timer);clearTimeout(copyTimer.current);ac.abort();};
++  },[]);
+   useEffect(()=>{if(draft)form.current?.querySelector('input')?.focus();},[draft?.id]);
+-  const cancel=()=>{setDraft(null);setSecret('');};
++  useEffect(()=>{if(!pair)return;setNow(Date.now());const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer);},[pair]);
++  const cancel=()=>{setDraft(null);setSecret('');setReveal(false);};
+   async function execute(body){
+-   if(flight.current||!data)return;flight.current=true;setBusy(true);setError('');setNotice('');
+-   try{const next=await request({...body,expectedRevision:data.revision});if(alive.current){setData(next);if(next.pair)setPair({...next.pair,connectionId:body.connectionId});if(next.checked)setNotice('连接验证通过');if(body.action==='save')cancel();if(body.action==='binding')setUserEdit(null);setConfirm(null);}return next;}
+-   catch(e){if(alive.current)setError(e.message);}
+-   finally{flight.current=false;if(alive.current)setBusy(false);}
++   if(flight.current||!data)return;flight.current=true;setBusy(true);setOperation(body);setError('');setNotice('');
++   try{
++    const next=await request({...body,expectedRevision:data.revision});
++    if(alive.current){setData(next);if(next.pair){setPair({...next.pair,connectionId:body.connectionId});setCopied(false);}if(next.checked)setNotice('连接验证通过');if(body.action==='save'){cancel();setAdding(false);}if(body.action==='binding')setUserEdit(null);setConfirm(null);}return next;
++   }catch(e){if(alive.current){if([401,403].includes(e.status))setData(null);setError(e.message);}}
++   finally{flight.current=false;if(alive.current){setBusy(false);setOperation(null);}}
+   }
+-  function edit(c,platform){setDraft(c?{...c}:{id:crypto.randomUUID(),platform,name:'',appId:'',domain:'feishu'});setSecret('');setPairing(null);setPair(null);setError('');}
+-  function bind(c){setPairing({connectionId:c.id,chatKind:'direct',targetId:''});setPair(null);setDraft(null);setSecret('');}
+-  function field(label,props,options){return h('label',{className:'nim-field'},h('span',null,label),options?h('select',props,...options):h('input',props));}
+-  function button(label,onClick,props={}){return h('button',{type:'button',onClick,disabled:busy,...props},label);}
++  function edit(c,platform){setDraft(c?{...c}:{id:crypto.randomUUID(),platform,name:'',appId:'',domain:'feishu'});setSecret('');setReveal(false);setPairing(null);setPair(null);setAdding(false);setError('');}
++  function bind(c){setPairing({connectionId:c.id,chatKind:'direct',targetId:''});setPair(null);cancel();setAdding(false);}
++  function field(label,props,options){const fieldId='nim-field-'+label.toLowerCase().replace(/\s+/g,'-');return h('div',{className:'nim-field'},h('label',{htmlFor:fieldId},label),options?h('select',{id:fieldId,...props},...options):h('input',{id:fieldId,...props}));}
++  function button(label,onClick,props={},icon){const {loading,...rest}=props;return h('button',{type:'button',onClick,disabled:busy,...rest},loading?h('span',{className:'nim-spinner','aria-hidden':true}):icon&&h(Icon,{name:icon}),label);}
++  function picker(compact=false){return h('div',{className:'nim-providers'+(compact?' nim-providers-compact':''),'aria-label':'选择消息平台'},...Object.entries(platforms).map(([id,p])=>h('button',{type:'button',className:'nim-provider',key:id,'data-platform':id,'aria-label':'添加'+(id==='feishu'?'飞书':'钉钉'),disabled:busy||!data,onClick:()=>edit(null,id)},
++   h('span',{className:'nim-provider-art'},h('span',{className:'nim-provider-orbit'}),h(PlatformMark,{platform:id})),h('span',{className:'nim-provider-name'},p.name),h('span',{className:'nim-provider-action'},'连接',h(Icon,{name:'arrow',size:17})))));}
++  async function copyPair(){try{await navigator.clipboard.writeText('/pair '+pair.code);if(!alive.current)return;setCopied(true);clearTimeout(copyTimer.current);copyTimer.current=setTimeout(()=>{if(alive.current)setCopied(false);},1800);}catch{if(alive.current)setError('复制失败，请选中配对码复制');}}
+   const nameFor=b=>b.target.kind==='bot'?data.bots.find(v=>v.id===b.target.id)?.name:data.groups.find(v=>v.id===b.target.id)?.name;
++  const connectionFor=b=>data.connections.find(c=>c.id===b.connectionId);
++  const pairingConnection=data?.connections.find(c=>c.id===pairing?.connectionId);
++  const title=label=>h('div',{className:'nim-section-title'},h('h3',null,label));
+   return h('section',{className:'nim-settings','aria-label':'消息接入'},
+-   h('header',{className:'nim-header'},h('h2',null,'消息接入'),!draft&&h('div',{className:'nim-actions'},button('添加钉钉',()=>edit(null,'dingtalk')),button('添加飞书',()=>edit(null,'feishu'),{className:'nim-primary'}))),
+-   error&&h('div',{role:'alert',className:'nim-error'},error,button('刷新',()=>request().then(setData).catch(e=>setError(e.message)))),notice&&h('div',{role:'status',className:'nim-notice'},notice),!data&&!error&&h('div',{role:'status'},'加载中…'),
+-   draft&&h('form',{className:'nim-panel nim-form',ref:form,onSubmit:e=>{e.preventDefault();void execute({action:'save',id:draft.id,platform:draft.platform,name:draft.name,appId:draft.appId,domain:draft.domain,...secret?{secret}:{}});}},
+-    h('div',{className:'nim-panel-heading'},h('h3',null,draft.platform==='dingtalk'?'钉钉':'飞书 / Lark'),h('a',{href:draft.platform==='dingtalk'?'https://open-dev.dingtalk.com/':'https://open.feishu.cn/app',target:'_blank',rel:'noopener noreferrer'},'开发者后台 ↗')),
+-    field('连接名称',{value:draft.name,required:true,maxLength:80,disabled:busy,onChange:e=>setDraft({...draft,name:e.target.value})}),
+-    field(draft.platform==='dingtalk'?'Client ID':'App ID',{value:draft.appId,required:true,maxLength:200,disabled:busy||draft.configured,onChange:e=>setDraft({...draft,appId:e.target.value})}),
+-    field(draft.platform==='dingtalk'?'Client Secret':'App Secret',{type:'password',autoComplete:'new-password',value:secret,required:!draft.configured,placeholder:draft.configured?'留空保留原密钥':'',disabled:busy,onChange:e=>setSecret(e.target.value)}),
+-    draft.platform==='feishu'&&field('平台',{value:draft.domain,disabled:busy||draft.configured,onChange:e=>setDraft({...draft,domain:e.target.value})},[h('option',{key:'feishu',value:'feishu'},'飞书'),h('option',{key:'lark',value:'lark'},'Lark')]),
+-    h('footer',{className:'nim-actions'},button('取消',cancel),h('button',{className:'nim-primary',type:'submit',disabled:busy},busy?'保存中…':'保存'))),
+-   !draft&&data&&h('div',{className:'nim-grid'},...data.connections.map(c=>h('article',{className:'nim-panel',key:c.id},
+-    h('div',{className:'nim-panel-heading'},h('div',{className:'nim-identity'},h('span',{className:'nim-platform','data-platform':c.platform,'aria-hidden':true},c.platform==='dingtalk'?'钉':'飞'),h('h3',null,c.name)),h('span',{className:'nim-status','data-state':c.state},statuses[c.state]??c.state)),
+-    h('code',{className:'nim-app'},c.appId),h('footer',{className:'nim-actions'},button('编辑',()=>edit(c)),button('验证',()=>execute({action:'check',id:c.id})),button(c.enabled?'停用':'启用',()=>execute({action:'enable',id:c.id,enabled:!c.enabled})),button('配对',()=>bind(c),{disabled:busy||!c.enabled,className:'nim-primary'}))))),
+-   pairing&&h('form',{className:'nim-panel nim-pair',onSubmit:e=>{e.preventDefault();void execute({action:'pair',connectionId:pairing.connectionId,chatKind:pairing.chatKind,target:{kind:pairing.chatKind==='direct'?'bot':'group',id:pairing.targetId}});}},
+-    h('div',{className:'nim-panel-heading'},h('h3',null,'配对会话'),button('关闭',()=>{setPairing(null);setPair(null);})),
+-    h('div',{className:'nim-pair-fields'},field('会话',{value:pairing.chatKind,disabled:busy,onChange:e=>{setPairing({...pairing,chatKind:e.target.value,targetId:''});setPair(null);}},[h('option',{key:'direct',value:'direct'},'私聊'),h('option',{key:'group',value:'group'},'群聊')]),
++   h('header',{className:'nim-header'},h('h2',null,'消息接入'),data?.connections.length>0&&!draft&&button(adding?'取消添加':'添加连接',()=>{setAdding(v=>!v);setPairing(null);setPair(null);},{className:adding?'nim-quiet':'nim-primary'},adding?'close':'plus')),
++   error&&h('div',{role:'alert',className:'nim-error'},h(Icon,{name:'alert'}),h('span',null,error),button('刷新',()=>request().then(v=>{if(alive.current){setData(v);setError('');}}).catch(e=>{if(alive.current)setError(e.message);}),{className:'nim-inline'},'refresh')),
++   notice&&h('div',{role:'status',className:'nim-notice'},h(Icon,{name:'check'}),notice),
++   !data&&!error&&h('div',{className:'nim-skeleton',role:'status','aria-label':'加载中'},h('span'),h('span')),
++   draft?h('form',{className:'nim-panel nim-form',ref:form,'aria-label':draft.configured?'编辑连接':'配置连接',onSubmit:e=>{e.preventDefault();void execute({action:'save',id:draft.id,platform:draft.platform,name:draft.name,appId:draft.appId,domain:draft.domain,...secret?{secret}:{}});}},
++    h('div',{className:'nim-form-heading'},button(null,cancel,{className:'nim-icon-button','aria-label':'返回连接列表'},'back'),h(PlatformMark,{platform:draft.platform,small:true}),h('h3',null,(draft.configured?'编辑':'连接')+(draft.platform==='dingtalk'?'钉钉':draft.domain==='lark'?'Lark':'飞书')),h('a',{className:'nim-external',href:platforms[draft.platform].url,target:'_blank',rel:'noopener noreferrer'},'开发者后台',h(Icon,{name:'external',size:14}))),
++    h('div',{className:'nim-form-body'},
++     draft.platform==='feishu'&&h('fieldset',{className:'nim-region',disabled:busy||draft.configured},h('legend',null,'平台'),h('div',{className:'nim-segments'},...['feishu','lark'].map(domain=>h('label',{key:domain,'data-selected':draft.domain===domain},h('input',{type:'radio',name:'im-domain',value:domain,checked:draft.domain===domain,onChange:()=>setDraft({...draft,domain})}),domain==='feishu'?'飞书':'Lark')))),
++     field('连接名称',{value:draft.name,required:true,maxLength:80,disabled:busy,onChange:e=>setDraft({...draft,name:e.target.value})}),
++     h('div',{className:'nim-form-divider'}),
++     field(platforms[draft.platform].app,{value:draft.appId,required:true,maxLength:200,disabled:busy||draft.configured,spellCheck:false,autoComplete:'off',onChange:e=>setDraft({...draft,appId:e.target.value})}),
++     h('label',{className:'nim-field'},h('span',null,platforms[draft.platform].secret),h('span',{className:'nim-secret'},h('input',{type:reveal?'text':'password',autoComplete:'new-password',value:secret,required:!draft.configured,placeholder:draft.configured?'已配置，留空保留':'',disabled:busy,onChange:e=>setSecret(e.target.value)}),button(null,()=>setReveal(v=>!v),{className:'nim-icon-button','aria-label':reveal?'隐藏应用密钥':'显示应用密钥','aria-pressed':reveal},reveal?'hidden':'eye')))),
++    h('footer',{className:'nim-form-footer'},button('取消',cancel,{className:'nim-quiet'}),h('button',{className:'nim-primary',type:'submit',disabled:busy},busy?'保存中…':'保存'))):
++   data&&h(React.Fragment,null,
++    !data.connections.length?h('div',{className:'nim-empty'},picker()):h(React.Fragment,null,
++     adding&&h('div',{className:'nim-add-panel'},picker(true)),
++     h('div',{className:'nim-grid'},...data.connections.map(c=>h('article',{className:'nim-panel nim-connection',key:c.id,'data-connection-id':c.id},
++      h('div',{className:'nim-connection-main'},h(PlatformMark,{platform:c.platform}),h('div',{className:'nim-connection-identity'},h('h3',null,c.name),h('code',{className:'nim-app'},c.appId)),h(Status,{state:c.state})),
++      h('footer',{className:'nim-connection-footer'},h('div',{className:'nim-actions'},button('编辑',()=>edit(c),{className:'nim-quiet'},'edit'),button(operation?.action==='check'&&operation.id===c.id?'验证中…':'验证',()=>execute({action:'check',id:c.id}),{className:'nim-quiet',loading:operation?.action==='check'&&operation.id===c.id},'verify')),
++       h('div',{className:'nim-actions'},h('button',{type:'button',className:'nim-switch',role:'switch','aria-label':c.name+'连接','aria-checked':c.enabled,title:c.enabled?'停用':'启用',disabled:busy,onClick:()=>execute({action:'enable',id:c.id,enabled:!c.enabled})},h('span')),button('配对',()=>bind(c),{disabled:busy||!c.enabled,className:'nim-pair-button',title:c.enabled?'配对会话':'启用连接后配对'},'link')))))))),
++   pairing&&pairingConnection&&h('form',{className:'nim-panel nim-pair','aria-label':'配对会话',onSubmit:e=>{e.preventDefault();void execute({action:'pair',connectionId:pairing.connectionId,chatKind:pairing.chatKind,target:{kind:pairing.chatKind==='direct'?'bot':'group',id:pairing.targetId}});}},
++    h('div',{className:'nim-panel-heading'},h('div',{className:'nim-identity'},h(PlatformMark,{platform:pairingConnection.platform,small:true}),h('h3',null,'配对会话')),button(null,()=>{setPairing(null);setPair(null);},{className:'nim-icon-button','aria-label':'关闭配对'},'close')),
++    h('ol',{className:'nim-steps','aria-label':'配对进度'},h('li',{'data-active':!pair,'data-complete':!!pair},h('span',null,pair?h(Icon,{name:'check',size:12}):'1'),'选择会话'),h('li',{'data-active':!!pair},h('span',null,'2'),'发送配对码')),
++    h('div',{className:'nim-pair-fields'},field('会话',{value:pairing.chatKind,disabled:busy,onChange:e=>{setPairing({...pairing,chatKind:e.target.value,targetId:''});setPair(null);}},[h('option',{key:'direct',value:'direct'},'Bot 私聊'),h('option',{key:'group',value:'group'},'群聊')]),
+      field(pairing.chatKind==='direct'?'Bot':'Naumi 群组',{required:true,value:pairing.targetId,disabled:busy,onChange:e=>{setPairing({...pairing,targetId:e.target.value});setPair(null);}},[h('option',{key:'',value:''},'选择'),...(pairing.chatKind==='direct'?data.bots:data.groups).map(v=>h('option',{key:v.id,value:v.id},v.name))])),
+-    h('footer',{className:'nim-actions'},h('button',{type:'submit',className:'nim-primary',disabled:busy||!pairing.targetId},'生成配对码')),
+-    pair&&h('div',{className:'nim-code',role:'status'},h('code',null,'/pair '+pair.code),h('span',null,(pairing.chatKind==='group'?'在目标群 @机器人发送':'在机器人私聊发送')+' · 有效至 '+new Date(pair.expires).toLocaleTimeString()),button('复制',()=>navigator.clipboard.writeText('/pair '+pair.code)))) ,
+-   data?.bindings.length>0&&h('section',{className:'nim-bindings'},h('h3',null,'已配对会话'),...data.bindings.map(b=>h('article',{className:'nim-panel nim-binding',key:b.id},
+-    h('div',{className:'nim-panel-heading'},h('strong',null,nameFor(b)??'目标已移除'),h('span',{className:'nim-status','data-state':b.active?'ready':'disabled'},b.active?'已配对':'已解绑')),
+-    h('div',{className:'nim-binding-route'},h('span',null,b.chat.kind==='direct'?'私聊':'群聊'),h('code',null,b.chat.title||b.chat.key)),
+-    userEdit?.id===b.id?h('form',{onSubmit:e=>{e.preventDefault();void execute({action:'binding',id:b.id,active:b.active,users:userEdit.text.split(/\r?\n/).map(v=>v.trim()).filter(Boolean)});}},h('label',{className:'nim-field'},'成员 ID（每行一个）'),h('textarea',{'aria-label':'授权成员 ID',value:userEdit.text,required:true,rows:3,disabled:busy,onChange:e=>setUserEdit({...userEdit,text:e.target.value})}),h('div',{className:'nim-actions'},button('取消',()=>setUserEdit(null)),h('button',{type:'submit',disabled:busy},'保存成员'))):
+-    h('footer',{className:'nim-actions'},button('成员 · '+b.users.length,()=>setUserEdit({id:b.id,text:b.users.join('\n')}),{disabled:busy||!b.active}),b.active&&(confirm===b.id?h(React.Fragment,null,button('确认解绑',()=>execute({action:'binding',id:b.id,active:false,users:b.users}),{className:'nim-danger'}),button('取消',()=>setConfirm(null))):button('解绑',()=>setConfirm(b.id))))))),
+-   data?.outbox.length>0&&h('section',null,h('h3',null,'待核对回执'),...data.outbox.map(o=>h('article',{key:o.id,className:'nim-panel nim-receipt'},h('strong',null,o.state==='unknown'?'发送结果待核对':'平台拒绝发送'),confirm===o.id?h('div',{className:'nim-actions'},button('已收到',()=>execute({action:'resolve',id:o.id,received:true,confirm:true})),button('未收到，重新发送',()=>execute({action:'resolve',id:o.id,received:false,confirm:true})),button('取消',()=>setConfirm(null))):button('核对',()=>setConfirm(o.id))))),
+-   data&&!data.connections.length&&!draft&&h('div',{className:'nim-empty'},h('span',{'aria-hidden':true},'↗'),h('strong',null,'添加消息连接'),h('div',{className:'nim-actions'},button('钉钉',()=>edit(null,'dingtalk')),button('飞书 / Lark',()=>edit(null,'feishu')))));
++    pair&&h('div',{className:'nim-code','data-expired':pair.expires<=now},h('div',{className:'nim-code-heading'},h('strong',null,pairing.chatKind==='group'?'在目标群 @机器人发送':'在机器人私聊发送'),h('span',null,h(Icon,{name:'clock',size:12}),pair.expires<=now?'配对码已过期':'有效至 '+new Date(pair.expires).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}))),h('div',{className:'nim-code-value'},h('code',null,'/pair '+pair.code),button(null,copyPair,{disabled:busy||pair.expires<=now,className:'nim-icon-button','aria-label':copied?'已复制':'复制配对码'},copied?'check':'copy')),h('span',{className:'nim-sr-only',role:'status'},copied?'配对码已复制':'')),
++    h('footer',{className:'nim-actions nim-pair-footer'},h('button',{type:'submit',className:pair?'nim-quiet':'nim-primary',disabled:busy||!pairing.targetId},busy&&operation?.action==='pair'?'生成中…':pair?'重新生成':'生成配对码'))),
++   data?.bindings.length>0&&!draft&&h('section',{className:'nim-bindings'},title('已配对会话'),...data.bindings.map(b=>h('article',{className:'nim-panel nim-binding',key:b.id},
++    h('div',{className:'nim-binding-main'},h(PlatformMark,{platform:connectionFor(b)?.platform??'feishu',small:true}),h('div',{className:'nim-binding-identity'},h('strong',null,b.chat.title||b.chat.key),h('div',{className:'nim-binding-route'},h(Icon,{name:b.chat.kind==='direct'?'chat':'people',size:12}),b.chat.kind==='direct'?'私聊':'群聊',h(Icon,{name:'arrow',size:12}),nameFor(b)??'目标已移除')),h(Status,{state:b.active?'ready':'disabled',label:b.active?'已配对':'已解绑'})),
++    userEdit?.id===b.id?h('form',{className:'nim-members-form',onSubmit:e=>{e.preventDefault();void execute({action:'binding',id:b.id,active:b.active,users:userEdit.text.split(/\r?\n/).map(v=>v.trim()).filter(Boolean)});}},h('label',{className:'nim-field',htmlFor:'nim-users-'+b.id},h('span',null,'成员 ID（每行一个）'),h('textarea',{id:'nim-users-'+b.id,'aria-label':'授权成员 ID',value:userEdit.text,required:true,rows:3,disabled:busy,onChange:e=>setUserEdit({...userEdit,text:e.target.value})})),h('div',{className:'nim-actions'},button('取消',()=>setUserEdit(null),{className:'nim-quiet'}),h('button',{type:'submit',className:'nim-primary',disabled:busy},'保存成员'))):
++    h('footer',{className:'nim-binding-footer'},button('成员 · '+b.users.length,()=>setUserEdit({id:b.id,text:b.users.join('\n')}),{disabled:busy||!b.active,className:'nim-quiet'},'people'),b.active&&(confirm===b.id?h('div',{className:'nim-actions'},button('取消',()=>setConfirm(null),{className:'nim-quiet'}),button('确认解绑',()=>execute({action:'binding',id:b.id,active:false,users:b.users}),{className:'nim-danger'})):button('解绑',()=>setConfirm(b.id),{className:'nim-quiet nim-unbind'})))))),
++   data?.outbox.length>0&&!draft&&h('section',{className:'nim-receipts'},title('待核对回执'),...data.outbox.map(o=>h('article',{key:o.id,className:'nim-panel nim-receipt'},h('div',{className:'nim-receipt-summary'},h('span',{className:'nim-receipt-icon'},h(Icon,{name:o.state==='unknown'?'clock':'alert',size:18})),h('div',null,h('strong',null,o.state==='unknown'?'发送结果待核对':'平台拒绝发送'),h('span',{className:'nim-receipt-target'},data.bindings.find(b=>b.id===o.bindingId)?.chat.title||'消息回执'))),confirm===o.id?h('div',{className:'nim-actions nim-reconcile'},button('已收到',()=>execute({action:'resolve',id:o.id,received:true,confirm:true}),{className:'nim-quiet'},'check'),button('未收到，重新发送',()=>execute({action:'resolve',id:o.id,received:false,confirm:true}),{className:'nim-primary'}),button('取消',()=>setConfirm(null),{className:'nim-quiet'})):button('核对',()=>setConfirm(o.id),{className:'nim-receipt-button'},'arrow')))));
+  };
+ }
+ export function installIMSettingsUI(ctx,React){return ctx.slots.inject('settings.section',()=>ctx.slots.register({name:'settings.section',id:'im',order:20,label:()=> '消息接入'},createIMSettings(React)));}
+diff --git a/scripts/deploy-im-settings-polish.mjs b/scripts/deploy-im-settings-polish.mjs
+new file mode 100644
+index 0000000..eed6dc9
+--- /dev/null
++++ b/scripts/deploy-im-settings-polish.mjs
+@@ -0,0 +1,34 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import assert from 'node:assert/strict';
++import {createHash,randomUUID} from 'node:crypto';
++import {execFileSync} from 'node:child_process';
++import {botLiveApi} from './bot-live-api.mjs';
++
++const root=process.cwd(),runtime='E:/Workspace/naumi-desktop',installed=path.join(runtime,'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise'),out=path.join(root,'evidence/im-settings-polish'),baseline='2ae583ae00c8d112adc85be84fd38c75f6896ed7';
++const files=['assets/im-settings.js','assets/im-settings.css'],sha=b=>createHash('sha256').update(b).digest('hex'),normal=b=>b.toString().replaceAll('\r\n','\n');
++const git=(...args)=>execFileSync('git',args,{cwd:root});
++const inventory=()=>Object.fromEntries(fs.readdirSync(installed,{recursive:true}).filter(p=>fs.statSync(path.join(installed,p)).isFile()).map(p=>[p.replaceAll('\\','/'),sha(fs.readFileSync(path.join(installed,p)))]));
++const checkpoint=path.join(runtime,'runtime/im-settings-polish-deploy.json');
++if(process.argv[2]==='restore'){
++ const state=JSON.parse(fs.readFileSync(checkpoint));for(const row of state.rows)assert.equal(sha(fs.readFileSync(path.join(installed,row.file))),row.after,'RUNTIME_DRIFT');
++ for(const row of state.rows){const bytes=fs.readFileSync(path.join(state.backup,row.file));assert.equal(sha(bytes),row.before);fs.copyFileSync(path.join(state.backup,row.file),path.join(installed,row.file));}
++ console.log('IM_POLISH_RUNTIME_ROLLBACK=PASS assets=2 data=UNTOUCHED');
++}else{
++ assert.equal(git('branch','--show-current').toString().trim(),'main','MAIN_REQUIRED');const commit=git('rev-parse','HEAD').toString().trim();
++ const api=await botLiveApi(runtime),beforeView=await api.json('/naumi/im'),beforeInventory=inventory();
++ const protectedPaths=['.dsh/.credentials.yaml','.dsh/naumi/bots.json','.dsh/naumi/bot-tasks.json','config/local.json'],protectedHashes=Object.fromEntries(protectedPaths.filter(p=>fs.existsSync(path.join(runtime,p))).map(p=>[p,sha(fs.readFileSync(path.join(runtime,p)))]));
++ const backup=path.join(runtime,'runtime/im-settings-polish-'+randomUUID());fs.mkdirSync(backup,{recursive:true});
++ const rows=files.map(file=>{const before=fs.readFileSync(path.join(installed,file)),after=fs.readFileSync(path.join(root,'plugins/naumi-enterprise',file)),base=git('show',baseline+':plugins/naumi-enterprise/'+file);
++  assert.equal(normal(before),normal(base),'RUNTIME_ASSET_DRIFT '+file);assert.equal(normal(after),normal(git('show',commit+':plugins/naumi-enterprise/'+file)),'UNCOMMITTED_SOURCE '+file);
++  const target=path.join(backup,file);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,before);return {file,before:sha(before),after:sha(after)};
++ });
++ fs.writeFileSync(checkpoint,JSON.stringify({commit,backup,rows},null,2));
++ for(const row of rows){const target=path.join(installed,row.file),temporary=target+'.'+randomUUID()+'.tmp';assert.equal(sha(fs.readFileSync(target)),row.before);fs.writeFileSync(temporary,fs.readFileSync(path.join(root,'plugins/naumi-enterprise',row.file)));fs.renameSync(temporary,target);}
++ const current=inventory();let untouched=0;for(const[p,h]of Object.entries(beforeInventory))if(!files.includes(p)){assert.equal(current[p],h,'UNRELATED_RUNTIME '+p);untouched++;}
++ for(const[p,h]of Object.entries(protectedHashes))assert.equal(sha(fs.readFileSync(path.join(runtime,p))),h,'DATA_CHANGED '+p);
++ for(const row of rows){const response=await api.request('/naumi/'+row.file);assert.equal(response.status,200);assert.equal(normal(Buffer.from(await response.arrayBuffer())),normal(fs.readFileSync(path.join(installed,row.file))));}
++ const afterView=await api.json('/naumi/im');assert.equal(beforeView.revision,afterView.revision);assert.deepEqual(beforeView.bindings,afterView.bindings);assert.deepEqual(beforeView.connections,afterView.connections);
++ fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'DEPLOYMENT.json'),JSON.stringify({commit,backup,assets:rows,untouched,protectedFiles:Object.keys(protectedHashes).length,imRevision:afterView.revision,connections:afterView.connections.length,bindings:afterView.bindings.length,restart:false,backendChanges:false},null,2)+'\n');
++ console.log(`IM_POLISH_LOADED=PASS assets=2 http=200 untouched=${untouched} protected=${Object.keys(protectedHashes).length} restart=0 im_revision=${afterView.revision}`);
++}
+diff --git a/scripts/verify-im-settings-ui.mjs b/scripts/verify-im-settings-ui.mjs
+index ea4b9fb..dcdd56d 100644
+--- a/scripts/verify-im-settings-ui.mjs
++++ b/scripts/verify-im-settings-ui.mjs
+@@ -31,15 +31,33 @@ try{
+  await page.route('**/*',route=>{const u=new URL(route.request().url());return ['http:','https:'].includes(u.protocol)&&u.origin!==base?route.abort():route.continue();});
+  await page.goto(launch);await page.waitForTimeout(1500);await page.keyboard.press('Control+Alt+,');
+  await page.getByRole('button',{name:'消息接入',exact:true}).click();await page.locator('.nim-settings').waitFor();check('public_settings_slot',await page.getByRole('heading',{name:'消息接入',exact:true}).isVisible());
+- await page.getByRole('button',{name:'添加飞书',exact:true}).click();await page.getByLabel('连接名称',{exact:true}).fill('飞书工作消息');await page.getByLabel('App ID',{exact:true}).fill('cli_fixture_disabled');await page.getByLabel('App Secret',{exact:true}).fill('fixture-only-secret');
++ await page.locator('.nim-provider').first().waitFor();await page.screenshot({path:path.join(out,'im-settings-empty.png')});check('empty_has_two_direct_platform_cards',await page.locator('.nim-provider').count()===2);check('no_duplicate_header_actions_in_empty',await page.locator('.nim-header button').count()===0);await page.setViewportSize({width:360,height:900});check('empty_mobile_single_column',await page.locator('.nim-providers').evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length===1));await page.screenshot({path:path.join(out,'im-settings-empty-mobile.png')});await page.setViewportSize({width:1360,height:900});await page.getByRole('button',{name:'添加飞书',exact:true}).click();await page.getByLabel('连接名称',{exact:true}).fill('飞书工作消息');await page.getByLabel('App ID',{exact:true}).fill('cli_fixture_disabled');await page.getByLabel('App Secret',{exact:true}).fill('fixture-only-secret');
++ await page.getByRole('button',{name:'显示应用密钥',exact:true}).click();check('secret_can_be_revealed',await page.getByLabel('App Secret',{exact:true}).getAttribute('type')==='text');await page.getByRole('button',{name:'隐藏应用密钥',exact:true}).click();await page.screenshot({path:path.join(out,'im-settings-form.png')});
+  check('secret_password_field',await page.getByLabel('App Secret',{exact:true}).getAttribute('type')==='password');
+  await page.getByRole('button',{name:'保存',exact:true}).click();await page.getByRole('heading',{name:'飞书工作消息',exact:true}).waitFor();const saved=await api();
+  check('real_save_persisted_disabled',saved.connections.length===1&&saved.connections[0].configured&&!saved.connections[0].enabled);check('secret_not_in_response',!JSON.stringify(saved).includes('fixture-only-secret')&&!JSON.stringify(saved).includes('secretRef'));
+  await page.locator('.nim-panel').getByRole('button',{name:'编辑',exact:true}).click();check('edit_never_hydrates_secret',await page.getByLabel('App Secret',{exact:true}).inputValue()==='');await page.getByLabel('连接名称',{exact:true}).fill('飞书 · 项目协作');await page.getByRole('button',{name:'保存',exact:true}).click();await page.getByRole('heading',{name:'飞书 · 项目协作',exact:true}).waitFor();check('rename_retains_secret',(await api()).connections[0].configured);
+- await page.getByRole('button',{name:'添加钉钉',exact:true}).click();await page.getByLabel('连接名称',{exact:true}).fill('钉钉 · 工作通知');await page.getByLabel('Client ID',{exact:true}).fill('ding_fixture_disabled');await page.getByLabel('Client Secret',{exact:true}).fill('fixture-only-secret');await page.getByRole('button',{name:'保存',exact:true}).click();await page.getByRole('heading',{name:'钉钉 · 工作通知',exact:true}).waitFor();
++ await page.getByRole('button',{name:'添加连接',exact:true}).click();await page.getByRole('button',{name:'添加钉钉',exact:true}).click();await page.getByLabel('连接名称',{exact:true}).fill('钉钉 · 工作通知');await page.getByLabel('Client ID',{exact:true}).fill('ding_fixture_disabled');await page.getByLabel('Client Secret',{exact:true}).fill('fixture-only-secret');await page.getByRole('button',{name:'保存',exact:true}).click();await page.getByRole('heading',{name:'钉钉 · 工作通知',exact:true}).waitFor();
+  check('both_platforms_operable',(await api()).connections.length===2);check('pair_disabled_until_enabled',await page.getByRole('button',{name:'配对',exact:true}).first().isDisabled());
+  await page.screenshot({path:path.join(out,'im-settings-desktop.png')});
+  for(const width of [1360,580,360]){await page.setViewportSize({width,height:900});check('responsive_'+width,await page.locator('.nim-settings').evaluate(el=>{const r=el.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+1&&el.scrollWidth<=el.clientWidth+1;}));}
+- await page.screenshot({path:path.join(out,'im-settings-mobile.png')});check('zero_page_errors',errors.length===0);check('no_model_calls',inference.length===0);
++ await page.screenshot({path:path.join(out,'im-settings-mobile.png')});check('connection_switch_semantics',await page.getByRole('switch').count()===2);
++
++ // Additional states use controlled HTTP responses in the isolated Host, never enable a real external application.
++ await page.setViewportSize({width:1360,height:900});const view=await api(),commands=[];view.connections[0]={...view.connections[0],enabled:true,state:'ready'};const enabledId=view.connections[0].id;const roomId=randomUUID(),bindingId=randomUUID(),receiptId=randomUUID();
++ view.groups=[{id:roomId,name:'产品讨论'}];view.bindings=[{id:bindingId,connectionId:enabledId,chat:{kind:'group',key:'oc_fixture',title:'产品协作群'},target:{kind:'group',id:roomId},users:['user-1'],active:true}];view.outbox=[{id:receiptId,bindingId,state:'unknown',error:'IM_SEND_UNKNOWN'}];let conflict=false;
++ await page.route('**/naumi/im',async route=>{const r=route.request();let response=view;if(r.method()==='POST'){const body=r.postDataJSON();commands.push(body);if(conflict&&body.action==='binding'){conflict=false;view.revision++;return route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({error:'IM_CONFLICT'})});}assert.equal(body.expectedRevision,view.revision);if(body.action==='binding')Object.assign(view.bindings[0],{active:body.active,users:body.users});if(body.action==='enable')Object.assign(view.connections.find(c=>c.id===body.id),{enabled:body.enabled,state:body.enabled?'ready':'disabled'});if(body.action==='resolve')view.outbox=[];view.revision++;response={...view,...body.action==='pair'?{pair:{code:'0123456789ABCDEF01234567',expires:Date.now()+600000}}:{},...body.action==='check'?{checked:body.id}:{}};}return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(response)});});
++ await page.reload();await page.waitForTimeout(1200);await page.keyboard.press('Control+Alt+,');await page.getByRole('button',{name:'消息接入',exact:true}).click();await page.locator('.nim-binding').waitFor();
++ await page.locator('[data-connection-id="'+enabledId+'"]').getByRole('button',{name:'验证',exact:true}).click();await page.getByRole('status').filter({hasText:'连接验证通过'}).waitFor();check('verify_uses_original_command',commands.at(-1).action==='check'&&commands.at(-1).id===enabledId);
++ await page.locator('[data-connection-id="'+enabledId+'"]').getByRole('button',{name:'配对',exact:true}).click();await page.locator('.nim-pair').waitFor();await page.locator('.nim-pair').getByRole('combobox',{name:'会话',exact:true}).selectOption('group');await page.getByLabel('Naumi 群组',{exact:true}).selectOption(roomId);await page.getByRole('button',{name:'生成配对码',exact:true}).click();await page.locator('.nim-code-value code').waitFor();check('pair_uses_exact_existing_target',commands.at(-1).target.kind==='group'&&commands.at(-1).target.id===roomId);await page.locator('.nim-pair').screenshot({path:path.join(out,'im-settings-pair.png')});
++ await page.evaluate(()=>{navigator.clipboard.writeText=async text=>{window.__imFixtureClipboard=text;};});await page.getByRole('button',{name:'复制配对码',exact:true}).click();await page.getByRole('button',{name:'已复制',exact:true}).waitFor();check('copy_feedback_and_exact_code',await page.evaluate(()=>window.__imFixtureClipboard==='/pair 0123456789ABCDEF01234567'));await page.getByRole('button',{name:'关闭配对',exact:true}).click();
++ await page.getByRole('button',{name:'成员 · 1',exact:true}).click();await page.getByLabel('授权成员 ID',{exact:true}).fill('user-1\nuser-2');await page.getByRole('button',{name:'保存成员',exact:true}).click();await page.getByRole('button',{name:'成员 · 2',exact:true}).waitFor();check('members_preserve_original_binding_command',commands.at(-1).id===bindingId&&commands.at(-1).users.length===2);
++ await page.getByRole('button',{name:'成员 · 2',exact:true}).click();await page.getByLabel('授权成员 ID',{exact:true}).fill('user-1\nuser-2\nuser-3');conflict=true;await page.getByRole('button',{name:'保存成员',exact:true}).click();await page.getByRole('alert').filter({hasText:'配置已变化'}).waitFor();check('CAS_conflict_preserves_member_draft',(await page.getByLabel('授权成员 ID',{exact:true}).inputValue()).includes('user-3'));await page.getByRole('button',{name:'刷新',exact:true}).click();await page.getByRole('alert').waitFor({state:'detached'});await page.getByRole('button',{name:'保存成员',exact:true}).click();await page.getByRole('button',{name:'成员 · 3',exact:true}).waitFor();
++ const prior=commands.length;await page.getByRole('button',{name:'解绑',exact:true}).click();check('unbind_requires_confirmation',commands.length===prior&&await page.getByRole('button',{name:'确认解绑',exact:true}).isVisible());await page.getByRole('button',{name:'确认解绑',exact:true}).click();await page.getByText('已解绑',{exact:true}).waitFor();check('unbind_scope_preserved',commands.at(-1).id===bindingId&&commands.at(-1).active===false);
++ await page.getByRole('button',{name:'核对',exact:true}).click();await page.getByRole('button',{name:'未收到，重新发送',exact:true}).click();await page.locator('.nim-receipt').waitFor({state:'detached'});check('UNKNOWN_resend_is_explicit',commands.at(-1).action==='resolve'&&commands.at(-1).id===receiptId&&commands.at(-1).confirm===true&&commands.at(-1).received===false);
++ await page.locator('[data-connection-id="'+enabledId+'"]').getByRole('switch').click();await page.locator('[data-connection-id="'+enabledId+'"]').getByRole('switch',{checked:false}).waitFor();check('switch_preserves_enable_contract',commands.at(-1).action==='enable'&&commands.at(-1).enabled===false);
++ await page.getByRole('button',{name:'添加连接',exact:true}).click();await page.getByRole('button',{name:'添加飞书',exact:true}).click();await page.getByRole('radio',{name:'Lark',exact:true}).check();check('Lark_region_control',await page.getByRole('heading',{name:'连接Lark',exact:true}).isVisible());await page.setViewportSize({width:360,height:900});check('form_mobile_no_overflow',await page.locator('.nim-form').evaluate(el=>el.scrollWidth<=el.clientWidth+1));await page.screenshot({path:path.join(out,'im-settings-form-mobile.png')});await page.emulateMedia({reducedMotion:'reduce'});check('reduced_motion_applied',await page.locator('.nim-form button').first().evaluate(el=>getComputedStyle(el).transitionDuration==='0s'));
++ fs.writeFileSync(path.join(out,'UI_COMMANDS.json'),JSON.stringify({tier:'controlled UI state fixture; original command contracts; no real external accounts',commands},null,2)+'\n');
++ check('zero_page_errors',errors.length===0);check('no_model_calls',inference.length===0);
+  fs.writeFileSync(path.join(out,'UI_VERIFICATION.json'),JSON.stringify({tier:'isolated REAL Harness host, real SQLite/credentials HTTP save; no external platform account',checks,errors,inference:0,connections:await api()},null,2)+'\n');console.log('IM_UI_COMPLETE checks='+checks.length+' errors='+errors.length+' inference=0');
+-}finally{await browser?.close();child.kill();await new Promise(r=>child.exitCode!==null?r():child.once('close',r));fs.writeFileSync(path.join(out,'UI_FIXTURE.log'),output.replace(/\?token=[A-Za-z0-9_~.%-]+/g,'?token=REDACTED'));}
++}finally{const last=browser?.contexts()[0]?.pages()[0];if(last)await last.screenshot({path:path.join(out,'ui-final-state.png')}).catch(()=>{});await browser?.close();child.kill();await new Promise(r=>child.exitCode!==null?r():child.once('close',r));fs.writeFileSync(path.join(out,'UI_FIXTURE.log'),output.replace(/\?token=[A-Za-z0-9_~.%-]+/g,'?token=REDACTED'));}
+diff --git a/tests/naumi-im-settings.test.mjs b/tests/naumi-im-settings.test.mjs
+new file mode 100644
+index 0000000..d97965e
+--- /dev/null
++++ b/tests/naumi-im-settings.test.mjs
+@@ -0,0 +1,59 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import {readFileSync} from 'node:fs';
++import {createIMSettings,installIMSettingsUI} from '../plugins/naumi-enterprise/assets/im-settings.js';
++
++const data=()=>({revision:1,connections:[],bindings:[],outbox:[],bots:[{id:'bot-a',name:'项目主管'}],groups:[{id:'room',name:'产品讨论'}]});
++function renderer(initial){
++ const state=initial.slice(),refs=[];let index=0,refIndex=0;
++ const React={Fragment:'fragment',createElement(type,props,...children){props={...props,children:children.flat(Infinity)};return typeof type==='function'?type(props):{type,props,children:props.children};},useState(value){const i=index++;if(!(i in state))state[i]=value;return[state[i],v=>{state[i]=typeof v==='function'?v(state[i]):v;}];},useEffect(){},useRef(value){const i=refIndex++;return refs[i]??=( {current:value} );}};
++ const Component=createIMSettings(React);
++ const render=()=>{index=0;refIndex=0;return Component();};
++ return {render,state};
++}
++function all(root,match){const result=[];function walk(node){if(!node||typeof node!=='object')return;if(match(node))result.push(node);for(const c of node.children??[])walk(c);}walk(root);return result;}
++const cls=(node,name)=>node.props?.className?.split(' ').includes(name);
++const c={id:'connection',name:'飞书 · 项目协作',platform:'feishu',appId:'cli_fixture',domain:'feishu',configured:true,enabled:true,state:'ready'};
++
++test('empty state is two entire actionable platform cards with vector marks and no duplicate header buttons',()=>{
++ const root=renderer([data()]).render(),cards=all(root,n=>cls(n,'nim-provider'));
++ assert.equal(cards.length,2);assert.deepEqual(cards.map(n=>n.props['aria-label']),['添加钉钉','添加飞书']);
++ for(const card of cards){assert.equal(card.type,'button');assert.equal(card.props.type,'button');assert.equal(all(card,n=>n.type==='button').length,1);assert.equal(all(card,n=>n.type==='svg').length,2);assert.equal(card.props.disabled,false);}
++ assert.equal(all(all(root,n=>cls(n,'nim-header'))[0],n=>n.type==='button').length,0);
++});
++
++test('connection state, native enable action, scoped edit/verify/pair and compact add picker remain real controls',()=>{
++ const view=data();view.connections=[c];const r=renderer([view]);let root=r.render();
++ assert.equal(all(root,n=>n.props?.role==='switch')[0].props['aria-checked'],true);assert.equal(all(root,n=>cls(n,'nim-status'))[0].props['data-state'],'ready');
++ assert.equal(all(root,n=>cls(n,'nim-pair-button'))[0].props.disabled,false);
++ all(root,n=>n.type==='button'&&n.children.includes('添加连接'))[0].props.onClick();root=r.render();assert.equal(all(root,n=>cls(n,'nim-providers-compact')).length,1);
++ all(root,n=>n.props?.['aria-label']==='添加飞书')[0].props.onClick();root=r.render();assert.equal(all(root,n=>n.type==='form')[0].props['aria-label'],'配置连接');
++ assert.equal(all(root,n=>n.type==='input'&&n.props.type==='password').length,1);
++});
++
++test('editing keeps saved secret out of DOM values and explicit reveal is local, reversible and reset on cancel',()=>{
++ const view=data();view.connections=[c];const r=renderer([view,{...c}]);let root=r.render();
++ const password=all(root,n=>n.type==='input'&&n.props.type==='password')[0];assert.equal(password.props.value,'');assert.equal(password.props.required,false);assert.equal(all(root,n=>n.type==='input'&&n.props.value===c.appId)[0].props.disabled,true);
++ all(root,n=>n.props?.['aria-label']==='显示应用密钥')[0].props.onClick();root=r.render();assert.equal(all(root,n=>n.props?.['aria-label']==='隐藏应用密钥')[0].props['aria-pressed'],true);
++ all(root,n=>n.props?.['aria-label']==='返回连接列表')[0].props.onClick();root=r.render();assert.equal(all(root,n=>cls(n,'nim-form')).length,0);assert.equal(r.state[2],'');
++});
++
++test('platform selection and pairing reuse the existing target selectors, code, expiry and close lifecycle',()=>{
++ const view=data();view.connections=[c];const r=renderer([view,null,'',false,'',{connectionId:c.id,chatKind:'direct',targetId:'bot-a'},{code:'ABC',expires:Date.now()+60000}]);let root=r.render();
++ assert.equal(all(root,n=>cls(n,'nim-steps')).length,1);assert.equal(all(root,n=>n.type==='select').length,2);for(const select of all(root,n=>n.type==='select'))assert.equal(all(root,n=>n.type==='label'&&n.props.htmlFor===select.props.id).length,1);assert.equal(all(root,n=>n.type==='code'&&n.children.includes('/pair ABC')).length,1);
++ assert.equal(all(root,n=>n.props?.['aria-label']==='复制配对码').length,1);
++ all(root,n=>n.type==='select'&&n.props.value==='direct')[0].props.onChange({target:{value:'group'}});root=r.render();assert.equal(all(root,n=>cls(n,'nim-code')).length,0);assert.equal(r.state[5].targetId,'');
++ all(root,n=>n.props?.['aria-label']==='关闭配对')[0].props.onClick();assert.equal(all(r.render(),n=>cls(n,'nim-pair')).length,0);
++});
++
++test('member editor has an associated textarea and receipt reconciliation requires an explicit UI action',()=>{
++ const view=data();view.connections=[c];view.bindings=[{id:'binding',connectionId:c.id,active:true,users:['u'],chat:{kind:'group',key:'chat',title:'产品群'},target:{kind:'group',id:'room'}}];view.outbox=[{id:'receipt',bindingId:'binding',state:'unknown'}];
++ const r=renderer([view]);let root=r.render();const members=all(root,n=>n.type==='button'&&n.children.includes('成员 · 1'))[0];members.props.onClick();root=r.render();const textarea=all(root,n=>n.type==='textarea')[0];assert.equal(all(root,n=>n.type==='label'&&n.props.htmlFor===textarea.props.id).length,1);
++ assert.equal(all(root,n=>cls(n,'nim-reconcile')).length,0);all(root,n=>n.type==='button'&&n.children.includes('核对'))[0].props.onClick();assert.equal(all(r.render(),n=>cls(n,'nim-reconcile')).length,1);
++});
++
++test('settings registration is unchanged; presentation remains scoped, light, responsive and reduced-motion aware',()=>{
++ const calls=[];installIMSettingsUI({slots:{inject:(name,fn)=>{calls.push(name);return fn();},register:(options,component)=>{calls.push(options);assert.equal(typeof component,'function');}}},{createElement(){}});
++ assert.equal(calls[0],'settings.section');assert.equal(calls[1].id,'im');assert.equal(calls[1].order,20);
++ const css=readFileSync(new URL('../plugins/naumi-enterprise/assets/im-settings.css',import.meta.url),'utf8');assert.match(css,/color-scheme:light/);assert.match(css,/prefers-reduced-motion:reduce/);assert.match(css,/@media\(max-width:420px\)/);assert.doesNotMatch(css,/(?:^|\n)(?:body|html|button|input)\s*[{,]/);assert.doesNotMatch(css,/border:[^;]*dashed/);
++});
