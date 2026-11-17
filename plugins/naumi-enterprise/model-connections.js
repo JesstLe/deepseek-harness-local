@@ -1,10 +1,12 @@
 import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
+import {officialModelSpecs,modelSpecView,configureModelSpec,refreshModelSpecs} from './model-specs.js';
 
 const protocols=['openai-completions','openai-responses','anthropic-messages'];
-const model=z.object({id:z.string().trim().min(1).max(512),name:z.string().trim().max(160).optional()}).strict();
+const model=z.object({id:z.string().trim().min(1).max(512),name:z.string().trim().max(160).optional(),contextWindow:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),maxTokens:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional()}).strict();
 const save=z.object({action:z.literal('save'),id:z.string().regex(/^[a-z][a-z0-9_-]{0,79}$/),expectedRevision:z.number().int().nonnegative(),displayName:z.string().trim().min(1).max(120),baseURL:z.string().trim().min(1).max(2048),api:z.enum(protocols),models:z.array(model).min(1).max(200),apiKey:z.string().trim().min(1).max(16000).optional()}).strict();
 const remove=z.object({action:z.literal('remove'),id:z.string().min(1).max(80),expectedRevision:z.number().int().nonnegative()}).strict();
+const refresh=z.object({action:z.literal('refresh-specs'),expectedRevision:z.number().int().nonnegative()}).strict();
 const discover=z.object({action:z.literal('discover'),id:z.string().min(1).max(80).optional(),baseURL:z.string().trim().min(1).max(2048),api:z.enum(protocols),apiKey:z.string().trim().min(1).max(16000).optional()}).strict();
 const error=(code,status=400)=>Object.assign(new Error(code),{code,status});
 export function endpoint(value){
@@ -54,7 +56,7 @@ export class ModelConnections{
  async read(){const ns=this.namespace(),groups=[];for(const[id,p]of Object.entries(ns.value.providers??{})){
   const info=p.apiKeyEnv?await this.ctx.credentials.describe(p.apiKeyEnv):{configured:false,writable:true};
   groups.push({id,displayName:p.displayName??id,api:p.api??'openai-completions',baseURL:p.baseURL??'',models:(p.models??[]).map(m=>({id:m.id,...m.name?{name:m.name}:{}})),configured:info.configured,editable:protocols.includes(p.api)&&Array.isArray(p.models)&&p.models.length>0});
- }return {revision:ns.revision,writable:this.ctx.settings.writable,groups};}
+ }for(const group of groups){const provider=ns.value.providers[group.id];group.models=group.models.map(m=>{const raw=provider.models.find(row=>row.id===m.id);return modelSpecView({...m,...raw.contextWindow===undefined?{}:{contextWindow:raw.contextWindow},...raw.maxTokens===undefined?{}:{maxTokens:raw.maxTokens}},provider);});}return {revision:ns.revision,writable:this.ctx.settings.writable,groups,specs:officialModelSpecs};}
  async repairDefault(removed){
   const current=this.ctx.agentDefaultModel.currentSelection();
   const p=this.namespace().value.providers??{},own=p[current.provider];
@@ -65,8 +67,13 @@ export class ModelConnections{
  }
  execute(input){const run=this.queue.then(()=>this.write(input));this.queue=run.catch(()=>{});return run;}
  async write(input){
-  const parsed=z.union([save,remove]).safeParse(input);if(!parsed.success)throw error('MODEL_INVALID_REQUEST');const p=parsed.data;
+  const parsed=z.union([save,remove,refresh]).safeParse(input);if(!parsed.success)throw error('MODEL_INVALID_REQUEST');const p=parsed.data;
   const ns=this.namespace();if(!this.ctx.settings.writable)throw error('MODEL_SETTINGS_READ_ONLY',403);if(ns.revision!==p.expectedRevision)throw error('MODEL_SETTINGS_CONFLICT',409);
+  if(p.action==='refresh-specs'){
+   const result=refreshModelSpecs(ns.value.providers??{}),ids=[...new Set(result.changes.map(row=>row.group))];
+   if(ids.length)await this.ctx.settings.mutate('llm-pi-ai',ids.map(id=>({op:'set',path:['providers',id,'models'],value:result.providers[id].models})),ns.revision);
+   return {...await this.read(),specRefresh:{changed:result.changes.length,changes:result.changes,unknown:result.unknown,conditional:result.conditional}};
+  }
   const previous=ns.value.providers?.[p.id];let newRef;
   if(p.action==='remove'){
    if(!previous)throw error('MODEL_GROUP_NOT_FOUND',404);
@@ -74,7 +81,7 @@ export class ModelConnections{
   }else{
    if(new Set(p.models.map(m=>m.id)).size!==p.models.length)throw error('MODEL_DUPLICATE_ID');
    if(!p.apiKey&&!previous?.apiKeyEnv)throw error('MODEL_KEY_REQUIRED');
-   const profile={...previous,displayName:p.displayName,baseURL:endpoint(p.baseURL),api:p.api,models:p.models.map(m=>({...previous?.models?.find(old=>old.id===m.id),...m})),apiKeyEnv:previous?.apiKeyEnv};
+   const profile={...previous,displayName:p.displayName,baseURL:endpoint(p.baseURL),api:p.api,models:p.models.map(m=>configureModelSpec(m,previous?.models?.find(old=>old.id===m.id),previous??{})),apiKeyEnv:previous?.apiKeyEnv};
    if(p.apiKey){if(/[\r\n\u0000-\u001f\u007f]/.test(p.apiKey))throw error('MODEL_KEY_INVALID');newRef='NAUMI_MODEL_'+randomUUID().replaceAll('-','').toUpperCase();profile.apiKeyEnv=newRef;await this.ctx.credentials.set(newRef,p.apiKey);}
    try{await this.ctx.settings.mutate('llm-pi-ai',[{op:'set',path:['providers',p.id],value:profile}],ns.revision);}
    catch(e){if(newRef)try{await this.ctx.credentials.unset(newRef);}catch{throw error('MODEL_SAVE_CLEANUP_FAILED',500);}throw e;}
