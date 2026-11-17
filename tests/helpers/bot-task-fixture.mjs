@@ -38,7 +38,7 @@ export async function taskFixture({concurrency=4}={}){
   };
   for(const agent of [sender,target,other])sessions.set(agent.id,{messages:new Map(),running:false});
   const open=()=>new BotTaskService({ctx,directory,store,runtime,concurrency,onError:e=>errors.push(e)});service=open();
-  const input=(extra={})=>({targetBotId:targetBot.id,task:'写一段产品介绍',idempotencyKey:randomUUID(),...extra});
+  const input=(extra={})=>({replyMode:'wait',targetBotId:targetBot.id,task:'写一段产品介绍',idempotencyKey:randomUUID(),...extra});
   const finish=async(task,{kind='completed',text='目标 Bot 的交付内容'}={})=>{
     const s=sessions.get(task.targetSessionId),message=s.messages.get(service.current(task.id).messageId);
     s.running=false;message.end={kind};message.text=text;await service.observeTask(task.id);await service.settled();

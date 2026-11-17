@@ -8,6 +8,8 @@
 
 文件交付扩展见 [Bot 文件交付](BOT_FILE_DELIVERABLES.md)：`output="files"`、原生文件登记、结构化来源引用和完成检查，不再只回传文字。
 
+异步接待与结果队列见 [异步员工协作](ASYNC_BOT_CONVERSATION.md)：新接待派单默认后台受理，主管先接话；结果走 next-turn，不插入当前话题。显式等待与任务内依赖仍保留。
+
 ## 实现模块
 
 - `bot-task-store.js`：原子文件事务、版本校验、任务与回复 outbox 同事务落盘。

@@ -39,7 +39,7 @@ test('automatic registration creates native events, durable source references an
     const address=parseFileAddress(previewAddress(ref));assert.equal(address.sessionId,task.targetSessionId);assert(address.path.includes('文章 草稿.md'));
     const worker=f.agents.get(task.targetSessionId),presented=worker.session.snapshotEvents().filter(e=>e.type==='deliverables/presented');
     assert.equal(presented.length,1);assert.equal(presented[0].seq,ref.seq);assert.equal(presented[0].data.turn,1);
-    const reply=f.sender.inbox.nextStep[0];assert(reply.content[0].text.includes('原始交付坐标'));assert(reply.content[0].text.includes(task.targetSessionId));
+    const reply=f.sender.inbox.nextTurn[0];assert(reply.content[0].text.includes('原始交付坐标'));assert(reply.content[0].text.includes(task.targetSessionId));
     const fetched=await(await f.request(null,{url:'/naumi/bot-tasks?taskId='+task.id})).json();assert.deepEqual(fetched.messages[0].files,done.delivery.files);
     const reopened=new BotTaskStore(f.store.file);assert.deepEqual(reopened.read().tasks[0].delivery,done.delivery);await reopened.close();
     f.sender.session.append('turn/start',{turn:1});f.sender.session.append('user/message',reply,{surfaceOp:'append'});
@@ -47,14 +47,14 @@ test('automatic registration creates native events, durable source references an
     assert.equal(f.sender.session.snapshotEvents().filter(e=>e.type==='deliverables/presented').length,1);
     // Reconcile and lost outbox acknowledgement never create another attachment or execute work again.
     await f.service.observeTask(task.id);await f.store.change(d=>{d.outbox[0].delivered=false;return {value:null};});await f.service.settled();
-    assert.equal(worker.session.snapshotEvents().filter(e=>e.type==='deliverables/presented').length,1);assert.equal(f.sender.inbox.nextStep.length,1);
+    assert.equal(worker.session.snapshotEvents().filter(e=>e.type==='deliverables/presented').length,1);assert.equal(f.sender.inbox.nextTurn.length,1);
   }finally{await f.cleanup();}
 });
 
 test('file tasks with text-only completion fail delivery checking and retain the actual text',async()=>{
   const f=await botTaskHost();try{const task=await start(f);await f.complete(task,'我已经写好了 `missing.md`');const done=f.service.current(task.id);
     assert.equal(done.status,'failed');assert.equal(done.error,'BOT_DELIVERY_MISSING');assert.equal(done.delivery.status,'missing');assert.match(done.result,/写好了/);
-    assert.equal(f.sender.inbox.nextStep.length,1);assert.match(f.sender.inbox.nextStep[0].content[0].text,/BOT_DELIVERY_MISSING/);
+    assert.equal(f.sender.inbox.nextTurn.length,1);assert.match(f.sender.inbox.nextTurn[0].content[0].text,/BOT_DELIVERY_MISSING/);
     const body={...input(f),output:'text'};await assert.rejects(f.service.dispatch(f.sender,body),/IDEMPOTENCY_CONFLICT/);
   }finally{await f.cleanup();}
 });
@@ -96,7 +96,7 @@ test('native present remains authoritative, different turns and forged relay coo
     const task=await start(f),file=path.join(f.dir,'native.md');fs.writeFileSync(file,'native');
     await f.complete(task,'正文完成',async(agent,turn)=>registerFiles(agent.session,turn,[{path:file,description:'原始文件'}],'native-present'));
     const refs=f.service.current(task.id).delivery.files;assert.equal(refs.length,1);assert.equal(f.agents.get(task.targetSessionId).session.snapshotEvents().filter(e=>e.type==='deliverables/presented').length,1);
-    const reply=f.sender.inbox.nextStep[0];f.sender.session.append('turn/start',{turn:1});f.sender.session.append('user/message',reply,{surfaceOp:'append'});
+    const reply=f.sender.inbox.nextTurn[0];f.sender.session.append('turn/start',{turn:1});f.sender.session.append('user/message',reply,{surfaceOp:'append'});
     await assert.rejects(f.service.runtime.mirror(f.sender.id,reply.id,[{...refs[0],seq:99999}]),/REFERENCE_MISMATCH/);
     assert.equal(f.sender.session.snapshotEvents().filter(e=>e.type==='deliverables/presented').length,0);
     assert.deepEqual(references(f.agents.get(task.targetSessionId).session.snapshotEvents(),task.targetSessionId,2),[]);
@@ -117,7 +117,7 @@ test('same-turn native deliveries do not leak from old turns and cross-workspace
   const f=await botTaskHost();try{
     const task=await start(f),file=path.join(f.dir,'private.md');fs.writeFileSync(file,'source');
     await f.complete(task,'完成',async(a,t)=>registerFiles(a.session,t,[{path:file}],'present-1'));
-    const refs=f.service.current(task.id).delivery.files,reply=f.sender.inbox.nextStep[0];
+    const refs=f.service.current(task.id).delivery.files,reply=f.sender.inbox.nextTurn[0];
     // The viewer can use the source Session reference; no recipient-local card is forged across workspaces.
     const otherRoot=path.join(f.dir,'other');fs.mkdirSync(otherRoot);
     f.sender.session=Session.create(SessionId(f.sender.id),f.sender.session.snapshotEvents(),{...f.sender.session.header,cwd:otherRoot});

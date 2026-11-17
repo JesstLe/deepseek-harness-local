@@ -22,7 +22,7 @@ if(['baseline','rollback'].includes(mode)){
       agent.session.append('tool/result',{turn,step:1,message:createToolResultMessage({callId:'verify-write',isError:false,content:[{type:'text',text:'written'}]})},{surfaceOp:'append'});
     });
     const done=f.service.current(task.id);assert.equal(done.status,'completed');assert.equal(done.delivery.files.length,1);
-    const reply=f.sender.inbox.nextStep[0];f.sender.session.append('turn/start',{turn:1});f.sender.session.append('user/message',reply,{surfaceOp:'append'});
+    const reply=f.sender.inbox.nextTurn[0];f.sender.session.append('turn/start',{turn:1});f.sender.session.append('user/message',reply,{surfaceOp:'append'});
     await f.service.runtime.mirror(f.sender.id,reply.id,done.delivery.files);
     assert.equal(f.sender.session.snapshotEvents().filter(e=>e.type==='deliverables/presented').length,1);
     const missing=await f.service.dispatch(f.sender,{targetBotId:f.targetBot.id,task:'交付 missing.md',output:'files',idempotencyKey:'verify-missing'});await f.service.settled();await f.complete(missing,'写好了 missing.md');assert.equal(f.service.current(missing.id).error,'BOT_DELIVERY_MISSING');

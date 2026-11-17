@@ -115,7 +115,7 @@ export function createBotTaskRuntime(ctx){
     },
     isRunning:sessionId=>ctx.agents.get(sessionId)?.status==='running',
     async inspect(sessionId,messageId){const stored=await snapshot(sessionId);return stored?inspectBotMessage(stored.events,messageId,stored.live?.status==='running'):null;},
-    async deliver({sessionId,messageId,fromSessionId,text,create=false,cwd,profile:config}){
+    async deliver({sessionId,messageId,fromSessionId,text,create=false,cwd,profile:config,mode='steer'}){
       const agent=await ensure(sessionId,{create,cwd,profile:config});
       const observed=await this.inspect(sessionId,messageId);
       const message=freezeMessage({id:messageId,role:'user',source:{kind:'agent-message',form:'relay',senderSessionId:fromSessionId},content:[{type:'text',text}]});
@@ -123,8 +123,10 @@ export function createBotTaskRuntime(ctx){
         // Resuming an idle Session does not itself wake a parked inbox. Requeue the SAME
         // still-pending identity synchronously; consumed or discarded input is never replayed.
         const pending=[...agent.inbox.nextStep,...agent.inbox.nextTurn].find(m=>m.id===messageId);
-        if(observed.pending&&pending&&agent.status==='idle'&&agent.inbox.remove(messageId))agent.steer(pending);
-      }else agent.steer(message);
+        if(observed.pending&&pending&&agent.status==='idle'&&agent.inbox.remove(messageId)){
+          if(mode==='followup')agent.followup(pending);else agent.steer(pending);
+        }
+      }else if(mode==='followup')agent.followup(message);else agent.steer(message);
       await ctx.sessions.flush(agent.session);
       const receipt=await this.inspect(sessionId,messageId);
       if(!receipt?.seen)throw Error('BOT_MESSAGE_RECEIPT_MISSING');

@@ -1,0 +1,59 @@
+Async Bot conversation — 2026-11-17
+Branch: codex/async-bot-conversation-20261117
+Baseline main/origin/main: ee6af8d83f333c7cf8f436c24425f6700cba5502
+Changed fields: task.replyMode=background|wait; bot_task_wait.waitForResult; native result message inbox=next-turn for background work; compact task activity feed; reception target and avatar/task-card state.
+
+FINAL ARTIFACT PATHS
+MODIFIED_FILE: E:/Workspace/naumi-desktop/evidence/async-bot/MODIFIED_FILE.zip
+DIFF_FILE: E:/Workspace/naumi-desktop/evidence/async-bot/DIFF_FILE.patch
+VERIFICATION: E:/Workspace/naumi-desktop/evidence/async-bot/VERIFICATION.txt
+ROLLBACK: E:/Workspace/naumi-desktop/evidence/async-bot/ROLLBACK.sh
+Original bytes and SHA256: original/, manifest.json. Modified source archive contains 22 explicit paths.
+
+Recorded pre-merge working directory: E:/Workspace/naumi-async-bot
+
+BASELINE
+Command: node scripts/verify-async-bot.mjs baseline
+Input: original Bot service/runtime; no replyMode field; wait Promise and steer result delivery.
+Literal output: BASELINE dispatch_mode=legacy wait=blocking result_inbox=next-step original_behavior=PASS
+Exit status: 0
+Baseline regression command: node --test tests/naumi-bot-communication.test.mjs tests/naumi-bot-http-runtime.test.mjs tests/naumi-bot-deliverables.test.mjs
+Result: tests=36 pass=36 fail=0; exit=0.
+
+MODIFIED
+Command: node scripts/verify-async-bot.mjs modified
+Input: a persisted background task, immediate wait call, independent user topic, then worker completion.
+Literal output: MODIFIED dispatch=background wait=immediate independent_chat=PASS result_mode=followup duplicate_tasks=0
+Exit status: 0
+Module regression: node --test tests/naumi-async-bot.test.mjs tests/naumi-bot-communication.test.mjs tests/naumi-bot-http-runtime.test.mjs tests/naumi-bot-deliverables.test.mjs
+Result: tests=43 pass=43 fail=0; exit=0; module-tests.log.
+Latest concentrated full regression: node --test tests/*.test.mjs desktop/tests/*.test.cjs
+Result: tests=385 pass=385 fail=0; exit=0; integration-tests.log. Earlier full-tests.log records 384 before the added legacy-retry test.
+
+UI
+Command: node scripts/verify-async-bot-ui.mjs
+Input: actual local Harness shell with candidate frontend, controlled read-only task catalog and a real local SSE stream; no model/business commands.
+Literal final output: UI_COMPLETE checks=18 errors=0
+Exit status: 0
+Verified: task cards, native reception session, actual working-state animation, idle transition, reduced-motion style, preserved new-topic draft/model/menu, single shared event stream, 1000/580/360px fit and no page errors.
+Screenshots were reopened and inspected. Native model position and employee menu remain unchanged.
+
+ROLLBACK
+Command: & 'D:/DEV/Git/bin/bash.exe' evidence/async-bot/ROLLBACK.sh E:/Workspace/naumi-async-bot/evidence/async-bot/rollback-copy
+Input: explicitly marked independent source copy, current modified hashes verified before restoration.
+Literal output: ROLLBACK_COPY restored=13 removed=9 hashes=PASS active_source=UNCHANGED
+Exit status: 0
+Command: node scripts/verify-async-bot.mjs rollback E:/Workspace/naumi-async-bot/evidence/async-bot/rollback-copy/plugins/naumi-enterprise
+Literal output: ROLLBACK dispatch_mode=legacy wait=blocking result_inbox=next-step original_behavior=PASS
+Exit status: 0
+Restored behavior/status: original wait/next-step source behavior in the copy; active implementation and MODIFIED_FILE remain modified. Existing file-delivery support remains present.
+This is a source-copy restoration test, not an online ledger downgrade. New optional fields are readable by the new version; a downgrade to an old strict-schema version needs a separate data migration plan.
+
+INITIAL VALIDATION ERRORS
+baseline-probe-initial-failure.log: the isolated original module copy initially lacked its unchanged bot-deliverables import; copied that unchanged dependency and reran successfully.
+ui-initial-failure.log: UI test driver used context.emulateMedia instead of page.emulateMedia; corrected and all 18 checks passed.
+
+SCOPE / RELEASE
+One functional slice. No credential/model/permission/employee-memory changes; no existing user task canceled or rewritten. Explicit single-task cancellation now records cancelled only after the actual stop succeeds.
+Main-pinned local loading and actual-model concurrent conversation are recorded after merge; the pre-merge tests above do not claim those gates.
+Installer EXE is not rebuilt by this slice.
