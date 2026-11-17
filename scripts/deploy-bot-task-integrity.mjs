@@ -26,7 +26,10 @@ for(const file of files){
   fs.writeFileSync(path.join(backup,file),before);rows.push({file,beforeSHA256:sha(before),afterSHA256:sha(fs.readFileSync(source))});
 }
 const protectedPaths=['.dsh/.credentials.yaml','.dsh/cordis.patch.yml','.dsh/profiles/web/cordis.yml','.dsh/profiles/web/cordis.patch.yml','.dsh/naumi/bots.json','config/local.json'];
-for(const f of fs.readdirSync(path.join(runtime,'.dsh/storages'),{recursive:true}))if(fs.statSync(path.join(runtime,'.dsh/storages',f)).isFile())protectedPaths.push('.dsh/storages/'+f);
+// Native session_projcache is derived/rebuilt during startup, not task data.
+// Protect the authoritative compressed Session logs instead of cache bytes.
+for(const f of fs.readdirSync(path.join(runtime,'.dsh/storages'),{recursive:true}))if(!f.replaceAll('\\','/').startsWith('session_projcache/')&&fs.statSync(path.join(runtime,'.dsh/storages',f)).isFile())protectedPaths.push('.dsh/storages/'+f);
+for(const f of fs.readdirSync(path.join(runtime,'.dsh/sessions'),{recursive:true}))if(f.endsWith('.jsonl.zstd'))protectedPaths.push('.dsh/sessions/'+f);
 const protectedBefore=Object.fromEntries(protectedPaths.filter(f=>fs.existsSync(path.join(runtime,f))).map(f=>[f,sha(fs.readFileSync(path.join(runtime,f)))]));
 const api=await botLiveApi(runtime),ledger=await api.json('/naumi/bot-tasks');
 const employees=async api=>{const catalog=await api.json('/naumi/bots'),out={};for(const b of catalog.bots){const {exportedAt,...data}=await api.json('/naumi/employees?view=export&botId='+encodeURIComponent(b.id));out[b.id]=sha(JSON.stringify(data));}return out;};
@@ -34,14 +37,18 @@ const employeeBefore=await employees(api),modelsBefore=await api.json('/naumi/mo
 const businessFile='C:/Users/13357/Documents/deepseek-harness/default-workspace/operations/2026-11-17-new-product-launch-kit.md',businessFileSHA256=sha(fs.readFileSync(businessFile));
 assert(!ledger.tasks.some(t=>['queued','starting','running','waiting'].includes(t.status)),'TASKS_NOT_QUIESCENT');
 const beforeLedger=fs.readFileSync(path.join(runtime,'.dsh/naumi/bot-tasks.json'));
-assert.equal(sha(beforeLedger),JSON.parse(fs.readFileSync(plan,'utf8')).ledgerSHA256,'REPAIR_PLAN_STALE');
-const shell=file=>{const r=spawnSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-File',path.join(runtime,file)],{encoding:'utf8',windowsHide:true,timeout:150000});fs.appendFileSync(path.join(backup,'service.private.log'),(r.stdout??'')+(r.stderr??''));assert.equal(r.status,0,'SERVICE_COMMAND_FAILED '+file);};
+const repairPlan=JSON.parse(fs.readFileSync(plan,'utf8')),resume=!!repairPlan.afterSHA256;
+assert.equal(sha(beforeLedger),resume?repairPlan.afterSHA256:repairPlan.ledgerSHA256,'REPAIR_PLAN_STALE');
+if(resume){assert.equal(sha(fs.readFileSync(repairPlan.backup)),repairPlan.beforeSHA256,'REPAIR_BACKUP_CHANGED');const task=JSON.parse(beforeLedger).tasks.find(t=>t.id===repairPlan.taskId);assert(task&&task.status==='interrupted'&&task.revision===repairPlan.revision&&!task.instruction&&!task.result,'REPAIR_RESUME_STATE_CHANGED');}
+// No inherited pipe handles: the detached server outlives PowerShell. Captured
+// pipes can keep spawnSync waiting after the script has already returned success.
+const shell=file=>{const r=spawnSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-File',path.join(runtime,file)],{stdio:'ignore',windowsHide:true,timeout:150000});fs.appendFileSync(path.join(backup,'service.private.log'),file+' exit='+r.status+' error='+(r.error?.code??'none')+'\n');assert.equal(r.status,0,'SERVICE_COMMAND_FAILED '+file);};
 execFileSync(process.execPath,[path.join(root,'scripts/check-bot-runtime.mjs'),runtime,'2'],{stdio:'inherit'});
 let stopped=false,complete=false;
 try{
   shell('Stop-Naumi.ps1');stopped=true;
-  const repaired=spawnSync(process.execPath,[path.join(root,'scripts/repair-bot-task-integrity.mjs'),runtime,plan,path.join(backup,'repair')],{encoding:'utf8',windowsHide:true});
-  process.stdout.write(repaired.stdout??'');assert.equal(repaired.status,0,repaired.stderr);
+  if(resume){fs.mkdirSync(path.join(backup,'repair'));fs.copyFileSync(repairPlan.backup,path.join(backup,'repair/ledger.before.json'));fs.copyFileSync(plan,path.join(backup,'repair/repair-receipt.json'));console.log('REPAIR_RESUMED ledger=ALREADY_REPAIRED replay=0');}
+  else{const repaired=spawnSync(process.execPath,[path.join(root,'scripts/repair-bot-task-integrity.mjs'),runtime,plan,path.join(backup,'repair')],{encoding:'utf8',windowsHide:true});process.stdout.write(repaired.stdout??'');assert.equal(repaired.status,0,repaired.stderr);}
   for(const file of files)fs.copyFileSync(path.join(root,'plugins/naumi-enterprise',file),path.join(base,file));
   shell('Start-Naumi.ps1');stopped=false;
   const loaded=await botLiveApi(runtime),response=await loaded.request('/naumi/bot-tasks?view=activity');assert.equal(response.status,200);assert.equal(response.headers.get('X-Naumi-Bot-Integrity'),'1');
