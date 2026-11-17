@@ -77,3 +77,10 @@ BotDirectory / 原生 Session、BotTaskStore、原生标题事件和工作区服
 
 - 最终候选固定main58ccccd（runtime stage dbaaee9，包含D2/本轮总览迁移文件版本与D4；不含后来e7fe7a5目标关联或creation/import后续切片）。该候选worktree最终集中全仓739/739，exit0，152.98秒，FULL_CANDIDATE_FINAL.log；没有真实模型请求。
 - 最终修订包495184762字节，SHA256 f37018df64eee312193b7109e3f9da35d1f306c3dea3e44745b3e07cd7b00d2e；草稿资产已替换，最终原生旧卸载器命令行确含--keep-shortcuts（UPGRADE_NATIVE_ARGS.json），覆盖安装完整验证尚在执行。共享3080不参与安装验收。
+
+## 最终交付状态（2026-11-18）
+- 本轮1工作总览、2旧Bot工作区迁移、3文件版本：已main/真实3080增量加载与验收；5安装公开发布已完成构建与真实覆盖升级/卸载验收；4钉钉私聊仍按用户要求延期。
+- 修订版0.3.6覆盖升级exit0，45618安装文件哈希通过；真实打包主进程与内置后端登录/检查更新/DingTalk只读未登录状态/worker退出通过，模型0。fixture二进制/persona/memory保留；卸载exit0；HKLM、Program Files原安装及恢复后快捷方式逐字节保持，目录与注册表恢复。
+- 最终复验起点为已安装旧策略0.3.6，保留最初0.3.5安装与前两轮失败回执；不冒称又执行了一次干净0.3.5→修订版升级。第一次用户快捷方式重建hash不同的事实继续保留，最终不写“全程原字节保持”。
+- GitHub v0.3.6已公开Latest，tag目标58ccccd29f1454ac6286b37e27d1610bd4f50d37；资产495184762字节，SHA256 f37018df64eee312193b7109e3f9da35d1f306c3dea3e44745b3e07cd7b00d2e，latest.yml同步。后续D3/creation/session-import不混入此候选。
+- 源码四件套与完整基线/修改/源码副本恢复/真实目录副本恢复/安装发布下载证据位于evidence/daily-five；副本回滚保留当前修改。最终以VERIFICATION.txt、PUBLISH.json、DOWNLOAD.json和REOPEN记录为准。
