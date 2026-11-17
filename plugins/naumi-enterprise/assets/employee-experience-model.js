@@ -1,6 +1,6 @@
 export const EXPERIENCE_EVENT='naumi:employee-settings';
 export const SIMPLE_FIELDS={communicationStyle:'回复方式',workStyle:'做事习惯'};
-export const EXPERIENCE_ACTIONS=[['appearance','更换形象'],['style','调整工作方式'],['memories','查看记住的内容'],['forget','忘记某件事'],['restore','恢复之前的设置']];
+export const EXPERIENCE_ACTIONS=[['work','工作与交付'],['appearance','更换形象'],['style','调整工作方式'],['memories','查看记住的内容'],['forget','忘记某件事'],['restore','恢复之前的设置']];
 export const hasSession=location=>new URLSearchParams(location?.hash?.slice(1)??'').has('session')||new URLSearchParams(location?.search??'').has('session');
 export function cleanEmployeeLanding(storage){try{if(storage?.getItem('naumi.activePanel')==='naumi-employees'){storage.setItem('naumi.activePanel','naumi-workbench');return true;}}catch{}return false;}
 export async function advancedEmployeeAccess(fetcher=globalThis.fetch,signal){
