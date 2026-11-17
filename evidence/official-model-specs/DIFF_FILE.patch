@@ -1,0 +1,1766 @@
+diff --git a/docs/implementation/OFFICIAL_MODEL_SPECS.md b/docs/implementation/OFFICIAL_MODEL_SPECS.md
+new file mode 100644
+index 0000000..644d822
+--- /dev/null
++++ b/docs/implementation/OFFICIAL_MODEL_SPECS.md
+@@ -0,0 +1,31 @@
++# 官方模型参数与可配置预算
++
++日期：2026-11-17。负责人：本任务。基线8995df9da41b6a36483a1b84277396892968d69c；独立分支codex/official-model-specs-20261117，工作树E:/Workspace/naumi-official-model-specs。功能迭代1。
++
++## 模块与职责
++
++修复早期CC Switch导入为所有模型统一写入128000上下文/16384输出以及部分400000覆盖带来的失真。新增官方规格目录、逐模型上下文/输出预算编辑、后端范围检查与显式官方校准。目录包含86个型号、14个供应商/通道标签（Kimi Coding、Alibaba/DeepSeek单独建模），涵盖OpenAI、Anthropic、Google、DeepSeek、阿里Qwen、智谱、Kimi、MiniMax、xAI、Mistral、Cohere、豆包12家供应商。
++
++## 公共接口、依赖方向、数据/状态/事务归属
++
++- official-model-specs.json保存官方文档核验时间、来源URL、源SHA256、上下文/输出/输入上限、原始K/M标签和数值精度。支持精确ID，不按相似名字、前缀或uncensored后缀猜模型。规格不代表账号有访问权限。
++- 文档给精确token数时保留原值；仅写K/M时保留原标签，采用保守十进制预算，不伪造二进制精确度。仅记录当前同步/默认API边界，不默认打开beta/batch/long-decode更大额度。未公布输出上限的条目保留null，不用网络搜索片段补数。
++- model-specs.js负责规格投影与预算验证。上下文和输出为正整数；输出必须小于上下文；已知模型不得超官方边界。有最大输入限制时，上下文预算还受maxInput+当前输出预算约束。
++- 用户配置的maxTokens是实际输出预算，不是官方最大输出能力。校准保留既有输出预算，只在超上限时下调，不自动扩大生成/付费额度；来源仅作为可查规格，不改变模型协议、reasoning wire参数、价格、API地址或Key。
++- Kimi Coding条目有套餐限制，自动校准不提高已有上下文；用户可据自身授权选择理论上限内的值，账号套餐能力仍由服务端决定。未核验别名保留旧配置，仅允许调低既有预算。
++- 原settings llm-pi-ai仍持有实际contextWindow/maxTokens；原适配器与compaction直接消费，无并行配置真源。原credentials仍独占密钥。未修改node_modules。
++- 原owner同源POST save支持逐模型contextWindow/maxTokens；refresh-specs需expectedRevision，在单次settings mutate中校准已识别模型。CAS、只读、失败回滚保持；校准不改默认模型或已有会话所选模型。
++
++## 本次实现与迁移状态
++
++模型连接表单新增“模型参数”，逐行显示官方来源、总上下文、最大输入和输出能力，并分别编辑本连接预算；“官方值”恢复该模型可用上下文预算，仍保留输出预算。列表页“校准官方参数”是显式整组校准。获取模型列表、手填ID、原模型元数据及未知模型继续保留。
++
++采集与复现：python -X utf8 scripts/refresh-official-model-specs.py默认从已核验快照重建；--fetch显式抓取官方文档并在严格解析成功后发布目录，不查询用户供应商账号、不发推理、不自动改用户配置。OFFICIAL_SOURCES.zip保留完整来源；sources/保存可读文本；SOURCE_MANIFEST.json记录摘要。后续更新须审查官方差异、测试、合入主线，再发布。
++
++## 验证命令、结果及证据层级
++
++基线27项模型连接/发现测试通过。定向、真实固定版适配器、原生设置UI/HTTP、全量及副本回滚见evidence/official-model-specs/VERIFICATION.txt。官方网站规格与实际供应商可用/额度验收分开。
++
++## 未完成项与下一步
++
++本次不探测真实供应商推理、不确认套餐、不改付费路由、不发布安装包。实际本机配置迁移、保留项、运行接入和Git主线状态按验证文件追加；旧版安装包不会因Git合并自动更新。
+diff --git a/plugins/naumi-enterprise/assets/model-connections.css b/plugins/naumi-enterprise/assets/model-connections.css
+index e4dbaa7..6492114 100644
+--- a/plugins/naumi-enterprise/assets/model-connections.css
++++ b/plugins/naumi-enterprise/assets/model-connections.css
+@@ -1,2 +1,3 @@
+ .nm-connections{color:#26334b;background:#fff;max-width:900px;margin:0 auto;padding:8px 0 24px;font:14px/1.55 Inter,"Segoe UI","Microsoft YaHei",sans-serif;color-scheme:light}.nm-connections *{box-sizing:border-box}.nm-connections header,.nm-group-head,.nm-connections footer{display:flex;align-items:center;gap:12px;justify-content:space-between}.nm-connections header{margin-bottom:24px}.nm-connections h2{font-size:20px;margin:0;font-weight:650}.nm-connections h3{font-size:15px;margin:0;font-weight:600;overflow-wrap:anywhere}.nm-connections button{border:1px solid #dfe5ef;border-radius:9px;padding:8px 14px;background:#fff;color:#354766;font:inherit;cursor:pointer}.nm-connections button:hover{background:#f3f6fc;border-color:#bac9e3}.nm-connections button:disabled{opacity:.5;cursor:default}.nm-connections .nm-primary,.nm-connections header>button{background:#315ded;color:#fff;border-color:#315ded}.nm-list{display:grid;gap:14px}.nm-list article{border:1px solid #e2e8f1;border-radius:14px;padding:20px;background:#fff}.nm-ready,.nm-missing{flex-shrink:0;font-size:12px;padding:3px 9px;border-radius:20px;background:#edf8f2;color:#2d7d59}.nm-missing{background:#fff6e7;color:#a47229}.nm-url{font-size:13px;color:#738098;margin:10px 0;overflow-wrap:anywhere}.nm-chips{display:flex;gap:6px;flex-wrap:wrap}.nm-chips span{font-size:12px;background:#f3f5fa;border-radius:6px;padding:3px 8px;overflow-wrap:anywhere;max-width:100%}.nm-connections footer{justify-content:flex-end;margin-top:16px}.nm-form{display:grid;grid-template-columns:1fr 1fr;gap:18px}.nm-form label{display:flex;flex-direction:column;gap:7px;min-width:0}.nm-form label:nth-child(2),.nm-models,.nm-form footer{grid-column:1/-1}.nm-form label>span{font-size:13px;font-weight:550}.nm-form input,.nm-form select,.nm-form textarea{border:1px solid #dce3ee;border-radius:9px;padding:10px 12px;background:#fff;color:#26334b;width:100%;font:inherit}.nm-form textarea{resize:vertical;min-height:120px;font-family:ui-monospace,Consolas,monospace}.nm-connections :focus-visible{outline:2px solid #7397f4;outline-offset:2px}.nm-error,.nm-notice{padding:12px 14px;border-radius:9px;margin-bottom:16px;overflow-wrap:anywhere}.nm-error{background:#fff1f1;color:#ad3e49}.nm-error button{margin-left:12px}.nm-notice{background:#edf8f2;color:#2d7d59}.nm-empty{padding:60px 20px;text-align:center;border:1px dashed #dce3ee;border-radius:14px;background:#fafbfe}@media(max-width:580px){.nm-form{grid-template-columns:1fr}.nm-form label{grid-column:1/-1}.nm-list article{padding:15px}.nm-group-head{align-items:flex-start}.nm-connections header{flex-wrap:wrap}.nm-connections footer{flex-wrap:wrap}}
+ .nm-model-heading,.nm-catalog-head,.nm-catalog-tools,.nm-catalog-actions{display:flex;align-items:center;justify-content:space-between;gap:10px}.nm-model-heading{margin-bottom:8px;flex-wrap:wrap}.nm-model-heading label{font-size:13px;font-weight:550}.nm-model-heading button{padding:6px 12px;color:#315ded;border-color:#d9e2ff;background:#f7f9ff}.nm-catalog{margin-top:12px;padding:14px;border:1px solid #dfe6f3;border-radius:12px;background:#fafbff}.nm-catalog-head{margin-bottom:12px}.nm-catalog-head strong{font-size:13px}.nm-catalog-head button,.nm-catalog-tools button{padding:3px 7px;font-size:12px}.nm-catalog-tools{justify-content:flex-start;margin:10px 0}.nm-catalog-tools>span{margin-left:auto;color:#738098;font-size:12px}.nm-catalog-list{max-height:260px;overflow:auto;overscroll-behavior:contain;border:1px solid #e5eaf3;border-radius:8px;background:#fff}.nm-form .nm-catalog-row{display:flex;flex-direction:row;align-items:flex-start;gap:10px;padding:9px 11px;border-bottom:1px solid #eef1f7;cursor:pointer}.nm-catalog-row:last-child{border-bottom:0}.nm-catalog-row:hover{background:#f3f6ff}.nm-form .nm-catalog-row>input{width:15px;height:15px;margin:3px 0 0;flex-shrink:0;accent-color:#315ded}.nm-catalog-row>span{min-width:0;overflow-wrap:anywhere;font-size:13px;font-weight:400}.nm-catalog-row small{display:block;color:#738098;font-size:12px;margin-top:2px}.nm-catalog-actions{justify-content:flex-end;margin-top:12px}.nm-discovery-status{padding:10px 0;color:#738098;font-size:13px}.nm-discovery-error{margin-top:10px;padding:10px 12px;border-radius:8px;background:#fff1f1;color:#ad3e49;font-size:13px}.nm-discovery-error button{margin-left:8px;font-size:12px;padding:3px 7px}@media(max-width:580px){.nm-catalog{padding:10px}.nm-catalog-actions button{width:100%}}
++.nm-header-actions{display:flex;gap:10px;flex-wrap:wrap}.nm-specs{grid-column:1/-1;border:1px solid #dfe6f3;border-radius:12px;background:#fff;overflow:hidden}.nm-specs>summary{cursor:pointer;padding:12px 14px;font-weight:600;font-size:13px;background:#f8faff}.nm-spec-rows{max-height:380px;overflow:auto;overscroll-behavior:contain}.nm-spec-row{padding:14px;border-top:1px solid #e8edf5}.nm-spec-title{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.nm-spec-title code{font-size:13px;overflow-wrap:anywhere}.nm-spec-title a,.nm-spec-title>span{font-size:11px;color:#52719b;text-decoration:none}.nm-spec-title a:hover{text-decoration:underline}.nm-spec-limits{font-size:11px;color:#738098;margin:5px 0 10px;overflow-wrap:anywhere}.nm-spec-inputs{display:grid;grid-template-columns:1fr 1fr auto;align-items:end;gap:10px}.nm-form .nm-spec-inputs label{grid-column:auto;font-size:12px;font-weight:500}.nm-spec-inputs input{font-variant-numeric:tabular-nums}.nm-spec-inputs>button{white-space:nowrap;padding:10px;font-size:12px}@media(max-width:580px){.nm-spec-inputs{grid-template-columns:1fr 1fr}.nm-spec-inputs>button{grid-column:1/-1}.nm-spec-row{padding:12px}}
+diff --git a/plugins/naumi-enterprise/assets/model-connections.js b/plugins/naumi-enterprise/assets/model-connections.js
+index 37c0cc8..3af563f 100644
+--- a/plugins/naumi-enterprise/assets/model-connections.js
++++ b/plugins/naumi-enterprise/assets/model-connections.js
+@@ -1,4 +1,4 @@
+-const labels={MODEL_DISCOVERY_KEY_ORIGIN_CHANGED:'API 地址已更换，请填写此地址的 API Key',MODEL_DISCOVERY_AUTH:'API Key 无效或没有模型列表权限',MODEL_DISCOVERY_UNSUPPORTED:'此接口未提供模型列表，可手动填写模型 ID',MODEL_DISCOVERY_RATE_LIMITED:'请求过于频繁，请稍后重试',MODEL_DISCOVERY_REDIRECT:'模型接口发生跳转，请检查 API URL',MODEL_DISCOVERY_TIMEOUT:'获取超时，请重试',MODEL_DISCOVERY_INVALID:'接口未返回有效的模型列表',MODEL_DISCOVERY_TOO_LARGE:'模型列表过大，请手动填写模型 ID',MODEL_DISCOVERY_BUSY:'正在获取模型列表，请稍后重试',MODEL_DISCOVERY_FAILED:'获取失败，请检查 API URL 和网络后重试',MODEL_URL_INVALID:'请填写 API 基础地址，不含密钥或请求路径',MODEL_KEY_REQUIRED:'请填写 API Key',MODEL_KEY_INVALID:'API Key 包含无效字符',MODEL_DUPLICATE_ID:'模型 ID 重复',MODEL_SETTINGS_CONFLICT:'配置已被更新，请重新载入后再保存',MODEL_SAVE_FAILED:'保存失败，请重试',MODEL_SETTINGS_READ_ONLY:'当前配置只读',OWNER_REQUIRED:'仅本机所有者可配置',AUTH_REQUIRED:'请重新连接工作台'};
++const labels={MODEL_CONTEXT_RANGE:'上下文预算超出官方或最大输入允许范围',MODEL_OUTPUT_RANGE:'输出预算超出官方上限',MODEL_TOKEN_BUDGET:'上下文预算必须大于输出预算',MODEL_SPEC_UNVERIFIED:'此型号尚未核验官方上限，仅支持调低已有预算',MODEL_DISCOVERY_KEY_ORIGIN_CHANGED:'API 地址已更换，请填写此地址的 API Key',MODEL_DISCOVERY_AUTH:'API Key 无效或没有模型列表权限',MODEL_DISCOVERY_UNSUPPORTED:'此接口未提供模型列表，可手动填写模型 ID',MODEL_DISCOVERY_RATE_LIMITED:'请求过于频繁，请稍后重试',MODEL_DISCOVERY_REDIRECT:'模型接口发生跳转，请检查 API URL',MODEL_DISCOVERY_TIMEOUT:'获取超时，请重试',MODEL_DISCOVERY_INVALID:'接口未返回有效的模型列表',MODEL_DISCOVERY_TOO_LARGE:'模型列表过大，请手动填写模型 ID',MODEL_DISCOVERY_BUSY:'正在获取模型列表，请稍后重试',MODEL_DISCOVERY_FAILED:'获取失败，请检查 API URL 和网络后重试',MODEL_URL_INVALID:'请填写 API 基础地址，不含密钥或请求路径',MODEL_KEY_REQUIRED:'请填写 API Key',MODEL_KEY_INVALID:'API Key 包含无效字符',MODEL_DUPLICATE_ID:'模型 ID 重复',MODEL_SETTINGS_CONFLICT:'配置已被更新，请重新载入后再保存',MODEL_SAVE_FAILED:'保存失败，请重试',MODEL_SETTINGS_READ_ONLY:'当前配置只读',OWNER_REQUIRED:'仅本机所有者可配置',AUTH_REQUIRED:'请重新连接工作台'};
+ export function mergeModelIds(text,models){return [...new Set([...text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean),...models.map(m=>m.id)])].join('\n');}
+ async function request(body,signal){const r=await fetch('/naumi/model-connections',{credentials:'same-origin',signal,cache:'no-store',...body?{method:'POST',headers:{'Content-Type':'application/json','x-naumi-model-connections':'1'},body:JSON.stringify(body)}:{}});const v=await r.json();if(!r.ok)throw Object.assign(Error(labels[v.error]??'模型连接暂不可用'),{status:r.status});return v;}
+ export function installModelConnectionsUI(ctx,React){
+@@ -22,12 +22,17 @@ export function installModelConnectionsUI(ctx,React){
+   }
+   function addModels(){const chosen=catalog.filter(m=>selected.includes(m.id)),text=mergeModelIds(draft.modelText,chosen);if(text.split('\n').filter(Boolean).length>200){setFetchError('每个连接最多保存 200 个模型');return;}setDraft(d=>({...d,modelText:mergeModelIds(d.modelText,chosen),models:[...(d.models??[]),...chosen.filter(m=>!d.models?.some(old=>old.id===m.id))]}));setCatalog(null);setSelected([]);setFetchError('');}
+   async function reload(){if(flight.current)return;flight.current=true;setBusy(true);try{const v=await request();if(alive.current){setData(v);setConflict(false);cancel();setError('');}}catch(e){if(alive.current)setError(e.message);}finally{flight.current=false;if(alive.current)setBusy(false);}}
+-  async function submit(body){if(flight.current||conflict)return;flight.current=true;setBusy(true);setError('');setNotice('');try{const v=await request({...body,expectedRevision:data.revision});if(alive.current){setData(v);cancel();setNotice(v.defaultPending?'连接已保存，默认模型待更新':'已保存');}}catch(e){if(alive.current){setError(e.message);if(e.status===409)setConflict(true);}}finally{flight.current=false;if(alive.current)setBusy(false);}}
+-  function save(e){e.preventDefault();if(fetching)return;const ids=draft.modelText.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);if(!ids.length){setError('请至少填写一个模型 ID');return;}submit({action:'save',id:draft.id,displayName:draft.displayName,baseURL:draft.baseURL,api:draft.api,models:ids.map(id=>({id,...draft.models?.find(m=>m.id===id)?.name?{name:draft.models.find(m=>m.id===id).name}:{}})),...key.trim()?{apiKey:key.trim()}: {}});}
++  async function submit(body){if(flight.current||conflict)return;flight.current=true;setBusy(true);setError('');setNotice('');try{const v=await request({...body,expectedRevision:data.revision});if(alive.current){setData(v);cancel();setNotice(v.specRefresh?'已校准 '+v.specRefresh.changed+' 个模型'+(v.specRefresh.unknown.length?'，'+v.specRefresh.unknown.length+' 个未核验型号保持原配置':''):v.defaultPending?'连接已保存，默认模型待更新':'已保存');}}catch(e){if(alive.current){setError(e.message);if(e.status===409)setConflict(true);}}finally{flight.current=false;if(alive.current)setBusy(false);}}
++  function save(e){e.preventDefault();if(fetching)return;const ids=draft.modelText.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);if(!ids.length){setError('请至少填写一个模型 ID');return;}submit({action:'save',id:draft.id,displayName:draft.displayName,baseURL:draft.baseURL,api:draft.api,models:ids.map(id=>{const prior=draft.models?.find(m=>m.id===id);return {id,...prior?.name?{name:prior.name}:{},...prior?.contextWindow===undefined?{}:{contextWindow:prior.contextWindow},...prior?.maxTokens===undefined?{}:{maxTokens:prior.maxTokens}};}),...key.trim()?{apiKey:key.trim()}: {}});}
+   const locked=busy||conflict||!data?.writable,change=(field,value)=>{if(['baseURL','api'].includes(field))resetDiscovery();setDraft(d=>({...d,[field]:value}));};
++  const configuredIds=draft?[...new Set(draft.modelText.split(/\r?\n/).map(id=>id.trim()).filter(Boolean))]:[];
++  const officialFor=id=>data?.specs?.models?.find(m=>m.id===id);
++  function budget(id){const prior=draft.models?.find(m=>m.id===id),spec=officialFor(id);let output=prior?.maxTokens??Math.min(128000,spec?.maxOutputTokens??128000);if(spec&&output>=spec.contextWindow)output=Math.max(1,Math.floor(spec.contextWindow/2));const cap=spec?Math.min(spec.contextWindow,spec.maxInputTokens?spec.maxInputTokens+Number(output):Infinity):prior?.contextLimit??prior?.contextWindow;return {prior,spec,context:prior?.contextWindow??(spec?.conditional?undefined:cap),output:prior?.maxTokens??(spec?output:undefined),cap,outputCap:spec?.maxOutputTokens??prior?.outputLimit??prior?.maxTokens};}
++  function changeBudget(id,field,raw){const value=raw===''?'':Number(raw);setDraft(d=>{const prior=d.models?.find(m=>m.id===id)??{id},next={...prior,[field]:value},spec=officialFor(id);if(field==='maxTokens'&&spec?.maxInputTokens&&value!==''&&next.contextWindow>spec.maxInputTokens+value)next.contextWindow=spec.maxInputTokens+value;return {...d,models:[...(d.models??[]).filter(m=>m.id!==id),next]};});}
++  function useOfficial(id){const b=budget(id);if(!b.spec)return;setDraft(d=>({...d,models:[...(d.models??[]).filter(m=>m.id!==id),{...b.prior,id,contextWindow:b.cap,maxTokens:b.output}]}));}
+   const visibleModels=catalog?.filter(m=>(m.id+' '+(m.name??'')).toLocaleLowerCase().includes(query.toLocaleLowerCase()))??[];
+   return h('section',{className:'nm-connections','aria-label':'模型连接'},
+-   h('header',null,h('h2',null,'模型连接'),!draft&&h('button',{type:'button',disabled:locked,onClick:()=>edit()},'添加连接')),
++   h('header',null,h('h2',null,'模型连接'),!draft&&h('div',{className:'nm-header-actions'},h('button',{type:'button',disabled:locked,onClick:()=>submit({action:'refresh-specs'})},'校准官方参数'),h('button',{type:'button',className:'nm-primary',disabled:locked,onClick:()=>edit()},'添加连接'))),
+    error&&h('div',{className:'nm-error',role:'alert'},error,h('button',{type:'button',disabled:busy,onClick:reload},conflict?'重新载入':'重试')),
+    notice&&h('div',{role:'status',className:'nm-notice'},notice),!data&&!error&&h('div',{role:'status'},'加载中…'),
+    data&&!data.writable&&h('div',{role:'status'},'当前配置只读'),
+@@ -43,6 +48,9 @@ export function installModelConnectionsUI(ctx,React){
+       catalog.length>0&&h(React.Fragment,null,h('input',{'aria-label':'搜索模型',placeholder:'搜索模型',value:query,onChange:e=>setQuery(e.target.value)}),h('div',{className:'nm-catalog-tools'},h('button',{type:'button',onClick:()=>setSelected([...new Set([...selected,...visibleModels.map(m=>m.id)])])},'全选'),h('button',{type:'button',onClick:()=>setSelected([])},'清空选择'),h('span',null,'已选 '+selected.length)),
+        h('div',{className:'nm-catalog-list'},...visibleModels.map(m=>h('label',{key:m.id,className:'nm-catalog-row'},h('input',{type:'checkbox',checked:selected.includes(m.id),onChange:e=>setSelected(ids=>e.target.checked?[...ids,m.id]:ids.filter(id=>id!==m.id))}),h('span',null,h('span',null,m.id),m.name&&m.name!==m.id&&h('small',null,m.name)))),!visibleModels.length&&h('div',{className:'nm-discovery-status'},'无匹配模型')),
+        h('div',{className:'nm-catalog-actions'},h('button',{type:'button',className:'nm-primary',disabled:locked||!selected.length,onClick:addModels},'添加所选（'+selected.length+'）'))))),
++    configuredIds.length>0&&h('details',{className:'nm-specs',open:true},h('summary',null,'模型参数 · '+configuredIds.length),h('div',{className:'nm-spec-rows'},...configuredIds.map(id=>{const b=budget(id);return h('section',{key:id,className:'nm-spec-row','aria-label':id+' 参数'},h('div',{className:'nm-spec-title'},h('code',null,id),b.spec?h('a',{href:b.spec.source,target:'_blank',rel:'noopener noreferrer',title:b.spec.precision==='exact'?'官方精确 token 数':'官方原文 '+(b.spec.contextLabel??'')+'；K/M 标注使用保守十进制预算'},b.spec.provider+' · 官方'):h('span',null,'未核验'),b.spec?.conditional&&h('span',null,'套餐限定')),
++      h('div',{className:'nm-spec-limits'},b.spec?'官方上下文 '+(b.spec.contextLabel??b.spec.contextWindow.toLocaleString())+(b.spec.maxInputTokens?' · 最大输入 '+b.spec.maxInputTokens.toLocaleString():'')+' · 最大输出 '+(b.spec.maxOutputTokens?.toLocaleString()??'未公布'):'沿用当前连接上限'),
++      h('div',{className:'nm-spec-inputs'},h('label',null,'上下文预算',h('input',{type:'number','aria-label':id+' 上下文预算',min:1,max:b.cap,step:1,required:b.context!==undefined,disabled:locked||b.context===undefined&&!b.spec,value:b.context??'',placeholder:b.spec?.conditional?'按套餐填写':'未核验',onChange:e=>changeBudget(id,'contextWindow',e.target.value)})),h('label',null,'输出预算',h('input',{type:'number','aria-label':id+' 输出预算',min:1,max:Math.min(b.outputCap??Infinity,(Number(b.context)||Infinity)-1),step:1,required:b.output!==undefined,disabled:locked||b.output===undefined,value:b.output??'',placeholder:'未核验',onChange:e=>changeBudget(id,'maxTokens',e.target.value)})),b.spec&&h('button',{type:'button',disabled:locked,onClick:()=>useOfficial(id)},'官方值'))); }))),
+     h('footer',null,h('button',{type:'button',disabled:busy,onClick:cancel},'取消'),h('button',{type:'submit',className:'nm-primary',disabled:locked||fetching},busy?'保存中…':'保存'))):
+    data?.groups.length?h('div',{className:'nm-list'},...data.groups.map(g=>h('article',{key:g.id},h('div',{className:'nm-group-head'},h('h3',null,g.displayName),h('span',{className:g.configured?'nm-ready':'nm-missing'},g.configured?'已配置':'待配置')),h('div',{className:'nm-url'},g.baseURL),h('div',{className:'nm-chips'},...g.models.slice(0,8).map(m=>h('span',{key:m.id},m.name??m.id)),g.models.length>8&&h('span',null,'+'+(g.models.length-8))),h('footer',null,confirm===g.id?h(React.Fragment,null,h('span',null,'移除此连接？'),h('button',{disabled:locked,onClick:()=>submit({action:'remove',id:g.id})},'确认移除'),h('button',{disabled:busy,onClick:()=>setConfirm(null)},'取消')):h(React.Fragment,null,h('button',{disabled:locked||!g.editable||!g.configured,onClick:()=>{edit(g);void fetchModels(g,'');}},'获取模型列表'),h('button',{disabled:locked||!g.editable,onClick:()=>edit(g)},'编辑'),h('button',{disabled:locked,onClick:()=>setConfirm(g.id)},'移除')))))):
+    data&&h('div',{className:'nm-empty'},h('button',{disabled:locked,onClick:()=>edit()},'添加模型连接')));
+diff --git a/plugins/naumi-enterprise/model-connections.js b/plugins/naumi-enterprise/model-connections.js
+index 537c846..936ebd7 100644
+--- a/plugins/naumi-enterprise/model-connections.js
++++ b/plugins/naumi-enterprise/model-connections.js
+@@ -1,10 +1,12 @@
+ import {randomUUID} from 'node:crypto';
+ import {z} from 'zod';
++import {officialModelSpecs,modelSpecView,configureModelSpec,refreshModelSpecs} from './model-specs.js';
+ 
+ const protocols=['openai-completions','openai-responses','anthropic-messages'];
+-const model=z.object({id:z.string().trim().min(1).max(512),name:z.string().trim().max(160).optional()}).strict();
++const model=z.object({id:z.string().trim().min(1).max(512),name:z.string().trim().max(160).optional(),contextWindow:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),maxTokens:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional()}).strict();
+ const save=z.object({action:z.literal('save'),id:z.string().regex(/^[a-z][a-z0-9_-]{0,79}$/),expectedRevision:z.number().int().nonnegative(),displayName:z.string().trim().min(1).max(120),baseURL:z.string().trim().min(1).max(2048),api:z.enum(protocols),models:z.array(model).min(1).max(200),apiKey:z.string().trim().min(1).max(16000).optional()}).strict();
+ const remove=z.object({action:z.literal('remove'),id:z.string().min(1).max(80),expectedRevision:z.number().int().nonnegative()}).strict();
++const refresh=z.object({action:z.literal('refresh-specs'),expectedRevision:z.number().int().nonnegative()}).strict();
+ const discover=z.object({action:z.literal('discover'),id:z.string().min(1).max(80).optional(),baseURL:z.string().trim().min(1).max(2048),api:z.enum(protocols),apiKey:z.string().trim().min(1).max(16000).optional()}).strict();
+ const error=(code,status=400)=>Object.assign(new Error(code),{code,status});
+ export function endpoint(value){
+@@ -54,7 +56,7 @@ export class ModelConnections{
+  async read(){const ns=this.namespace(),groups=[];for(const[id,p]of Object.entries(ns.value.providers??{})){
+   const info=p.apiKeyEnv?await this.ctx.credentials.describe(p.apiKeyEnv):{configured:false,writable:true};
+   groups.push({id,displayName:p.displayName??id,api:p.api??'openai-completions',baseURL:p.baseURL??'',models:(p.models??[]).map(m=>({id:m.id,...m.name?{name:m.name}:{}})),configured:info.configured,editable:protocols.includes(p.api)&&Array.isArray(p.models)&&p.models.length>0});
+- }return {revision:ns.revision,writable:this.ctx.settings.writable,groups};}
++ }for(const group of groups){const provider=ns.value.providers[group.id];group.models=group.models.map(m=>{const raw=provider.models.find(row=>row.id===m.id);return modelSpecView({...m,...raw.contextWindow===undefined?{}:{contextWindow:raw.contextWindow},...raw.maxTokens===undefined?{}:{maxTokens:raw.maxTokens}},provider);});}return {revision:ns.revision,writable:this.ctx.settings.writable,groups,specs:officialModelSpecs};}
+  async repairDefault(removed){
+   const current=this.ctx.agentDefaultModel.currentSelection();
+   const p=this.namespace().value.providers??{},own=p[current.provider];
+@@ -65,8 +67,13 @@ export class ModelConnections{
+  }
+  execute(input){const run=this.queue.then(()=>this.write(input));this.queue=run.catch(()=>{});return run;}
+  async write(input){
+-  const parsed=z.union([save,remove]).safeParse(input);if(!parsed.success)throw error('MODEL_INVALID_REQUEST');const p=parsed.data;
++  const parsed=z.union([save,remove,refresh]).safeParse(input);if(!parsed.success)throw error('MODEL_INVALID_REQUEST');const p=parsed.data;
+   const ns=this.namespace();if(!this.ctx.settings.writable)throw error('MODEL_SETTINGS_READ_ONLY',403);if(ns.revision!==p.expectedRevision)throw error('MODEL_SETTINGS_CONFLICT',409);
++  if(p.action==='refresh-specs'){
++   const result=refreshModelSpecs(ns.value.providers??{}),ids=[...new Set(result.changes.map(row=>row.group))];
++   if(ids.length)await this.ctx.settings.mutate('llm-pi-ai',ids.map(id=>({op:'set',path:['providers',id,'models'],value:result.providers[id].models})),ns.revision);
++   return {...await this.read(),specRefresh:{changed:result.changes.length,changes:result.changes,unknown:result.unknown,conditional:result.conditional}};
++  }
+   const previous=ns.value.providers?.[p.id];let newRef;
+   if(p.action==='remove'){
+    if(!previous)throw error('MODEL_GROUP_NOT_FOUND',404);
+@@ -74,7 +81,7 @@ export class ModelConnections{
+   }else{
+    if(new Set(p.models.map(m=>m.id)).size!==p.models.length)throw error('MODEL_DUPLICATE_ID');
+    if(!p.apiKey&&!previous?.apiKeyEnv)throw error('MODEL_KEY_REQUIRED');
+-   const profile={...previous,displayName:p.displayName,baseURL:endpoint(p.baseURL),api:p.api,models:p.models.map(m=>({...previous?.models?.find(old=>old.id===m.id),...m})),apiKeyEnv:previous?.apiKeyEnv};
++   const profile={...previous,displayName:p.displayName,baseURL:endpoint(p.baseURL),api:p.api,models:p.models.map(m=>configureModelSpec(m,previous?.models?.find(old=>old.id===m.id),previous??{})),apiKeyEnv:previous?.apiKeyEnv};
+    if(p.apiKey){if(/[\r\n\u0000-\u001f\u007f]/.test(p.apiKey))throw error('MODEL_KEY_INVALID');newRef='NAUMI_MODEL_'+randomUUID().replaceAll('-','').toUpperCase();profile.apiKeyEnv=newRef;await this.ctx.credentials.set(newRef,p.apiKey);}
+    try{await this.ctx.settings.mutate('llm-pi-ai',[{op:'set',path:['providers',p.id],value:profile}],ns.revision);}
+    catch(e){if(newRef)try{await this.ctx.credentials.unset(newRef);}catch{throw error('MODEL_SAVE_CLEANUP_FAILED',500);}throw e;}
+diff --git a/plugins/naumi-enterprise/model-specs.js b/plugins/naumi-enterprise/model-specs.js
+new file mode 100644
+index 0000000..bd0a65a
+--- /dev/null
++++ b/plugins/naumi-enterprise/model-specs.js
+@@ -0,0 +1,45 @@
++import fs from 'node:fs';
++export const officialModelSpecs=JSON.parse(fs.readFileSync(new URL('./official-model-specs.json',import.meta.url),'utf8'));
++const catalog=new Map(officialModelSpecs.models.map(row=>[row.id,Object.freeze(row)]));
++export const officialSpec=id=>catalog.get(id)??null;
++const fail=code=>{throw Object.assign(new Error(code),{code,status:400});};
++const capacity=(m,p)=>({contextWindow:m?.contextWindow??p.defaultContextWindow??1000000,maxTokens:m?.maxTokens??p.defaultMaxTokens??128000});
++export function modelSpecView(model,provider={}){
++ const spec=officialSpec(model.id),configured=capacity(model,provider);
++ return {...model,...configured,official:spec,contextLimit:spec?Math.min(spec.contextWindow,spec.maxInputTokens?spec.maxInputTokens+configured.maxTokens:Infinity):configured.contextWindow,outputLimit:spec?.maxOutputTokens??configured.maxTokens};
++}
++/** Exact IDs only. Documented limits and connection budgets remain distinct. */
++export function configureModelSpec(input,previous,provider={}, {reset=false}={}){
++ const spec=officialSpec(input.id),old=capacity(previous,provider),result={...previous,...input};
++ if(!spec){
++  if(input.contextWindow!==undefined&&(!previous||input.contextWindow>old.contextWindow))fail('MODEL_SPEC_UNVERIFIED');
++  if(input.maxTokens!==undefined&&(!previous||input.maxTokens>old.maxTokens))fail('MODEL_SPEC_UNVERIFIED');
++  if(input.contextWindow!==undefined||input.maxTokens!==undefined){const c=input.contextWindow??old.contextWindow,o=input.maxTokens??old.maxTokens;if(o>=c)fail('MODEL_TOKEN_BUDGET');}
++  return result;
++ }
++ const outLimit=spec.maxOutputTokens??old.maxTokens;
++ let output=input.maxTokens??old.maxTokens;
++ if(input.maxTokens!==undefined&&!reset&&output>outLimit)fail('MODEL_OUTPUT_RANGE');
++ output=Math.min(output,outLimit);
++ if(output>=spec.contextWindow&&input.maxTokens===undefined)output=Math.max(1,Math.floor(spec.contextWindow/2));
++ const contextLimit=Math.min(spec.contextWindow,spec.maxInputTokens?spec.maxInputTokens+output:Infinity);
++ let context=input.contextWindow??(reset&&!spec.conditional?contextLimit:previous?.contextWindow??(spec.conditional?old.contextWindow:contextLimit));
++ if(input.contextWindow!==undefined&&!reset&&context>contextLimit)fail('MODEL_CONTEXT_RANGE');
++ context=Math.min(context,contextLimit);
++ if(!Number.isSafeInteger(context)||!Number.isSafeInteger(output)||context<1||output<1||output>=context)fail('MODEL_TOKEN_BUDGET');
++ result.contextWindow=context;result.maxTokens=output;
++ return result;
++}
++export function refreshModelSpecs(providers){
++ const changes=[],unknown=[],conditional=[];
++ for(const[id,p]of Object.entries(providers)){
++  if(!Array.isArray(p.models))continue;
++  const models=p.models.map(m=>{
++   const spec=officialSpec(m.id);if(!spec){unknown.push({group:id,model:m.id});return m;}if(spec.conditional)conditional.push({group:id,model:m.id});
++   const next=configureModelSpec({id:m.id},m,p,{reset:true});
++   if(next.contextWindow!==m.contextWindow||next.maxTokens!==m.maxTokens)changes.push({group:id,model:m.id,before:capacity(m,p),after:capacity(next,p),source:spec.source});return next;
++  });
++  if(models.some((m,i)=>m!==p.models[i]&&(m.contextWindow!==p.models[i].contextWindow||m.maxTokens!==p.models[i].maxTokens)))providers={...providers,[id]:{...p,models}};
++ }
++ return {providers,changes,unknown,conditional};
++}
+diff --git a/plugins/naumi-enterprise/official-model-specs.json b/plugins/naumi-enterprise/official-model-specs.json
+new file mode 100644
+index 0000000..1ed65fb
+--- /dev/null
++++ b/plugins/naumi-enterprise/official-model-specs.json
+@@ -0,0 +1,1343 @@
++{
++  "version": 1,
++  "updatedAt": "2026-11-17",
++  "unitPolicy": "Exact numeric tokens where published. K/M-only labels use conservative decimal normalization; original labels and precision retained. Synchronous/default API limits only; beta/batch/long-decode increases excluded. Availability and subscription quotas are not inferred from specifications.",
++  "models": [
++    {
++      "id": "gpt-4.1",
++      "provider": "OpenAI",
++      "contextWindow": 1047576,
++      "maxOutputTokens": 32768,
++      "source": "https://developers.openai.com/api/docs/models/gpt-4.1.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "openai-gpt-4.1",
++      "sourceSHA256": "baa0f3aa720c9ab9faf3d060d56549ecc6273dd366336d7269c92bebe95b3389",
++      "input": [
++        "text",
++        "image"
++      ],
++      "precision": "exact"
++    },
++    {
++      "id": "gpt-5.5",
++      "provider": "OpenAI",
++      "contextWindow": 1050000,
++      "maxOutputTokens": 128000,
++      "source": "https://developers.openai.com/api/docs/models/gpt-5.5.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "openai-gpt-5.5",
++      "sourceSHA256": "5c508a781addc036a8d03475e7b7e22587258fe298a8fe95d59631c3b142d0f6",
++      "input": [
++        "text",
++        "image"
++      ],
++      "precision": "exact"
++    },
++    {
++      "id": "gpt-5.6-luna",
++      "provider": "OpenAI",
++      "contextWindow": 1050000,
++      "maxOutputTokens": 128000,
++      "source": "https://developers.openai.com/api/docs/models/gpt-5.6-luna.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "openai-gpt-5.6-luna",
++      "sourceSHA256": "8e4c2cc03c86804b4f5a0bf73ebb9508666ab712db32b6e2b4723a67d053ede4",
++      "input": [
++        "text",
++        "image"
++      ],
++      "precision": "exact",
++      "maxInputTokens": 922000
++    },
++    {
++      "id": "gpt-5.6-sol",
++      "provider": "OpenAI",
++      "contextWindow": 1050000,
++      "maxOutputTokens": 128000,
++      "source": "https://developers.openai.com/api/docs/models/gpt-5.6-sol.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "openai-gpt-5.6-sol",
++      "sourceSHA256": "c0c7f9a635a572335cfe0ba4ea9b920d9b3d2b40aa1ba9f31f3adff203834637",
++      "input": [
++        "text",
++        "image"
++      ],
++      "precision": "exact",
++      "maxInputTokens": 922000
++    },
++    {
++      "id": "gpt-5.6-terra",
++      "provider": "OpenAI",
++      "contextWindow": 1050000,
++      "maxOutputTokens": 128000,
++      "source": "https://developers.openai.com/api/docs/models/gpt-5.6-terra.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "openai-gpt-5.6-terra",
++      "sourceSHA256": "77a5b6c2fcf0b921354158199e2a76f6e90abf895e09c6d30fdc9dc6b56c3702",
++      "input": [
++        "text",
++        "image"
++      ],
++      "precision": "exact",
++      "maxInputTokens": 922000
++    },
++    {
++      "id": "gpt-6-astra",
++      "provider": "OpenAI",
++      "contextWindow": 1050000,
++      "maxOutputTokens": 128000,
++      "source": "https://developers.openai.com/api/docs/models/gpt-6-astra.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "openai-gpt-6-astra",
++      "sourceSHA256": "a9b79d0f5988c879aea6f4f7adb19743c469ee538d8e19744bdaee13d0c50ae2",
++      "input": [
++        "text",
++        "image"
++      ],
++      "precision": "exact",
++      "maxInputTokens": 922000
++    },
++    {
++      "id": "gpt-6-luna",
++      "provider": "OpenAI",
++      "contextWindow": 1050000,
++      "maxOutputTokens": 128000,
++      "source": "https://developers.openai.com/api/docs/models/gpt-6-luna.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "openai-gpt-6-luna",
++      "sourceSHA256": "44dcc0a50961150ee700aa701df8d46c59488f003979f3c755c3230bd8a0dfb2",
++      "input": [
++        "text",
++        "image"
++      ],
++      "precision": "exact",
++      "maxInputTokens": 922000
++    },
++    {
++      "id": "gpt-6-sol",
++      "provider": "OpenAI",
++      "contextWindow": 1050000,
++      "maxOutputTokens": 128000,
++      "source": "https://developers.openai.com/api/docs/models/gpt-6-sol.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "openai-gpt-6-sol",
++      "sourceSHA256": "8e3cd3378f0686313dd489ed37347d481d24d4b791e7bd28b1538c4df7762fc4",
++      "input": [
++        "text",
++        "image"
++      ],
++      "precision": "exact",
++      "maxInputTokens": 922000
++    },
++    {
++      "id": "gpt-6.1-sol",
++      "provider": "OpenAI",
++      "contextWindow": 1050000,
++      "maxOutputTokens": 128000,
++      "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "openai-gpt-6.1-sol",
++      "sourceSHA256": "02dff9ef937bbc97fb24ba7c936269a549563cfb8a49b91a6ba1c1575d2b77c0",
++      "input": [
++        "text",
++        "image"
++      ],
++      "precision": "exact",
++      "maxInputTokens": 922000
++    },
++    {
++      "id": "gpt-6.1-terra",
++      "provider": "OpenAI",
++      "contextWindow": 1050000,
++      "maxOutputTokens": 128000,
++      "source": "https://developers.openai.com/api/docs/models/gpt-6.1-terra.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "openai-gpt-6.1-terra",
++      "sourceSHA256": "6a73b3e2e941fbe3813636d5bd2d653ff190e49cc3692eaf8daa3bb125c877f8",
++      "input": [
++        "text",
++        "image"
++      ],
++      "precision": "exact",
++      "maxInputTokens": 922000
++    },
++    {
++      "id": "claude-fable-5-2",
++      "provider": "Anthropic",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 128000,
++      "source": "https://platform.claude.com/docs/en/models/overview.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "claude",
++      "sourceSHA256": "d5d0ec8acea9cde0b2a218c7ab4224e6be514b8a04fc995c0e08d784ded3da8e",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "128K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "claude-opus-5-5",
++      "provider": "Anthropic",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 128000,
++      "source": "https://platform.claude.com/docs/en/models/overview.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "claude",
++      "sourceSHA256": "d5d0ec8acea9cde0b2a218c7ab4224e6be514b8a04fc995c0e08d784ded3da8e",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "128K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "claude-sonnet-5-5",
++      "provider": "Anthropic",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 128000,
++      "source": "https://platform.claude.com/docs/en/models/overview.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "claude",
++      "sourceSHA256": "d5d0ec8acea9cde0b2a218c7ab4224e6be514b8a04fc995c0e08d784ded3da8e",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "128K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "claude-haiku-5-5",
++      "provider": "Anthropic",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 128000,
++      "source": "https://platform.claude.com/docs/en/models/overview.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "claude",
++      "sourceSHA256": "d5d0ec8acea9cde0b2a218c7ab4224e6be514b8a04fc995c0e08d784ded3da8e",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "128K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "claude-mythos-5-2",
++      "provider": "Anthropic",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 128000,
++      "source": "https://platform.claude.com/docs/en/models/overview.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "claude",
++      "sourceSHA256": "d5d0ec8acea9cde0b2a218c7ab4224e6be514b8a04fc995c0e08d784ded3da8e",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "128K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "claude-fable-5-1",
++      "provider": "Anthropic",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 128000,
++      "source": "https://platform.claude.com/docs/en/models/overview.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "claude",
++      "sourceSHA256": "d5d0ec8acea9cde0b2a218c7ab4224e6be514b8a04fc995c0e08d784ded3da8e",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "128K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "claude-mythos-5-1",
++      "provider": "Anthropic",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 128000,
++      "source": "https://platform.claude.com/docs/en/models/overview.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "claude",
++      "sourceSHA256": "d5d0ec8acea9cde0b2a218c7ab4224e6be514b8a04fc995c0e08d784ded3da8e",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "128K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "claude-fable-5",
++      "provider": "Anthropic",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 128000,
++      "source": "https://platform.claude.com/docs/en/models/overview.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "claude",
++      "sourceSHA256": "d5d0ec8acea9cde0b2a218c7ab4224e6be514b8a04fc995c0e08d784ded3da8e",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "128K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "claude-mythos-5",
++      "provider": "Anthropic",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 128000,
++      "source": "https://platform.claude.com/docs/en/models/overview.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "claude",
++      "sourceSHA256": "d5d0ec8acea9cde0b2a218c7ab4224e6be514b8a04fc995c0e08d784ded3da8e",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "128K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "claude-opus-5",
++      "provider": "Anthropic",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 128000,
++      "source": "https://platform.claude.com/docs/en/models/overview.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "claude",
++      "sourceSHA256": "d5d0ec8acea9cde0b2a218c7ab4224e6be514b8a04fc995c0e08d784ded3da8e",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "128K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "claude-opus-4-8",
++      "provider": "Anthropic",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 128000,
++      "source": "https://platform.claude.com/docs/en/models/overview.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "claude",
++      "sourceSHA256": "d5d0ec8acea9cde0b2a218c7ab4224e6be514b8a04fc995c0e08d784ded3da8e",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "128K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "claude-opus-4-7",
++      "provider": "Anthropic",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 128000,
++      "source": "https://platform.claude.com/docs/en/models/overview.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "claude",
++      "sourceSHA256": "d5d0ec8acea9cde0b2a218c7ab4224e6be514b8a04fc995c0e08d784ded3da8e",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "128K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "claude-opus-4-6",
++      "provider": "Anthropic",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 128000,
++      "source": "https://platform.claude.com/docs/en/models/overview.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "claude",
++      "sourceSHA256": "d5d0ec8acea9cde0b2a218c7ab4224e6be514b8a04fc995c0e08d784ded3da8e",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "128K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "claude-opus-4-5",
++      "provider": "Anthropic",
++      "contextWindow": 200000,
++      "maxOutputTokens": 64000,
++      "source": "https://platform.claude.com/docs/en/models/overview.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "claude",
++      "sourceSHA256": "d5d0ec8acea9cde0b2a218c7ab4224e6be514b8a04fc995c0e08d784ded3da8e",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "200K",
++      "outputLabel": "64K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "claude-sonnet-5",
++      "provider": "Anthropic",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 128000,
++      "source": "https://platform.claude.com/docs/en/models/overview.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "claude",
++      "sourceSHA256": "d5d0ec8acea9cde0b2a218c7ab4224e6be514b8a04fc995c0e08d784ded3da8e",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "128K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "claude-sonnet-4-6",
++      "provider": "Anthropic",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 128000,
++      "source": "https://platform.claude.com/docs/en/models/overview.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "claude",
++      "sourceSHA256": "d5d0ec8acea9cde0b2a218c7ab4224e6be514b8a04fc995c0e08d784ded3da8e",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "128K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "claude-sonnet-4-5",
++      "provider": "Anthropic",
++      "contextWindow": 200000,
++      "maxOutputTokens": 64000,
++      "source": "https://platform.claude.com/docs/en/models/overview.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "claude",
++      "sourceSHA256": "d5d0ec8acea9cde0b2a218c7ab4224e6be514b8a04fc995c0e08d784ded3da8e",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "200K",
++      "outputLabel": "64K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "claude-haiku-4-5",
++      "provider": "Anthropic",
++      "contextWindow": 200000,
++      "maxOutputTokens": 64000,
++      "source": "https://platform.claude.com/docs/en/models/overview.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "claude",
++      "sourceSHA256": "d5d0ec8acea9cde0b2a218c7ab4224e6be514b8a04fc995c0e08d784ded3da8e",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "200K",
++      "outputLabel": "64K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "gemini-3.5-flash-lite",
++      "provider": "Google",
++      "contextWindow": 1048576,
++      "maxOutputTokens": 65536,
++      "source": "https://aistudio.google.com/docs/models/gemini-3.5-flash-lite",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "gemini-gemini-3.5-flash-lite",
++      "sourceSHA256": "3e1d93265689c3de5e8d3c09a5bedc6e148180a0bf59ea94e8c3b52add4093c9",
++      "input": [
++        "text",
++        "image"
++      ],
++      "precision": "exact",
++      "contextKind": "input",
++      "maxInputTokens": 1048576
++    },
++    {
++      "id": "gemini-3.6-flash",
++      "provider": "Google",
++      "contextWindow": 1048576,
++      "maxOutputTokens": 65536,
++      "source": "https://aistudio.google.com/docs/models/gemini-3.6-flash",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "gemini-gemini-3.6-flash",
++      "sourceSHA256": "2705ac744037c29c8d53e981d9b280179c7f9f72699517cbb649ffc81c1df013",
++      "input": [
++        "text",
++        "image"
++      ],
++      "precision": "exact",
++      "contextKind": "input",
++      "maxInputTokens": 1048576
++    },
++    {
++      "id": "gemini-3.8-flash",
++      "provider": "Google",
++      "contextWindow": 1048576,
++      "maxOutputTokens": 65536,
++      "source": "https://aistudio.google.com/docs/models/gemini-3.8-flash",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "gemini-gemini-3.8-flash",
++      "sourceSHA256": "fa752d3c6321c82333ccb7e2211dce0475e52cfe72983142e4a5f9018f3fdc01",
++      "input": [
++        "text",
++        "image"
++      ],
++      "precision": "exact",
++      "contextKind": "input",
++      "maxInputTokens": 1048576
++    },
++    {
++      "id": "gemini-4-argon",
++      "provider": "Google",
++      "contextWindow": 1048576,
++      "maxOutputTokens": 65536,
++      "source": "https://aistudio.google.com/docs/models/gemini-4-argon",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "gemini-gemini-4-argon",
++      "sourceSHA256": "0cc58f26735c661847449fa8ca1d4bdc55db76d017ba9c01e7cd7716eabd0db0",
++      "input": [
++        "text",
++        "image"
++      ],
++      "precision": "exact",
++      "contextKind": "total"
++    },
++    {
++      "id": "gemini-4-carbon",
++      "provider": "Google",
++      "contextWindow": 1048576,
++      "maxOutputTokens": 65536,
++      "source": "https://aistudio.google.com/docs/models/gemini-4-carbon",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "gemini-gemini-4-carbon",
++      "sourceSHA256": "6128933ff42f9c9c44dc1b762201f02695fe0b354c1e14d2df198fcb9eed14d0",
++      "input": [
++        "text",
++        "image"
++      ],
++      "precision": "exact",
++      "contextKind": "total"
++    },
++    {
++      "id": "gemini-4-hydrogen",
++      "provider": "Google",
++      "contextWindow": 1048576,
++      "maxOutputTokens": 65536,
++      "source": "https://aistudio.google.com/docs/models/gemini-4-hydrogen",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "gemini-gemini-4-hydrogen",
++      "sourceSHA256": "002c19db4935bd76b98520133841a63df4696c7cfa8052a9001a3762a9e9b763",
++      "input": [
++        "text",
++        "image"
++      ],
++      "precision": "exact",
++      "contextKind": "total"
++    },
++    {
++      "id": "glm-4.5",
++      "provider": "Z.ai",
++      "contextWindow": 128000,
++      "maxOutputTokens": 96000,
++      "source": "https://docs.z.ai/guides/llm/glm-4.5",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "zhipu-glm-4.5",
++      "sourceSHA256": "d67cf535f053368e0c02a299bf86d4dc3a2aee1c6095996689a30810d99e6749",
++      "contextLabel": "128K",
++      "outputLabel": "96K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "glm-4.5-air",
++      "provider": "Z.ai",
++      "contextWindow": 128000,
++      "maxOutputTokens": 96000,
++      "source": "https://docs.z.ai/guides/llm/glm-4.5",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "zhipu-glm-4.5",
++      "sourceSHA256": "d67cf535f053368e0c02a299bf86d4dc3a2aee1c6095996689a30810d99e6749",
++      "contextLabel": "128K",
++      "outputLabel": "96K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "glm-4.6",
++      "provider": "Z.ai",
++      "contextWindow": 200000,
++      "maxOutputTokens": 128000,
++      "source": "https://docs.z.ai/guides/llm/glm-4.6",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "zhipu-glm-4.6",
++      "sourceSHA256": "dd69624d0ccde1b50002474e40653613132cb8157b5f42803e454f8bc8d63024",
++      "contextLabel": "200K",
++      "outputLabel": "128K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "glm-4.7",
++      "provider": "Z.ai",
++      "contextWindow": 200000,
++      "maxOutputTokens": 128000,
++      "source": "https://docs.z.ai/guides/llm/glm-4.7",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "zhipu-glm-4.7",
++      "sourceSHA256": "dc87540111701d51043d8d6bc7e3e37ac77a0717bf79f2e2d4ce0ae4b70874fc",
++      "contextLabel": "200K",
++      "outputLabel": "128K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "glm-5-turbo",
++      "provider": "Z.ai",
++      "contextWindow": 200000,
++      "maxOutputTokens": 128000,
++      "source": "https://docs.z.ai/guides/llm/glm-5-turbo",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "zhipu-glm-5-turbo",
++      "sourceSHA256": "3e78d5bbaa20ce38df8bb9522f4b2098fa9441b30c8a5a797d955a4826adf6fb",
++      "contextLabel": "200K",
++      "outputLabel": "128K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "glm-5.1",
++      "provider": "Z.ai",
++      "contextWindow": 200000,
++      "maxOutputTokens": 128000,
++      "source": "https://docs.z.ai/guides/llm/glm-5.1",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "zhipu-glm-5.1",
++      "sourceSHA256": "64cf52548ac992c83662aacd930175f9b82323fdcb04ad9b51244e873eb6fd3b",
++      "contextLabel": "200K",
++      "outputLabel": "128K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "glm-5.2",
++      "provider": "Z.ai",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 128000,
++      "source": "https://docs.z.ai/guides/llm/glm-5.2",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "zhipu-glm-5.2",
++      "sourceSHA256": "cf678110cbce3a488de00968f3526ee43932e83806553c1a9ace901afecf2df8",
++      "contextLabel": "1M",
++      "outputLabel": "128K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "glm-5.3-flash",
++      "provider": "Z.ai",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 128000,
++      "source": "https://docs.z.ai/guides/vlm/glm-5.3-flash.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "zhipu-glm-5.3-flash",
++      "sourceSHA256": "37e8a048e9aeffab6a488fe7e78b6acaf65a270a5e38a1bd8b0d1a83d11efd43",
++      "contextLabel": "1M",
++      "outputLabel": "128K",
++      "precision": "documented-unit",
++      "input": [
++        "text",
++        "image"
++      ]
++    },
++    {
++      "id": "glm-5.3",
++      "provider": "Z.ai",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 128000,
++      "source": "https://docs.z.ai/guides/llm/glm-5.3",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "zhipu-glm-5.3",
++      "sourceSHA256": "7c622fca7d4844aa8a08e33302714fab149a0626f37e44575290905d1645b06d",
++      "contextLabel": "1M",
++      "outputLabel": "128K",
++      "precision": "documented-unit",
++      "input": [
++        "text"
++      ]
++    },
++    {
++      "id": "glm-5",
++      "provider": "Z.ai",
++      "contextWindow": 200000,
++      "maxOutputTokens": 128000,
++      "source": "https://docs.z.ai/guides/llm/glm-5",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "zhipu",
++      "sourceSHA256": "d68c8266b85f257a8ed75c9e0c2658bd2a87c62e9825e526b9f76943f593d4aa",
++      "contextLabel": "200K",
++      "outputLabel": "128K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "deepseek-flash",
++      "provider": "DeepSeek",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 384000,
++      "source": "https://api-docs.deepseek.com/quick_start/pricing/",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "deepseek",
++      "sourceSHA256": "5efd7e7661de5b86a1a3d5569ea5d9d8633bf1ca1c311ec42baace85ef18d78e",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "384K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "deepseek-v4-pro",
++      "provider": "DeepSeek",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 384000,
++      "source": "https://api-docs.deepseek.com/quick_start/pricing/",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "deepseek",
++      "sourceSHA256": "5efd7e7661de5b86a1a3d5569ea5d9d8633bf1ca1c311ec42baace85ef18d78e",
++      "input": [
++        "text"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "384K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "deepseek-v4-flash",
++      "provider": "DeepSeek",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 384000,
++      "source": "https://api-docs.deepseek.com/quick_start/pricing/",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "deepseek",
++      "sourceSHA256": "5efd7e7661de5b86a1a3d5569ea5d9d8633bf1ca1c311ec42baace85ef18d78e",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "384K",
++      "precision": "documented-unit",
++      "aliasOf": "deepseek-flash"
++    },
++    {
++      "id": "deepseek-v4-flash-vision-exp",
++      "provider": "DeepSeek",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 384000,
++      "source": "https://api-docs.deepseek.com/quick_start/pricing/",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "deepseek",
++      "sourceSHA256": "5efd7e7661de5b86a1a3d5569ea5d9d8633bf1ca1c311ec42baace85ef18d78e",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "384K",
++      "precision": "documented-unit",
++      "aliasOf": "deepseek-flash"
++    },
++    {
++      "id": "kimi-k3.1-pro",
++      "provider": "Kimi",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 1048576,
++      "source": "https://platform.kimi.ai/docs/api/models-overview.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "kimi-parameters",
++      "sourceSHA256": "47cd877cdb628b5d77d6703936bf03376ae7fac4f9219a490c4348f4f23f0faf",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "precision": "documented-unit",
++      "outputSource": "https://platform.kimi.ai/docs/api/chat.md"
++    },
++    {
++      "id": "kimi-k3.1-pro-highspeed",
++      "provider": "Kimi",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 1048576,
++      "source": "https://platform.kimi.ai/docs/api/models-overview.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "kimi-parameters",
++      "sourceSHA256": "47cd877cdb628b5d77d6703936bf03376ae7fac4f9219a490c4348f4f23f0faf",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "precision": "documented-unit",
++      "outputSource": "https://platform.kimi.ai/docs/api/chat.md"
++    },
++    {
++      "id": "kimi-k3",
++      "provider": "Kimi",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 1048576,
++      "source": "https://platform.kimi.ai/docs/api/models-overview.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "kimi-parameters",
++      "sourceSHA256": "47cd877cdb628b5d77d6703936bf03376ae7fac4f9219a490c4348f4f23f0faf",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "precision": "documented-unit",
++      "outputSource": "https://platform.kimi.ai/docs/api/chat.md"
++    },
++    {
++      "id": "k3",
++      "provider": "Kimi Coding",
++      "contextWindow": 1000000,
++      "maxOutputTokens": null,
++      "source": "https://www.kimi.com/code/docs/en/",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "kimi-coding-readable",
++      "sourceSHA256": "eebf8df391b47a2f878d455f20624688174abe5c41a1c9dc26c0514124c64b60",
++      "contextLabel": "最高 1M（套餐限定）",
++      "precision": "documented-unit",
++      "conditional": true
++    },
++    {
++      "id": "k3.1-pro",
++      "provider": "Kimi Coding",
++      "contextWindow": 1000000,
++      "maxOutputTokens": null,
++      "source": "https://www.kimi.com/code/docs/en/",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "kimi-coding-readable",
++      "sourceSHA256": "eebf8df391b47a2f878d455f20624688174abe5c41a1c9dc26c0514124c64b60",
++      "contextLabel": "最高 1M（套餐限定）",
++      "precision": "documented-unit",
++      "conditional": true
++    },
++    {
++      "id": "k3.1-pro-highspeed",
++      "provider": "Kimi Coding",
++      "contextWindow": 1000000,
++      "maxOutputTokens": null,
++      "source": "https://www.kimi.com/code/docs/en/",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "kimi-coding-readable",
++      "sourceSHA256": "eebf8df391b47a2f878d455f20624688174abe5c41a1c9dc26c0514124c64b60",
++      "contextLabel": "最高 1M（套餐限定）",
++      "precision": "documented-unit",
++      "conditional": true
++    },
++    {
++      "id": "kimi-for-coding",
++      "provider": "Kimi Coding",
++      "contextWindow": 1000000,
++      "maxOutputTokens": null,
++      "source": "https://www.kimi.com/code/docs/en/",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "kimi-coding-readable",
++      "sourceSHA256": "eebf8df391b47a2f878d455f20624688174abe5c41a1c9dc26c0514124c64b60",
++      "contextLabel": "最高 1M（套餐限定）",
++      "precision": "documented-unit",
++      "conditional": true
++    },
++    {
++      "id": "kimi-for-coding-highspeed",
++      "provider": "Kimi Coding",
++      "contextWindow": 256000,
++      "maxOutputTokens": null,
++      "source": "https://www.kimi.com/code/docs/en/",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "kimi-coding-readable",
++      "sourceSHA256": "eebf8df391b47a2f878d455f20624688174abe5c41a1c9dc26c0514124c64b60",
++      "contextLabel": "256K（套餐限定）",
++      "precision": "documented-unit",
++      "conditional": true
++    },
++    {
++      "id": "deepseek-v4.1-flash-1017",
++      "provider": "Alibaba / DeepSeek",
++      "contextWindow": 1000000,
++      "maxOutputTokens": null,
++      "source": "https://www.alibabacloud.com/help/en/model-studio/text-generation-model",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "qwen-text",
++      "sourceSHA256": "bcfb3277d2e08eec9d9a183f4efbd44b61b929fe4cc8469f284dfda93000d66b",
++      "contextLabel": "1M",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "k3-256k",
++      "provider": "Kimi Coding",
++      "contextWindow": 256000,
++      "maxOutputTokens": null,
++      "source": "https://www.kimi.com/code/docs/en/",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "kimi-coding-readable",
++      "sourceSHA256": "eebf8df391b47a2f878d455f20624688174abe5c41a1c9dc26c0514124c64b60",
++      "contextLabel": "256K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "MiniMax-M3",
++      "provider": "MiniMax",
++      "contextWindow": 1000000,
++      "maxOutputTokens": null,
++      "source": "https://platform.minimax.io/docs/api-reference/text-anthropic-api.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "minimax-anthropic",
++      "sourceSHA256": "c622367780ee9de862cb6be5c48f0d9e77ca272363a23843a20d2a5b1e3b3e39",
++      "input": [
++        "text",
++        "image"
++      ],
++      "precision": "exact",
++      "contextLabel": "1,000,000"
++    },
++    {
++      "id": "MiniMax-M3.1-Flash",
++      "provider": "MiniMax",
++      "contextWindow": 1000000,
++      "maxOutputTokens": null,
++      "source": "https://platform.minimax.io/docs/api-reference/text-anthropic-api.md",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "minimax-anthropic",
++      "sourceSHA256": "c622367780ee9de862cb6be5c48f0d9e77ca272363a23843a20d2a5b1e3b3e39",
++      "input": [
++        "text",
++        "image"
++      ],
++      "precision": "exact",
++      "contextLabel": "1,000,000"
++    },
++    {
++      "id": "qwen4-max",
++      "provider": "Alibaba Qwen",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 131072,
++      "source": "https://www.alibabacloud.com/help/en/model-studio/text-generation-model",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "qwen-text",
++      "sourceSHA256": "bcfb3277d2e08eec9d9a183f4efbd44b61b929fe4cc8469f284dfda93000d66b",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "131,072 (Non-thinking); 262,144 (thinking + output)",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "qwen3.8-flash",
++      "provider": "Alibaba Qwen",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 128000,
++      "source": "https://www.alibabacloud.com/help/en/model-studio/text-generation-model",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "qwen-text",
++      "sourceSHA256": "bcfb3277d2e08eec9d9a183f4efbd44b61b929fe4cc8469f284dfda93000d66b",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "128k",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "qwen3.7-plus",
++      "provider": "Alibaba Qwen",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 128000,
++      "source": "https://www.alibabacloud.com/help/en/model-studio/text-generation-model",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "qwen-text",
++      "sourceSHA256": "bcfb3277d2e08eec9d9a183f4efbd44b61b929fe4cc8469f284dfda93000d66b",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "128k",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "qwen3.8-max",
++      "provider": "Alibaba Qwen",
++      "contextWindow": 1000000,
++      "maxOutputTokens": 128000,
++      "source": "https://www.alibabacloud.com/help/en/model-studio/text-generation-model",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "qwen-text",
++      "sourceSHA256": "bcfb3277d2e08eec9d9a183f4efbd44b61b929fe4cc8469f284dfda93000d66b",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "outputLabel": "128k",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "grok-4.7",
++      "provider": "xAI",
++      "contextWindow": 500000,
++      "maxOutputTokens": null,
++      "source": "https://docs.x.ai/developers/models",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "xai",
++      "sourceSHA256": "350688b758d3495597c87b27474bfe2ed0312933fcb412ae5f835a8fac8fcfb4",
++      "contextLabel": "500k",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "grok-4.6",
++      "provider": "xAI",
++      "contextWindow": 500000,
++      "maxOutputTokens": null,
++      "source": "https://docs.x.ai/developers/models",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "xai",
++      "sourceSHA256": "350688b758d3495597c87b27474bfe2ed0312933fcb412ae5f835a8fac8fcfb4",
++      "contextLabel": "500k",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "grok-4.5",
++      "provider": "xAI",
++      "contextWindow": 500000,
++      "maxOutputTokens": null,
++      "source": "https://docs.x.ai/developers/models",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "xai",
++      "sourceSHA256": "350688b758d3495597c87b27474bfe2ed0312933fcb412ae5f835a8fac8fcfb4",
++      "contextLabel": "500k",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "grok-4.3",
++      "provider": "xAI",
++      "contextWindow": 1000000,
++      "maxOutputTokens": null,
++      "source": "https://docs.x.ai/developers/models",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "xai",
++      "sourceSHA256": "350688b758d3495597c87b27474bfe2ed0312933fcb412ae5f835a8fac8fcfb4",
++      "contextLabel": "1M",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "grok-4.20-0309-reasoning",
++      "provider": "xAI",
++      "contextWindow": 1000000,
++      "maxOutputTokens": null,
++      "source": "https://docs.x.ai/developers/models",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "xai",
++      "sourceSHA256": "350688b758d3495597c87b27474bfe2ed0312933fcb412ae5f835a8fac8fcfb4",
++      "contextLabel": "1M",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "grok-4.20-0309-non-reasoning",
++      "provider": "xAI",
++      "contextWindow": 1000000,
++      "maxOutputTokens": null,
++      "source": "https://docs.x.ai/developers/models",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "xai",
++      "sourceSHA256": "350688b758d3495597c87b27474bfe2ed0312933fcb412ae5f835a8fac8fcfb4",
++      "contextLabel": "1M",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "grok-build-0.1",
++      "provider": "xAI",
++      "contextWindow": 256000,
++      "maxOutputTokens": null,
++      "source": "https://docs.x.ai/developers/models",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "xai",
++      "sourceSHA256": "350688b758d3495597c87b27474bfe2ed0312933fcb412ae5f835a8fac8fcfb4",
++      "contextLabel": "256k",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "grok-4.20-multi-agent-0309",
++      "provider": "xAI",
++      "contextWindow": 1000000,
++      "maxOutputTokens": null,
++      "source": "https://docs.x.ai/developers/models",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "xai",
++      "sourceSHA256": "350688b758d3495597c87b27474bfe2ed0312933fcb412ae5f835a8fac8fcfb4",
++      "contextLabel": "1M",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "mistral-large-4",
++      "provider": "Mistral",
++      "contextWindow": 1000000,
++      "maxOutputTokens": null,
++      "source": "https://docs.mistral.ai/models/mistral-large-4-0",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "mistral-large",
++      "sourceSHA256": "e5d8ed43bd77b1c9a89ccc41e9191d325b133b73b54803c8d204f6885ab0d17b",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1M",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "command-a-plus-05-2026",
++      "provider": "Cohere",
++      "contextWindow": 128000,
++      "maxOutputTokens": 64000,
++      "source": "https://docs.cohere.com/docs/models",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "cohere",
++      "sourceSHA256": "9fe88968b2b4a6a2baea2ab55c599b55f8e370f12d58546a71508c03ecc2ae3c",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "128k",
++      "outputLabel": "64k",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "command-a-03-2025",
++      "provider": "Cohere",
++      "contextWindow": 256000,
++      "maxOutputTokens": 8000,
++      "source": "https://docs.cohere.com/docs/models",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "cohere",
++      "sourceSHA256": "9fe88968b2b4a6a2baea2ab55c599b55f8e370f12d58546a71508c03ecc2ae3c",
++      "input": [
++        "text"
++      ],
++      "contextLabel": "256k",
++      "outputLabel": "8k",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "command-r7b-12-2024",
++      "provider": "Cohere",
++      "contextWindow": 128000,
++      "maxOutputTokens": 4000,
++      "source": "https://docs.cohere.com/docs/models",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "cohere",
++      "sourceSHA256": "9fe88968b2b4a6a2baea2ab55c599b55f8e370f12d58546a71508c03ecc2ae3c",
++      "input": [
++        "text"
++      ],
++      "contextLabel": "128k",
++      "outputLabel": "4k",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "command-a-translate-08-2025",
++      "provider": "Cohere",
++      "contextWindow": 8000,
++      "maxOutputTokens": 8000,
++      "source": "https://docs.cohere.com/docs/models",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "cohere",
++      "sourceSHA256": "9fe88968b2b4a6a2baea2ab55c599b55f8e370f12d58546a71508c03ecc2ae3c",
++      "input": [
++        "text"
++      ],
++      "contextLabel": "8K",
++      "outputLabel": "8k",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "command-a-reasoning-08-2025",
++      "provider": "Cohere",
++      "contextWindow": 256000,
++      "maxOutputTokens": 32000,
++      "source": "https://docs.cohere.com/docs/models",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "cohere",
++      "sourceSHA256": "9fe88968b2b4a6a2baea2ab55c599b55f8e370f12d58546a71508c03ecc2ae3c",
++      "input": [
++        "text"
++      ],
++      "contextLabel": "256k",
++      "outputLabel": "32k",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "command-a-vision-07-2025",
++      "provider": "Cohere",
++      "contextWindow": 128000,
++      "maxOutputTokens": 8000,
++      "source": "https://docs.cohere.com/docs/models",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "cohere",
++      "sourceSHA256": "9fe88968b2b4a6a2baea2ab55c599b55f8e370f12d58546a71508c03ecc2ae3c",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "128K",
++      "outputLabel": "8K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "command-r-08-2024",
++      "provider": "Cohere",
++      "contextWindow": 128000,
++      "maxOutputTokens": 4000,
++      "source": "https://docs.cohere.com/docs/models",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "cohere",
++      "sourceSHA256": "9fe88968b2b4a6a2baea2ab55c599b55f8e370f12d58546a71508c03ecc2ae3c",
++      "input": [
++        "text"
++      ],
++      "contextLabel": "128k",
++      "outputLabel": "4k",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "command-r-plus-08-2024",
++      "provider": "Cohere",
++      "contextWindow": 128000,
++      "maxOutputTokens": 4000,
++      "source": "https://docs.cohere.com/docs/models",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "cohere",
++      "sourceSHA256": "9fe88968b2b4a6a2baea2ab55c599b55f8e370f12d58546a71508c03ecc2ae3c",
++      "input": [
++        "text"
++      ],
++      "contextLabel": "128k",
++      "outputLabel": "4k",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "doubao-seed-evolving",
++      "provider": "ByteDance Doubao",
++      "contextWindow": 1024000,
++      "maxOutputTokens": 256000,
++      "source": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "doubao-md",
++      "sourceSHA256": "7e377ca9847760ea4fef8c3193c33900b6d7a079abcfe3290bf8e3bfcf35dcb0",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1024K",
++      "outputLabel": "256K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "doubao-seed-2-1-pro-260915",
++      "provider": "ByteDance Doubao",
++      "contextWindow": 1024000,
++      "maxOutputTokens": 256000,
++      "source": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "doubao-md",
++      "sourceSHA256": "7e377ca9847760ea4fef8c3193c33900b6d7a079abcfe3290bf8e3bfcf35dcb0",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1024K",
++      "outputLabel": "256K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "doubao-seed-2-1-lite-260915",
++      "provider": "ByteDance Doubao",
++      "contextWindow": 1024000,
++      "maxOutputTokens": 256000,
++      "source": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "doubao-md",
++      "sourceSHA256": "7e377ca9847760ea4fef8c3193c33900b6d7a079abcfe3290bf8e3bfcf35dcb0",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "1024K",
++      "outputLabel": "256K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "doubao-seed-2-1-turbo-260628",
++      "provider": "ByteDance Doubao",
++      "contextWindow": 256000,
++      "maxOutputTokens": 256000,
++      "source": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "doubao-md",
++      "sourceSHA256": "7e377ca9847760ea4fef8c3193c33900b6d7a079abcfe3290bf8e3bfcf35dcb0",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "256K",
++      "outputLabel": "256K",
++      "precision": "documented-unit"
++    },
++    {
++      "id": "doubao-seed-2-1-pro-260628",
++      "provider": "ByteDance Doubao",
++      "contextWindow": 256000,
++      "maxOutputTokens": 256000,
++      "source": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
++      "checkedAt": "2026-11-17",
++      "sourceKey": "doubao-md",
++      "sourceSHA256": "7e377ca9847760ea4fef8c3193c33900b6d7a079abcfe3290bf8e3bfcf35dcb0",
++      "input": [
++        "text",
++        "image"
++      ],
++      "contextLabel": "256K",
++      "outputLabel": "256K",
++      "precision": "documented-unit"
++    }
++  ]
++}
+diff --git a/plugins/naumi-enterprise/package.json b/plugins/naumi-enterprise/package.json
+index 24d1d8f..580542b 100644
+--- a/plugins/naumi-enterprise/package.json
++++ b/plugins/naumi-enterprise/package.json
+@@ -57,7 +57,9 @@
+     "desktop-identity.js",
+     "desktop-enterprise.js",
+     "model-connections.js",
+-    "product-version.js"
++    "product-version.js",
++    "model-specs.js",
++    "official-model-specs.json"
+   ],
+   "dsh": {
+     "bundle": {
+diff --git a/scripts/build-official-model-specs.py b/scripts/build-official-model-specs.py
+new file mode 100644
+index 0000000..1d876f8
+--- /dev/null
++++ b/scripts/build-official-model-specs.py
+@@ -0,0 +1,73 @@
++from pathlib import Path
++import json,re,hashlib,datetime,os,zipfile
++from bs4 import BeautifulSoup
++ROOT=Path(__file__).resolve().parents[1];P=Path(os.environ.get('NAUMI_SPEC_SOURCE_DIR',ROOT/'evidence/official-model-specs/sources'));records={};CHECKED_AT='2026-11-17'
++for file in sorted(P.glob('INDEX*.json')):
++ snapshot=json.loads(file.read_text(encoding='utf-8-sig'));CHECKED_AT=max(CHECKED_AT,snapshot.get('retrievedAt','')[:10])
++ for row in snapshot['sources']:
++  if row.get('status')==200:records[row['name']]=row
++for name,url in [('kimi-coding-readable','https://www.kimi.com/code/docs/en/'),('kimi-chat','https://platform.kimi.ai/docs/api/chat.md')]:
++ b=(P/(name+'.txt')).read_bytes();records[name]={'name':name,'url':url,'finalUrl':url,'sha256':hashlib.sha256(b).hexdigest()}
++MODELS={}
++def text(name):return (P/(name+'.txt')).read_text(encoding='utf-8')
++def raw(name):
++ file=P/(name+'.raw')
++ if file.exists():return file.read_bytes()
++ with zipfile.ZipFile(ROOT/'evidence/official-model-specs/OFFICIAL_SOURCES.zip') as z:return z.read('sources/'+name+'.raw')
++def tokens(value):
++ value=value.strip().replace(',','');m=re.fullmatch(r'(\d+(?:\.\d+)?)\s*([kKmM])?',value);assert m,value
++ return int(float(m[1])*({'k':1000,'m':1000000}.get((m[2] or '').lower(),1)))
++def add(id,provider,context,output,source,**extra):
++ assert source in records and context>0 and (output is None or output>0)
++ r=records[source];MODELS[id]={'id':id,'provider':provider,'contextWindow':context,'maxOutputTokens':output,'source':r['finalUrl'],'checkedAt':CHECKED_AT,'sourceKey':source,'sourceSHA256':r['sha256'],**extra}
++for f in sorted(P.glob('openai-gpt*.txt')):
++ s=f.read_text(encoding='utf8');id=re.search(r'Model ID: `([^`]+)`',s)[1];c=int(re.search(r'([\d,]+) context window',s)[1].replace(',',''));o=int(re.search(r'([\d,]+) max output tokens',s)[1].replace(',',''));i=re.search(r'Maximum input tokens: ([\d,]+)',s)
++ add(id,'OpenAI',c,o,f.stem,input=['text','image'] if 'Input modalities: text, image' in s else ['text'],precision='exact',**({'maxInputTokens':int(i[1].replace(',',''))} if i else {}))
++for line in text('claude').splitlines():
++ m=re.match(r'\| \[Claude ([^\]]+)\]\(https://platform.claude.com/docs/en/models/([^/]+)/overview\).*?\|\s*([\d.]+[MK]) tokens\s*\|\s*([\d.]+[MK]) tokens',line)
++ if m:
++  name,slug,c,o=m.groups();add('claude-'+slug,'Anthropic',tokens(c),tokens(o),'claude',input=['text','image'],contextLabel=c,outputLabel=o,precision='documented-unit')
++for f in sorted(P.glob('gemini-gemini*.txt')):
++ s=f.read_text(encoding='utf8');id=f.stem.removeprefix('gemini-');c=re.search(r'\*\*(?:Context window \(unified input and output token limit\)|Input token limit)\*\*\s*([\d,]+)',s);o=re.search(r'\*\*(?:Max output|Output token limit)\*\*\s*([\d,]+)',s);assert c and o,id
++ add(id,'Google',int(c[1].replace(',','')),int(o[1].replace(',','')),f.stem,input=['text','image'],precision='exact',contextKind='total' if 'unified input and output' in s else 'input',**({'maxInputTokens':int(c[1].replace(',',''))} if 'unified input and output' not in s else {}))
++for f in sorted(P.glob('zhipu-glm*.txt')):
++ s=f.read_text(encoding='utf8');c=re.search(r'Context Length\s*(?:>\s*)+([\d.]+[MK])',s);o=re.search(r'Maximum Output Tokens\s*(?:>\s*)+([\d.]+[MK])',s)
++ if not c:c=re.search(r'([\d.]+M)-token context window',s)
++ if not o:o=re.search(r'maximum output length of ([\d.]+K)',s)
++ assert c and o,f.stem;id=f.stem.removeprefix('zhipu-');add(id,'Z.ai',tokens(c[1]),tokens(o[1]),f.stem,contextLabel=c[1],outputLabel=o[1],precision='documented-unit',**({'input':['text','image']} if id=='glm-5.3-flash' else {'input':['text']} if id=='glm-5.3' else {}))
++ if id=='glm-4.5':add('glm-4.5-air','Z.ai',tokens(c[1]),tokens(o[1]),f.stem,contextLabel=c[1],outputLabel=o[1],precision='documented-unit')
++assert '> 200K' in text('zhipu') and '> 128K' in text('zhipu')
++add('glm-5','Z.ai',200000,128000,'zhipu',contextLabel='200K',outputLabel='128K',precision='documented-unit')
++assert 'MAXIMUM: 384K' in text('deepseek') and 'CONTEXT LENGTH\n1M' in text('deepseek')
++for id in ['deepseek-flash','deepseek-v4-pro','deepseek-v4-flash','deepseek-v4-flash-vision-exp']:add(id,'DeepSeek',1000000,384000,'deepseek',input=['text'] if id=='deepseek-v4-pro' else ['text','image'],contextLabel='1M',outputLabel='384K',precision='documented-unit',**({'aliasOf':'deepseek-flash'} if id.startswith('deepseek-v4-flash') else {}))
++assert 'can be set up to 1048576' in text('kimi-chat')
++for id in ['kimi-k3.1-pro','kimi-k3.1-pro-highspeed','kimi-k3']:add(id,'Kimi',1000000,1048576,'kimi-parameters',input=['text','image'],contextLabel='1M',precision='documented-unit',outputSource=records['kimi-chat']['url'])
++for id in ['k3','k3.1-pro','k3.1-pro-highspeed','kimi-for-coding']:assert id in text('kimi-coding-readable');add(id,'Kimi Coding',1000000,None,'kimi-coding-readable',contextLabel='最高 1M（套餐限定）',precision='documented-unit',conditional=True)
++assert 'kimi-for-coding-highspeed' in text('kimi-coding-readable') and '256K tokens' in text('kimi-parameters')
++add('kimi-for-coding-highspeed','Kimi Coding',256000,None,'kimi-coding-readable',contextLabel='256K（套餐限定）',precision='documented-unit',conditional=True)
++assert 'deepseek-v4.1-flash-1017' in text('qwen-text')
++add('deepseek-v4.1-flash-1017','Alibaba / DeepSeek',1000000,None,'qwen-text',contextLabel='1M',precision='documented-unit')
++add('k3-256k','Kimi Coding',256000,None,'kimi-coding-readable',contextLabel='256K',precision='documented-unit')
++for id in ['MiniMax-M3','MiniMax-M3.1-Flash']:assert id in text('minimax-anthropic');add(id,'MiniMax',1000000,None,'minimax-anthropic',input=['text','image'],precision='exact',contextLabel='1,000,000')
++soup=BeautifulSoup(raw('qwen-text'),'html.parser')
++for row in soup.select('tr'):
++ cells=[x.get_text(' ',strip=True) for x in row.find_all(['th','td'])]
++ if len(cells)>=10 and cells[0].startswith('qwen') and re.fullmatch(r'\d+[MKmk]',cells[1]) and re.match(r'[\d,]+\s*\(',cells[2]) or len(cells)>=10 and cells[0].startswith('qwen') and re.fullmatch(r'\d+[MKmk]',cells[1]) and re.fullmatch(r'\d+[Kk]',cells[2]):
++  c=tokens(cells[1]);o=re.match(r'[\d,]+',cells[2])[0];o=tokens(cells[2]) if re.fullmatch(r'\d+[Kk]',cells[2]) else int(o.replace(',',''));add(cells[0],'Alibaba Qwen',c,o,'qwen-text',input=['text','image'],contextLabel=cells[1],outputLabel=cells[2],precision='documented-unit')
++for line in text('xai').splitlines():
++ m=re.match(r'\| (grok-[\w.\-]+).*?\|\s*([\d.]+[kM])\s*\|',line)
++ if m:add(m[1],'xAI',tokens(m[2]),None,'xai',contextLabel=m[2],precision='documented-unit')
++add('mistral-large-4','Mistral',1000000,None,'mistral-large',input=['text','image'],contextLabel='1M',precision='documented-unit')
++for line in text('cohere').splitlines():
++ if not line.startswith('| `command') or '| Live ' not in line:continue
++ cells=[x.strip() for x in line.strip('|').split('|')]
++ if len(cells)<7:continue
++ id=cells[0].strip('`');c=tokens(cells[4]);o=tokens(cells[5]);add(id,'Cohere',c,o,'cohere',input=['text','image'] if 'Images' in cells[3] else ['text'],contextLabel=cells[4],outputLabel=cells[5],precision='documented-unit')
++for line in text('doubao-md').splitlines():
++ m=re.match(r'\|\[(doubao-seed-(?:evolving|2-1-[\w-]+))\]',line)
++ if not m:continue
++ c=re.search(r'上下文窗口:\s*(\d+K)',line);o=re.search(r'最大回答.*?\):\s*(\d+K)',line)
++ if c and o:add(m[1],'ByteDance Doubao',tokens(c[1]),tokens(o[1]),'doubao-md',input=['text','image'],contextLabel=c[1],outputLabel=o[1],precision='documented-unit')
++assert len(MODELS)>=60,len(MODELS)
++payload={'version':1,'updatedAt':CHECKED_AT,'unitPolicy':'Exact numeric tokens where published. K/M-only labels use conservative decimal normalization; original labels and precision retained. Synchronous/default API limits only; beta/batch/long-decode increases excluded. Availability and subscription quotas are not inferred from specifications.','models':list(MODELS.values())}
++target=Path(os.environ.get('NAUMI_SPEC_OUTPUT',ROOT/'plugins/naumi-enterprise/official-model-specs.json'));target.write_text(json.dumps(payload,ensure_ascii=False,indent=2)+'\n',encoding='utf8');(P.parent/'SOURCE_MANIFEST.json').write_text(json.dumps([r for r in records.values() if r['finalUrl'] in {u for m in MODELS.values() for u in [m['source'],m.get('outputSource')]}],ensure_ascii=False,indent=2)+'\n',encoding='utf8');print('OFFICIAL_CATALOG models='+str(len(MODELS))+' providers='+str(len(set(x['provider'] for x in MODELS.values())))+' source_hashes=retained');print(json.dumps({p:sum(x['provider']==p for x in MODELS.values()) for p in sorted(set(x['provider'] for x in MODELS.values()))},ensure_ascii=False))
+diff --git a/scripts/deploy-official-model-specs.mjs b/scripts/deploy-official-model-specs.mjs
+new file mode 100644
+index 0000000..7666e79
+--- /dev/null
++++ b/scripts/deploy-official-model-specs.mjs
+@@ -0,0 +1,20 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync} from 'node:child_process';import {parse} from 'yaml';import {botLiveApi} from './bot-live-api.mjs';import {refreshModelSpecs} from '../plugins/naumi-enterprise/model-specs.js';
++const root=process.cwd(),e=path.join(root,'evidence/official-model-specs'),target=path.join(root,'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise'),profile=path.join(root,'.dsh/profiles/web/cordis.patch.yml'),credentials=path.join(root,'.dsh/.credentials.yaml'),stateFile=path.join(root,'.dsh/official-model-specs-deployment.json'),mode=process.argv[2];
++const hash=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex'),save=(p,v)=>{const tmp=p+'.tmp';fs.writeFileSync(tmp,JSON.stringify(v,null,2)+'\n');fs.renameSync(tmp,p);},read=p=>JSON.parse(fs.readFileSync(p)),providers=file=>parse(fs.readFileSync(file,'utf8')).find(row=>row.id==='llm-pi-ai').config.providers;
++const files=['model-connections.js','assets/model-connections.js','assets/model-connections.css','model-specs.js','official-model-specs.json','package.json'];
++if(mode==='prepare'){
++ assert.equal(execFileSync('git',['branch','--show-current'],{encoding:'utf8'}).trim(),'main');execFileSync(process.execPath,['scripts/check-bot-runtime.mjs',root],{stdio:'inherit'});assert(!fs.existsSync(stateFile),'Existing deployment intent: resume or inspect it before preparing again');
++ const manifest=read(path.join(e,'hashes.json')),backup=path.join(root,'.dsh','official-model-specs-'+randomUUID());fs.mkdirSync(backup,{recursive:true});const old={};for(const f of fs.readdirSync(target,{recursive:true})){const p=path.join(target,f);if(fs.statSync(p).isFile())old[f.replaceAll('\\','/')]=hash(p);}
++ for(const f of files){const p=path.join(target,f),row=manifest.find(r=>r.file==='plugins/naumi-enterprise/'+f);if(f!=='package.json'){if(row.originalSHA256)assert.equal(hash(p),row.originalSHA256,'Runtime drift '+f);else assert(!fs.existsSync(p),'New runtime path already exists '+f);}if(fs.existsSync(p)){const dest=path.join(backup,'source',f);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(p,dest);}}
++ fs.copyFileSync(profile,path.join(backup,'original-profile.yml'));const api=await botLiveApi(root),settings=await api.rpc('settings/describe',{}),defaultModel=settings.namespaces.find(n=>n.ns==='agent-default-model').value;
++ save(stateFile,{phase:'prepared',backup,files,old,credentialHash:hash(credentials),defaultModel,mainCommit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim()});console.log('SPEC_PREPARED files=6 config_snapshot=private running=0');
++}else if(mode==='files'){
++ const s=read(stateFile);assert.equal(s.phase,'prepared');for(const f of files){const p=path.join(target,f);if(f==='package.json'){const pkg=JSON.parse(fs.readFileSync(p));for(const name of ['model-specs.js','official-model-specs.json'])if(!pkg.files.includes(name))pkg.files.push(name);fs.writeFileSync(p,JSON.stringify(pkg,null,2)+'\n');}else fs.copyFileSync(path.join(root,'plugins/naumi-enterprise',f),p);}
++ for(const[f,h]of Object.entries(s.old))if(!files.includes(f))assert.equal(hash(path.join(target,f)),h,'Unrelated file changed: '+f);s.phase='files';save(stateFile,s);console.log('SPEC_FILES updated=6 unrelated_changed=0');
++}else if(mode==='migrate'){
++ const s=read(stateFile);assert.equal(s.phase,'files');assert.equal(hash(credentials),s.credentialHash);assert.deepEqual(providers(profile),providers(path.join(s.backup,'original-profile.yml')),'Provider config changed since preparation');const expected=refreshModelSpecs(providers(profile)),api=await botLiveApi(root),current=await api.json('/naumi/model-connections');assert.equal(current.specs.models.length,86);
++ const value=await api.json('/naumi/model-connections',{action:'refresh-specs',expectedRevision:current.revision},'x-naumi-model-connections');assert.equal(value.specRefresh.changed,expected.changes.length);assert.deepEqual(providers(profile),expected.providers);assert.equal(hash(credentials),s.credentialHash);const afterSettings=await api.rpc('settings/describe',{});assert.deepEqual(afterSettings.namespaces.find(n=>n.ns==='agent-default-model').value,s.defaultModel);
++ for(const file of files.filter(f=>f!=='package.json'))assert.equal(hash(path.join(target,file)),hash(path.join(root,'plugins/naumi-enterprise',file)));for(const[f,h]of Object.entries(s.old))if(!files.includes(f))assert.equal(hash(path.join(target,f)),h,'Unrelated runtime changed: '+f);
++ fs.copyFileSync(profile,path.join(s.backup,'modified-profile.yml'));const rollbackCopy=path.join(s.backup,'rollback-test-profile.yml');fs.copyFileSync(profile,rollbackCopy);fs.copyFileSync(path.join(s.backup,'original-profile.yml'),rollbackCopy);assert.equal(hash(rollbackCopy),hash(path.join(s.backup,'original-profile.yml')));assert.equal(hash(profile),hash(path.join(s.backup,'modified-profile.yml')));
++ const sessions=await api.rpc('session/list',{_request:{}}),running=sessions.items.filter(row=>row.running).length;const receipt={status:'PASS',mainCommit:s.mainCommit,changedRuntimeFiles:files,unrelatedChanged:0,groups:value.groups.length,models:value.groups.reduce((n,g)=>n+g.models.length,0),changedModels:value.specRefresh.changed,changes:value.specRefresh.changes,unknown:value.specRefresh.unknown,conditional:value.specRefresh.conditional,credentialsUnchanged:true,defaultModelUnchanged:true,configRollbackCopy:'PASS',activeModifiedRetained:true,sessions:sessions.items.length,running,modelCalls:0,backup:s.backup};save(path.join(e,'DEPLOYMENT.json'),receipt);s.phase='complete';save(stateFile,s);console.log('SPEC_LIVE groups='+receipt.groups+' models='+receipt.models+' calibrated='+receipt.changedModels+' unknown='+receipt.unknown.length+' credentials=unchanged defaults=unchanged config_rollback=PASS model_calls=0');
++}else throw Error('Use prepare|files|migrate; each phase persists its recovery intent');
+diff --git a/scripts/refresh-official-model-specs.py b/scripts/refresh-official-model-specs.py
+new file mode 100644
+index 0000000..8492987
+--- /dev/null
++++ b/scripts/refresh-official-model-specs.py
+@@ -0,0 +1,37 @@
++"""Explicit official-document refresh; no model/provider API keys or inference calls.
++Usage: python -X utf8 scripts/refresh-official-model-specs.py [--fetch]
++Default rebuilds the checked-in snapshot. --fetch stages all known official sources
++and publishes only after strict parsing succeeds; review the resulting Git diff.
++"""
++from pathlib import Path
++import sys,json,urllib.request,urllib.parse,concurrent.futures,tempfile,shutil,hashlib,datetime,subprocess,os,zipfile
++from bs4 import BeautifulSoup
++ROOT=Path(__file__).resolve().parents[1];E=ROOT/'evidence/official-model-specs';sources=E/'sources'
++if '--fetch' not in sys.argv:
++ raise SystemExit(subprocess.call([sys.executable,str(ROOT/'scripts/build-official-model-specs.py')]))
++allowed={'developers.openai.com','platform.claude.com','aistudio.google.com','api-docs.deepseek.com','www.alibabacloud.com','docs.z.ai','platform.kimi.ai','www.kimi.com','platform.minimax.io','docs.x.ai','docs.mistral.ai','docs.cohere.com','docs.volcengine.com'}
++staging=Path(tempfile.mkdtemp(prefix='naumi-official-specs-'));shutil.copytree(sources,staging/'sources');P=staging/'sources';records=json.loads((E/'SOURCE_MANIFEST.json').read_text(encoding='utf-8-sig'))
++def download(row):
++ url=row['finalUrl'];assert urllib.parse.urlparse(url).scheme=='https' and urllib.parse.urlparse(url).hostname in allowed
++ with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'Naumi model-spec verification','Accept':'text/markdown,text/html;q=0.9'}),timeout=30) as response:
++  assert urllib.parse.urlparse(response.url).hostname in allowed;raw=response.read(4*1024*1024+1);assert len(raw)<=4*1024*1024;final=response.url
++ text=raw.decode('utf-8');name=row['name'];(P/(name+'.raw')).write_bytes(raw)
++ if '<html' in text[:1000].lower() or '<!doctype' in text[:100].lower():
++  soup=BeautifulSoup(text,'html.parser')
++  for el in soup(['script','style','nav','header','footer']):el.decompose()
++  text=soup.get_text('\n',strip=True)
++ assert len(text)>100 and not text.lstrip().startswith('404 ')
++ (P/(name+'.txt')).write_text(text,encoding='utf8');return {**row,'finalUrl':final,'sha256':hashlib.sha256(raw).hexdigest(),'status':200}
++with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:updated=list(pool.map(download,records))
++by_name={r['name']:r for r in updated};now=datetime.datetime.now(datetime.timezone.utc).isoformat()
++for file in P.glob('INDEX*.json'):
++ data=json.loads(file.read_text(encoding='utf-8-sig'));data['retrievedAt']=now;data['sources']=[by_name.get(r['name'],r) for r in data['sources']];file.write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding='utf8')
++output=staging/'catalog.json';env={**os.environ,'NAUMI_SPEC_SOURCE_DIR':str(P),'NAUMI_SPEC_OUTPUT':str(output)};subprocess.run([sys.executable,str(ROOT/'scripts/build-official-model-specs.py')],env=env,check=True)
++# The strict parser succeeded. Publish documentation cache and catalog, never user configuration.
++for file in P.iterdir():
++ if file.is_file():shutil.copyfile(file,sources/file.name)
++shutil.copyfile(staging/'SOURCE_MANIFEST.json',E/'SOURCE_MANIFEST.json');target=ROOT/'plugins/naumi-enterprise/official-model-specs.json';temporary=target.with_suffix('.json.tmp');shutil.copyfile(output,temporary);temporary.replace(target)
++with zipfile.ZipFile(E/'OFFICIAL_SOURCES.zip','w',zipfile.ZIP_DEFLATED) as z:
++ for f in sorted(P.iterdir()):
++  if f.is_file():z.write(f,'sources/'+f.name)
++print('OFFICIAL_REFRESH published=1 user_config_changed=0 model_calls=0; review source changes before release')
+diff --git a/scripts/reopen-official-model-specs.mjs b/scripts/reopen-official-model-specs.mjs
+new file mode 100644
+index 0000000..bb6064e
+--- /dev/null
++++ b/scripts/reopen-official-model-specs.mjs
+@@ -0,0 +1 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash} from 'node:crypto';import {execFileSync} from 'node:child_process';const e='evidence/official-model-specs',hash=b=>createHash('sha256').update(b).digest('hex'),rows=JSON.parse(fs.readFileSync(e+'/hashes.json'));for(const r of rows){assert.equal(hash(fs.readFileSync(r.file)),r.modifiedSHA256);assert.equal(hash(fs.readFileSync(path.join(e,'modified',r.file))),r.modifiedSHA256);if(r.originalSHA256)assert.equal(hash(fs.readFileSync(path.join(e,'original',r.file))),r.originalSHA256);}for(const name of ['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh'])assert(fs.readFileSync(e+'/'+name).length);execFileSync('D:/DEV/Git/bin/bash.exe',['-n',e+'/ROLLBACK.sh']);execFileSync('python',['-X','utf8','-c',`import zipfile; z=zipfile.ZipFile('${e}/MODIFIED_FILE.zip'); assert z.testzip() is None; s=zipfile.ZipFile('${e}/OFFICIAL_SOURCES.zip'); assert s.testzip() is None`]);console.log('REOPEN artifacts=4 source_hashes=PASS originals=PASS source_archive=PASS rollback=PASS');
+diff --git a/scripts/verify-official-model-specs.mjs b/scripts/verify-official-model-specs.mjs
+new file mode 100644
+index 0000000..cb401b3
+--- /dev/null
++++ b/scripts/verify-official-model-specs.mjs
+@@ -0,0 +1,24 @@
++import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';import {spawn} from 'node:child_process';import {stringify,parse} from 'yaml';import {chromium} from '../desktop/node_modules/playwright/index.mjs';
++const root=process.cwd(),e=path.join(root,'evidence/official-model-specs'),temporary=path.join(root,'runtime','official-spec-fixture-'+randomUUID()),home=path.join(temporary,'home'),profile=path.join(home,'profiles/web');fs.mkdirSync(path.join(profile,'node_modules/@naumi'),{recursive:true});
++for(const[name,folder]of [['dsh-enterprise','naumi-enterprise'],['dsh-ui-layout','naumi-ui-layout'],['dsh-sidebar-browser','naumi-sidebar-browser']])fs.symlinkSync(path.join(root,'plugins',folder),path.join(profile,'node_modules/@naumi',name),'junction');fs.symlinkSync(path.join(root,'node_modules/@deepseek-ai'),path.join(profile,'node_modules/@deepseek-ai'),'junction');
++fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'naumi-discovery-fixture',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}}));fs.writeFileSync(path.join(home,'cordis.patch.yml'),stringify([{id:'ui-theme',config:{preference:'light'}},{id:'session-log-deepseek',disabled:true}]));
++let mode='normal',modelRequests=0;const inferenceRequests=[];
++const upstream=http.createServer(async(req,res)=>{if(req.url!=='/v1/models'){inferenceRequests.push(req.url);res.writeHead(404).end();return;}modelRequests++;assert.equal(req.method,'GET');assert.equal(req.headers.authorization,'Bearer discovery-fixture-key');const state=mode;if(state==='delay')await new Promise(r=>setTimeout(r,1200));if(res.destroyed)return;if(state==='error'){res.writeHead(401).end(JSON.stringify({error:'do-not-show-provider-body'}));return;}res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data:state==='empty'?[]:[{id:'manual-model'},{id:'alpha-model'},{id:'beta-model'},{id:'alpha-model'}]}));});await new Promise(r=>upstream.listen(0,'127.0.0.1',r));const apiURL='http://127.0.0.1:'+upstream.address().port+'/v1';
++fs.writeFileSync(path.join(profile,'cordis.patch.yml'),stringify([{id:'ui-settings-general',config:{welcomeNoticeVersion:'2026-09-28.1'}},{id:'llm-pi-ai',config:{providers:{existing:{displayName:'测试连接',api:'openai-completions',baseURL:apiURL,apiKeyEnv:'DISCOVERY_FIXTURE_KEY',defaultContextWindow:128000,defaultMaxTokens:16384,models:[{id:'gpt-6.1-sol',contextWindow:400000,maxTokens:128000},{id:'glm-5.3'},{id:'private-alias',contextWindow:128000,maxTokens:16384}]}}}}]));
++const sock=http.createServer();await new Promise(r=>sock.listen(0,'127.0.0.1',r));const port=sock.address().port;await new Promise(r=>sock.close(r));const base='http://127.0.0.1:'+port;let output='',browser;
++const child=spawn(process.execPath,[path.join(root,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'web','--host','127.0.0.1','--port',String(port),'--no-open'],{cwd:root,env:{...process.env,DSH_HOME:home,DSH_TELEMETRY_MODE:'DISABLED',DISCOVERY_FIXTURE_KEY:'discovery-fixture-key'},windowsHide:true});child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);const checks=[];function check(name,yes){assert(yes,name);checks.push(name);console.log('SPEC_PASS '+name);}
++try{
++ let launch;for(let i=0;i<100;i++){launch=output.match(new RegExp('http://127\\.0\\.0\\.1:'+port+'/?\\?token=[A-Za-z0-9_~.%-]+'))?.[0];if(launch)break;if(child.exitCode!==null)throw Error('FIXTURE_BOOT_FAILED');await new Promise(r=>setTimeout(r,200));}assert(launch,'FIXTURE_BOOT_TIMEOUT');
++ const exchange=await fetch(launch,{redirect:'manual'}),cookie=exchange.headers.getSetCookie().map(v=>v.split(';')[0]).join('; ');assert(cookie);const headers={cookie,'Content-Type':'application/json','x-naumi-model-connections':'1',origin:base};async function call(body){const r=await fetch(base+'/naumi/model-connections',{headers,...body?{method:'POST',body:JSON.stringify(body)}:{}});return {status:r.status,value:await r.json()};}const initial=(await call()).value;
++ check('actual_http_exposes_verified_limits',initial.specs.models.length===86&&initial.groups[0].models[0].official.contextWindow===1050000&&initial.groups[0].models[0].contextWindow===400000);
++ browser=await chromium.launch({headless:true,channel:'chrome'});const context=await browser.newContext({viewport:{width:1360,height:1080},colorScheme:'light'}),page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.route('**/*',route=>{const u=new URL(route.request().url());return ['http:','https:'].includes(u.protocol)&&u.origin!==base?route.abort():route.continue();});await page.goto(launch);await page.waitForFunction(()=>document.body.getAttribute('data-naumi')==='enterprise');await page.getByRole('button',{name:/设置|Settings/}).first().click();await page.getByRole('button',{name:'模型连接',exact:true}).click();const panel=page.locator('.nm-connections');await panel.getByRole('heading',{name:'测试连接',exact:true}).waitFor();
++ await panel.getByRole('button',{name:'校准官方参数',exact:true}).click();await panel.getByRole('status').filter({hasText:'已校准 2 个模型'}).waitFor();let live=(await call()).value;check('ui_calibrates_known_models_and_keeps_unknowns',live.groups[0].models[0].contextWindow===1050000&&live.groups[0].models[1].contextWindow===1000000&&live.groups[0].models[2].contextWindow===128000);check('output_budget_not_raised_to_model_maximum',live.groups[0].models[1].maxTokens===16384);
++ await panel.getByRole('button',{name:'编辑',exact:true}).click();const row=panel.getByRole('region',{name:'gpt-6.1-sol 参数',exact:true});check('official_limit_source_is_visible',await row.getByRole('link',{name:'OpenAI · 官方',exact:true}).getAttribute('href')==='https://developers.openai.com/api/docs/models/gpt-6.1-sol.md');
++ const ctxField=panel.getByLabel('gpt-6.1-sol 上下文预算',{exact:true}),outField=panel.getByLabel('gpt-6.1-sol 输出预算',{exact:true});await ctxField.fill('1050001');await panel.getByRole('button',{name:'保存',exact:true}).click();check('browser_blocks_out_of_range_context',await ctxField.evaluate(el=>!el.checkValidity()));check('invalid_form_does_not_persist',(await call()).value.revision===live.revision);
++ await ctxField.fill('600000');await outField.fill('32000');await panel.getByRole('button',{name:'保存',exact:true}).click();await panel.getByRole('heading',{name:'测试连接',exact:true}).waitFor();live=(await call()).value;check('custom_budgets_persist_through_actual_settings',live.groups[0].models[0].contextWindow===600000&&live.groups[0].models[0].maxTokens===32000);const persisted=parse(fs.readFileSync(path.join(profile,'cordis.patch.yml'),'utf8')).find(x=>x.id==='llm-pi-ai').config.providers.existing;check('configuration_file_contains_real_numbers',persisted.models[0].contextWindow===600000&&persisted.models[0].maxTokens===32000&&persisted.apiKeyEnv==='DISCOVERY_FIXTURE_KEY');
++ const invalid=await call({action:'save',id:'existing',expectedRevision:live.revision,displayName:'测试连接',baseURL:apiURL,api:'openai-completions',models:[{id:'gpt-6.1-sol',contextWindow:2000000,maxTokens:128000}]});check('server_independently_rejects_bypassed_ui',invalid.status===400&&invalid.value.error==='MODEL_CONTEXT_RANGE');check('failed_range_write_leaves_revision_unchanged',(await call()).value.revision===live.revision);
++ await panel.getByRole('button',{name:'编辑',exact:true}).click();await row.getByRole('button',{name:'官方值',exact:true}).click();check('restore_official_context_respects_input_plus_output',await ctxField.inputValue()==='954000'&&await outField.inputValue()==='32000');await outField.fill('16000');check('lower_output_also_lowers_input_compatible_context',await ctxField.inputValue()==='938000');await ctxField.fill('600000');await outField.fill('32000');
++ for(const width of [1360,580,360]){await page.setViewportSize({width,height:1080});check('responsive_'+width,await panel.evaluate(el=>el.scrollWidth<=el.clientWidth+2));}
++ await page.screenshot({path:path.join(e,'model-specs-narrow.png')});await page.setViewportSize({width:1360,height:1080});await panel.locator('.nm-specs').screenshot({path:path.join(e,'model-specs.png')});check('no_inference_and_no_page_errors',inferenceRequests.length===0&&errors.length===0);
++ fs.writeFileSync(path.join(e,'UI_HTTP.json'),JSON.stringify({status:'PASS',passed:checks.length,checks,pageErrors:errors,inferenceCalls:0,realSupplierCalls:0,liveConfigurationWrites:0},null,2)+'\n');console.log('SPEC_UI_COMPLETE checks='+checks.length+' errors='+errors.length+' inference=0');
++}finally{await browser?.close();child.kill();await new Promise(r=>child.exitCode!==null?r():child.once('close',r));upstream.closeAllConnections();await new Promise(r=>upstream.close(r));}
+diff --git a/tests/naumi-model-specs.test.mjs b/tests/naumi-model-specs.test.mjs
+new file mode 100644
+index 0000000..06f448d
+--- /dev/null
++++ b/tests/naumi-model-specs.test.mjs
+@@ -0,0 +1,23 @@
++import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import {officialModelSpecs,officialSpec,configureModelSpec,modelSpecView,refreshModelSpecs} from '../plugins/naumi-enterprise/model-specs.js';import {ModelConnections} from '../plugins/naumi-enterprise/model-connections.js';
++function fixture(providers={team:{displayName:'Team',api:'openai-responses',baseURL:'https://fixture.example/v1',apiKeyEnv:'SHARED',defaultContextWindow:128000,defaultMaxTokens:16384,models:[{id:'gpt-6.1-sol',contextWindow:400000,maxTokens:128000,custom:'retained'},{id:'glm-5.3'},{id:'deepseek-flash'},{id:'custom-uncensored',contextWindow:200000,maxTokens:16000}]}}){let revision=3,failed=false,keyWrites=0,defaultWrites=0;const ctx={settings:{writable:true,describe:()=>[{ns:'llm-pi-ai',revision,value:{providers:structuredClone(providers)}}],async mutate(ns,ops,expected){assert.equal(expected,revision);if(failed)throw Error('disk failure');for(const op of ops){if(op.path.length===3)providers[op.path[1]][op.path[2]]=structuredClone(op.value);else providers[op.path[1]]=structuredClone(op.value);}revision++;}},credentials:{describe:async()=>({configured:true,writable:true}),set:async()=>{keyWrites++;},unset:async()=>{}},agentDefaultModel:{currentSelection:()=>({provider:'team',model:'gpt-6.1-sol'}),saveSelection:async()=>{defaultWrites++;}}};return {ctx,service:new ModelConnections(ctx),get providers(){return providers;},get revision(){return revision;},get keyWrites(){return keyWrites;},get defaultWrites(){return defaultWrites;},fail(){failed=true;}};}
++test('official catalog covers exact main-provider models with source URL, timestamp and hash',()=>{assert(officialModelSpecs.models.length>=80);assert(new Set(officialModelSpecs.models.map(m=>m.provider)).size>=12);const seen=new Set();for(const row of officialModelSpecs.models){assert(!seen.has(row.id));seen.add(row.id);assert.match(row.source,/^https:\/\//);assert.match(row.sourceSHA256,/^[a-f0-9]{64}$/);assert.equal(row.checkedAt,'2026-11-17');assert(Number.isSafeInteger(row.contextWindow)&&row.contextWindow>0);if(row.maxOutputTokens!==null)assert(row.maxOutputTokens>0);}});
++test('OpenAI exact total/input/output limits come from the official page, not the old blanket 400K',()=>{const m=officialSpec('gpt-6.1-sol');assert.equal(m.contextWindow,1050000);assert.equal(m.maxInputTokens,922000);assert.equal(m.maxOutputTokens,128000);const source=fs.readFileSync('evidence/official-model-specs/sources/openai-gpt-6.1-sol.txt','utf8');for(const text of ['1,050,000 context window','Maximum input tokens: 922,000','128,000 max output tokens'])assert(source.includes(text));});
++test('explicit Gemini token counts and documented K/M labels are distinguished',()=>{assert.equal(officialSpec('gemini-4-carbon').contextWindow,1048576);assert.equal(officialSpec('gemini-4-carbon').maxOutputTokens,65536);assert.equal(officialSpec('glm-5.3').contextLabel,'1M');assert.equal(officialSpec('glm-5.3').precision,'documented-unit');assert.equal(officialSpec('deepseek-flash').maxOutputTokens,384000);});
++test('aliases and subscription entitlements are never guessed by stripping names',()=>{assert.equal(officialSpec('gpt-6.1-sol-uncensored'),null);assert.equal(officialSpec('deepseek-v4.1-flash-uncensored'),null);assert.equal(officialSpec('vendor/gpt-6.1-sol'),null);assert.equal(officialSpec('k3').conditional,true);assert.equal(officialSpec('grok-4.7').maxOutputTokens,null);});
++test('custom context and output budgets persist only below all applicable official caps',()=>{const next=configureModelSpec({id:'gpt-6.1-sol',contextWindow:900000,maxTokens:32000},{id:'gpt-6.1-sol',compat:{preserved:true}});assert.equal(next.contextWindow,900000);assert.equal(next.maxTokens,32000);assert.deepEqual(next.compat,{preserved:true});assert.throws(()=>configureModelSpec({id:'gpt-6.1-sol',contextWindow:1050001,maxTokens:128000}),e=>e.code==='MODEL_CONTEXT_RANGE');assert.throws(()=>configureModelSpec({id:'gpt-6.1-sol',maxTokens:128001}),e=>e.code==='MODEL_OUTPUT_RANGE');});
++test('maximum input remains enforced when a user lowers the output reservation',()=>{assert.throws(()=>configureModelSpec({id:'gpt-6.1-sol',contextWindow:1000000,maxTokens:16000}),e=>e.code==='MODEL_CONTEXT_RANGE');assert.equal(configureModelSpec({id:'gpt-6.1-sol',maxTokens:16000}).contextWindow,938000);assert.equal(modelSpecView({id:'gpt-6.1-sol',maxTokens:16000}).contextLimit,938000);});
++test('output reservation must leave room for input; unknown models can only reduce existing limits',()=>{assert.throws(()=>configureModelSpec({id:'glm-5.3',contextWindow:10000,maxTokens:10000}),e=>e.code==='MODEL_TOKEN_BUDGET');const old={id:'private-model',contextWindow:100000,maxTokens:10000};assert.equal(configureModelSpec({id:old.id,contextWindow:90000},old).contextWindow,90000);assert.throws(()=>configureModelSpec({id:old.id,contextWindow:100001},old),e=>e.code==='MODEL_SPEC_UNVERIFIED');assert.throws(()=>configureModelSpec({id:'new-private',contextWindow:1000}),e=>e.code==='MODEL_SPEC_UNVERIFIED');});
++test('official refresh fixes model-level values but preserves routes, secrets, metadata and output budgets',()=>{const f=fixture(),before=structuredClone(f.providers),r=refreshModelSpecs(f.providers);assert.equal(r.providers.team.models[0].contextWindow,1050000);assert.equal(r.providers.team.models[0].custom,'retained');assert.equal(r.providers.team.models[1].contextWindow,1000000);assert.equal(r.providers.team.models[1].maxTokens,16384);assert.equal(r.providers.team.models[2].maxTokens,16384);assert.deepEqual(r.providers.team.models[3],before.team.models[3]);for(const key of ['baseURL','api','apiKeyEnv','defaultContextWindow','defaultMaxTokens'])assert.equal(r.providers.team[key],before.team[key]);assert.equal(r.unknown.length,1);});
++test('conditional Kimi Coding entries keep existing budget rather than assuming a larger subscription',()=>{const p={code:{defaultContextWindow:128000,defaultMaxTokens:16384,models:[{id:'k3'}]}};const r=refreshModelSpecs(p);assert.equal(r.providers.code.models[0].contextWindow,128000);assert.equal(r.conditional.length,1);});
++test('refresh is atomic, CAS protected, idempotent after persistence and never touches credentials/default selection',async()=>{const f=fixture();const r=await f.service.execute({action:'refresh-specs',expectedRevision:3});assert.equal(r.specRefresh.changed,3);assert.equal(f.revision,4);assert.equal(f.keyWrites,0);assert.equal(f.defaultWrites,0);assert.equal(f.providers.team.models[0].contextWindow,1050000);await assert.rejects(f.service.execute({action:'refresh-specs',expectedRevision:3}),e=>e.status===409);const again=await f.service.execute({action:'refresh-specs',expectedRevision:4});assert.equal(again.specRefresh.changed,0);assert.equal(f.revision,4);});
++test('refresh write failure and read-only mode retain the original complete provider state',async()=>{for(const mode of ['failure','readonly']){const f=fixture(),before=structuredClone(f.providers);if(mode==='failure')f.fail();else f.ctx.settings.writable=false;await assert.rejects(f.service.execute({action:'refresh-specs',expectedRevision:3}));assert.deepEqual(f.providers,before);assert.equal(f.keyWrites,0);}});
++test('read exposes only safe numeric spec projection, never arbitrary model private metadata',async()=>{const f=fixture(),r=await f.service.read();const m=r.groups[0].models[0];assert.equal(m.contextWindow,400000);assert.equal(m.official.contextWindow,1050000);assert(!JSON.stringify(r).includes('SHARED'));assert(!('custom' in m));assert(r.specs.models.length>=80);});
++test('save validates range before staging a new credential and preserves an intentional smaller context',async()=>{const f=fixture();const base={action:'save',id:'team',expectedRevision:3,displayName:'Team',baseURL:'https://fixture.example/v1',api:'openai-responses',apiKey:'replacement',models:[{id:'gpt-6.1-sol',contextWindow:2000000,maxTokens:128000}]};await assert.rejects(f.service.execute(base),e=>e.code==='MODEL_CONTEXT_RANGE');assert.equal(f.keyWrites,0);await f.service.execute({...base,apiKey:undefined,models:[{id:'gpt-6.1-sol',contextWindow:600000,maxTokens:32000}]});assert.equal(f.providers.team.models[0].contextWindow,600000);assert.equal(f.providers.team.models[0].maxTokens,32000);});
++test('new known models receive verified metadata and package closure includes the catalog and resolver',()=>{const row=configureModelSpec({id:'glm-5.3'},undefined,{defaultContextWindow:128000,defaultMaxTokens:16384});assert.equal(row.contextWindow,1000000);assert.equal(row.maxTokens,16384);const pkg=JSON.parse(fs.readFileSync('plugins/naumi-enterprise/package.json'));assert(pkg.files.includes('model-specs.js'));assert(pkg.files.includes('official-model-specs.json'));});
++
++test('real pinned Harness adapter consumes the configured context and output budgets without inference',async()=>{
++ const {Context}=await import('@deepseek-ai/cordis');const pi=await import('@deepseek-ai/dsh-llm-pi-ai');let adapter;const ctx=new Context();
++ const provider=await ctx.plugin({apply(scope){scope.provide('llm',{registerConfigurableProviders:()=>({replace(){}}),registerModelDiscovery:()=>()=>{},registerAdapter:(_routes,value)=>{adapter=value;return {replace(){}};}});scope.provide('credentials',{resolve:async()=>({value:'fixture-key'})});}});
++ const model=configureModelSpec({id:'gpt-6.1-sol',contextWindow:600000,maxTokens:32000});const plugin=await ctx.plugin(pi,{providers:{verified:{api:'openai-responses',baseURL:'https://fixture.invalid/v1',models:[model]}}});
++ try{assert(adapter);const resolved=await adapter.resolveModel('verified','gpt-6.1-sol');assert.equal(resolved.context.contextWindow,600000);assert.equal(resolved.defaultMaxTokens,32000);}finally{await plugin.dispose();await provider.dispose();}
++});
