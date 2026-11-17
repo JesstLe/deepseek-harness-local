@@ -55,3 +55,7 @@ D1–D4共同属于第一优先级，顺序为依赖安排，不是把主动性�
 ## D3 自然目标提议进展
 
 复用原生会话来源校验、EmployeeWorkStore与GoalForm，新增employee_goal_propose，仅形成待确认记录。用户修改后确认或忽略；确认与正式goal同事务，支持CAS与原operationId重试，原提议/消息来源保留，不派单、不启用规则。该切片的源码/主线/隔离壳/运行加载分别以 [实现记录](../implementation/NATURAL_WORK_GOALS.md) 和evidence/natural-work-goals/VERIFICATION.txt为准。D3任务关联与固定文件版本、D2员工连续性、D5安装分发及真实供应商验收仍保留。
+
+## D2 连续性接续
+
+补齐旧风格/人设赋值的有效投影：当前档案替换旧值后，历史赋值保留审计但不继续作为active记忆注入新会话，全部状态中标为已替换。复用原员工/Session/记忆工具开展隔离新会话、双模型、宿主重启、人设候选确认、临时要求与遗忘验收，详见[连续性记录](../implementation/EMPLOYEE_CONTINUITY_D2.md)。历史工作区迁移、任务关联和最终安装交付仍分别验收。

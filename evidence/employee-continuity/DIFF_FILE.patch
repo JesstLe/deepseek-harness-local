@@ -1,0 +1,305 @@
+diff --git a/.gitattributes b/.gitattributes
+index bf674f8..d0b630a 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -303,3 +303,7 @@ plugins/naumi-enterprise/third-party/ds-bot-im/** -text
+ # Natural work goal proposal audit and source-copy rollback.
+ /evidence/natural-work-goals/** -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab,cr-at-eol
+ /evidence/natural-work-goals/ROLLBACK.sh text eol=lf
++
++# Employee continuity effective-memory projection evidence.
++/evidence/employee-continuity/** -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab,cr-at-eol
++/evidence/employee-continuity/ROLLBACK.sh text eol=lf
+diff --git a/docs/implementation/EMPLOYEE_CONTINUITY_D2.md b/docs/implementation/EMPLOYEE_CONTINUITY_D2.md
+new file mode 100644
+index 0000000..74e2642
+--- /dev/null
++++ b/docs/implementation/EMPLOYEE_CONTINUITY_D2.md
+@@ -0,0 +1,35 @@
++# 日常员工连续性 D2
++
++模块与职责：主线程负责当前员工的身份/记忆/人物设定/明确遗忘跨会话、模型和重启的隔离验收与实际缺口修复。基线def82a3（接续46a0dc6，仅其他线程Cloud47部署脚本增量），独立codex/employee-continuity-acceptance，E:/Workspace/naumi-employee-continuity。企业模块保持不变；其他线程继续负责历史工作区迁移/总览/固定文件版本。
++
++公共接口/依赖/状态归属：沿用BotDirectory、原SessionController、EmployeeService来源校验、EmployeeStore及原生工具/模型；不新增身份、记忆、任务或执行账本。只在原active记忆读取投影中过滤已被当前档案替换的历史赋值，原记录/版本/来源保留，不改schema、不迁移、不自动共享。
++
++调研与实际缺口：baseline真实EmployeeStore依次学习“以后回复先给结论”和“以后回复详细解释”，档案已为详细解释，但active检索和系统上下文仍同时包含两条相斥的字段赋值。旧人物设定候选确认后再被用户更改，也可能以active记忆重新注入旧值。基线原模块30/30并未覆盖这类冲突。
++
++本次实现：原memories/context投影以当前profile为权威；只有具有真实user来源和精确支持语法的旧字段赋值、或已确认但与当前profile不一致的人设候选被排除，手动普通偏好不受影响。全部状态查询保留原记录并标effective=false，原高级表单标签显示已替换。当前生效记录仍沿原scope/过期/排序/数量/转义规则；不改模型位置/权限/企业sync。
++
++文件归属：employee-store.js、assets/employee-center.js单标签；连续性测试/隔离真实模型runner/打包与精确加载脚本、本文和PRD证据。
++
++验证与证据层级：BASELINE.log 30/30；BASELINE_STALE_STYLE.log记录实际冲突，后续集中模块、实际原生宿主/模型与重启、导出与副本回滚分别留证。真实供应商凭据只读并仅通过子进程环境注入，不写入隔离home或证据。
++
++未完成与下一步：集中测试与隔离真实供应商连续性；不对3080业务会话发测试，不因观察超时重放模型；完成后普通合并/空闲加载，D2历史工作区与D3任务/交付及D5安装仍独立退出。
++
++集中验证进度：35/35模块（5个新连续性用例+原30）exit0；9路径源码包ZIP CRC/原始哈希、4原文件恢复/5新增删除、副本原30/30通过。全仓首轮因本工作树漏desktop/node_modules junction导致installer/electron依赖缺失，完整失败保留；已补与主仓库相同依赖junction后集中复测，不改业务代码或跳过测试。真实供应商隔离验收已有新会话检索/人设候选确认/双模型/同数据宿主重启记录；未结束前不计整条PASS。
++
++## 验收矩阵（已观察证据）
++| 要求 | 结果 | 证据 |
++| --- | --- | --- |
++| 新会话仍为同员工/记忆 | PASS；新Session绑定同Bot，未在新prompt泄露标记而检索并返回 | LIVE_VERIFICATION fresh_session_native_search |
++| 模型切换保持人设/记忆 | PASS；原生selectModel deepseek-flash→deepseek-v4-pro，工具回读确认人设与标记 | second_model_recall |
++| 宿主重启保持连续 | PASS；停止同隔离宿主后重开同home/port，export除exportedAt完全相等，同Session真实模型检索 | restart checks |
++| 人设随会话演变须确认 | PASS；真实profile_propose候选不注入，owner确认后新模型读取 | persona checks |
++| 临时要求不污染 | PASS；“这次回复简洁直接”前后export除时间完全一致 | temporary check |
++| 遗忘不再注入 | PASS；owner原子遗忘后全新Session检索不再返回随机标记 | forgotten check |
++| 员工私有记忆隔离 | PASS；独立Bot原生工具无前员工标记/人设 | other_employee check |
++| 不借权限/不改模型 | PASS；4个实际持久Session的12个原生权限/sandbox/approval事件，仅employee工具；同Bot3Session策略逐项一致 | NATIVE_POLICIES.json |
++| 旧风格/人设不再冲突 | PASS；35/35模块，旧记录未改/导出保留/当前字段权威/重开 | MODULE.log |
++| 历史物理工作区迁移 | 协作线程daily-five负责，不由上述记忆验收代替 | DAILY_FIVE_CLOSEOUT.md |
++
++真实链路：13检查、10完整原生回合、22供应商请求、2宿主启动；不是loopback假模型。只使用既有选定分组的deepseek-flash与同组已配置deepseek-v4-pro，密钥只在环境/内存，不写fixture；原3组配置/凭据文件hash保持，0次3080请求。企业状态不变。两个隔离宿主已结束，没有新建生产员工或修改业务会话。
++
++主线同步def82a3→b65d506→8734f5a，保留daily-five三模块/0.3.6候选版本，未写协作文件。整合后全仓738/738、exit0，原主线728/728通过也保留；35模块、30副本回滚均exit0。旧风格冲突baseline可复现；副本恢复旧行为仍保留两条style并通过原30测试，当前源码保持修复。功能切片1。
+diff --git a/docs/prd/DAILY_EMPLOYEE_PRIORITY.md b/docs/prd/DAILY_EMPLOYEE_PRIORITY.md
+index 470de7b..1d955cc 100644
+--- a/docs/prd/DAILY_EMPLOYEE_PRIORITY.md
++++ b/docs/prd/DAILY_EMPLOYEE_PRIORITY.md
+@@ -55,3 +55,7 @@ D1–D4共同属于第一优先级，顺序为依赖安排，不是把主动性
+ ## D3 自然目标提议进展
+ 
+ 复用原生会话来源校验、EmployeeWorkStore与GoalForm，新增employee_goal_propose，仅形成待确认记录。用户修改后确认或忽略；确认与正式goal同事务，支持CAS与原operationId重试，原提议/消息来源保留，不派单、不启用规则。该切片的源码/主线/隔离壳/运行加载分别以 [实现记录](../implementation/NATURAL_WORK_GOALS.md) 和evidence/natural-work-goals/VERIFICATION.txt为准。D3任务关联与固定文件版本、D2员工连续性、D5安装分发及真实供应商验收仍保留。
++
++## D2 连续性接续
++
++补齐旧风格/人设赋值的有效投影：当前档案替换旧值后，历史赋值保留审计但不继续作为active记忆注入新会话，全部状态中标为已替换。复用原员工/Session/记忆工具开展隔离新会话、双模型、宿主重启、人设候选确认、临时要求与遗忘验收，详见[连续性记录](../implementation/EMPLOYEE_CONTINUITY_D2.md)。历史工作区迁移、任务关联和最终安装交付仍分别验收。
+diff --git a/plugins/naumi-enterprise/assets/employee-center.js b/plugins/naumi-enterprise/assets/employee-center.js
+index 083240b..2a66646 100644
+--- a/plugins/naumi-enterprise/assets/employee-center.js
++++ b/plugins/naumi-enterprise/assets/employee-center.js
+@@ -106,7 +106,7 @@ export function createEmployeeCenter(React,{client=createEmployeeClient(),workOn
+           tab==='memories'&&h(Maintenance,{key:botId,botId,onChanged:refresh}),
+           tab==='profile'&&h(React.Fragment,null,h(Profile,{profile,busy:busy||!writeable,save:patch=>run({action:'profile_update',expectedRevision:profile.revision,patch},{close:false})}),h('div',{className:'emp-runtime-strip'},h('span',null,'执行器 ',badge(data.heartbeat.runtimeState==='healthy'&&!data.heartbeat.stale?'在线':'状态待核查',data.heartbeat.runtimeState==='healthy'?'green':'')),h('span',null,'运行会话 ',data.heartbeat.runningSessionCount??'—'),h('span',null,'最近采样 ',time(data.heartbeat.sampledAt)))),
+           tab==='memories'&&h(React.Fragment,null,h('div',{className:'emp-toolbar'},h('input',{'aria-label':'搜索记忆',placeholder:'搜索记忆',value:search,onChange:e=>{setSearch(e.target.value);setOffset(0);},maxLength:300}),h('select',{'aria-label':'记忆状态',value:status,onChange:e=>{setStatus(e.target.value);setOffset(0);}},Object.entries({...MEMORY_STATUS,all:'全部状态'}).map(([v,s])=>h('option',{key:v,value:v},s))),h('select',{'aria-label':'记忆类别',value:kind,onChange:e=>{setKind(e.target.value);setOffset(0);}},h('option',{value:'all'},'全部类别'),Object.entries(MEMORY_LABELS).map(([v,s])=>h('option',{key:v,value:v},s))),button('新增记忆',()=>setDialog({type:'memory'}),{className:'primary',disabled:busy||!writeable})),
+-            memories.length?h('div',{className:'emp-memory-list'},memories.map(m=>h('article',{key:m.id,className:'emp-memory-card','data-memory-id':m.id},h('div',{className:'emp-card-meta'},badge(MEMORY_LABELS[m.kind]),badge(MEMORY_STATUS[m.status],m.status==='candidate'?'amber':''),m.pinned&&badge('固定'),h('span',null,time(m.updatedAt))),h('p',{className:'emp-memory-text'},m.text),m.proposedProfile&&h('dl',{className:'emp-proposed'},Object.entries(m.proposedProfile).map(([k,v])=>h('div',{key:k},h('dt',null,PROFILE_LABELS[k]),h('dd',null,v)))),h('details',null,h('summary',null,'来源'),h('p',null,m.source.kind==='user'?'用户明确指令':m.source.kind==='proposal'?'会话候选':'手动管理'),m.source.quote&&h('blockquote',null,m.source.quote),m.source.sessionId&&h('code',null,m.source.sessionId),m.expiresAt&&h('p',null,'有效期：',time(m.expiresAt))),m.status!=='deleted'&&h('div',{className:'emp-card-actions'},m.status==='candidate'&&button('确认生效',()=>run({action:'memory_update',memoryId:m.id,expectedRevision:m.revision,profileRevision:profile.revision,patch:{status:'active'}}),{className:'primary',disabled:busy||!writeable}),m.status==='candidate'&&button('拒绝',()=>run({action:'memory_update',memoryId:m.id,expectedRevision:m.revision,patch:{status:'rejected'}}),{disabled:busy||!writeable}),button('编辑',()=>setDialog({type:'memory',memory:m}),{disabled:busy||!writeable}),button(m.pinned?'取消固定':'固定',()=>run({action:'memory_update',memoryId:m.id,expectedRevision:m.revision,patch:{pinned:!m.pinned}}),{disabled:busy||!writeable}),button('删除',()=>setDialog({type:'delete-memory',memory:m}),{className:'danger',disabled:busy||!writeable}))))):h('p',{className:'emp-empty'},'暂无匹配记忆'),
++            memories.length?h('div',{className:'emp-memory-list'},memories.map(m=>h('article',{key:m.id,className:'emp-memory-card','data-memory-id':m.id},h('div',{className:'emp-card-meta'},badge(MEMORY_LABELS[m.kind]),badge(m.effective===false?'已替换':MEMORY_STATUS[m.status],m.status==='candidate'?'amber':''),m.pinned&&badge('固定'),h('span',null,time(m.updatedAt))),h('p',{className:'emp-memory-text'},m.text),m.proposedProfile&&h('dl',{className:'emp-proposed'},Object.entries(m.proposedProfile).map(([k,v])=>h('div',{key:k},h('dt',null,PROFILE_LABELS[k]),h('dd',null,v)))),h('details',null,h('summary',null,'来源'),h('p',null,m.source.kind==='user'?'用户明确指令':m.source.kind==='proposal'?'会话候选':'手动管理'),m.source.quote&&h('blockquote',null,m.source.quote),m.source.sessionId&&h('code',null,m.source.sessionId),m.expiresAt&&h('p',null,'有效期：',time(m.expiresAt))),m.status!=='deleted'&&h('div',{className:'emp-card-actions'},m.status==='candidate'&&button('确认生效',()=>run({action:'memory_update',memoryId:m.id,expectedRevision:m.revision,profileRevision:profile.revision,patch:{status:'active'}}),{className:'primary',disabled:busy||!writeable}),m.status==='candidate'&&button('拒绝',()=>run({action:'memory_update',memoryId:m.id,expectedRevision:m.revision,patch:{status:'rejected'}}),{disabled:busy||!writeable}),button('编辑',()=>setDialog({type:'memory',memory:m}),{disabled:busy||!writeable}),button(m.pinned?'取消固定':'固定',()=>run({action:'memory_update',memoryId:m.id,expectedRevision:m.revision,patch:{pinned:!m.pinned}}),{disabled:busy||!writeable}),button('删除',()=>setDialog({type:'delete-memory',memory:m}),{className:'danger',disabled:busy||!writeable}))))):h('p',{className:'emp-empty'},'暂无匹配记忆'),
+             h('div',{className:'emp-pagination'},button('上一页',()=>setOffset(Math.max(0,offset-20)),{disabled:offset===0||busy}),h('span',null,'第 ',Math.floor(offset/20)+1,' 页'),button('下一页',()=>setOffset(offset+20),{disabled:memories.length<20||busy||offset>=4980}))),
+           tab==='work'&&(delivery?h('section',{className:'emp-delivery-detail'},h('div',{className:'emp-section-heading'},h('div',{className:'emp-inline'},button('← 返回工作列表',()=>setDelivery(null)),h('h2',null,delivery.title)),badge(DELIVERY_STATUS[delivery.businessStatus])),h('div',{className:'emp-version-list'},delivery.artifacts.map(a=>h('a',{key:a.id,href:client.artifactURL(botId,a.id),download:a.fileName,onClick:async e=>{e.preventDefault();try{const file=await client.artifact(botId,a.id);const hash=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(file.content)))].map(b=>b.toString(16).padStart(2,'0')).join('');if(hash!==a.sha256||file.sha256!==a.sha256)throw Error('WORK_ARTIFACT_CORRUPT');const url=URL.createObjectURL(new Blob([file.content],{type:'text/plain;charset=utf-8'})),link=document.createElement('a');link.href=url;link.download=a.fileName;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(error){setError(errorLabel(error));}}},'v',a.version,' · ',a.fileName,h('span',null,a.sha256.slice(0,12))))),
+             h('pre',{className:'emp-artifact-preview'},delivery.currentContent),h('section',{className:'emp-acceptance'},h('h3',null,'验收条件'),h('ol',null,delivery.acceptanceCriteria.map((c,i)=>h('li',{key:i},c)))),h('div',{className:'emp-card-actions'},['draft','changes_requested'].includes(delivery.businessStatus)&&button('保存新版本',()=>setDialog({type:'delivery',delivery}),{disabled:busy||!writeable}),delivery.businessStatus==='draft'&&button('提交审核',()=>review('submit'),{className:'primary',disabled:busy||!writeable}),delivery.businessStatus==='submitted'&&button('开始审核',()=>review('start_review'),{className:'primary',disabled:busy||!writeable}),['submitted','in_review'].includes(delivery.businessStatus)&&button('退回修改',()=>setDialog({type:'review',action:'request_changes'}),{disabled:busy||!writeable}),delivery.businessStatus==='in_review'&&button('验收通过',()=>setDialog({type:'review',action:'accept'}),{className:'primary',disabled:busy||!writeable}),!['accepted','cancelled'].includes(delivery.businessStatus)&&button('取消交付',()=>setDialog({type:'cancel-delivery'}),{className:'danger',disabled:busy||!writeable})),
+diff --git a/plugins/naumi-enterprise/employee-store.js b/plugins/naumi-enterprise/employee-store.js
+index 9ed8fe1..a7df881 100644
+--- a/plugins/naumi-enterprise/employee-store.js
++++ b/plugins/naumi-enterprise/employee-store.js
+@@ -142,11 +142,20 @@ export class EmployeeStore{
+       return {learned:true,memory,profile:this.profile(botId)};
+     });
+   }
++  memoryEffective(memory,profile){
++    // Old explicit field assignments are history, not competing current instructions.
++    if(memory.proposedProfile&&Object.entries(memory.proposedProfile).some(([field,value])=>profile[field]!==value))return false;
++    if(memory.kind==='preference'&&memory.source?.kind==='user'){
++      const style=memory.source.quote?.match(/^以后回复[：:，,\s]*(先给结论|简洁直接|详细解释|少用术语)[。！!]?$/u);
++      if(style&&memory.text===style[1]&&profile.communicationStyle!==memory.text)return false;
++    }
++    return true;
++  }
+   memories(botId,{query='',status='active',kind='all',offset=0,limit=20}={}){
+     z.string().max(300).parse(query);z.enum(['active','candidate','rejected','deleted','all']).parse(status);z.enum([...memoryKinds,'all']).parse(kind);z.number().int().min(0).max(5000).parse(offset);z.number().int().min(1).max(100).parse(limit);
+-    const q=query.trim().toLocaleLowerCase(),tokens=q.split(/\s+/u).filter(Boolean),time=this.clock().getTime();
+-    return this.allMemories(botId).filter(m=>(kind==='all'||m.kind===kind)&&(status==='all'||m.status===status)&&(status!=='active'||!m.expiresAt||Date.parse(m.expiresAt)>time))
+-      .map(m=>({...m,_score:q?tokens.reduce((n,t)=>n+(m.text.toLocaleLowerCase().includes(t)?1:0),0):1})).filter(m=>m._score>0)
++    const q=query.trim().toLocaleLowerCase(),tokens=q.split(/\s+/u).filter(Boolean),time=this.clock().getTime(),profile=this.profile(botId);
++    return this.allMemories(botId).filter(m=>(kind==='all'||m.kind===kind)&&(status==='all'||m.status===status)&&(status!=='active'||((!m.expiresAt||Date.parse(m.expiresAt)>time)&&this.memoryEffective(m,profile))))
++      .map(m=>({...m,...m.status==='active'&&!this.memoryEffective(m,profile)?{effective:false}:{},_score:q?tokens.reduce((n,t)=>n+(m.text.toLocaleLowerCase().includes(t)?1:0),0):1})).filter(m=>m._score>0)
+       .sort((a,b)=>Number(b.pinned)-Number(a.pinned)||b._score-a._score||b.updatedAt.localeCompare(a.updatedAt)||a.id.localeCompare(b.id)).slice(offset,offset+limit).map(({_score,...m})=>m);
+   }
+   history(botId,{after=0,limit=50}={}){
+diff --git a/scripts/deploy-employee-continuity.mjs b/scripts/deploy-employee-continuity.mjs
+new file mode 100644
+index 0000000..0748438
+--- /dev/null
++++ b/scripts/deploy-employee-continuity.mjs
+@@ -0,0 +1,43 @@
++// Narrow main-only runtime delta. No account enrollment, provider calls, or task writes.
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';import {DatabaseSync} from 'node:sqlite';import {botLiveApi} from './bot-live-api.mjs';
++const root=process.cwd(),mode=process.argv[2]??'prepare',runtime=path.resolve(process.argv[3]??root),baseline='def82a3d7c0b7a573daa82f16b6e1723b16961d5';
++const installed=path.join(runtime,'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise'),backup=path.join(runtime,'runtime/employee-continuity-load-'+randomUUID()),out=path.join(root,'evidence/employee-continuity');
++const files=['employee-store.js','assets/employee-center.js'];
++const read=p=>fs.readFileSync(p),sha=v=>createHash('sha256').update(v).digest('hex'),norm=v=>v.toString().replaceAll('\r\n','\n');
++const inventory=()=>Object.fromEntries(fs.readdirSync(installed,{recursive:true}).filter(f=>fs.statSync(path.join(installed,f)).isFile()).map(f=>[f.replaceAll('\\','/'),sha(read(path.join(installed,f)))]));
++const sourceCommit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
++fs.mkdirSync(backup,{recursive:true});fs.mkdirSync(out,{recursive:true});const original=inventory(),rows=[];
++for(const file of files){const target=path.join(installed,file),before=fs.existsSync(target)?read(target):null,source=read(path.join(root,'plugins/naumi-enterprise',file));let after=source;assert.equal(norm(source),norm(execFileSync('git',['show',sourceCommit+':plugins/naumi-enterprise/'+file])),'SOURCE_NOT_COMMITTED '+file);
++ assert(before,'RUNTIME_FILE_MISSING '+file);assert.equal(norm(before),norm(execFileSync('git',['show',baseline+':plugins/naumi-enterprise/'+file])),'RUNTIME_DRIFT '+file);
++ for(const[kind,bytes]of[['before',before],['after',after]])if(bytes){const p=path.join(backup,kind,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);}
++ rows.push({file,beforeSHA256:before?sha(before):null,afterSHA256:sha(after)});
++}
++fs.writeFileSync(path.join(backup,'manifest.json'),JSON.stringify({baseline,rows},null,2));
++if(mode==='prepare'){console.log('EMPLOYEE_CONTINUITY_PREPARED files=2 host_client=UNCHANGED backup='+backup);process.exit(0);}assert.equal(mode,'apply');
++assert.equal(execFileSync('git',['branch','--show-current'],{encoding:'utf8'}).trim(),'main');const unrelatedTracked=execFileSync('git',['diff','HEAD','--name-only','-z'],{encoding:'utf8'}).split('\0').filter(Boolean);assert(unrelatedTracked.every(f=>!files.map(p=>'plugins/naumi-enterprise/'+p).includes(f)),'TASK_SOURCE_DIRTY');
++const untracked=execFileSync('git',['ls-files','--others','--exclude-standard','-z'],{encoding:'utf8'}).split('\0').filter(f=>f&&!f.startsWith('evidence/employee-continuity/')),untrackedHashes=Object.fromEntries(untracked.map(f=>[f,sha(read(path.join(root,f)))]));
++const api=await botLiveApi(runtime),sessions=await api.rpc('session/list',{_request:{}}),bots=await api.json('/naumi/bots'),tasks=await api.json('/naumi/bot-tasks'),models=sha(JSON.stringify(await api.json('/naumi/model-connections')));
++assert(!sessions.items.some(s=>s.running),'RUNNING_SESSIONS');assert(!tasks.tasks.some(t=>['queued','starting','running','waiting'].includes(t.status)),'ACTIVE_TASKS');
++const groupRows=()=>{const db=new DatabaseSync(path.join(runtime,'.dsh/naumi/bot-groups.sqlite'),{readOnly:true});try{const rows=Object.fromEntries(['rooms','members','posts','replies','post_context','room_name_operations'].map(t=>[t,db.prepare('SELECT * FROM '+t+' ORDER BY rowid').all()]));assert(!rows.replies.some(r=>['queued','starting','sent'].includes(r.state)),'GROUP_BUSY');return sha(JSON.stringify(rows));}finally{db.close();}};
++const groupsBefore=groupRows(),employees=async api=>Object.fromEntries(await Promise.all(bots.bots.map(async b=>{const {exportedAt,...v}=await api.json('/naumi/employees?view=export&botId='+encodeURIComponent(b.id));return[b.id,sha(JSON.stringify(v))];}))),employeesBefore=await employees(api);
++const protectedPaths=['.dsh/.credentials.yaml','.dsh/cordis.patch.yml','.dsh/profiles/web/package.json','.dsh/profiles/web/cordis.yml','.dsh/profiles/web/cordis.patch.yml','.dsh/naumi/bots.json','.dsh/naumi/bot-tasks.json','config/local.json','node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'];
++for(const f of fs.readdirSync(path.join(runtime,'.dsh/sessions'),{recursive:true}))if(path.basename(f)==='session.v4.jsonl.zstd')protectedPaths.push('.dsh/sessions/'+f);
++const protectedBefore=Object.fromEntries(protectedPaths.filter(f=>fs.existsSync(path.join(runtime,f))).map(f=>[f,sha(read(path.join(runtime,f)))]));
++const shell=name=>{const r=spawnSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-File',path.join(runtime,name)],{windowsHide:true,stdio:'ignore',timeout:150000});assert.equal(r.status,0,'SERVICE_COMMAND '+name);};
++const atomic=(p,bytes)=>{fs.mkdirSync(path.dirname(p),{recursive:true});const tmp=p+'.'+randomUUID()+'.tmp';fs.writeFileSync(tmp,bytes);fs.renameSync(tmp,p);};let complete=false;
++try{
++ shell('Stop-Naumi.ps1');for(const[f,h]of Object.entries(protectedBefore))assert.equal(sha(read(path.join(runtime,f))),h,'PRELOAD_DATA_DRIFT '+f);
++ for(const r of rows){const p=path.join(installed,r.file);if(r.beforeSHA256)assert.equal(sha(read(p)),r.beforeSHA256,'PRELOAD_RUNTIME_DRIFT');else assert(!fs.existsSync(p));}
++ for(const r of rows)atomic(path.join(installed,r.file),read(path.join(backup,'after',r.file)));shell('Start-Naumi.ps1');
++ const loaded=await botLiveApi(runtime),afterSessions=await loaded.rpc('session/list',{_request:{}});assert(!afterSessions.items.some(s=>s.running));assert.equal(afterSessions.items.length,sessions.items.length);
++ for(const f of ['employee-center.js'])assert.equal((await loaded.request('/naumi/assets/'+f)).status,200);const workResponse=await loaded.request('/naumi/employee-work?botId='+encodeURIComponent(bots.bots[0].id));assert.equal(workResponse.status,200);assert.equal(workResponse.headers.get('x-naumi-goal-proposals'),'1');const centerSource=await (await loaded.request('/naumi/assets/employee-center.js')).text();assert(centerSource.includes("m.effective===false?'已替换'"));for(const bot of bots.bots){const v=await loaded.json('/naumi/employee-work?botId='+encodeURIComponent(bot.id));assert(Array.isArray(v.goalProposals),'PROPOSAL_READER_MISSING');}
++ assert.deepEqual(await loaded.json('/naumi/bots'),bots);assert.deepEqual(await loaded.json('/naumi/bot-tasks'),tasks);assert.equal(sha(JSON.stringify(await loaded.json('/naumi/model-connections'))),models);assert.deepEqual(await employees(loaded),employeesBefore);assert.equal(groupRows(),groupsBefore);
++ const after=inventory();for(const r of rows)assert.equal(after[r.file],r.afterSHA256);for(const[f,h]of Object.entries(original))if(!files.includes(f))assert.equal(after[f],h,'UNRELATED_RUNTIME '+f);
++ for(const[f,h]of Object.entries(protectedBefore))assert.equal(sha(read(path.join(runtime,f))),h,'PROTECTED_DATA '+f);for(const[f,h]of Object.entries(untrackedHashes))assert.equal(sha(read(path.join(root,f))),h,'OTHER_EVIDENCE_CHANGED '+f);
++ fs.writeFileSync(path.join(out,'DEPLOYMENT.json'),JSON.stringify({status:'PASS',sourceCommit,files:rows,backup,http:200,sessions:afterSessions.items.length,running:0,bots:bots.bots.length,revision:bots.revision,automaticGoalConfirmations:0,enterpriseConfigurationChanges:0,modelCalls:0,modelGroupsUnchanged:true,employeeExportsUnchanged:true,employeeExportComparison:"all_fields_except_exportedAt",taskAndGroupRowsUnchanged:true,protectedFilesUnchanged:Object.keys(protectedBefore).length,unrelatedRuntimeUnchanged:Object.keys(original).filter(f=>!files.includes(f)).length,otherUntrackedFilesPreserved:untracked.length,unrelatedTrackedEditsNotTouched:unrelatedTracked,nativeComposerUnchanged:true,packageChange:"UNCHANGED"},null,2)+'\n');
++ complete=true;console.log('EMPLOYEE_CONTINUITY_LOADED files=2 http=200 running=0 models=UNCHANGED employees=UNCHANGED tasks=UNCHANGED groups=UNCHANGED account_data=UNCHANGED model_calls=0');
++}finally{if(!complete){
++ const dataFile=path.join(runtime,'.dsh/naumi/bots.json'),expected=protectedBefore['.dsh/naumi/bots.json'];
++ if(expected&&sha(read(dataFile))!==expected)console.error('EMPLOYEE_CONTINUITY_LOAD_INCOMPLETE new_directory_metadata=RETAINED compatible_reader=RETAINED backup='+backup);
++ else{try{shell('Stop-Naumi.ps1');}catch{}for(const r of rows){const p=path.join(installed,r.file);if(r.beforeSHA256)atomic(p,read(path.join(backup,'before',r.file)));else if(fs.existsSync(p))fs.unlinkSync(p);}shell('Start-Naumi.ps1');console.error('EMPLOYEE_CONTINUITY_LOAD_FAILED runtime=RESTORED backup='+backup);}
++}}
+diff --git a/scripts/package-employee-continuity.mjs b/scripts/package-employee-continuity.mjs
+new file mode 100644
+index 0000000..f7b035d
+--- /dev/null
++++ b/scripts/package-employee-continuity.mjs
+@@ -0,0 +1,11 @@
++import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';
++const root=process.cwd(),out=path.join(root,'evidence/employee-continuity'),baseline='def82a3d7c0b7a573daa82f16b6e1723b16961d5';
++const paths=['.gitattributes','docs/implementation/EMPLOYEE_CONTINUITY_D2.md','docs/prd/DAILY_EMPLOYEE_PRIORITY.md','plugins/naumi-enterprise/employee-store.js','plugins/naumi-enterprise/assets/employee-center.js','tests/naumi-employee-continuity.test.mjs','scripts/verify-employee-continuity-live.mjs','scripts/package-employee-continuity.mjs','scripts/deploy-employee-continuity.mjs'];
++const hash=b=>createHash('sha256').update(b).digest('hex'),manifest={baseline,entries:[]};
++for(const file of paths){const original=path.join(out,'original',file);let before=null;if(fs.existsSync(original))before=fs.readFileSync(original);else{try{before=execFileSync('git',['show',baseline+':'+file],{stdio:['ignore','pipe','ignore']});}catch{}if(before){fs.mkdirSync(path.dirname(original),{recursive:true});fs.writeFileSync(original,before);}}const bytes=fs.readFileSync(path.join(root,file));manifest.entries.push({path:file,original:before?hash(before):null,modified:hash(bytes)});}
++fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
++fs.writeFileSync(path.join(out,'ROLLBACK.sh'),`#!/usr/bin/env bash\nset -euo pipefail\nHERE="$(cd "$(dirname "$0")" && pwd)"\nnode - "$1" "$HERE" <<'NODE'\nconst fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');const target=path.resolve(process.argv[2]),out=path.resolve(process.argv[3]);if(!fs.existsSync(path.join(target,'.naumi-employee-continuity-rollback-copy')))throw Error('MARKED_COPY_REQUIRED');if(target===path.resolve(out,'../..'))throw Error('SOURCE_TARGET_REJECTED');const m=JSON.parse(fs.readFileSync(path.join(out,'manifest.json'))),hash=b=>crypto.createHash('sha256').update(b).digest('hex');for(const e of m.entries){const file=path.resolve(target,e.path);if(!file.startsWith(target+path.sep))throw Error('INVALID_TARGET');if(fs.existsSync(file)&&hash(fs.readFileSync(file))!==e.modified)throw Error('COPY_CHANGED '+e.path);if(e.original){const bytes=fs.readFileSync(path.join(out,'original',e.path));if(hash(bytes)!==e.original)throw Error('ORIGINAL_CHANGED');fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,bytes);}else if(fs.existsSync(file))fs.unlinkSync(file);}for(const e of m.entries){const file=path.join(target,e.path);if(e.original?hash(fs.readFileSync(file))!==e.original:fs.existsSync(file))throw Error('RESTORE_FAILED');}console.log('ROLLBACK_SOURCE originals='+m.entries.filter(e=>e.original).length+' new_removed='+m.entries.filter(e=>!e.original).length+' hashes=PASS live_data=UNTOUCHED');\nNODE\n`);
++const patch=execFileSync('git',['diff',baseline,'--binary','--',...paths]);fs.writeFileSync(path.join(out,'DIFF_FILE.patch'),patch);if(!patch.length)throw Error('NO_TASK_CHANGES');
++execFileSync('python',['-X','utf8','-c',"import json,zipfile,pathlib; r=pathlib.Path('.'); o=r/'evidence/employee-continuity'; m=json.loads((o/'manifest.json').read_text()); z=zipfile.ZipFile(o/'MODIFIED_FILE.zip','w',zipfile.ZIP_DEFLATED); [z.write(r/e['path'],e['path']) for e in m['entries']]; z.close(); z=zipfile.ZipFile(o/'MODIFIED_FILE.zip'); assert z.testzip() is None; print('ZIP entries='+str(len(z.namelist()))+' CRC=PASS')"],{stdio:'inherit'});
++if(process.argv.includes('--rollback-test')){const copy=path.join(root,'runtime/employee-continuity-source-rollback-2');if(fs.existsSync(copy))throw Error('COPY_ALREADY_EXISTS');fs.mkdirSync(copy,{recursive:true});fs.writeFileSync(path.join(copy,'.naumi-employee-continuity-rollback-copy'),'source-only');for(const dir of ['plugins','tests'])fs.cpSync(path.join(root,dir),path.join(copy,dir),{recursive:true});fs.copyFileSync(path.join(root,'package.json'),path.join(copy,'package.json'));for(const e of manifest.entries){const dest=path.join(copy,e.path);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(path.join(root,e.path),dest);}fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');fs.mkdirSync(path.join(copy,'desktop'));fs.cpSync(path.join(root,'services'),path.join(copy,'services'),{recursive:true});for(const dir of ['app','installer','scripts'])fs.cpSync(path.join(root,'desktop',dir),path.join(copy,'desktop',dir),{recursive:true});fs.symlinkSync(path.join(root,'desktop/node_modules'),path.join(copy,'desktop/node_modules'),'junction');const r=spawnSync('D:/DEV/Git/bin/bash.exe',[path.join(out,'ROLLBACK.sh'),copy],{encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK.log'),r.stdout+r.stderr);if(r.status!==0)throw Error('ROLLBACK_FAILED '+r.stdout+r.stderr);console.log(r.stdout.trim());const t=spawnSync(process.execPath,['--test','tests/naumi-employee-store.test.mjs','tests/naumi-employees.test.mjs','tests/naumi-employee-experience.test.mjs'],{cwd:copy,encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK_TESTS.log'),t.stdout+t.stderr);if(t.status!==0)throw Error('ROLLBACK_TESTS_FAILED '+t.stdout);console.log('ROLLBACK tests=30 pass=30 fail=0 exit=0');const legacy=spawnSync(process.execPath,['--input-type=module','-e',"import assert from 'node:assert/strict';import {EmployeeStore} from './plugins/naumi-enterprise/employee-store.js';const s=new EmployeeStore(':memory:');s.learnExplicit('b','a','以后回复先给结论','one');s.learnExplicit('b','b','以后回复详细解释','two');assert.equal(s.memories('b').length,2);assert.equal(s.profile('b').communicationStyle,'详细解释');s.close();console.log('ROLLBACK_BEHAVIOR legacy_styles=2 current_style=详细解释 originals=PRESERVED');"],{cwd:copy,encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK_BEHAVIOR.log'),legacy.stdout+legacy.stderr);if(legacy.status!==0)throw Error('ROLLBACK_BEHAVIOR_FAILED');console.log(legacy.stdout.trim());}
++for(const e of manifest.entries)if(hash(fs.readFileSync(path.join(root,e.path)))!==e.modified)throw Error('MODIFIED_SOURCE_CHANGED');console.log('ARTIFACTS paths='+paths.length+' modified=RETAINED enterprise=UNCHANGED');
+diff --git a/scripts/verify-employee-continuity-live.mjs b/scripts/verify-employee-continuity-live.mjs
+new file mode 100644
+index 0000000..c89dc70
+--- /dev/null
++++ b/scripts/verify-employee-continuity-live.mjs
+@@ -0,0 +1,77 @@
++// Explicit --live only. Own random-port Harness/home/Bots; no actual3080 writes.
++import fs from 'node:fs';
++import path from 'node:path';
++import http from 'node:http';
++import assert from 'node:assert/strict';
++import {randomUUID,createHash} from 'node:crypto';
++import {spawn,execFileSync} from 'node:child_process';
++import {parse,stringify} from 'yaml';
++
++const root=process.cwd(),runtime=path.resolve(process.argv[3]??'E:/Workspace/naumi-desktop'),out=path.join(root,'evidence/employee-continuity');
++assert(['--prepare','--live'].includes(process.argv[2]),'EXPLICIT_PREPARE_OR_LIVE_REQUIRED');
++const paths=['.dsh/cordis.patch.yml','.dsh/profiles/web/cordis.patch.yml','.dsh/.credentials.yaml'],raw=paths.map(p=>fs.readFileSync(path.join(runtime,p))),hash=b=>createHash('sha256').update(b).digest('hex');
++const config=parse(raw[1].toString()),selection=config.find(c=>c.id==='agent-default-model')?.config,providers=config.find(c=>c.id==='llm-pi-ai')?.config.providers;
++assert(selection?.provider&&selection.model,'EXISTING_SELECTION_MISSING');const provider=providers[selection.provider];assert(provider?.apiKeyEnv&&provider.baseURL,'EXISTING_PROVIDER_MISSING');
++const key=parse(raw[2].toString()).refs?.[provider.apiKeyEnv];assert(typeof key==='string'&&key.length>10,'EXISTING_CREDENTIAL_MISSING');
++const models=[selection.model,'deepseek-v4-pro'];assert(models.every(id=>provider.models.some(m=>m.id===id)),'EXPLICIT_SECOND_MODEL_NOT_IN_SELECTED_GROUP');
++fs.mkdirSync(out,{recursive:true});if(process.argv[2]==='--prepare'){console.log('CONTINUITY_PREPARED existing_provider=1 selected_model='+models[0]+' second_model='+models[1]+' credential_disk_writes=0 inference=0');process.exit(0);}
++const fixture=path.join(root,'runtime/employee-continuity-'+randomUUID()),home=path.join(fixture,'home'),profile=path.join(home,'profiles/web'),workspacePath=path.join(fixture,'workspace');fs.mkdirSync(path.join(profile,'node_modules/@naumi'),{recursive:true});fs.mkdirSync(workspacePath);
++fs.writeFileSync(path.join(fixture,'.continuity-fixture'),'isolated-only');
++for(const [name,folder]of [['dsh-enterprise','naumi-enterprise'],['dsh-ui-layout','naumi-ui-layout'],['dsh-sidebar-browser','naumi-sidebar-browser']])fs.symlinkSync(path.join(root,'plugins',folder),path.join(profile,'node_modules/@naumi',name),'junction');fs.symlinkSync(path.join(root,'node_modules/@deepseek-ai'),path.join(profile,'node_modules/@deepseek-ai'),'junction');
++fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'naumi-continuity-fixture',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}}));
++let supplierRequests=0;
++const upstream=http.createServer(async(req,res)=>{
++ try{assert(supplierRequests<60,'SUPPLIER_REQUEST_CEILING');supplierRequests++;let raw='';for await(const b of req)raw+=b;const body=JSON.parse(raw);assert(models.includes(body.model),'UNEXPECTED_MODEL');assert(body.max_tokens<=1024,'OUTPUT_CEILING');
++ const target=new URL(req.url,new URL(provider.baseURL).origin),headers=Object.fromEntries(Object.entries(req.headers).filter(([k])=>!['host','connection','content-length','accept-encoding'].includes(k)));
++ const r=await fetch(target,{method:'POST',headers,body:raw,signal:AbortSignal.timeout(120000)});res.writeHead(r.status,{'Content-Type':r.headers.get('content-type')??'application/json'});for await(const b of r.body)res.write(b);res.end();
++ }catch(e){res.writeHead(503,{'Content-Type':'application/json'}).end(JSON.stringify({error:{type:'continuity_bound',message:'isolated inference bound or upstream unavailable'}}));}
++});await new Promise(r=>upstream.listen(0,'127.0.0.1',r));
++const providerId='continuity-existing',ref='NAUMI_CONTINUITY_EXISTING_API_KEY',modelConfig={displayName:'连续性隔离验收',api:provider.api,baseURL:'http://127.0.0.1:'+upstream.address().port+new URL(provider.baseURL).pathname,apiKeyEnv:ref,models:provider.models.filter(m=>models.includes(m.id)).map(m=>({...m,maxTokens:1024})),defaultMaxTokens:1024};
++fs.writeFileSync(path.join(profile,'cordis.patch.yml'),stringify([{id:'agent-default-model',config:{provider:providerId,model:models[0]}},{id:'llm-pi-ai',config:{providers:{[providerId]:modelConfig}}}]));
++const sock=http.createServer();await new Promise(r=>sock.listen(0,'127.0.0.1',r));const port=sock.address().port;assert.notEqual(port,3080);await new Promise(r=>sock.close(r));const base='http://127.0.0.1:'+port;
++const receipt={status:'RUNNING',sourceCommit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),fixture,home,port,providerGroup:'existing selected connection',models,checks:[],turns:[],realSupplier:true,real3080Requests:0,credentialDiskWrites:0,configWrites:0,enterpriseChanges:0},save=()=>fs.writeFileSync(path.join(out,'LIVE_VERIFICATION.json'),JSON.stringify(receipt,null,2)+'\n');
++let child,output='',cookie='',boots=0;const check=(name,value)=>{assert(value,name);receipt.checks.push(name);save();console.log('CONTINUITY_LIVE_PASS '+name);};
++const scrub=s=>s.replaceAll(key,'REDACTED').replace(/token=[A-Za-z0-9_~.%-]+/g,'token=REDACTED');
++async function stop(){if(!child)return;if(child.exitCode===null&&child.signalCode===null){child.kill('SIGTERM');await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('OWN_HOST_STOP_TIMEOUT')),30000);child.once('close',()=>{clearTimeout(timer);resolve();});});}fs.writeFileSync(path.join(out,'HOST_'+boots+'.log'),scrub(output));child=null;}
++async function start(){
++ output='';child=spawn(process.execPath,[path.join(root,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'web','--host','127.0.0.1','--port',String(port),'--no-open'],{cwd:root,env:{...process.env,DSH_HOME:home,DSH_TELEMETRY_MODE:'DISABLED',[ref]:key},windowsHide:true});boots++;child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);
++ let launch;for(let i=0;i<300;i++){launch=output.match(new RegExp(base.replaceAll('.','\\.')+'/?\\?token=[A-Za-z0-9_~.%-]+'))?.[0];if(launch)break;assert(child.exitCode===null&&child.signalCode===null,'OWN_HOST_EXITED');await new Promise(r=>setTimeout(r,300));}assert(launch,'OWN_HOST_START_TIMEOUT');
++ const r=await fetch(launch,{redirect:'manual',signal:AbortSignal.timeout(10000)});assert.equal(r.status,303);cookie=r.headers.getSetCookie().map(v=>v.split(';')[0]).join('; ');assert(cookie);
++}
++async function request(url,body,header){const r=await fetch(base+url,{...body?{method:'POST',body:JSON.stringify(body)}:{},headers:{cookie,origin:base,'Content-Type':'application/json',...header?{[header]:'1'}:{}},signal:AbortSignal.timeout(45000)}),v=await r.json();assert(r.ok,scrub(JSON.stringify(v)));return v;}
++async function rpc(method,args){const v=await request('/api/'+method,{type:'client-request',rpcId:randomUUID(),method,payload:{args}});assert(v.result?.ok,scrub(JSON.stringify(v)));return v.result.value;}
++const employee=(botId,view='profile')=>request('/naumi/employees?'+new URLSearchParams({botId,view}));
++const owner=(botId,body)=>request('/naumi/employees',{botId,operationId:randomUUID(),...body},'x-naumi-employees');
++const events=async sessionId=>(await rpc('session/events',{request:{address:{kind:'session',sessionId},maxMessages:100}})).records.map(r=>r.event);
++async function turn(sessionId,text,label){
++ const before=await rpc('session/state',{request:{sessionId}});assert(!before.running,'OWN_SESSION_ALREADY_RUNNING');
++ await rpc('session/prompt',{request:{sessionId,requestId:randomUUID(),mode:'queue',content:[{type:'text',text}]}});
++ let last;for(let i=0;i<6;i++){last=await rpc('session/wait',{request:{sessionId,afterSeq:before.cursor,timeoutMs:30000,maxMessages:100}});if(last.reason!=='timeout')break;assert(last.state.running||last.state.queue?.length,'OBSERVED_IDLE_WITHOUT_TERMINAL_RECEIPT');}
++ assert.equal(last.reason,'idle',label+' '+last.reason);const rows=(await events(sessionId)).filter(e=>e.seq>before.cursor),end=rows.findLast(e=>e.type==='turn/end');assert(end,label+' NO_TERMINAL_TURN');assert.equal(end.data.reason.kind,'completed',label+' '+JSON.stringify(end.data.reason));
++ const blocks=rows.filter(e=>e.type==='assistant/message').flatMap(e=>e.data.message.content),tools=blocks.filter(b=>b.type==='tool-call').map(b=>b.name),answer=blocks.filter(b=>b.type==='text').map(b=>b.text).join('\n');
++ receipt.turns.push({label,sessionId,modelRequests:rows.filter(e=>e.type==='assistant/message').length,toolCalls:tools,completed:true});save();return {answer,tools,rows};
++}
++async function newChat(bot){const {sessionId}=await rpc('session/create',{request:{cwd:bot.cwd}}),latest=(await request('/naumi/bots')).bots.find(b=>b.id===bot.id);assert(!latest.sessionIds.includes(sessionId),'NEW_CHAT_REUSED_OLD_SESSION');await request('/naumi/bots',{action:'bind',botId:bot.id,sessionId,expectedRevision:latest.revision},'x-naumi-bots');return sessionId;}
++try{
++ await start();const workspace=await rpc('workspace/create',{request:{path:workspacePath}}),bot=await request('/naumi/bots',{action:'create-primary',requestId:randomUUID(),expectedRevision:0,name:'连续性隔离员工',workspaceId:workspace.workspace.workspaceId},'x-naumi-bots');receipt.botId=bot.id;save();
++ const marker='CONTINUITY_'+randomUUID().slice(0,8),memoryText='验收项目标记为'+marker;
++ await turn(bot.homeSessionId,'记住我的偏好：'+memoryText,'learn_explicit_marker');
++ await turn(bot.homeSessionId,'以后回复先给结论','learn_initial_style');await turn(bot.homeSessionId,'以后回复详细解释','replace_style');
++ let memories=await employee(bot.id,'memories');check('native_explicit_learning_has_verified_source',memories.some(m=>m.text===memoryText&&m.source.kind==='user'));check('superseded_style_is_not_retrieved',(await employee(bot.id)).communicationStyle==='详细解释'&&!memories.some(m=>m.text==='先给结论'));
++ const chat=await newChat(bot);receipt.newChat=chat;const recalled=await turn(chat,'请只用employee_profile和employee_memory_search查询已有信息。搜索“验收项目标记”，回复查到的完整原文及当前沟通风格；不要创建目标、记录新记忆或使用文件和命令。','fresh_chat_recall');
++ check('fresh_session_native_search_recalls_unprompted_marker',recalled.tools.includes('employee_memory_search')&&recalled.answer.includes(marker));
++ await turn(chat,'希望你的人物设定为耐心的资料研究员。请先用employee_profile取得当前这条真实消息的sourceMessageId和quote，再调用employee_profile_propose，patch只含persona=耐心的资料研究员，operationId用稳定标识。它仅为候选，等待我确认，不要直接生效或创建目标。','propose_persona');
++ const candidates=await request('/naumi/employees?'+new URLSearchParams({botId:bot.id,view:'memories',status:'candidate'})),candidate=candidates.find(m=>m.proposedProfile?.persona==='耐心的资料研究员');check('persona_candidate_not_active_without_owner',!!candidate&&(await employee(bot.id)).persona==='');
++ await owner(bot.id,{action:'memory_update',memoryId:candidate.id,expectedRevision:candidate.revision,profileRevision:(await employee(bot.id)).revision,patch:{status:'active'}});
++ const selected=await rpc('session/selectModel',{request:{sessionId:chat,provider:providerId,model:models[1]}});check('native_model_switch_exact_selection',selected.selected.model===models[1]);
++ const switched=await turn(chat,'请只用employee_profile和employee_memory_search，报告当前保存的人物设定，并搜索“验收项目标记”报告完整原文。不要修改设定、记忆或目标。','second_model_recall');check('second_model_sees_same_employee_persona_and_memory',switched.tools.includes('employee_profile')&&switched.tools.includes('employee_memory_search')&&switched.answer.includes(marker)&&switched.answer.includes('资料研究员'));
++ const beforeRestart=await employee(bot.id,'export');await stop();await start();check('restart_keeps_exact_identity_and_employee_data',JSON.stringify({...await employee(bot.id,'export'),exportedAt:null})===JSON.stringify({...beforeRestart,exportedAt:null})&&(await request('/naumi/bots')).bots.some(b=>b.id===bot.id&&b.sessionIds.includes(chat)));
++ const restarted=await turn(chat,'请只用employee_profile和employee_memory_search核对当前员工。搜索“验收项目标记”并报告完整标记和已保存人物设定，不要修改任何内容。','restart_recall');check('restored_native_session_recalls_memory_and_persona',restarted.tools.includes('employee_memory_search')&&restarted.answer.includes(marker)&&restarted.answer.includes('资料研究员'));
++ const beforeTemp=await employee(bot.id,'export');await turn(chat,'这次回复简洁直接','temporary_instruction');const afterTemp=await employee(bot.id,'export');check('temporary_request_does_not_persist_preferences',JSON.stringify({...beforeTemp,exportedAt:null})===JSON.stringify({...afterTemp,exportedAt:null}));
++ memories=await employee(bot.id,'memories');const remembered=memories.find(m=>m.text===memoryText);await owner(bot.id,{action:'memory_forget',memoryId:remembered.id,expectedRevision:remembered.revision,profileRevision:(await employee(bot.id)).revision});
++ const fresh=await newChat(bot),forgotten=await turn(fresh,'请只用employee_memory_search搜索“验收项目标记”。只报告实际检索到的内容；没有则明确没有，不要编造、修改记忆或读取旧聊天和文件。','fresh_session_after_forgetting');check('forgotten_memory_not_retrieved_or_injected_in_fresh_session',forgotten.tools.includes('employee_memory_search')&&!forgotten.answer.includes(marker)&&!(await employee(bot.id,'memories')).some(m=>m.id===remembered.id));
++ const directory=await request('/naumi/bots'),other=await request('/naumi/bots',{action:'create',requestId:randomUUID(),expectedRevision:directory.revision,fields:{name:'隔离对照员工',kind:'agent',purpose:'验证员工记忆隔离'}},'x-naumi-bots');const otherBot=other.bot??other;
++ const foreign=await turn(otherBot.homeSessionId,'请只用employee_profile与employee_memory_search搜索“验收项目标记”，报告你实际保存的人物设定和检索结果。不要读取其他员工、文件或聊天，不要保存新信息。','other_employee_isolation');check('other_employee_has_no_private_persona_or_memory',foreign.tools.includes('employee_memory_search')&&!foreign.answer.includes(marker)&&(await employee(otherBot.id)).persona===''&&(await employee(otherBot.id,'memories')).length===0);
++ check('original_user_configuration_hashes_unchanged',paths.every((p,i)=>hash(fs.readFileSync(path.join(runtime,p)))===hash(raw[i])));check('no_credentials_written_to_fixture',!fs.existsSync(path.join(home,'.credentials.yaml'))||!fs.readFileSync(path.join(home,'.credentials.yaml'),'utf8').includes(key));
++ receipt.status='PASS';receipt.boots=boots;receipt.supplierRequests=supplierRequests;receipt.maxSupplierRequests=60;save();console.log('CONTINUITY_LIVE checks='+receipt.checks.length+' turns='+receipt.turns.length+' boots='+boots+' actual3080_writes=0 config_changes=0 credential_disk_writes=0');
++}catch(error){receipt.status='FAIL';receipt.error=scrub(error.message);save();throw Error(scrub(error.message));}finally{await stop();upstream.closeAllConnections();await new Promise(r=>upstream.close(r));receipt.supplierRequests=supplierRequests;save();}
+diff --git a/tests/naumi-employee-continuity.test.mjs b/tests/naumi-employee-continuity.test.mjs
+new file mode 100644
+index 0000000..2bdfd06
+--- /dev/null
++++ b/tests/naumi-employee-continuity.test.mjs
+@@ -0,0 +1,44 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import os from 'node:os';
++import path from 'node:path';
++import {EmployeeStore} from '../plugins/naumi-enterprise/employee-store.js';
++
++test('latest explicit communication assignment is the only active style across Sessions; originals are retained',()=>{
++ const s=new EmployeeStore(':memory:');try{
++  const old=s.learnExplicit('bot','first','以后回复先给结论','one').memory;
++  s.learnExplicit('bot','second','以后回复详细解释','two');
++  assert.deepEqual(s.memories('bot').map(m=>m.text),['详细解释']);assert(!s.context('bot').includes('先给结论'));
++  const row=s.memories('bot',{status:'all'}).find(m=>m.id===old.id);assert.equal(row.status,'active');assert.equal(row.effective,false);assert.equal(s.entity('bot',old.id).effective,undefined);
++  assert.equal(s.export('bot').memories.length,2);assert(s.history('bot').some(e=>e.source.sessionId==='one'));
++ }finally{s.close();}
++});
++test('forgetting current explicit style does not reactivate older assignments or erase historical sources',()=>{
++ const s=new EmployeeStore(':memory:');try{
++  s.learnExplicit('bot','first','以后回复先给结论','one');s.learnExplicit('bot','second','以后回复详细解释','two');
++  s.learnExplicit('bot','forget','忘记我的偏好：详细解释','two');assert.equal(s.profile('bot').communicationStyle,'');assert.equal(s.memories('bot').length,0);
++  assert.equal(s.export('bot').memories.length,2);assert(s.history('bot').some(e=>e.action==='explicit_forgetting'));
++ }finally{s.close();}
++});
++test('owner changed or cleared persona supersedes accepted candidates while candidate and independent memory remain historical',()=>{
++ const s=new EmployeeStore(':memory:');try{
++  const candidate=s.createMemory('bot',{operationId:'candidate',kind:'preference',text:'人物设定候选：资料员',status:'candidate'},{kind:'proposal',sessionId:'one',messageId:'m',quote:'请做资料员'},{proposedProfile:{persona:'资料员'}});
++  const active=s.updateMemory('bot',{operationId:'confirm',memoryId:candidate.id,expectedRevision:1,profileRevision:0,patch:{status:'active'}});assert(s.memories('bot').some(m=>m.id===active.id));
++  s.updateProfile('bot',{operationId:'new-role',expectedRevision:1,patch:{persona:'设计师'}});assert(!s.memories('bot').some(m=>m.id===active.id));assert(!s.context('bot').includes('资料员'));
++  assert.equal(s.memories('bot',{status:'all'}).find(m=>m.id===active.id).effective,false);assert.equal(s.entity('bot',active.id).status,'active');
++ }finally{s.close();}
++});
++test('ordinary manual preferences and unsupported or temporary syntax do not get silently filtered or learned',()=>{
++ const s=new EmployeeStore(':memory:');try{
++  s.createMemory('bot',{operationId:'manual',kind:'preference',text:'先给结论'});s.learnExplicit('bot','current','以后回复详细解释','session');
++  assert.equal(s.memories('bot').length,2);assert.equal(s.learnExplicit('bot','temp','这次回复简洁直接','session').learned,false);assert.equal(s.profile('bot').communicationStyle,'详细解释');
++  assert.equal(s.learnExplicit('bot','quote','他说以后回复先给结论','session').learned,false);assert.equal(s.memories('other').length,0);
++ }finally{s.close();}
++});
++test('reopened durable store yields the same effective projection without migrations, rewritten sources or shared Bot data',()=>{
++ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-continuity-')),file=path.join(dir,'employee.sqlite');let s;try{
++  s=new EmployeeStore(file);s.learnExplicit('bot','a','以后回复先给结论','one');s.learnExplicit('bot','b','以后回复简洁直接','two');const audit=s.stats().events;s.close();s=new EmployeeStore(file);
++  assert.equal(s.profile('bot').communicationStyle,'简洁直接');assert.deepEqual(s.memories('bot').map(m=>m.text),['简洁直接']);assert.equal(s.stats().events,audit);assert.equal(s.db.prepare('PRAGMA user_version').get().user_version,1);assert.equal(s.memories('other').length,0);
++ }finally{s?.close();assert(path.resolve(dir).startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(dir,{recursive:true,force:true});}
++});
