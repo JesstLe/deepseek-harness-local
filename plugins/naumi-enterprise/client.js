@@ -1,6 +1,11 @@
 /** Async presentation-only module; the original enterprise app below stays intact. */
 function installNaumiContextUI(ctx,React,createPortal,Icon){
   ctx.effect(()=>{
+    let dispose,closed=false;
+    void import('/naumi/assets/model-connections.js').then(module=>{if(!closed)dispose=module.installModelConnectionsUI(ctx,React);}).catch(error=>console.error('Naumi model connections:',error));
+    return()=>{closed=true;dispose?.();};
+  });
+  ctx.effect(()=>{
     let moduleScope,closed=false;
     void import('/naumi/assets/bot-task-ui.js').then(module=>{if(!closed)moduleScope=module.installBotTaskUI(ctx,React);}).catch(error=>console.error('Naumi background tasks:',error));
     return()=>{closed=true;if(typeof moduleScope==='function')moduleScope();else moduleScope?.dispose?.();};

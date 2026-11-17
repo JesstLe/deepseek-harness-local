@@ -1,0 +1,472 @@
+diff --git a/.gitattributes b/.gitattributes
+index 411a0da..005662e 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -145,3 +145,19 @@ plugins/naumi-ui-layout/UPSTREAM.json text eol=lf
+ /evidence/employee-experience/ROLLBACK.sh text eol=lf
+ /scripts/*employee-experience*.mjs text eol=lf
+ /docs/implementation/EMPLOYEE_INVISIBLE_EXPERIENCE.md text eol=lf
++
++# Custom endpoint and key configuration: reproducible source/evidence bytes.
++/plugins/naumi-enterprise/host.js text eol=lf
++/plugins/naumi-enterprise/client.js text eol=lf
++/plugins/naumi-enterprise/package.json text eol=lf
++/plugins/naumi-enterprise/cordis.patch.yml text eol=lf
++/plugins/naumi-enterprise/model-connections.js text eol=lf
++/plugins/naumi-enterprise/assets/model-connections.js text eol=lf
++/plugins/naumi-enterprise/assets/model-connections.css text eol=lf
++/tests/naumi-model-connections.test.mjs text eol=lf
++/scripts/verify-custom-model-auth.mjs text eol=lf
++/scripts/custom-model-auth-evidence.mjs text eol=lf
++/scripts/deploy-custom-model-auth.mjs text eol=lf
++/docs/implementation/CUSTOM_MODEL_CONNECTIONS.md text eol=lf
++/evidence/custom-model-auth/** -text whitespace=cr-at-eol
++/evidence/custom-model-auth/ROLLBACK.sh text eol=lf
+diff --git a/docs/implementation/CUSTOM_MODEL_CONNECTIONS.md b/docs/implementation/CUSTOM_MODEL_CONNECTIONS.md
+new file mode 100644
+index 0000000..2349cbc
+--- /dev/null
++++ b/docs/implementation/CUSTOM_MODEL_CONNECTIONS.md
+@@ -0,0 +1,34 @@
++# 自定义模型连接与官方账户解耦
++
++日期：2026-11-17。基线：c1fe9f0955f5d2344cbf3f7c6a2d2523fd2fa3b3。分支：codex/custom-model-auth-20261117；工作树：E:/Workspace/naumi-custom-model-auth。功能模块计数1。
++
++## 模块与职责
++移除 Naumi 组合中官方账户登录、账户控制器、账户模型适配器及官方密钥向导；使用自定义 URL/API Key 分组配置。企业协作登录、owner 认证、设备身份和企业模型网关保持原职责。
++文件负责人：本线程独占新增 model-connections.js、assets/model-connections.js/css；host.js/client.js 只追加注册；cordis.patch.yml 追加禁用与无账户默认值；package.json 仅追加文件。不编辑 bot-task*、bot-deliverables 或员工 UI。
++
++## 公共接口、依赖方向、数据/状态/事务归属
++- `/naumi/model-connections`：owner GET 安全配置投影；owner 同源 POST save/remove，强制 JSON 与专用请求头，131072 字节上限。
++- `llm-pi-ai` 原 settings 命名空间持有分组，沿用 live mutate 与 revision CAS。保留未触碰的 provider 及模型元数据，直接使用原适配器及发送旁单一模型选择器。
++- 密钥只写原 credentials 服务。新建/轮换使用唯一引用，settings 写失败则清理新引用，不改变原密钥。不回传密钥、不写浏览器存储、不向供应商自动探测。
++- 移除分组不删除可能共享的凭据引用；既有/历史引用保留在本机原凭据库中。新安装包不携带开发者配置或凭据。
++- 默认模型从官方占位迁移到首个已配置模型；移除当前默认组则更新默认。已有会话保留自身模型选择，不重写任务/历史。无分组时为未配置占位，不回退官方服务。
++
++## 本次实现与迁移状态
++- 使用原“模型”设置槽替换为“模型连接”，浅色分组卡片及 URL、密码框、协议、逐行模型 ID 表单。
++- OpenAI Chat Completions、OpenAI Responses、Anthropic Messages；原 CC Switch 分组保持原 ID、URL、模型元数据和凭据引用，空密钥编辑保留原值。
++- 禁用账户服务/控制器/账户 UI、官方模型与账户模型、官方 onboarding/会话上报、官方搜索接口、官方插件库存以及产品遥测/反馈。通用引擎、MIT 版权与依赖包名称保留。
++- Web 搜索不再使用官方账户密钥；普通 HTTP 网页读取保留。未配置新的搜索供应商时不展示为已可用。
++
++## 验证命令、结果及证据层级
++基线391/391；整合主线20c91f5（新增浏览器默认值切片）后409/409，exit0。新增15项覆盖成功/失败/CAS并发/重试/密钥轮换与失败清理/owner和同源边界/默认模型修复。真实配置装载、HTTP、headless Harness→本地SSE供应商以及原生设置页Chrome20项通过，0页面错误；未调用真实供应商。桌面/360px截图已打开检查。打包闭包83文件PASS。副本回滚与正式本地加载记录见 evidence/custom-model-auth/VERIFICATION.txt。
++
++## 未完成项与下一步
++当前模块不替代后续企业服务器验证并下发短期凭据的设计；不把本地凭据配置当企业登录。本轮不构建安装包。真实供应商调用结果单独记录，不以配置保存代替模型可用验收。
++
++## 可复用配置示例
++```json
++{"action":"save","id":"custom-team","expectedRevision":0,"displayName":"团队模型","baseURL":"https://HOST/v1","api":"openai-completions","apiKey":"TOKEN","models":[{"id":"MODEL_ID"}]}
++```
++
++## 主线同步记录
++原始c1fe9f0；完成1个功能模块后fetch并Fast-forward整合20c91f5，保留浏览器默认值/外观预览/任务交付等协作变更。首轮定向测试发现CRLF字符串假设与fixture注入缺项已修正；首轮全仓404/405的唯一失败为写文件引入CRLF，已保留LF源格式并通过409项。隔离headless探针初次误用Web bundle，后续发现headless默认关闭本机credential服务；修正探针配置后真实凭据库→适配器→HTTP SSE完成，未修改正式用户配置来迁就测试。
+diff --git a/plugins/naumi-enterprise/assets/model-connections.css b/plugins/naumi-enterprise/assets/model-connections.css
+new file mode 100644
+index 0000000..80878f3
+--- /dev/null
++++ b/plugins/naumi-enterprise/assets/model-connections.css
+@@ -0,0 +1 @@
++.nm-connections{color:#26334b;background:#fff;max-width:900px;margin:0 auto;padding:8px 0 24px;font:14px/1.55 Inter,"Segoe UI","Microsoft YaHei",sans-serif;color-scheme:light}.nm-connections *{box-sizing:border-box}.nm-connections header,.nm-group-head,.nm-connections footer{display:flex;align-items:center;gap:12px;justify-content:space-between}.nm-connections header{margin-bottom:24px}.nm-connections h2{font-size:20px;margin:0;font-weight:650}.nm-connections h3{font-size:15px;margin:0;font-weight:600;overflow-wrap:anywhere}.nm-connections button{border:1px solid #dfe5ef;border-radius:9px;padding:8px 14px;background:#fff;color:#354766;font:inherit;cursor:pointer}.nm-connections button:hover{background:#f3f6fc;border-color:#bac9e3}.nm-connections button:disabled{opacity:.5;cursor:default}.nm-connections .nm-primary,.nm-connections header>button{background:#315ded;color:#fff;border-color:#315ded}.nm-list{display:grid;gap:14px}.nm-list article{border:1px solid #e2e8f1;border-radius:14px;padding:20px;background:#fff}.nm-ready,.nm-missing{flex-shrink:0;font-size:12px;padding:3px 9px;border-radius:20px;background:#edf8f2;color:#2d7d59}.nm-missing{background:#fff6e7;color:#a47229}.nm-url{font-size:13px;color:#738098;margin:10px 0;overflow-wrap:anywhere}.nm-chips{display:flex;gap:6px;flex-wrap:wrap}.nm-chips span{font-size:12px;background:#f3f5fa;border-radius:6px;padding:3px 8px;overflow-wrap:anywhere;max-width:100%}.nm-connections footer{justify-content:flex-end;margin-top:16px}.nm-form{display:grid;grid-template-columns:1fr 1fr;gap:18px}.nm-form label{display:flex;flex-direction:column;gap:7px;min-width:0}.nm-form label:nth-child(2),.nm-models,.nm-form footer{grid-column:1/-1}.nm-form label>span{font-size:13px;font-weight:550}.nm-form input,.nm-form select,.nm-form textarea{border:1px solid #dce3ee;border-radius:9px;padding:10px 12px;background:#fff;color:#26334b;width:100%;font:inherit}.nm-form textarea{resize:vertical;min-height:120px;font-family:ui-monospace,Consolas,monospace}.nm-connections :focus-visible{outline:2px solid #7397f4;outline-offset:2px}.nm-error,.nm-notice{padding:12px 14px;border-radius:9px;margin-bottom:16px;overflow-wrap:anywhere}.nm-error{background:#fff1f1;color:#ad3e49}.nm-error button{margin-left:12px}.nm-notice{background:#edf8f2;color:#2d7d59}.nm-empty{padding:60px 20px;text-align:center;border:1px dashed #dce3ee;border-radius:14px;background:#fafbfe}@media(max-width:580px){.nm-form{grid-template-columns:1fr}.nm-form label{grid-column:1/-1}.nm-list article{padding:15px}.nm-group-head{align-items:flex-start}.nm-connections header{flex-wrap:wrap}.nm-connections footer{flex-wrap:wrap}}
+diff --git a/plugins/naumi-enterprise/assets/model-connections.js b/plugins/naumi-enterprise/assets/model-connections.js
+new file mode 100644
+index 0000000..762e7ad
+--- /dev/null
++++ b/plugins/naumi-enterprise/assets/model-connections.js
+@@ -0,0 +1,32 @@
++const labels={MODEL_URL_INVALID:'请填写 API 基础地址，不含密钥或请求路径',MODEL_KEY_REQUIRED:'请填写 API Key',MODEL_KEY_INVALID:'API Key 包含无效字符',MODEL_DUPLICATE_ID:'模型 ID 重复',MODEL_SETTINGS_CONFLICT:'配置已被更新，请重新载入后再保存',MODEL_SAVE_FAILED:'保存失败，请重试',MODEL_SETTINGS_READ_ONLY:'当前配置只读',OWNER_REQUIRED:'仅本机所有者可配置',AUTH_REQUIRED:'请重新连接工作台'};
++async function request(body,signal){const r=await fetch('/naumi/model-connections',{credentials:'same-origin',signal,cache:'no-store',...body?{method:'POST',headers:{'Content-Type':'application/json','x-naumi-model-connections':'1'},body:JSON.stringify(body)}:{}});const v=await r.json();if(!r.ok)throw Object.assign(Error(labels[v.error]??'模型连接暂不可用'),{status:r.status});return v;}
++export function installModelConnectionsUI(ctx,React){
++ const h=React.createElement,{useState,useEffect,useRef}=React;
++ function Connections(){
++  const [data,setData]=useState(null),[draft,setDraft]=useState(null),[key,setKey]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[conflict,setConflict]=useState(false),[notice,setNotice]=useState(''),[confirm,setConfirm]=useState(null);
++  const alive=useRef(true),flight=useRef(false),form=useRef(null);
++  useEffect(()=>{alive.current=true;const ac=new AbortController();request(null,ac.signal).then(v=>{if(alive.current)setData(v);}).catch(e=>{if(alive.current&&!ac.signal.aborted)setError(e.message);});return()=>{alive.current=false;ac.abort();};},[]);
++  useEffect(()=>{if(draft)form.current?.querySelector('input')?.focus();},[draft?.id]);
++  function edit(group){setDraft(group?{...group,modelText:group.models.map(m=>m.id).join('\n')}:{id:'custom-'+crypto.randomUUID().slice(0,8),displayName:'',baseURL:'',api:'openai-completions',modelText:''});setKey('');setError('');setNotice('');setConfirm(null);}
++  function cancel(){setDraft(null);setKey('');setConfirm(null);if(!conflict)setError('');}
++  async function reload(){if(flight.current)return;flight.current=true;setBusy(true);try{const v=await request();if(alive.current){setData(v);setConflict(false);cancel();setError('');}}catch(e){if(alive.current)setError(e.message);}finally{flight.current=false;if(alive.current)setBusy(false);}}
++  async function submit(body){if(flight.current||conflict)return;flight.current=true;setBusy(true);setError('');setNotice('');try{const v=await request({...body,expectedRevision:data.revision});if(alive.current){setData(v);cancel();setNotice(v.defaultPending?'连接已保存，默认模型待更新':'已保存');}}catch(e){if(alive.current){setError(e.message);if(e.status===409)setConflict(true);}}finally{flight.current=false;if(alive.current)setBusy(false);}}
++  function save(e){e.preventDefault();const ids=draft.modelText.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);if(!ids.length){setError('请至少填写一个模型 ID');return;}submit({action:'save',id:draft.id,displayName:draft.displayName,baseURL:draft.baseURL,api:draft.api,models:ids.map(id=>({id,...draft.models?.find(m=>m.id===id)?.name?{name:draft.models.find(m=>m.id===id).name}:{}})),...key.trim()?{apiKey:key.trim()}: {}});}
++  const locked=busy||conflict||!data?.writable,change=(field,value)=>setDraft(d=>({...d,[field]:value}));
++  return h('section',{className:'nm-connections','aria-label':'模型连接'},
++   h('header',null,h('h2',null,'模型连接'),!draft&&h('button',{type:'button',disabled:locked,onClick:()=>edit()},'添加连接')),
++   error&&h('div',{className:'nm-error',role:'alert'},error,h('button',{type:'button',disabled:busy,onClick:reload},conflict?'重新载入':'重试')),
++   notice&&h('div',{role:'status',className:'nm-notice'},notice),!data&&!error&&h('div',{role:'status'},'加载中…'),
++   data&&!data.writable&&h('div',{role:'status'},'当前配置只读'),
++   draft?h('form',{ref:form,onSubmit:save,className:'nm-form'},
++    h('label',null,h('span',null,'分组名称'),h('input',{required:true,maxLength:120,value:draft.displayName,disabled:locked,onChange:e=>change('displayName',e.target.value)})),
++    h('label',null,h('span',null,'API URL'),h('input',{type:'url',required:true,placeholder:'https://api.example.com/v1',maxLength:2048,value:draft.baseURL,disabled:locked,onChange:e=>change('baseURL',e.target.value)})),
++    h('label',null,h('span',null,'API Key'),h('input',{type:'password',autoComplete:'new-password',required:!draft.configured,placeholder:draft.configured?'已配置，留空保留':'API Key',value:key,disabled:locked,onChange:e=>setKey(e.target.value)})),
++    h('label',null,h('span',null,'接口协议'),h('select',{value:draft.api,disabled:locked,onChange:e=>change('api',e.target.value)},...Object.entries({'openai-completions':'OpenAI Chat Completions','openai-responses':'OpenAI Responses','anthropic-messages':'Anthropic Messages'}).map(([value,label])=>h('option',{key:value,value},label)))),
++    h('label',{className:'nm-models'},h('span',null,'模型 ID（每行一个）'),h('textarea',{required:true,rows:5,maxLength:100000,disabled:locked,value:draft.modelText,onChange:e=>change('modelText',e.target.value)})),
++    h('footer',null,h('button',{type:'button',disabled:busy,onClick:cancel},'取消'),h('button',{type:'submit',className:'nm-primary',disabled:locked},busy?'保存中…':'保存'))):
++   data?.groups.length?h('div',{className:'nm-list'},...data.groups.map(g=>h('article',{key:g.id},h('div',{className:'nm-group-head'},h('h3',null,g.displayName),h('span',{className:g.configured?'nm-ready':'nm-missing'},g.configured?'已配置':'待配置')),h('div',{className:'nm-url'},g.baseURL),h('div',{className:'nm-chips'},...g.models.slice(0,8).map(m=>h('span',{key:m.id},m.name??m.id)),g.models.length>8&&h('span',null,'+'+(g.models.length-8))),h('footer',null,confirm===g.id?h(React.Fragment,null,h('span',null,'移除此连接？'),h('button',{disabled:locked,onClick:()=>submit({action:'remove',id:g.id})},'确认移除'),h('button',{disabled:busy,onClick:()=>setConfirm(null)},'取消')):h(React.Fragment,null,h('button',{disabled:locked||!g.editable,onClick:()=>edit(g)},'编辑'),h('button',{disabled:locked,onClick:()=>setConfirm(g.id)},'移除')))))):
++   data&&h('div',{className:'nm-empty'},h('button',{disabled:locked,onClick:()=>edit()},'添加模型连接')));
++ }
++ return ctx.slots.inject('settings.section',()=>ctx.slots.register({name:'settings.section',id:'models',order:10,label:()=> '模型连接'},Connections));
++}
+diff --git a/plugins/naumi-enterprise/client.js b/plugins/naumi-enterprise/client.js
+index b5f0d18..0af996c 100644
+--- a/plugins/naumi-enterprise/client.js
++++ b/plugins/naumi-enterprise/client.js
+@@ -1,5 +1,10 @@
+ /** Async presentation-only module; the original enterprise app below stays intact. */
+ function installNaumiContextUI(ctx,React,createPortal,Icon){
++  ctx.effect(()=>{
++    let dispose,closed=false;
++    void import('/naumi/assets/model-connections.js').then(module=>{if(!closed)dispose=module.installModelConnectionsUI(ctx,React);}).catch(error=>console.error('Naumi model connections:',error));
++    return()=>{closed=true;dispose?.();};
++  });
+   ctx.effect(()=>{
+     let moduleScope,closed=false;
+     void import('/naumi/assets/bot-task-ui.js').then(module=>{if(!closed)moduleScope=module.installBotTaskUI(ctx,React);}).catch(error=>console.error('Naumi background tasks:',error));
+diff --git a/plugins/naumi-enterprise/cordis.patch.yml b/plugins/naumi-enterprise/cordis.patch.yml
+index 9556779..273fbd7 100644
+--- a/plugins/naumi-enterprise/cordis.patch.yml
++++ b/plugins/naumi-enterprise/cordis.patch.yml
+@@ -1,3 +1,42 @@
++# Naumi model access: explicit endpoints and API keys, no vendor account flow.
++- id: deepseek-account
++  disabled: true
++- id: account-controller
++  disabled: true
++- id: ui-settings-account
++  disabled: true
++- id: llm-deepseek-account
++  disabled: true
++- id: llm-deepseek
++  disabled: true
++- id: ui-settings-models
++  disabled: true
++- id: session-log-deepseek
++  disabled: true
++- id: ui-settings-session-log
++  disabled: true
++- id: web-search-deepseek
++  disabled: true
++- id: web-deepseek-api
++  disabled: true
++- id: plugin-package-inventory-deepseek
++  disabled: true
++- id: desktop-product-telemetry
++  disabled: true
++- id: product-analytics
++  disabled: true
++- id: message-feedback
++  disabled: true
++- id: ui-message-feedback
++  disabled: true
++- id: agent-default-model
++  config:
++    provider: naumi-custom
++    model: configure-model
++- id: web
++  config:
++    searchProvider: ''
++    fetchProvider: http
+ - id: ui-brand-official
+   disabled: true
+ - id: ui-layout
+diff --git a/plugins/naumi-enterprise/host.js b/plugins/naumi-enterprise/host.js
+index 4a85544..546af9b 100644
+--- a/plugins/naumi-enterprise/host.js
++++ b/plugins/naumi-enterprise/host.js
+@@ -1,3 +1,4 @@
++import {installModelConnections} from './model-connections.js';
+ import {readFile} from 'node:fs/promises';
+ import {fileURLToPath} from 'node:url';
+ import {businessCookie,projectWorkspace,validateOrigin} from './domain.js';
+@@ -12,6 +13,7 @@ export const inject=['webServer','connection'];
+ /** Supported plugin routes, index branding and an authenticated read-only business adapter. */
+ export function apply(ctx,config) {
+   installDesktopIdentity(ctx);
++  installModelConnections(ctx);
+   installAgentDesktop(ctx);
+   installEgoBrowser(ctx);
+   installDingTalk(ctx);
+@@ -21,6 +23,8 @@ export function apply(ctx,config) {
+   installBots(ctx,{collaborationOrigin});
+   const designOrigin=validateOrigin(config.designOrigin);
+   const assets=new Map([['employee-enterprise-work.js','text/javascript; charset=utf-8'],['employee-memory-maintenance.js','text/javascript; charset=utf-8'],['employee-sync-panel.js','text/javascript; charset=utf-8'],['employee-center.js','text/javascript; charset=utf-8'],['employee-center-model.js','text/javascript; charset=utf-8'],['employee-center.css','text/css; charset=utf-8'],['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml'],['browser-client.js','text/javascript; charset=utf-8'],['browser-native-client.js','text/javascript; charset=utf-8'],['browser-native.css','text/css; charset=utf-8'],['browser-scheduler.js','text/javascript; charset=utf-8'],['browser.css','text/css; charset=utf-8'],['team-panel.css','text/css; charset=utf-8'],['team-panel.js','text/javascript; charset=utf-8'],['team-panel-model.js','text/javascript; charset=utf-8'],['bot-sidebar.js','text/javascript; charset=utf-8'],['bot-sidebar-model.js','text/javascript; charset=utf-8'],['bot-sidebar.css','text/css; charset=utf-8']]);
++  assets.set('model-connections.js','text/javascript; charset=utf-8');
++  assets.set('model-connections.css','text/css; charset=utf-8');
+   assets.set('employee-experience.js','text/javascript; charset=utf-8');
+   assets.set('bot-task-ui.js','text/javascript; charset=utf-8');
+   assets.set('bot-task-model.js','text/javascript; charset=utf-8');
+@@ -57,7 +61,7 @@ export function apply(ctx,config) {
+   }}));
+   ctx.on('webserver/index-inject',table=>{
+     table.push({kind:'global',name:'__NAUMI__',value:{collaborationOrigin,designOrigin,version:'0.3.0'}});
+-    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/employee-center.css"><link rel="stylesheet" href="/naumi/assets/employee-experience.css"><link rel="stylesheet" href="/naumi/assets/browser.css"><link rel="stylesheet" href="/naumi/assets/browser-native.css"><link rel="stylesheet" href="/naumi/assets/team-panel.css"><link rel="stylesheet" href="/naumi/assets/bot-sidebar.css"><link rel="stylesheet" href="/naumi/assets/bot-task.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
++    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/model-connections.css"><link rel="stylesheet" href="/naumi/assets/employee-center.css"><link rel="stylesheet" href="/naumi/assets/employee-experience.css"><link rel="stylesheet" href="/naumi/assets/browser.css"><link rel="stylesheet" href="/naumi/assets/browser-native.css"><link rel="stylesheet" href="/naumi/assets/team-panel.css"><link rel="stylesheet" href="/naumi/assets/bot-sidebar.css"><link rel="stylesheet" href="/naumi/assets/bot-task.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
+   });
+   ctx.effect(()=>ctx.webServer.tapIndex(html=>html.replace(/<title>[^<]*<\/title>/i,'<title>Naumi · 企业协作</title>').replace(/<link[^>]+rel="(?:shortcut )?icon"[^>]*href="(?!\/naumi\/)[^"]*"[^>]*>/g,'')));
+ }
+diff --git a/plugins/naumi-enterprise/model-connections.js b/plugins/naumi-enterprise/model-connections.js
+new file mode 100644
+index 0000000..f370596
+--- /dev/null
++++ b/plugins/naumi-enterprise/model-connections.js
+@@ -0,0 +1,75 @@
++import {randomUUID} from 'node:crypto';
++import {z} from 'zod';
++
++const protocols=['openai-completions','openai-responses','anthropic-messages'];
++const model=z.object({id:z.string().trim().min(1).max(512),name:z.string().trim().max(160).optional()}).strict();
++const save=z.object({action:z.literal('save'),id:z.string().regex(/^[a-z][a-z0-9_-]{0,79}$/),expectedRevision:z.number().int().nonnegative(),displayName:z.string().trim().min(1).max(120),baseURL:z.string().trim().min(1).max(2048),api:z.enum(protocols),models:z.array(model).min(1).max(200),apiKey:z.string().trim().min(1).max(16000).optional()}).strict();
++const remove=z.object({action:z.literal('remove'),id:z.string().min(1).max(80),expectedRevision:z.number().int().nonnegative()}).strict();
++const error=(code,status=400)=>Object.assign(new Error(code),{code,status});
++export function endpoint(value){
++ let u;try{u=new URL(value);}catch{throw error('MODEL_URL_INVALID');}
++ if(!['http:','https:'].includes(u.protocol)||u.username||u.password||u.search||u.hash||/\/(?:chat\/completions|responses|messages)\/?$/.test(u.pathname))throw error('MODEL_URL_INVALID');
++ return u.href.replace(/\/+$/,'');
++}
++const unconfigured={provider:'naumi-custom',model:'configure-model'};
++const official=id=>['deepseek-official','deepseek-account'].includes(id);
++
++/** Settings own route configuration; the existing local credential service alone owns secrets.
++ * A rotated key gets a fresh reference, so a failed CAS never changes a working route's key.
++ */
++export class ModelConnections{
++ constructor(ctx){this.ctx=ctx;this.queue=Promise.resolve();}
++ namespace(){const ns=this.ctx.settings.describe({redactSecrets:true}).find(n=>n.ns==='llm-pi-ai');if(!ns)throw error('MODEL_SETTINGS_UNAVAILABLE',503);return ns;}
++ async read(){const ns=this.namespace(),groups=[];for(const[id,p]of Object.entries(ns.value.providers??{})){
++  const info=p.apiKeyEnv?await this.ctx.credentials.describe(p.apiKeyEnv):{configured:false,writable:true};
++  groups.push({id,displayName:p.displayName??id,api:p.api??'openai-completions',baseURL:p.baseURL??'',models:(p.models??[]).map(m=>({id:m.id,...m.name?{name:m.name}:{}})),configured:info.configured,editable:protocols.includes(p.api)&&Array.isArray(p.models)&&p.models.length>0});
++ }return {revision:ns.revision,writable:this.ctx.settings.writable,groups};}
++ async repairDefault(removed){
++  const current=this.ctx.agentDefaultModel.currentSelection();
++  const p=this.namespace().value.providers??{},own=p[current.provider];
++  const missingModel=own?.models?.length&&!own.models.some(m=>m.id===current.model);
++  if(!official(current.provider)&&current.provider!==unconfigured.provider&&current.provider!==removed&&!missingModel)return;
++  const first=missingModel?[current.provider,own]:Object.entries(p).find(([,v])=>v.models?.length);
++  await this.ctx.agentDefaultModel.saveSelection(first?{provider:first[0],model:first[1].models[0].id}:unconfigured);
++ }
++ execute(input){const run=this.queue.then(()=>this.write(input));this.queue=run.catch(()=>{});return run;}
++ async write(input){
++  const parsed=z.union([save,remove]).safeParse(input);if(!parsed.success)throw error('MODEL_INVALID_REQUEST');const p=parsed.data;
++  const ns=this.namespace();if(!this.ctx.settings.writable)throw error('MODEL_SETTINGS_READ_ONLY',403);if(ns.revision!==p.expectedRevision)throw error('MODEL_SETTINGS_CONFLICT',409);
++  const previous=ns.value.providers?.[p.id];let newRef;
++  if(p.action==='remove'){
++   if(!previous)throw error('MODEL_GROUP_NOT_FOUND',404);
++   await this.ctx.settings.mutate('llm-pi-ai',[{op:'unset',path:['providers',p.id]}],ns.revision);
++  }else{
++   if(new Set(p.models.map(m=>m.id)).size!==p.models.length)throw error('MODEL_DUPLICATE_ID');
++   if(!p.apiKey&&!previous?.apiKeyEnv)throw error('MODEL_KEY_REQUIRED');
++   const profile={...previous,displayName:p.displayName,baseURL:endpoint(p.baseURL),api:p.api,models:p.models.map(m=>({...previous?.models?.find(old=>old.id===m.id),...m})),apiKeyEnv:previous?.apiKeyEnv};
++   if(p.apiKey){if(/[\r\n\u0000-\u001f\u007f]/.test(p.apiKey))throw error('MODEL_KEY_INVALID');newRef='NAUMI_MODEL_'+randomUUID().replaceAll('-','').toUpperCase();profile.apiKeyEnv=newRef;await this.ctx.credentials.set(newRef,p.apiKey);}
++   try{await this.ctx.settings.mutate('llm-pi-ai',[{op:'set',path:['providers',p.id],value:profile}],ns.revision);}
++   catch(e){if(newRef)try{await this.ctx.credentials.unset(newRef);}catch{throw error('MODEL_SAVE_CLEANUP_FAILED',500);}throw e;}
++  }
++  // Configuration is already durable. Report a default-selection issue separately, not as a failed save.
++  let defaultPending=false;try{await this.repairDefault(p.action==='remove'?p.id:undefined);}catch{defaultPending=true;}
++  return {...await this.read(),defaultPending};
++ }
++}
++
++export function installModelConnections(ctx){
++ return ctx.inject(['webServer','connection','settings','credentials','agentDefaultModel'],scope=>{
++  const service=new ModelConnections(scope);
++  scope.on('ready',()=>service.repairDefault().catch(()=>{}));
++  scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/model-connections',handler:async(req,res)=>{
++   res.setHeader('Cache-Control','no-store');const send=(status,value)=>{if(!res.destroyed)res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'}).end(JSON.stringify(value));};
++   const admission=scope.connection.admit(req);if('rejection'in admission){send(admission.rejection,{error:'AUTH_REQUIRED'});return;}if(admission.peer.principal.kind!=='owner'){send(403,{error:'OWNER_REQUIRED'});return;}
++   try{
++    if(req.method==='GET'){send(200,await service.read());return;}
++    if(req.method!=='POST'){res.setHeader('Allow','GET, POST');send(405,{error:'METHOD_NOT_ALLOWED'});return;}
++    if(req.headers['x-naumi-model-connections']!=='1'||req.headers.origin&&![`http://${req.headers.host}`,`https://${req.headers.host}`].includes(req.headers.origin)){send(403,{error:'SAME_ORIGIN_REQUIRED'});return;}
++    if(!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type']??'')){send(415,{error:'JSON_REQUIRED'});return;}
++    let bytes=0,text='';for await(const b of req){bytes+=b.length;if(bytes>131072){send(413,{error:'MODEL_BODY_TOO_LARGE'});return;}text+=b;}
++    let input;try{input=JSON.parse(text);}catch{throw error('MODEL_INVALID_REQUEST');}
++    send(200,await service.execute(input));
++   }catch(e){const conflict=e.code==='SETTINGS_CONFLICT';send(conflict?409:e.status??500,{error:conflict?'MODEL_SETTINGS_CONFLICT':/^MODEL_[A-Z_]+$/.test(e.code??'')?e.code:'MODEL_SAVE_FAILED'});}
++  }}));
++ });
++}
+diff --git a/plugins/naumi-enterprise/package.json b/plugins/naumi-enterprise/package.json
+index 389a7bb..828897a 100644
+--- a/plugins/naumi-enterprise/package.json
++++ b/plugins/naumi-enterprise/package.json
+@@ -55,7 +55,8 @@
+     "employee-runtime-policy.js",
+     "dingtalk-skills",
+     "desktop-identity.js",
+-    "desktop-enterprise.js"
++    "desktop-enterprise.js",
++    "model-connections.js"
+   ],
+   "dsh": {
+     "bundle": {
+diff --git a/scripts/custom-model-auth-evidence.mjs b/scripts/custom-model-auth-evidence.mjs
+new file mode 100644
+index 0000000..5582462
+--- /dev/null
++++ b/scripts/custom-model-auth-evidence.mjs
+@@ -0,0 +1,35 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';
++const root=process.cwd(),e=path.join(root,'evidence/custom-model-auth'),baseline='c1fe9f0955f5d2344cbf3f7c6a2d2523fd2fa3b3',sha=b=>createHash('sha256').update(b).digest('hex');
++const files=['.gitattributes','plugins/naumi-enterprise/host.js','plugins/naumi-enterprise/client.js','plugins/naumi-enterprise/package.json','plugins/naumi-enterprise/cordis.patch.yml','plugins/naumi-enterprise/model-connections.js','plugins/naumi-enterprise/assets/model-connections.js','plugins/naumi-enterprise/assets/model-connections.css','tests/naumi-model-connections.test.mjs','scripts/verify-custom-model-auth.mjs','scripts/custom-model-auth-evidence.mjs','scripts/deploy-custom-model-auth.mjs','docs/implementation/CUSTOM_MODEL_CONNECTIONS.md'];
++const mode=process.argv[2];
++if(mode==='prepare'){
++ fs.mkdirSync(e,{recursive:true});const manifest=[];
++ for(const file of files){const bytes=fs.readFileSync(path.join(root,file)),modified=path.join(e,'modified',file);fs.mkdirSync(path.dirname(modified),{recursive:true});fs.writeFileSync(modified,bytes);let old=null;
++  try{old=execFileSync('git',['show',baseline+':'+file],{stdio:['ignore','pipe','ignore']});}catch{}
++  if(old){const target=path.join(e,'original',file);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,old);}
++  manifest.push({file,originalSHA256:old?sha(old):null,modifiedSHA256:sha(bytes)});
++ }
++ fs.writeFileSync(e+'/hashes.json',JSON.stringify(manifest,null,2)+'\n');
++ // The index contains this task's explicit paths only; no credentials/configuration directories.
++ fs.writeFileSync(e+'/DIFF_FILE.patch',execFileSync('git',['diff','--cached','--binary',baseline,'--',...files]));
++ execFileSync('python',['-c',`import pathlib,zipfile; p=pathlib.Path(r'${e}'); z=zipfile.ZipFile(p/'MODIFIED_FILE.zip','w',zipfile.ZIP_DEFLATED); [z.write(f,f.relative_to(p).as_posix()) for d in ['original','modified'] for f in sorted((p/d).rglob('*')) if f.is_file()]; z.write(p/'hashes.json','hashes.json'); z.close()`]);
++ console.log('ARTIFACTS originals='+manifest.filter(x=>x.originalSHA256).length+' modified='+manifest.length+' hashes=PASS');
++}else if(mode==='rollback'){
++ assert(process.argv.includes('--test'),'COPY_TEST_REQUIRED');const manifest=JSON.parse(fs.readFileSync(e+'/hashes.json')),temp=path.join(root,'runtime','custom-model-rollback-'+randomUUID());fs.mkdirSync(temp,{recursive:true});const archive=path.join(temp,'baseline.tar'),copy=path.join(temp,'copy');fs.mkdirSync(copy);fs.writeFileSync(archive,execFileSync('git',['archive','HEAD'],{maxBuffer:100*1024*1024}));execFileSync(process.platform==='win32'?'C:/Windows/System32/tar.exe':'tar',['-xf',archive,'-C',copy]);
++ for(const m of manifest){const p=path.join(copy,m.file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.copyFileSync(path.join(e,'modified',m.file),p);assert.equal(sha(fs.readFileSync(p)),m.modifiedSHA256);}
++ // Apply the rollback to a real modified source copy, never the active checkout/runtime.
++ for(const m of manifest){const p=path.join(copy,m.file);if(m.originalSHA256){fs.copyFileSync(path.join(e,'original',m.file),p);assert.equal(sha(fs.readFileSync(p)),m.originalSHA256);}else fs.unlinkSync(p);}
++ fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');fs.symlinkSync(path.join(root,'desktop/node_modules'),path.join(copy,'desktop/node_modules'),'junction');
++ const tests=spawnSync(process.execPath,['--test','tests/*.test.mjs','desktop/tests/*.test.cjs'],{cwd:copy,encoding:'utf8',windowsHide:true,timeout:180000,maxBuffer:10*1024*1024});fs.writeFileSync(e+'/ROLLBACK_TESTS.log',(tests.stdout??'')+(tests.stderr??''));assert.equal(tests.status,0,'ROLLBACK_TESTS_FAILED');const count=(tests.stdout.match(/(?:ℹ |# )tests (\d+)/)??[])[1];assert(count);
++ const before=fs.readFileSync(path.join(copy,'plugins/naumi-enterprise/cordis.patch.yml'),'utf8');assert(!before.includes('- id: deepseek-account'));assert(!fs.existsSync(path.join(copy,'plugins/naumi-enterprise/model-connections.js')));assert.equal(sha(fs.readFileSync(path.join(copy,'plugins/naumi-enterprise/bot-deliverables.js'))),sha(fs.readFileSync(path.join(root,'plugins/naumi-enterprise/bot-deliverables.js'))));
++ for(const m of manifest)assert.equal(sha(fs.readFileSync(path.join(root,m.file))),m.modifiedSHA256,'ACTIVE_SOURCE_CHANGED');
++ const output=`ROLLBACK_COPY restored=${manifest.filter(x=>x.originalSHA256).length} removed=${manifest.filter(x=>!x.originalSHA256).length} tests=${count} hashes=PASS\nROLLBACK_BEHAVIOR official_composition=restored custom_settings=absent file_deliverables=retained\nROLLBACK modified_source=retained live_data=untouched`;
++ fs.writeFileSync(e+'/ROLLBACK_RESULT.json',JSON.stringify({status:'PASS',tests:Number(count),exit:0,output},null,2)+'\n');console.log(output);
++}else if(mode==='reopen'){
++ const manifest=JSON.parse(fs.readFileSync(e+'/hashes.json'));
++ for(const m of manifest){assert.equal(sha(fs.readFileSync(path.join(root,m.file))),m.modifiedSHA256);assert.equal(sha(fs.readFileSync(path.join(e,'modified',m.file))),m.modifiedSHA256);if(m.originalSHA256)assert.equal(sha(fs.readFileSync(path.join(e,'original',m.file))),m.originalSHA256);}
++ execFileSync('python',['-c',`import pathlib,zipfile,json,hashlib; p=pathlib.Path(r'${e}'); z=zipfile.ZipFile(p/'MODIFIED_FILE.zip'); m=json.loads(z.read('hashes.json')); assert m==json.loads((p/'hashes.json').read_text()); [(lambda b,h: (_ for _ in ()).throw(AssertionError()) if hashlib.sha256(b).hexdigest()!=h else None)(z.read('modified/'+r['file']),r['modifiedSHA256']) for r in m]; assert z.testzip() is None`]);
++ const verification=fs.readFileSync(e+'/VERIFICATION.txt','utf8');for(const name of ['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh']){fs.readFileSync(e+'/'+name);assert(verification.includes('E:\\Workspace\\naumi-desktop\\evidence\\custom-model-auth\\'+name));}
++ assert(fs.readFileSync(e+'/DIFF_FILE.patch','utf8').includes('model-connections.js'));execFileSync('D:/DEV/Git/bin/bash.exe',['-n',e+'/ROLLBACK.sh']);assert.equal(JSON.parse(fs.readFileSync(e+'/ROLLBACK_RESULT.json')).status,'PASS');
++ console.log('REOPEN files='+manifest.length+' zip=PASS hashes=PASS patch=PASS verification=PASS rollback=PASS');
++}else throw Error('EXPECTED prepare|rollback|reopen');
+diff --git a/scripts/deploy-custom-model-auth.mjs b/scripts/deploy-custom-model-auth.mjs
+new file mode 100644
+index 0000000..c7d653d
+--- /dev/null
++++ b/scripts/deploy-custom-model-auth.mjs
+@@ -0,0 +1,16 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';
++const root=process.cwd(),runtime=path.resolve(process.argv[2]??root),target=path.join(runtime,'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise'),source=path.join(root,'plugins/naumi-enterprise'),sha=b=>createHash('sha256').update(b).digest('hex'),read=p=>fs.readFileSync(p),norm=p=>read(p).toString().replaceAll('\r\n','\n');
++assert.equal(execFileSync('git',['branch','--show-current'],{encoding:'utf8'}).trim(),'main');assert.equal(execFileSync('git',['status','--porcelain'],{encoding:'utf8'}),'','DIRTY_MAIN');assert(fs.realpathSync(target).startsWith(fs.realpathSync(runtime)+path.sep));
++const files=['host.js','client.js','package.json','cordis.patch.yml','model-connections.js','assets/model-connections.js','assets/model-connections.css'],backup=path.join(runtime,'runtime','custom-model-load-'+randomUUID());fs.mkdirSync(backup);const before={};for(const file of fs.readdirSync(target,{recursive:true})){const p=path.join(target,file);if(fs.statSync(p).isFile())before[file.replaceAll('\\','/')]=sha(read(p));}
++const prepared=[];for(const file of files){const p=path.join(target,file),original=fs.existsSync(p)?read(p):null;if(original){const b=path.join(backup,'before',file);fs.mkdirSync(path.dirname(b),{recursive:true});fs.writeFileSync(b,original);}let next=read(path.join(source,file));
++ if(file==='host.js'){let actual=norm(p);assert(!actual.includes('installModelConnections'));actual="import {installModelConnections} from './model-connections.js';\n"+actual;assert(actual.includes('  installDesktopIdentity(ctx);'));actual=actual.replace('  installDesktopIdentity(ctx);','  installDesktopIdentity(ctx);\n  installModelConnections(ctx);');const anchor="  assets.set('employee-experience.js'";assert(actual.includes(anchor));actual=actual.replace(anchor,"  assets.set('model-connections.js','text/javascript; charset=utf-8');\n  assets.set('model-connections.css','text/css; charset=utf-8');\n"+anchor);assert(actual.includes('<link rel="stylesheet" href="/naumi/assets/style.css">'));actual=actual.replace('<link rel="stylesheet" href="/naumi/assets/style.css">','<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/model-connections.css">');next=Buffer.from(actual);}
++ if(file==='client.js'){let actual=norm(p);const marker='function installNaumiContextUI(ctx,React,createPortal,Icon){';assert(actual.includes(marker));assert(!actual.includes("import('/naumi/assets/model-connections.js')"));const updated=norm(path.join(source,file)),start=updated.indexOf(marker)+marker.length,end=updated.indexOf("  ctx.effect(()=>{\n    let moduleScope",start);assert(end>start);next=Buffer.from(actual.replace(marker,marker+updated.slice(start,end).trimEnd()+'\n'));}
++ if(file==='cordis.patch.yml'){const actual=norm(p),updated=norm(path.join(source,file)),boundary='- id: ui-brand-official';assert(actual.includes(boundary));assert(!actual.includes('- id: deepseek-account'));next=Buffer.from(updated.slice(0,updated.indexOf(boundary))+actual);}
++ if(file==='package.json'){const v=JSON.parse(original);assert(v.files.includes('bot-deliverables.js'));assert(!v.files.includes('model-connections.js'));v.files.push('model-connections.js');next=Buffer.from(JSON.stringify(v,null,2)+'\n');}
++ if(!original)assert(!fs.existsSync(p));const a=path.join(backup,'after',file);fs.mkdirSync(path.dirname(a),{recursive:true});fs.writeFileSync(a,next);prepared.push({file,originalSHA256:original?sha(original):null,deployedSHA256:sha(next)});
++}
++function shell(file){const r=spawnSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-File',path.join(runtime,file)],{encoding:'utf8',windowsHide:true,timeout:150000});process.stdout.write(r.stdout??'');assert.equal(r.status,0,r.stderr);}
++execFileSync(process.execPath,[path.join(root,'scripts/check-bot-runtime.mjs'),runtime,'2'],{stdio:'inherit'});let complete=false;
++try{shell('Stop-Naumi.ps1');for(const row of prepared)fs.copyFileSync(path.join(backup,'after',row.file),path.join(target,row.file));shell('Start-Naumi.ps1');for(const row of prepared)assert.equal(sha(read(path.join(target,row.file))),row.deployedSHA256);for(const[file,hash]of Object.entries(before))if(!files.includes(file))assert.equal(sha(read(path.join(target,file))),hash,'UNRELATED_FILE_CHANGED '+file);complete=true;
++ const receipt={status:'PASS',mainCommit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),files:prepared,unrelatedFilesUnchanged:Object.keys(before).filter(f=>!files.includes(f)).length,unrelatedChanged:0,packageDeltaOnly:true,botDeliverablesRetained:true,privateBackup:backup};fs.writeFileSync(path.join(root,'evidence/custom-model-auth/DEPLOYMENT.json'),JSON.stringify(receipt,null,2)+'\n');console.log('DEPLOY custom_model_auth=1 files=7 unrelated_changed=0 package_delta=1 file_deliverables=retained');
++}finally{if(!complete){try{shell('Stop-Naumi.ps1');}catch{}for(const row of prepared){const p=path.join(target,row.file);if(row.originalSHA256)fs.copyFileSync(path.join(backup,'before',row.file),p);else if(fs.existsSync(p))fs.unlinkSync(p);}shell('Start-Naumi.ps1');console.log('DEPLOY_FAILED original_runtime_restored=1');}}
+diff --git a/scripts/verify-custom-model-auth.mjs b/scripts/verify-custom-model-auth.mjs
+new file mode 100644
+index 0000000..b077897
+--- /dev/null
++++ b/scripts/verify-custom-model-auth.mjs
+@@ -0,0 +1,59 @@
++import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import assert from 'node:assert/strict';import {randomUUID,createHash} from 'node:crypto';import {spawn} from 'node:child_process';import {stringify,parse} from 'yaml';import {chromium} from '../desktop/node_modules/playwright/index.mjs';
++const root=process.cwd(),e=path.join(root,'evidence/custom-model-auth');fs.mkdirSync(e,{recursive:true});
++const temporary=path.join(root,'runtime','custom-model-fixture-'+randomUUID()),home=path.join(temporary,'home'),profile=path.join(home,'profiles/web');fs.mkdirSync(path.join(profile,'node_modules/@naumi'),{recursive:true});
++const sha=b=>createHash('sha256').update(b).digest('hex');
++for(const[name,folder]of [['dsh-enterprise','naumi-enterprise'],['dsh-ui-layout','naumi-ui-layout'],['dsh-sidebar-browser','naumi-sidebar-browser']])fs.symlinkSync(path.join(root,'plugins',folder),path.join(profile,'node_modules/@naumi',name),'junction');
++fs.symlinkSync(path.join(root,'node_modules/@deepseek-ai'),path.join(profile,'node_modules/@deepseek-ai'),'junction');
++fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'naumi-custom-fixture',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}}));
++fs.writeFileSync(path.join(home,'cordis.patch.yml'),stringify([{id:'ui-theme',config:{preference:'light'}},{id:'session-log-deepseek',disabled:true}]));
++const upstreamRequests=[];
++const upstream=http.createServer(async(req,res)=>{let body='';for await(const b of req)body+=b;upstreamRequests.push({path:req.url,authorization:req.headers.authorization,body:body?JSON.parse(body):null});
++ if(req.url==='/v1/chat/completions'){res.writeHead(200,{'Content-Type':'text/event-stream'});res.end('data: '+JSON.stringify({id:'fixture-chat',object:'chat.completion.chunk',created:1,model:'fixture-model',choices:[{index:0,delta:{role:'assistant',content:'OK'},finish_reason:null}]})+'\n\ndata: '+JSON.stringify({id:'fixture-chat',object:'chat.completion.chunk',created:1,model:'fixture-model',choices:[{index:0,delta:{},finish_reason:'stop'}],usage:{prompt_tokens:1,completion_tokens:1,total_tokens:2}})+'\n\ndata: [DONE]\n\n');return;}
++ res.writeHead(404).end();
++});await new Promise(r=>upstream.listen(0,'127.0.0.1',r));const apiURL='http://127.0.0.1:'+upstream.address().port+'/v1';
++const originalProfile={displayName:'原有分组',api:'openai-completions',baseURL:apiURL,apiKeyEnv:'NAUMI_FIXTURE_KEY',models:[{id:'fixture-model',name:'原有模型',contextWindow:128000,maxTokens:1024,reasoningEfforts:false}]};
++fs.writeFileSync(path.join(profile,'cordis.patch.yml'),stringify([{id:'ui-settings-general',config:{welcomeNoticeVersion:'2026-09-28.1'}},{id:'llm-pi-ai',config:{providers:{existing:originalProfile}}}]));
++const socket=http.createServer();await new Promise(r=>socket.listen(0,'127.0.0.1',r));const port=socket.address().port;await new Promise(r=>socket.close(r));const base='http://127.0.0.1:'+port;
++const env={...process.env,DSH_HOME:home,DSH_TELEMETRY_MODE:'DISABLED',NAUMI_FIXTURE_KEY:'original-fixture-key'};
++let output='',browser;const child=spawn(process.execPath,[path.join(root,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'web','--host','127.0.0.1','--port',String(port),'--no-open'],{cwd:root,env,windowsHide:true});child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);
++const checks=[];function check(name,condition){assert(condition,name);checks.push(name);console.log('AUTH_PASS '+name);}
++try{
++ let launch;for(let i=0;i<180;i++){launch=output.match(new RegExp('http://127\\.0\\.0\\.1:'+port+'/?\\?token=[A-Za-z0-9_~.%-]+'))?.[0];if(launch)break;if(child.exitCode!==null)throw Error('FIXTURE_BOOT_FAILED '+output.replace(/token=[A-Za-z0-9_~.%-]+/g,'token=REDACTED').slice(-4000));await new Promise(r=>setTimeout(r,500));}assert(launch,'FIXTURE_BOOT_TIMEOUT '+output.slice(-1500));
++ const exchange=await fetch(launch,{redirect:'manual'}),cookie=exchange.headers.getSetCookie().map(v=>v.split(';')[0]).join('; ');assert(cookie);const headers={cookie,'Content-Type':'application/json','x-naumi-model-connections':'1',origin:base};
++ async function call(body){const r=await fetch(base+'/naumi/model-connections',{headers,...body?{method:'POST',body:JSON.stringify(body)}:{}});return {status:r.status,value:await r.json()};}
++ async function rpc(method,args={}){const r=await fetch(base+'/api/'+method,{method:'POST',headers,body:JSON.stringify({type:'client-request',rpcId:randomUUID(),method,payload:{args}})});const t=await r.text();try{return JSON.parse(t);}catch{return {http:r.status};}}
++ let result=await call();check('actual_host_owner_http',result.status===200&&result.value.groups.length===1);const before=result.value;
++ check('existing_group_metadata_preserved',before.groups[0].id==='existing'&&before.groups[0].models[0].name==='原有模型'&&before.groups[0].configured);
++ const account=await rpc('account/watch',{});check('official_account_remote_unmounted',!account.result?.ok);
++ const html=await (await fetch(base,{headers})).text();check('account_and_official_models_not_in_boot_roster',!html.includes('@deepseek-ai/dsh-client-ui-settings-account')&&!html.includes('@deepseek-ai/dsh-client-ui-settings-models'));
++ result=await call({action:'save',id:'custom-team',expectedRevision:before.revision,displayName:'团队连接',baseURL:apiURL,api:'openai-completions',apiKey:'custom-fixture-key',models:[{id:'fixture-model'}]});check('actual_settings_save_live',result.status===200&&result.value.groups.length===2);
++ let persisted=parse(fs.readFileSync(path.join(profile,'cordis.patch.yml'),'utf8')).find(x=>x.id==='llm-pi-ai').config.providers;
++ check('existing_group_bytes_unchanged',sha(JSON.stringify(persisted.existing))===sha(JSON.stringify(originalProfile)));
++ check('key_stored_outside_profile',!fs.readFileSync(path.join(profile,'cordis.patch.yml'),'utf8').includes('custom-fixture-key')&&fs.readFileSync(path.join(home,'.credentials.yaml'),'utf8').includes('custom-fixture-key'));
++ check('key_never_returned',!JSON.stringify(result).includes('custom-fixture-key'));
++ const stale=await call({action:'remove',id:'existing',expectedRevision:before.revision});check('actual_revision_conflict',stale.status===409);
++ // Real headless Harness pipeline uses the same profile/credentials and new custom adapter route.
++ const overlay=path.join(temporary,'probe.yml');fs.writeFileSync(overlay,stringify([{id:'agent-default-model',config:{provider:'custom-team',model:'fixture-model'}},{id:'credentials',disabled:false}]));
++ // The headless profile needs the same model config and the account-free product bundle.
++ const hp=path.join(home,'profiles/headless');fs.mkdirSync(hp,{recursive:true});fs.writeFileSync(path.join(hp,'package.json'),JSON.stringify({name:'naumi-headless-fixture',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-headless']}}}));fs.symlinkSync(path.join(profile,'node_modules'),path.join(hp,'node_modules'),'junction');fs.writeFileSync(path.join(hp,'cordis.patch.yml'),stringify([{id:'llm-pi-ai',config:{providers:persisted}},...['deepseek-account','llm-deepseek','llm-deepseek-account','session-log-deepseek','web-search-deepseek','web-deepseek-api'].map(id=>({id,disabled:true}))]));
++ const probe=await new Promise(resolve=>{const p=spawn(process.execPath,[path.join(root,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'--profile','headless','--patch',overlay,'Reply exactly OK. Do not use tools.'],{cwd:root,env,windowsHide:true});let text='';p.stdout.on('data',b=>text+=b);p.stderr.on('data',b=>text+=b);const timer=setTimeout(()=>p.kill(),60000);p.on('close',code=>{clearTimeout(timer);resolve({code,text});});});
++ if(probe.code!==0)fs.writeFileSync(path.join(temporary,'failed-probe.log'),probe.text.replaceAll('custom-fixture-key','REDACTED'));
++ check('custom_url_key_real_harness_model_call',probe.code===0&&/\bOK\b/.test(probe.text)&&upstreamRequests.some(r=>r.path==='/v1/chat/completions'&&r.authorization==='Bearer custom-fixture-key'&&r.body.model==='fixture-model'));
++ browser=await chromium.launch({headless:true,channel:'chrome'});const context=await browser.newContext({viewport:{width:1360,height:900},colorScheme:'light'}),page=await context.newPage(),errors=[],outbound=[];page.on('pageerror',e=>errors.push(e.message));
++ await page.route('**/*',route=>{const u=new URL(route.request().url());if(['http:','https:'].includes(u.protocol)&&u.origin!==base){outbound.push(u.hostname);return route.abort();}return route.continue();});
++ await page.goto(launch);await page.waitForFunction(()=>document.body.getAttribute('data-naumi')==='enterprise');
++ // Open native settings with the native launcher. No replacement page or injected React renderer.
++ const settingsButton=page.getByRole('button',{name:/设置|Settings/}).first();await settingsButton.click();
++ const modelsNav=page.getByRole('button',{name:'模型连接',exact:true});await modelsNav.click();const panel=page.locator('.nm-connections');await panel.getByRole('heading',{name:'团队连接',exact:true}).waitFor();
++ check('real_settings_slot_and_light_ui',await panel.isVisible()&&await panel.evaluate(el=>getComputedStyle(el).backgroundColor==='rgb(255, 255, 255)'));
++ check('no_official_login_or_onboarding',await page.getByText(/登录 DeepSeek|DeepSeek 账号|DeepSeek Account|Sign in to DeepSeek/).count()===0);
++ await panel.getByRole('button',{name:'添加连接',exact:true}).click();await panel.getByLabel('分组名称',{exact:true}).fill('界面验证');await panel.getByLabel('API URL',{exact:true}).fill(apiURL);await panel.getByLabel('API Key',{exact:true}).fill('ui-fixture-key');await panel.getByLabel('模型 ID（每行一个）',{exact:true}).fill('fixture-model');await panel.getByRole('button',{name:'保存',exact:true}).click();await panel.getByRole('heading',{name:'界面验证',exact:true}).waitFor();check('ui_save_reaches_actual_settings_and_credentials',(await call()).value.groups.some(g=>g.displayName==='界面验证'&&g.configured));
++ const card=panel.locator('article').filter({has:page.getByRole('heading',{name:'界面验证',exact:true})});await card.getByRole('button',{name:'编辑',exact:true}).click();check('existing_key_not_echoed',await panel.getByLabel('API Key',{exact:true}).inputValue()==='');
++ await panel.getByLabel('分组名称',{exact:true}).fill('保留冲突草稿');const latest=(await call()).value;await call({action:'save',id:'other',expectedRevision:latest.revision,displayName:'并发修改',baseURL:apiURL,api:'openai-responses',apiKey:'parallel-fixture-key',models:[{id:'fixture-model'}]});await panel.getByRole('button',{name:'保存',exact:true}).click();await panel.getByRole('button',{name:'重新载入',exact:true}).waitFor();check('ui_conflict_keeps_draft',await panel.getByLabel('分组名称',{exact:true}).inputValue()==='保留冲突草稿'&&await panel.getByRole('button',{name:'保存',exact:true}).isDisabled());await panel.getByRole('button',{name:'重新载入',exact:true}).click();await panel.getByRole('heading',{name:'并发修改',exact:true}).waitFor();
++ await panel.getByRole('button',{name:'添加连接',exact:true}).click();for(const width of [1360,580,360]){await page.setViewportSize({width,height:900});check('responsive_'+width,await panel.evaluate(el=>el.scrollWidth<=el.clientWidth+2));}
++ await page.screenshot({path:path.join(e,'model-connections-narrow.png')});await page.setViewportSize({width:1360,height:900});await page.screenshot({path:path.join(e,'model-connections.png')});
++ check('no_browser_page_errors',errors.length===0);check('no_vendor_network_requests',!outbound.some(h=>/deepseek/.test(h)));
++ fs.writeFileSync(path.join(e,'INTEGRATION.json'),JSON.stringify({checks,passed:checks.length,pageErrors:errors,upstream:'isolated-http-sse-fixture',realSupplierCalls:0,liveEmployeeWrites:0,officialAccountMounted:false},null,2)+'\n');console.log('CUSTOM_AUTH_COMPLETE checks='+checks.length+' errors='+errors.length+' supplier_calls=0');
++}finally{await browser?.close();child.kill();await new Promise(r=>child.exitCode!==null?r():child.once('close',r));upstream.closeAllConnections();await new Promise(r=>upstream.close(r));
++ // Keep private fixture for diagnostic reproducibility; it is under ignored runtime, never packaged.
++}
+diff --git a/tests/naumi-model-connections.test.mjs b/tests/naumi-model-connections.test.mjs
+new file mode 100644
+index 0000000..71bd91e
+--- /dev/null
++++ b/tests/naumi-model-connections.test.mjs
+@@ -0,0 +1,37 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import http from 'node:http';
++import {Context} from '@deepseek-ai/cordis';
++import {ModelConnections,endpoint,installModelConnections} from '../plugins/naumi-enterprise/model-connections.js';
++import {installModelConnectionsUI} from '../plugins/naumi-enterprise/assets/model-connections.js';
++
++function fixture(){
++ let revision=0,providers={},selection={provider:'deepseek-account',model:'old'},writable=true,failure=false,lateConflict=false;const keys=new Map(),setRefs=[];
++ const ctx={settings:{get writable(){return writable;},describe:()=>[{ns:'llm-pi-ai',revision,value:{providers:structuredClone(providers)}}],async mutate(ns,ops,expected){assert.equal(ns,'llm-pi-ai');if(lateConflict)throw Object.assign(Error('conflict'),{code:'SETTINGS_CONFLICT'});if(failure)throw Error('disk failure');assert.equal(expected,revision);for(const o of ops){if(o.op==='set')providers[o.path[1]]=structuredClone(o.value);else delete providers[o.path[1]];}revision++;}},credentials:{async describe(ref){return {configured:keys.has(ref),writable:true};},async set(ref,value){setRefs.push(ref);keys.set(ref,value);},async unset(ref){keys.delete(ref);}},agentDefaultModel:{currentSelection:()=>selection,async saveSelection(s){selection=structuredClone(s);}}};
++ const service=new ModelConnections(ctx);return {ctx,service,keys,setRefs,get revision(){return revision;},get providers(){return providers;},get selection(){return selection;},fail:()=>{failure=true;},lateConflict:()=>{lateConflict=true;},readonly:()=>{writable=false;},customDefault:()=>{selection={provider:'enterprise',model:'preserved'};}};
++}
++const input=(f,over={})=>({action:'save',id:'team',expectedRevision:f.revision,displayName:'团队模型',baseURL:'https://example.com/v1/',api:'openai-completions',apiKey:'fixture-key',models:[{id:'fixture-model'}],...over});
++
++test('custom group persists URL/protocol/models and only a credential reference, never a returned key',async()=>{const f=fixture(),r=await f.service.execute(input(f));assert.equal(f.providers.team.baseURL,'https://example.com/v1');assert.equal(f.keys.get(f.providers.team.apiKeyEnv),'fixture-key');assert(!JSON.stringify(r).includes('fixture-key'));assert(!JSON.stringify(f.providers).includes('fixture-key'));assert.equal(r.groups[0].configured,true);assert.deepEqual(f.selection,{provider:'team',model:'fixture-model'});});
++test('blank-key edits preserve original reference and nested model/protocol metadata',async()=>{const f=fixture();await f.service.execute(input(f));const ref=f.providers.team.apiKeyEnv;f.providers.team.headers={'x-test':'retained'};f.providers.team.models[0].contextWindow=99999;f.providers.team.models[0].reasoningEfforts={high:'high'};const p=input(f,{displayName:'新名称'});delete p.apiKey;await f.service.execute(p);assert.equal(f.providers.team.apiKeyEnv,ref);assert.equal(f.keys.size,1);assert.equal(f.providers.team.models[0].contextWindow,99999);assert.deepEqual(f.providers.team.headers,{'x-test':'retained'});});
++test('key rotation uses a new immutable reference and does not alter another route sharing the old key',async()=>{const f=fixture();await f.service.execute(input(f));const old=f.providers.team.apiKeyEnv;f.providers.shared=structuredClone(f.providers.team);await f.service.execute(input(f,{apiKey:'new-fixture-key'}));assert.notEqual(f.providers.team.apiKeyEnv,old);assert.equal(f.providers.shared.apiKeyEnv,old);assert.equal(f.keys.get(old),'fixture-key');});
++test('stale revision is rejected before any credential write, preserving all groups',async()=>{const f=fixture();await f.service.execute(input(f));await assert.rejects(f.service.execute(input(f,{expectedRevision:0,apiKey:'changed'})),e=>e.status===409);assert.equal(f.keys.size,1);assert.equal(f.revision,1);});
++test('settings failure or late CAS conflict cleans the staged key and retains prior working key/configuration',async()=>{for(const mode of ['fail','lateConflict']){const f=fixture();await f.service.execute(input(f));const old=structuredClone(f.providers);f[mode]();await assert.rejects(f.service.execute(input(f,{apiKey:'changed'})));assert.deepEqual(f.providers,old);assert.equal(f.keys.size,1);assert.equal(f.keys.get(f.providers.team.apiKeyEnv),'fixture-key');}});
++test('concurrent same-revision saves serialize with one winner, and a retry succeeds',async()=>{const f=fixture(),p=input(f);const r=await Promise.allSettled([f.service.execute(p),f.service.execute({...p,id:'other'})]);assert.equal(r.filter(x=>x.status==='fulfilled').length,1);assert.equal(r[1].reason.status,409);await f.service.execute(input(f,{id:'other'}));assert.equal(Object.keys(f.providers).length,2);});
++test('removal repairs the default but preserves shared credentials; last removal leaves explicit unconfigured state',async()=>{const f=fixture();await f.service.execute(input(f));await f.service.execute(input(f,{id:'second'}));await f.service.execute({action:'remove',id:'team',expectedRevision:f.revision});assert.deepEqual(f.selection,{provider:'second',model:'fixture-model'});await f.service.execute({action:'remove',id:'second',expectedRevision:f.revision});assert.deepEqual(f.selection,{provider:'naumi-custom',model:'configure-model'});assert.equal(f.keys.size,2);});
++test('nonofficial defaults and unrelated group settings remain unchanged',async()=>{const f=fixture();f.customDefault();await f.service.execute(input(f));assert.deepEqual(f.selection,{provider:'enterprise',model:'preserved'});assert.equal(f.revision,1);});
++test('editing away the current default model selects the remaining model in that group',async()=>{const f=fixture();await f.service.execute(input(f));await f.service.execute(input(f,{models:[{id:'replacement'}]}));assert.deepEqual(f.selection,{provider:'team',model:'replacement'});});
++test('URL validation rejects embedded credentials, query secrets, fragments and request endpoints but supports custom HTTP hosts',()=>{for(const v of ['file:///tmp/key','ftp://example.com','https://user:secret@example.com/v1','https://example.com/v1?key=secret','https://example.com/#secret','https://example.com/v1/chat/completions','https://example.com/v1/responses','https://example.com/v1/messages','not-a-url'])assert.throws(()=>endpoint(v));assert.equal(endpoint('http://127.0.0.1:3183/v1/'),'http://127.0.0.1:3183/v1');});
++test('invalid protocol, empty/duplicate models, newline keys, missing keys and unknown fields never write config',async()=>{for(const change of [{api:'oauth'},{models:[]},{models:[{id:'x'},{id:'x'}]},{apiKey:'x\ny'},{apiKey:undefined},{permissions:'all'}]){const f=fixture();await assert.rejects(f.service.execute(input(f,change)));assert.equal(f.revision,0);assert.equal(f.keys.size,0);}});
++test('all three custom wire protocols are accepted, and read-only deployments reject mutations',async()=>{for(const api of ['openai-completions','openai-responses','anthropic-messages']){const f=fixture();await f.service.execute(input(f,{api}));assert.equal(f.providers.team.api,api);}const f=fixture();f.readonly();await assert.rejects(f.service.execute(input(f)),e=>e.status===403);assert.equal(f.keys.size,0);});
++test('new models settings replaces the native models slot without another navigation or model selector',()=>{const registered=[];installModelConnectionsUI({slots:{inject(name,fn){fn();},register(o){registered.push(o);}}},{createElement(){},useState(){},useEffect(){},useRef(){}});assert.deepEqual(registered.map(o=>[o.name,o.id]),[['settings.section','models']]);});
++test('Naumi composition disables official authentication, official model adapters, onboarding and cloud credential consumers',()=>{const patch=fs.readFileSync('plugins/naumi-enterprise/cordis.patch.yml','utf8').replaceAll('\r\n','\n');for(const id of ['deepseek-account','account-controller','ui-settings-account','llm-deepseek-account','llm-deepseek','ui-settings-models','web-search-deepseek','web-deepseek-api','session-log-deepseek'])assert(patch.includes('- id: '+id+'\n  disabled: true'));const pkg=JSON.parse(fs.readFileSync('plugins/naumi-enterprise/package.json'));assert(pkg.files.includes('bot-deliverables.js'));assert(pkg.files.includes('model-connections.js'));});
++test('owner HTTP protects secrets against guests, foreign origins, missing headers and malformed/oversized bodies',async()=>{
++ const f=fixture(),ctx=new Context(),routes=new Map();const provider=await ctx.plugin({apply(scope){for(const[k,v]of Object.entries(f.ctx))scope.provide(k,v);scope.provide('connection',{admit:req=>req.headers.cookie==='owner'?{peer:{principal:{kind:'owner'}}}:req.headers.cookie==='guest'?{peer:{principal:{kind:'guest'}}}:{rejection:401}});scope.provide('webServer',{register(r){routes.set(r.path,r.handler);return()=>routes.delete(r.path);}});}});
++ let child;const host=await ctx.plugin({apply(scope){child=installModelConnections(scope);}});await child;
++ const server=http.createServer((req,res)=>void routes.get('/naumi/model-connections')(req,res));await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;
++ const post=(body,headers={})=>fetch(origin+'/naumi/model-connections',{method:'POST',headers:{cookie:'owner',origin,'Content-Type':'application/json','x-naumi-model-connections':'1',...headers},body:typeof body==='string'?body:JSON.stringify(body)});
++ try{assert.equal((await post(input(f),{cookie:''})).status,401);assert.equal((await post(input(f),{cookie:'guest'})).status,403);assert.equal((await post(input(f),{origin:'https://foreign.example'})).status,403);assert.equal((await post(input(f),{'x-naumi-model-connections':''})).status,403);assert.equal((await post(input(f),{'Content-Type':'text/plain'})).status,415);assert.equal((await post('{')).status,400);assert.equal((await post('x'.repeat(131073))).status,413);assert.equal((await post(input(f))).status,200);const r=await fetch(origin+'/naumi/model-connections',{headers:{cookie:'owner'}});assert.equal(r.headers.get('Cache-Control'),'no-store');assert(!(await r.text()).includes('fixture-key'));assert.equal((await post(input(f,{expectedRevision:0}))).status,409);}
++ finally{server.closeAllConnections();await new Promise(r=>server.close(r));await host.dispose();await provider.dispose();}
++});
