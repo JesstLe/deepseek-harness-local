@@ -40,6 +40,11 @@ export class BotGroupStore {
       this.db.exec(`CREATE TABLE IF NOT EXISTS post_context (
         post_seq INTEGER PRIMARY KEY REFERENCES posts(seq), task_id TEXT,
         attachments TEXT NOT NULL DEFAULT '[]', request_attachments TEXT NOT NULL DEFAULT '[]'
+      );
+      CREATE TABLE IF NOT EXISTS room_name_operations (
+        operation_id TEXT PRIMARY KEY, room_id TEXT NOT NULL REFERENCES rooms(id),
+        expected_name TEXT NOT NULL, name TEXT NOT NULL, actor TEXT NOT NULL,
+        result_json TEXT NOT NULL, created_at TEXT NOT NULL
       )`);
     } catch (error) {
       this.db.close();
@@ -94,6 +99,24 @@ export class BotGroupStore {
       const add = this.db.prepare('INSERT INTO members VALUES (?, ?, ?, ?)');
       botIds.forEach((botId, position) => add.run(id, botId, 'session-' + randomUUID(), position));
       return this.room(id);
+    });
+  }
+
+  rename({operationId,roomId,name,expectedName},actor='owner') {
+    if(typeof name!=='string'||!name.trim()||name.trim().length>80||/[\u0000-\u001f\u007f]/.test(name.trim())||typeof expectedName!=='string'||!expectedName||expectedName.length>80)fail('BOT_GROUP_INVALID_NAME');
+    name=name.trim();
+    return this.write(()=>{
+      const prior=this.db.prepare('SELECT room_id,expected_name,name FROM room_name_operations WHERE operation_id=?').get(operationId);
+      if(prior){
+        if(prior.room_id!==roomId||prior.expected_name!==expectedName||prior.name!==name)fail('BOT_GROUP_CONFLICT');
+        return this.room(roomId); // Never replay the write after a later successful rename.
+      }
+      const room=this.room(roomId);if(!room)fail('BOT_GROUP_NOT_FOUND');
+      if(room.name!==expectedName)fail('BOT_GROUP_CONFLICT');
+      this.db.prepare('UPDATE rooms SET name=? WHERE id=?').run(name,roomId);
+      const result=this.room(roomId);
+      this.db.prepare('INSERT INTO room_name_operations VALUES(?,?,?,?,?,?,?)').run(operationId,roomId,expectedName,name,JSON.stringify(actor),JSON.stringify(result),timestamp());
+      return result;
     });
   }
 
