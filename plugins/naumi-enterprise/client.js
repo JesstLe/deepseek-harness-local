@@ -1,5 +1,6 @@
 /** Async presentation-only module; the original enterprise app below stays intact. */
 function installNaumiContextUI(ctx,React,createPortal,Icon){
+  ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/bot-overview.js').then(module=>{if(!closed)dispose=module.installBotOverviewUI(ctx,React);});return()=>{closed=true;dispose?.();};});
   ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/plugin-market.js').then(module=>{if(!closed)dispose=module.installPluginMarketUI(ctx,React);}).catch(error=>console.error('Naumi plugin market:',error));return()=>{closed=true;dispose?.();};});
   ctx.effect(()=>{
     let dispose,closed=false;
@@ -172,7 +173,7 @@ window.__ModuleLoader__.load({id:'@naumi/dsh-enterprise',factory(require){
       for(const [id]of PANELS)yield ctx.slots.register({name:'main',key:id},()=>h(Page,{page:id}));
       yield ctx.slots.register({name:'main',key:'naumi-conversation',children:{'naumi.group.controls':{kind:'single',scope:'session'}}},props=>h(React.Suspense,{fallback:null},h(BotGroups,{native:props})));
       yield ctx.slots.inject('sidebar.panellist',function*(){for(const [id,label,icon]of PANELS)yield ctx.slots.register({name:'sidebar.panellist',id,order:-100+PANELS.findIndex(x=>x[0]===id),label:()=>label},()=>h(Icon,{name:icon}));});
-      const known=new Set([...PANELS.map(x=>x[0]),'naumi-conversation']);
+      const known=new Set([...PANELS.map(x=>x[0]),'naumi-conversation','naumi-bot-overview']);
       const previous=sessionStorage.getItem('naumi.activePanel');
       const saved=previous==='naumi-bot-groups'?'naumi-conversation':previous;
       const hash=new URLSearchParams(location.hash.slice(1));

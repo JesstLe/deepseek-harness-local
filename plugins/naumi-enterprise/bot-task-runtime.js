@@ -1,3 +1,4 @@
+import {captureVersion,verifyVersion,transferVersion} from './bot-file-versions.js';
 import {installModelSelection,modelSelectionProjectionDefinition} from '@deepseek-ai/dsh-agent';
 import {freezeMessage} from '@deepseek-ai/dsh-llm';
 import {references,announcedFiles,validateFiles,registerFiles,verifyHandoffFiles} from './bot-deliverables.js';
@@ -76,13 +77,15 @@ export function createBotTaskRuntime(ctx){
     }
     const current=await snapshot(sessionId),refs=references(current.events,sessionId,turn),verified=[];
     for(const ref of refs){
-      const [stat]=await validateFiles(ctx,{id:sessionId,header:current.header},[{path:ref.path,description:ref.description}],AbortSignal.timeout(10000));
-      verified.push({...ref,version:stat.version,...(stat.bytes!==undefined?{bytes:stat.bytes}:{})});
+      const session={id:sessionId,header:current.header};
+      if(ended&&ctx.workspaceFiles.readBytes){verified.push(await captureVersion(ctx,session,ref,signal));}
+      else {const [stat]=await validateFiles(ctx,session,[{path:ref.path,description:ref.description}],signal);verified.push({...ref,version:stat.version,...(stat.bytes!==undefined?{bytes:stat.bytes}:{})});}
     }
     return verified;
   });
   return {
     snapshot,profile,ensure,
+    async verifyVersion(ref){const s=await snapshot(ref.sessionId);const event=s?.events.find(e=>e.type==='deliverables/presented'&&e.seq===ref.seq&&e.data.turn===ref.turn);if(event?.data.files[ref.index]?.path!==ref.path)throw Error('BOT_VERSION_REFERENCE');return verifyVersion(ctx,{id:ref.sessionId,header:s.header},ref,AbortSignal.timeout(10000));},
     async admitGroupAttachments(sessionId,parts,requestId){
       const agent=ctx.agents.get(sessionId),uploads=ctx.get('fileUploads'),attachments=ctx.get('attachments');
       if(!agent||!uploads||!attachments)throw Error('BOT_GROUP_ATTACHMENTS_UNAVAILABLE');
@@ -122,8 +125,8 @@ export function createBotTaskRuntime(ctx){
           const source=await snapshot(ref.sessionId),event=source?.events.find(e=>e.seq===ref.seq&&e.type==='deliverables/presented'&&e.data.turn===ref.turn);
           const original=event?.data.files[ref.index];
           if(!original||original.path!==ref.path)throw Error('BOT_DELIVERY_REFERENCE_MISMATCH');
-          await validateFiles(ctx,{id:ref.sessionId,header:source.header},[original],AbortSignal.timeout(10000));
-          checked.push(...await validateFiles(ctx,agent.session,[original],AbortSignal.timeout(10000)));
+          if(ref.snapshot){const copied=await transferVersion(ctx,{id:ref.sessionId,header:source.header},agent.session,ref,AbortSignal.timeout(10000));checked.push({path:copied.path,description:ref.description});}
+          else {await validateFiles(ctx,{id:ref.sessionId,header:source.header},[original],AbortSignal.timeout(10000));checked.push(...await validateFiles(ctx,agent.session,[original],AbortSignal.timeout(10000)));}
         }
         registerFiles(agent.session,state.turn,checked,callId);await ctx.sessions.flush(agent.session);
       });
