@@ -6,6 +6,7 @@ import {z} from 'zod';
 import {defineTool} from '@deepseek-ai/dsh-tools';
 import {installBotTasks} from './bot-tasks.js';
 import {installEmployees} from './employees.js';
+import {installBotGroups} from './bot-groups.js';
 import {BOT_FORMS,BOT_PALETTES} from './assets/bot-appearance-model.js';
 
 const name=z.string().trim().min(1).max(80).refine(v=>!/[\u0000-\u001f\u007f]/u.test(v));
@@ -30,7 +31,7 @@ export class BotDirectory {
   }
   assertReady(){if(this.closed)fail('BOT_DIRECTORY_CLOSED');if(this.failure)fail(this.failure);}
   list(){this.assertReady();return clone(this.value);}
-  forSession(sessionId){this.assertReady();const bot=this.value.bots.find(b=>b.sessionIds.includes(sessionId));return bot?clone(bot):null;}
+  forSession(sessionId){this.assertReady();const groupBotId=this.groupSessionOwner?.(sessionId);const bot=this.value.bots.find(b=>b.id===groupBotId||b.sessionIds.includes(sessionId));return bot?clone(bot):null;}
   subscribe(listener){this.listeners.add(listener);return()=>this.listeners.delete(listener);}
   transact(change){
     this.assertReady();const run=this.tail.then(async()=>{
@@ -45,6 +46,7 @@ export class BotDirectory {
     const fields=z.object({name,kind:z.enum(['agent','team']),purpose:z.string().trim().min(1).max(4000)}).strict().parse(input);
     if(!cwd||!path.isAbsolute(cwd))fail('BOT_WORKSPACE_REQUIRED');
     return this.transact(next=>{
+      if(this.groupSessionOwner?.(sessionId))fail('BOT_SESSION_ALREADY_BOUND');
       const existing=next.bots.find(b=>b.sessionIds.includes(sessionId));
       if(existing){
         if(existing.status==='archived')fail('BOT_ARCHIVED');
@@ -82,6 +84,7 @@ export class BotDirectory {
     id.parse(botId);id.parse(sessionId);revision.parse(expectedRevision);
     return this.transact(next=>{
       const bot=next.bots.find(b=>b.id===botId);if(!bot)fail('BOT_NOT_FOUND');if(bot.status!=='active')fail('BOT_ARCHIVED');
+      if(this.groupSessionOwner?.(sessionId))fail('BOT_SESSION_ALREADY_BOUND');
       const existing=next.bots.find(b=>b.sessionIds.includes(sessionId));if(existing&&existing.id!==botId)fail('BOT_SESSION_ALREADY_BOUND');
       if(existing)return {bot,unchanged:true};if(bot.revision!==expectedRevision)fail('BOT_CONFLICT');
       if(!cwd||path.resolve(cwd).toLocaleLowerCase()!==path.resolve(bot.cwd).toLocaleLowerCase())fail('BOT_WORKSPACE_MISMATCH');
@@ -106,7 +109,9 @@ export function createBotTools(ctx,directory){
 export function installBots(ctx,{directory,collaborationOrigin}={}){
   return ctx.inject(['agents','agentTeams','agentPresets','sessions','sessionPersistence','tools','systemPrompt'],scope=>{
     const store=directory??new BotDirectory(path.join(process.env.DSH_HOME??path.join(os.homedir(),'.dsh'),'naumi','bots.json'));
-    const taskRuntime=installBotTasks(scope,store);
+    let taskService;
+    const taskRuntime=installBotTasks(scope,store,{onReady:service=>{taskService=service;}});
+    const groupRuntime=installBotGroups(scope,store,()=>taskService);
     const employeeRuntime=installEmployees(scope,store,{collaborationOrigin});
     const installed=new Map(),streams=new Set();
     const install=agent=>{
@@ -153,6 +158,6 @@ export function installBots(ctx,{directory,collaborationOrigin}={}){
       const heartbeat=setInterval(()=>{if(!res.destroyed)res.write(': keepalive\n\n');},25000);heartbeat.unref?.();
       res.on('close',()=>{clearInterval(heartbeat);unsubscribe();streams.delete(res);});
     }}));
-    scope.effect(()=>async()=>{await employeeRuntime.dispose();await taskRuntime.dispose();for(const dispose of installed.values())dispose();installed.clear();for(const res of streams)res.end();streams.clear();await store.close();});
+    scope.effect(()=>async()=>{await groupRuntime.dispose();await employeeRuntime.dispose();await taskRuntime.dispose();for(const dispose of installed.values())dispose();installed.clear();for(const res of streams)res.end();streams.clear();await store.close();});
   });
 }

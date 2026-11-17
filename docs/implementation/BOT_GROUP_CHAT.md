@@ -1,0 +1,25 @@
+# Bot 群聊
+
+负责人：本次群聊切片。任务分支：`codex/bot-groups`。本地开工基线：`9a730ed23356d783b494cd6a45e566b08bd36605`。起始共享工作树干净。功能切片计数 1。
+
+## 模块与职责
+
+- 群聊入口允许本机 owner 从当前 Bot 目录选 2 至 12 个活跃成员，默认接话者可留空或从成员中选一位。任意名称的 Bot 按稳定 ID 路由。用户可输入 `@名称`，也可用点名按钮选择多个成员。
+- `bot-group-store.js` 保存群、群成员 Session、消息和待处理回复。`bot-group-service.js` 负责路由、恢复和群任务投影。`bot-groups.js` 接入本机同源 owner HTTP 和 Harness 会话事件。
+- `bots.js` 解析群成员 Session 的 Bot 身份。群 Session 不追加到 Bot 目录的接待 Session 列表，也不能被普通目录绑定或用于另建 Bot。
+- `assets/bot-groups.js` 与 `assets/bot-groups.css` 显示群与任务。`client.js` 注册入口，`host.js` 提供静态资源，插件清单随代码同步。
+
+## 接口与状态
+
+- `GET /naumi/bot-groups` 列群，`GET /naumi/bot-groups?roomId=…&before=…` 读取消息与群任务。`POST /naumi/bot-groups` 接受 `create` 和 `post`。写操作使用 UUID 在网络重试时去重，同 UUID 换内容返回冲突。写入要求 owner 与 `x-naumi-bot-groups: 1`，校验请求来源和大小。
+- `bot-groups.sqlite` 与原 Bot 目录同目录。群消息与点名接收人的队列同事务写入。Harness Session 收据是每轮是否真实完成的依据。重开时只恢复原来已在 inbox 等待的稳定消息 ID，无法确认是否完成的回合标为中断。
+- 每位成员每个群拥有独立根 Session。运行时使用目标 Bot 自身的模型、工作目录、preset 与权限。不同成员可并行接话，单成员同群依序接话。群默认接话者只影响路由。
+- 群里用现有 `bot_dispatch` 派单。群任务由原任务账本按来源 Session 投影，文件仍通过 Harness 原生交付引用打开，群聊不会写第二份任务状态。显示的任务范围是从当前群成员 Session 发起的任务。
+- 群聊按本机 owner 作用域设计。成员上下文只加载当前群的近期讨论，成员仍使用该 Bot 的正常记忆、工具与权限。其他设备和企业成员的共享访问尚未接入。需要原生工具确认的轮次提供打开 Session 的入口。
+
+## 验证与交接
+
+- `node --test tests/naumi-bot-groups.test.mjs` 通过 6 项。使用真实 SQLite、确定性 Harness 适配器，验证点名解析、可选默认接话者、越界拒绝、并行与串行、改名与归档、重启恢复与任务/文件投影。
+- 相关 JS 通过 `node --check`，`npm pack --dry-run --json ./plugins/naumi-enterprise` 确认新增模块及样式进入插件包。
+- `node --test tests/naumi-bots.test.mjs tests/naumi-async-bot.test.mjs tests/naumi-bot-http-runtime.test.mjs` 未进入用例，当前环境缺少 Cordis、Harness 和 Zod，npm 注册表连接也不可用。真实 Harness 模型运行、浏览器操作与安装版验收待补。
+- 原 checkout 的 Git 元数据不可写，单独 checkout 用于实现。`git fetch origin main` 在隔离 checkout 遭遇 GitHub 连接失败。通过 GitHub 读取主线 `68b4bb462fd2d3df04524f4097b723b60933bb5c` 源码，三方核对 `bots.js` 与 `host.js` 的重叠改动。
