@@ -16,6 +16,7 @@ if(mode==='prepare'){
  const dir=path.join(runtime,'runtime/im-gateway-'+randomUUID()),candidate=path.join(dir,'candidate'),plugin=path.join(candidate,'plugins/naumi-enterprise');fs.mkdirSync(plugin,{recursive:true});
  const files=git('diff','--name-only',baseline,'HEAD','--','plugins/naumi-enterprise').toString().trim().split(/\r?\n/).map(p=>p.slice('plugins/naumi-enterprise/'.length));
  for(const file of files){const from=path.join(installed,file);if(fs.existsSync(from)){const dest=path.join(plugin,file);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(from,dest);}}
+ execFileSync('git',['init','--quiet'],{cwd:candidate});
  const patch=path.join(dir,'task-delta.patch');fs.writeFileSync(patch,git('diff','--binary',baseline,'HEAD','--','plugins/naumi-enterprise'));
  execFileSync('git',['apply','--check','--ignore-space-change',patch],{cwd:candidate});execFileSync('git',['apply','--ignore-space-change',patch],{cwd:candidate});
  const rows=files.map(file=>{const old=path.join(installed,file),modified=path.join(plugin,file),bytes=fs.readFileSync(modified),prior=fs.existsSync(old)?fs.readFileSync(old):null;
