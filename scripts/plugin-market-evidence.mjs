@@ -31,7 +31,7 @@ const pwsh='D:/DEV/PowerShell/pwsh.exe',zip=path.join(out,'MODIFIED_FILE.zip'),r
 execFileSync(pwsh,['-NoProfile','-Command',`$ErrorActionPreference='Stop'; Compress-Archive -Path '${stage.replaceAll("'","''")}/*' -DestinationPath '${zip.replaceAll("'","''")}' -Force; Expand-Archive -LiteralPath '${zip.replaceAll("'","''")}' -DestinationPath '${reopened.replaceAll("'","''")}'`],{windowsHide:true});
 for(const m of manifest)assert.equal(hash(fs.readFileSync(path.join(reopened,m.path))),m.modifiedSHA256);
 const copy=path.join(root,'runtime/market-rollback-'+randomUUID()),archive=path.join(root,'runtime/market-baseline-'+randomUUID()+'.tar');fs.mkdirSync(copy);
-execFileSync('git',['archive','--format=tar','--output='+archive,base,'desktop/app','desktop/tests','plugins','package.json','tests/naumi-enterprise.test.mjs'],{cwd:root});
+execFileSync('git',['archive','--format=tar','--output='+archive,base,'desktop/app','desktop/tests','desktop/scripts','plugins','package.json','scripts','tests/naumi-enterprise.test.mjs'],{cwd:root});
 execFileSync('tar',['-xf',archive,'-C',copy]);
 for(const m of manifest)write(path.join(copy,m.path),fs.readFileSync(path.join(root,m.path)));
 write(path.join(copy,'.naumi-market-copy.json'),JSON.stringify({target:fs.realpathSync(copy)}));
