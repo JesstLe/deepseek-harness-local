@@ -56,3 +56,7 @@ BotDirectory / 原生 Session、BotTaskStore、原生标题事件和工作区服
 - UI_NATIVE_BINARY.log：18/18，原生present发布实际二进制，经真正workspaceFiles分块读取生成快照；删除工作原件后快照逐字节和owner核验通过。供应商外呼0，4次确定性loopback夹具请求。
 - 源码副本ROLLBACK tests=43 pass=43 fail=0 exit=0；当前修改保留。可执行ROLLBACK.sh仅接受带任务marker的runtime副本，不操作实际数据目录。
 - 0.3.6中间依赖stage从固定main b65d506完成：45,618文件、closure PASS、private paths0。用户要求纳入D2 82d2070后，不发布中间包；仅刷新两份D2源及打包副本，重新核对其余45,614 staged文件，再从包含D2/D3/D4的固定main打最终安装候选。没有重跑真实模型。
+
+- D2最终计数沿用主线程补正：13检查、10原生会话回合、2次宿主启动；22为本地隔离连接入口计数，不是精确上游收费调用数，原生持久事件18条已提交模型响应。本文不重跑真实模型。
+- D2加载后本线程只读复核104sessions/0running/4bots/catalog revision47，4个独立cwd和3个新home保持。D2通知中revision46为旧口径，已按实时47说明。
+- 最终依赖stage核验完成：source dbaaee9，package invocation5ffd5f7，两者plugins/desktop无差异；D2四份文件刷新、其余45614文件哈希通过，45618总文件，closure PASS。后续主线程证据提交不改变本次打包产品代码。
