@@ -52,3 +52,28 @@ First evidence run was invalidated by edits to its verifier while it ran; preser
 RELEASE PREPARATION
 Defective 0.3.4 marked prerelease and removed from Latest, without deleting assets or changing tag/binary. Stable Latest temporarily0.3.2 until0.3.5 publication.
 Build, real final-installer lifecycle and public release receipts are appended after fixed-main build. No employee install or user shortcut is adopted by the tests.
+
+FINAL PATH-BUDGET FOLLOW-UP
+A real first 0.3.5 candidate was actually installed to the owned deep Unicode fixture E:/Workspace/naumi-desktop/runtime/installer-path-installed-035/中文 空格/Naumi. It correctly wrote uninstallerIcon.ico and Naumi.exe but stalled in ZIP payload extraction; native process timed out at180s, not a successful install. The target+backend-relative longest path exceeded the stock nsisunz MAX_PATH buffer. OVERLONG_INSTALL.txt/json and partial file manifest retain this failure. The owned partial directory was removed after checking its resolved absolute path stayed under the task runtime and no process used it; user shortcut hash unchanged.
+Added production build path budget from staged inventory; current longest payload relative path192, max install directory66, maximum destination259. Interactive and silent new installs reject oversized candidates before writing payload files; uninstall does not impose the new limit, so old deep installations are still removable. No path truncation or fallback to root.
+
+FINAL MODIFIED
+Command: node --test --test-concurrency=1 tests/*.test.mjs desktop/tests/*.test.cjs
+Input: full fixed path, final payload budget, all current main modules.
+Literal result:
+ℹ tests 557
+ℹ pass 557
+ℹ fail 0
+Exit status:0. Output FINAL_TESTS.txt.
+Command: node desktop/scripts/verify-installer-path.mjs
+Literal result: NATIVE_PATH cases=9 pass=9 invalid_rejected=5 new_parent=PASS unicode_spaces=PASS trailing_slash=PASS long_path=REJECTED no_writes=PASS exit=0
+Exit status:0. Output MODIFIED_NATIVE_FINAL.txt.
+FINAL ROLLBACK
+Command: D:/DEV/Git/bin/bash.exe evidence/installer-path-fix/ROLLBACK.sh
+Input: final15 path source overlay and original baseline restore in a second copy.
+Literal result:
+ROLLBACK tests=554 pass=554 fail=0 exit=0
+RESTORED version=0.3.4 native_path_callback=baseline source_hashes=PASS
+CURRENT version=0.3.5 native_path_callback=fixed source=modified service3080=untouched
+Exit status:0. Output ROLLBACK_FINAL_COMMAND.txt; ROLLBACK_NATIVE.txt again confirms actual=\Naumi exit=1 only in restored copy.
+First new budget test run retained an older overly broad assertion forbidding any builder writeFile; refined it to require that the presentation hook never writes files, while allowing the owned runtime budget include. Final557 pass above includes the corrected contract. PATH_LIMIT_TESTS.txt retains the first check result.

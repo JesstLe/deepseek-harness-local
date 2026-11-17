@@ -46,6 +46,14 @@ test('new install directories use nonexisting-path-safe Win32 canonicalization a
  const gate=read('desktop/installer/maintenance.nsh');assert(gate.indexOf('Call NaumiCanonicalPath')<gate.indexOf('!insertmacro NaumiExtractMaintenance',gate.indexOf('!macro customCheckAppRunning')));
  assert(gate.includes('Call un.NaumiCanonicalPath'));assert(gate.includes('SetErrorLevel 43'));
 });
+
+test('ZIP extraction admission is derived from real payload paths before any file write',async()=>{
+ const {installPathBudget}=await import('../scripts/build-desktop.mjs');
+ const value=installPathBudget([{path:'x'.repeat(174)}]);assert.equal(value.longestPayloadPathChars,192);assert.equal(value.maxInstallDirChars,66);
+ assert.equal(value.maxInstallDirChars+1+value.longestPayloadPathChars,259);
+ assert.throws(()=>installPathBudget([]),/INVENTORY_REQUIRED/);assert.throws(()=>installPathBudget([{path:'x'.repeat(260)}]),/BUDGET_EXHAUSTED/);
+ assert(source.includes('$1 > ${NAUMI_MAX_INSTALLDIR_CHARS}'));assert(source.includes('installer-path-budget.nsh'));
+});
 test('one light layout scales geometry and uses high resolution branded assets',()=>{
  for(const s of ['MUI_BGCOLOR FFFFFF','GetDpiForWindow','NaumiScale','820 520','NaumiRail','Microsoft YaHei UI'])assert(source.includes(s));
  const assets={'logo.bmp':[88,88],'rail.bmp':[432,1040],'action-install.bmp':[320,88],'action-browse.bmp':[168,80]};
@@ -75,5 +83,7 @@ test('presentation build hook preserves both native builder phases and restores 
  const original=Target.prototype.computeFinalScript,restore=installPresentationHook(Target,engine,meta),target=new Target;
  try{target.computeFinalScript(raw,false,['x64']);target.computeFinalScript(raw,true,['x64']);assert.deepEqual(calls.map(c=>c.installer),[false,true]);assert(calls.every(c=>c.raw===engine&&c.owner===target));assert.throws(()=>presentationScript(raw+'x',engine,meta),/SOURCE_CHANGED/);}finally{restore();}
  assert.equal(Target.prototype.computeFinalScript,original);
- const builder=read('desktop/scripts/build-desktop.mjs');assert(builder.includes("publish:'never'"));assert(!builder.includes('writeFile'));
+ const builder=read('desktop/scripts/build-desktop.mjs');assert(builder.includes("publish:'never'"));
+ const hook=builder.slice(builder.indexOf('export function installPresentationHook'),builder.indexOf('export async function buildDesktop'));assert(!hook.includes('writeFile'));
+ assert(builder.includes("path.join(root,'runtime/installer-path-budget.nsh')"));
 });
