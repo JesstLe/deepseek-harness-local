@@ -33,3 +33,5 @@
 - 追加修复后定向100/100通过，exit0。需从包含修订的固定main重建0.3.9并复跑真实交接。
 
 - 额外真实NSIS无安装参数观察器确认：Node spawn会将含空格/D参数整项包引号，pinned GetDParameter保留尾引号。customInit仅去除末尾包装引号、仍以canonical+注册目录精确匹配，并将INSTDIR设为检查后的路径，支持中文/空格。原始观察输出归档ARGV。
+
+- 第二轮已成功安装最终0.3.9（实际asar版本确认），但Explorer启动不继承测试进程env，隔离profile的回执门未满足；该轮作为验收夹具失败保留HANDOFF_SECOND，不计生产重开PASS。原生runner为自有临时开始菜单快捷方式增加仅夹具的context launcher，仍由NSIS自动调用，生产app.asar不改；不改真实账号/系统env。
