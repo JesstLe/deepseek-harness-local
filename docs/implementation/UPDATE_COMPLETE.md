@@ -38,3 +38,9 @@
 
 - 第三轮NSIS已自动创建新GUI PID53976，renderer原生参数为0.3.9且userdata为隔离profile；因夹具登录仅session cookie，退出后identity分区Cookies表为0（只读SQLite计数确认），工作台回执未满足。保留HANDOFF_THIRD；fixture登录改为Max-Age=3600再验收，不改变产品登录策略。
 - 副本回滚增强为从整合HEAD复制，再仅恢复本任务20文件；额外断言协作UI的host/client/两份CSS逐字保持，不回退其他线程UI。
+
+## 最终真实链路与当前用户处理
+- 完整native handoff PASS：old PID56848退出→stock updater真实下载495316892字节/SHA512→NSIS实际替换→生产0.3.9 PID39500工作台回执；外接Harness、原Session与数据保持，fixture卸载及HKLM/原快捷方式保护通过，0模型。
+- 稳定发布v0.3.9，tag固定1602a1d；匿名30段HTTP206完整下载SHA256/SHA512吻合，旧0.3.7资产保持。
+- 当前用户一次性currentuser安装使用同一APPDATA和原backend-link；部署脚本修复PowerShell单进程JSON边界，并增加带原快照/原backend PID/原配置hash复核的resume-closed。原TypeError与WAL门失败保留，不混记通过。
+- employees.sqlite-wal是运行态旁路文件，实测后台改变但稳定DB/任务/配置字节保持；不重写或checkpoint真实DB，业务保护以原员工export hash+稳定文件hash核验。实际安装正在执行，最终以USER_INSTALL回执为准。
