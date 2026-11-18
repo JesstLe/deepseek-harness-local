@@ -26,3 +26,8 @@
 - 已整合 origin/main effb693b6a7ba8a8067120c3a8566eae3f61b6bc，保留交付中心/折叠侧栏全部UI与证据；.gitattributes只并列保留两模块规则。
 - 整合树集中测试843/843，exit0，含最终原生启动回执；原切片837/837。
 - 新增实际原生自动更新runner：独立currentuser安装槽、公版0.3.8加修复候选代码（保留旧版本元数据），下载完整0.3.9真实NSIS，验证旧PID退出/新PID回执/外部后端与原会话保留，最终卸载fixture；该验收尚待构建后执行。
+
+## 真实交接首轮与追加修复
+- 首轮真实loopback完整下载及原生点击已执行，旧候选GUI退出，但HKCU/HKLM并存时stock静默分支仅凭hasPerMachineInstallation就转机器安装，新GUI未重开。首轮保留HANDOFF_FIRST，不混记通过。
+- 最小扩展：native updater公共installDirectory绑定process.execPath目录；NSIS现有customInit仅针对--updated且显式/D匹配已注册安装目录，选择对应现有安装范围，未知目录exit43；未修改stock引擎/卸载事务/依赖版本。
+- 追加修复后定向100/100通过，exit0。需从包含修订的固定main重建0.3.9并复跑真实交接。

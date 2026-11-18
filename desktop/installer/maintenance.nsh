@@ -4,6 +4,52 @@
 ; any installed-file removal. It replaces the builder's force-kill fallback.
 !define NAUMI_HELPER_DIR "${__FILEDIR__}\..\app"
 !define NAUMI_BUNDLED_NODE "${__FILEDIR__}\..\..\runtime\desktop-backend\node.exe"
+; A native update supplies the exact initiating install directory. With both HKCU
+; and HKLM installs present, the stock silent section otherwise elevates merely
+; because HKLM exists, even after initMultiUser selected CurrentUser.
+; Resolve scope only for --updated /D matching an existing registered install.
+!macro customInit
+  ${If} ${isUpdated}
+    !insertmacro GetDParameter $R0
+    ${If} $R0 != ""
+      Push $R0
+      Call NaumiCanonicalPath
+      Pop $R1
+      ${If} $R1 == ""
+        SetErrorLevel 43
+        Quit
+      ${EndIf}
+      ReadRegStr $R2 HKCU "${INSTALL_REGISTRY_KEY}" InstallLocation
+      StrCpy $R3 ""
+      ${If} $R2 != ""
+        Push $R2
+        Call NaumiCanonicalPath
+        Pop $R3
+      ${EndIf}
+      ${If} $R1 == $R3
+        StrCpy $hasPerMachineInstallation "0"
+        StrCpy $hasPerUserInstallation "1"
+        !insertmacro setInstallModePerUser
+      ${Else}
+        ReadRegStr $R2 HKLM "${INSTALL_REGISTRY_KEY}" InstallLocation
+        StrCpy $R3 ""
+        ${If} $R2 != ""
+          Push $R2
+          Call NaumiCanonicalPath
+          Pop $R3
+        ${EndIf}
+        ${If} $R1 == $R3
+          StrCpy $hasPerMachineInstallation "1"
+          StrCpy $hasPerUserInstallation "0"
+          !insertmacro setInstallModePerAllUsers
+        ${Else}
+          SetErrorLevel 43
+          Quit
+        ${EndIf}
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
+!macroend
 !macro NaumiExtractMaintenance
   InitPluginsDir
   SetOutPath $PLUGINSDIR
