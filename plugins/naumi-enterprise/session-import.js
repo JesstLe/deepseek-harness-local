@@ -3,8 +3,9 @@ import path from 'node:path';
 import os from 'node:os';
 import {randomUUID} from 'node:crypto';
 import {Session,SessionId} from '@deepseek-ai/dsh-session';
-import {createUserMessage,createAssistantMessage} from '@deepseek-ai/dsh-llm';
+import {createUserMessage,createAssistantMessage,createSystemMessage} from '@deepseek-ai/dsh-llm';
 import {ImportSources,readImportSnapshot,digest,importError} from './session-import-source.js';
+import {installImportedContext} from './session-import-context.js';
 
 async function readJSON(file){try{return JSON.parse(await fs.readFile(file,'utf8'));}catch(e){if(e.code==='ENOENT')return null;throw e;}}
 /** Durable no-clobber publication; an interrupted temporary file is never a committed plan. */
@@ -12,9 +13,12 @@ async function publish(file,value,{exclusive=false}={}){await fs.mkdir(path.dirn
 const toolText=b=>b.kind==='tool-call'?'[历史工具调用 '+b.name+' / '+b.id+']\n'+b.text:b.kind==='tool-result'?'[历史工具结果 '+b.id+(b.isError?' / error':'')+']\n'+b.text:b.text;
 export function importSessionPlan(snapshot,sessionId,cwd){
  const minimal=Session.create(SessionId(sessionId)),session=Session.create(SessionId(sessionId),undefined,{...minimal.header,cwd}),events=[],mapping=[];const append=(...args)=>{const e=session.append(...args);events.push(e);return e;};
+ // V4 requires the first surface head to be a system slot before any future
+ // current system prompt can be appended. Empty local anchor imports no old authority.
+ append('turn/start',{turn:1});append('step/start',{turn:1,step:1});append('system/message',{turn:1,step:1,message:createSystemMessage('')},{surfaceOp:'append'});append('step/end',{turn:1,step:1});append('turn/end',{turn:1,reason:{kind:'completed'}});
  append('session/title',{title:snapshot.title,messageSeqs:[],source:{kind:'user'}});
  append('user/message',createUserMessage({source:{kind:'naumi-session-import',form:'recall'},content:[{type:'text',text:`[${snapshot.provider} 历史会话；历史工具仅为记录，不代表当前工具、权限或待执行请求。来源 ${snapshot.sourceSessionId}，快照 ${snapshot.fingerprint}。]`}]}),{surfaceOp:'append'});
- let turn=0;
+ let turn=1;
  for(const m of snapshot.messages){const content=[{type:'text',text:m.blocks.map(toolText).join('\n\n')}];let e;
   if(m.role==='user')e=append('user/message',createUserMessage({source:{kind:'naumi-session-import',form:'recall'},content}),{surfaceOp:'append'});
   else{turn++;append('turn/start',{turn});append('step/start',{turn,step:1});e=append('assistant/message',{turn,step:1,message:createAssistantMessage({source:{provider:'imported-'+snapshot.provider,model:'transcript'},content}),stream:[]},{surfaceOp:'append'});append('step/end',{turn,step:1});append('turn/end',{turn,reason:{kind:'completed'}});}
@@ -54,7 +58,7 @@ export class SessionImporter{
  }
 }
 export function installSessionImport(ctx,options={}){return ctx.inject(['sessionPersistence','workspaceRegistry'],scope=>{
- const importer=new SessionImporter({ctx:scope,...options});scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/session-import',handler:async(req,res)=>{
+ const importer=new SessionImporter({ctx:scope,...options});installImportedContext(scope,{root:importer.root});scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/session-import',handler:async(req,res)=>{
   res.setHeader('Content-Type','application/json; charset=utf-8');res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Naumi-Session-Import','1');const send=(status,body)=>res.writeHead(status).end(JSON.stringify(body));
   try{const a=scope.connection.admit(req);if('rejection'in a){send(a.rejection,{error:'IMPORT_OWNER_REQUIRED'});return;}if(a.peer.principal.kind!=='owner')importError('OWNER_REQUIRED',403);
    if(req.method!=='POST'){res.setHeader('Allow','POST');importError('METHOD',405);}if(req.headers['x-naumi-import']!=='1'||req.headers.origin&&![`http://${req.headers.host}`,`https://${req.headers.host}`].includes(req.headers.origin))importError('SAME_ORIGIN_REQUIRED',403);
