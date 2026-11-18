@@ -4,7 +4,7 @@ import {createGroupMentions} from './bot-mentions.js';
 import {primaryBot} from './primary-bot.js';
 import {createBotAvatar} from './bot-avatar.js';
 import {createChatMarkdown} from './bot-chat-markdown.js';
-import {groupCatalog,groupRequest,groupError,roomDraft,watchGroupReplies,roomWorking,groupTimeline,groupInterruptTargets} from './bot-chat-model.js';
+import {groupCatalog,groupRequest,groupError,roomDraft,watchGroupReplies,roomWorking,groupTimeline,groupInterruptTargets,groupWorkMembers} from './bot-chat-model.js';
 
 export function createBotGroupsPage(ctx,React){
  const h=React.createElement,{useEffect,useState,useRef,useSyncExternalStore}=React,groups=groupCatalog(),catalog=botCatalog(),Avatar=createBotAvatar(React),Markdown=createChatMarkdown(React);
@@ -60,7 +60,17 @@ export function createBotGroupsPage(ctx,React){
   };
   return h('div',{className:'nbc-group-title'},h('div',{className:'nbc-title-line'},h('h1',null,room.name),action('修改群名',open,'edit',{ref:button,disabled:editing})),working&&h('span',{className:'nbc-working'},'正在协作'),editing&&h('form',{className:'nbc-rename','aria-label':'修改群名',onSubmit:submit,onKeyDown:e=>{if(e.key==='Escape'&&!composing.current&&!e.nativeEvent?.isComposing&&!pending){e.preventDefault();close();}if(e.key==='Enter'&&(composing.current||e.nativeEvent?.isComposing))e.preventDefault();}},h('input',{ref:input,'aria-label':'群名称',value:name,maxLength:80,required:true,disabled:pending||conflict,onCompositionStart:()=>{composing.current=true;},onCompositionEnd:()=>{composing.current=false;},onChange:e=>{setName(e.target.value);operation.current=null;setError('');}}),h('button',{type:'submit',disabled:pending||conflict||!name.trim()},pending?'保存中…':'保存'),h('button',{type:'button',disabled:pending,onClick:close},'取消'),error&&h('div',{className:'nbc-error',role:'alert'},error)));
  }
- function NativeComposer({room,native,accessory,busy,onSubmit,onCancel}){
+ function WorkIndicator({rows,bots,stale,onSelect,onAll}){
+  if(!rows.length)return null;
+  const activeCount=rows.filter(row=>['running','starting','replying'].includes(row.state)).length,waitingCount=rows.filter(row=>row.state==='waiting').length,moving=activeCount>0,labels={running:'工作中',starting:'准备中',replying:'正在回复',waiting:'待确认',queued:'排队中'},summary=stale?'状态待同步':moving?activeCount+' 位正在工作':waitingCount?waitingCount+' 位待确认':rows.length+' 位排队中';
+  return h('div',{className:'nbc-work-indicator','data-stale':stale||undefined,'data-room-work':true},
+   h('div',{className:'nbc-work-heading',role:'status','aria-live':'polite','aria-atomic':true},h('span',{className:'nbc-work-signal','data-moving':moving&&!stale,'aria-hidden':true},h('i'),h('i'),h('i')),rows.some(row=>row.tasks.length)?h('button',{type:'button',className:'nbc-work-summary',onClick:onAll,'aria-label':'查看当前群全部任务'},summary):h('span',null,summary)),
+   h('div',{className:'nbc-work-members','aria-label':'当前群工作成员'},rows.map(row=>{const bot=bots.find(b=>b.id===row.botId),name=bot?.name??'已归档成员',state=stale?'unknown':row.state,label=stale?'状态待同步':labels[state],count=row.tasks.length;
+    return h('button',{type:'button',key:row.botId,className:'nbc-work-member','data-work-bot':row.botId,'data-work-state':state,'data-moving':!stale&&['running','starting','replying'].includes(state),'aria-label':name+'，'+label+(count>1?'，'+count+' 项任务':''),'title':name+' · '+label+(count?' · '+count+' 项任务':''),onClick:()=>onSelect(row)},
+     h('span',{className:'nbc-work-face'},bot?h(Avatar,{bot,staticPreview:true}):icon('users',20)),h('span',{className:'nbc-work-name'},name),h('span',{className:'nbc-work-state'},label),count>1&&h('span',{className:'nbc-work-count'},count));
+   })));
+ }
+ function NativeComposer({room,native,accessory,busy,onSubmit,onCancel,workStatus=null}){
   const [binding,setBinding]=useState(null),[error,setError]=useState('');const callbacks=useRef({onSubmit,onCancel});callbacks.current={onSubmit,onCancel};
   useEffect(()=>{let closed=false,ref,dispose,stopMentions,stopSidebar;const controller=new AbortController();
    void (async()=>{try{
@@ -77,7 +87,7 @@ export function createBotGroupsPage(ctx,React){
    }catch(e){if(!closed){console.error('Naumi group composer:',e);setError(e.message==='NATIVE_COMPOSER_EXTENSION_MISSING'?'原生输入区扩展尚未加载，请更新工作台。':groupError(e));}}})();
    return()=>{closed=true;controller.abort();dispose?.();stopMentions?.();stopSidebar?.();ref?.release();};
   },[room.id]);
-  return h('div',{className:'nbc-native-dock','data-native-composer':binding?.sessionId??'loading'},error?h('div',{className:'nbc-error',role:'alert'},error):binding&&native?.SessionProvider?h(native.SessionProvider,{session:binding.reference},native.renderFactorySlot('naumi.group.composer',{groupBusy:busy,placeholder:'发送消息，@ 提及成员',accessory})):h('div',{className:'nbc-loading',role:'status'},'载入输入区…'));
+  return h('div',{className:'nbc-native-dock','data-native-composer':binding?.sessionId??'loading'},workStatus,error?h('div',{className:'nbc-error',role:'alert'},error):binding&&native?.SessionProvider?h(native.SessionProvider,{session:binding.reference},native.renderFactorySlot('naumi.group.composer',{groupBusy:busy,placeholder:'发送消息，@ 提及成员',accessory})):h('div',{className:'nbc-loading',role:'status'},'载入输入区…'));
  }
  function Conversation({room,bots,native}){
   const [data,setData]=useState(null),[older,setOlder]=useState([]),[end,setEnd]=useState(false),[loadingOlder,setLoadingOlder]=useState(false),[draft,setDraft]=useState(()=>roomDraft(room.id)),[error,setError]=useState(''),[readError,setReadError]=useState(''),[sending,setSending]=useState(false),[drawer,setDrawer]=useState(null),[live,setLive]=useState({});
@@ -129,7 +139,7 @@ export function createBotGroupsPage(ctx,React){
     drawer==='tasks'&&h(TaskDrawer,{tasks:data?.tasks??[],bots,native,onClose:()=>setDrawer(null),onSelect:selectTask}),
     drawer==='members'&&h('aside',{className:'nbc-drawer','aria-label':'群成员'},h('header',null,h('h3',null,'群成员'),action('关闭成员',()=>setDrawer(null),'close')),room.members.map(m=>{const b=bots.find(b=>b.id===m.botId);return h('div',{key:m.botId,className:'nbc-person'},b&&h(Avatar,{bot:b,staticPreview:true}),h('strong',null,label(m.botId)),m.botId===room.defaultBotId&&h('span',null,'默认接话'));}))
    ),
-   h(NativeComposer,{room,native,busy:replies.some(r=>['queued','starting','sent'].includes(r.state)),onSubmit:send,onCancel:stopReply,accessory})
+   h(NativeComposer,{room,native,busy:replies.some(r=>['queued','starting','sent'].includes(r.state)),onSubmit:send,onCancel:stopReply,accessory,workStatus:h(WorkIndicator,{rows:groupWorkMembers(room,data),bots,stale:!!readError,onAll:()=>setDrawer('tasks'),onSelect:row=>{if(row.tasks.length>1)setDrawer('tasks');else{const id=row.tasks[0]?.targetSessionId??row.replies[0]?.sessionId;if(id)openSession(id);}}})})
   );
  }
  return function UnifiedConversation({native}){const state=useSyncExternalStore(groups.subscribe,groups.getSnapshot,groups.getSnapshot),people=useSyncExternalStore(catalog.subscribe,catalog.getSnapshot,catalog.getSnapshot),room=state.rooms.find(r=>r.id===state.selected),bots=people.bots;
