@@ -1,0 +1,347 @@
+diff --git a/.gitattributes b/.gitattributes
+index 68ee4bf..ee42697 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -354,3 +354,7 @@ plugins/naumi-enterprise/third-party/ds-bot-im/** -text
+ # Preserve release receipts byte-for-byte for archived SHA256 verification.
+ /evidence/daily-release-037/** -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab,cr-at-eol
+ /evidence/daily-release-037/ROLLBACK.sh text eol=lf
++
++# Preserve linked-update repair originals and executable copy-only rollback.
++/evidence/update-entry-fix/** -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab,cr-at-eol
++/evidence/update-entry-fix/ROLLBACK.sh text eol=lf
+diff --git a/desktop/scripts/verify-linked-update-entry.mjs b/desktop/scripts/verify-linked-update-entry.mjs
+new file mode 100644
+index 0000000..c84da93
+--- /dev/null
++++ b/desktop/scripts/verify-linked-update-entry.mjs
+@@ -0,0 +1,38 @@
++// Installed native preload/main + the actual linked backend. Own auth/profile only;
++// read the workbench, never submit messages, edit tasks, import history or install updates.
++import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import http from 'node:http';import assert from 'node:assert/strict';import {createRequire} from 'node:module';
++const require=createRequire(import.meta.url),{_electron}=require('playwright');
++const [root,exe,out,mode='modified']=process.argv.slice(2);assert(root&&exe&&out);fs.mkdirSync(out,{recursive:true});
++const temp=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-linked-update-')),alias=path.join(temp,'root'),home=path.join(temp,'harness'),userData=path.join(temp,'profile');
++for(const d of ['config','logs','plugins/naumi-enterprise/assets'])fs.mkdirSync(path.join(alias,d),{recursive:true});
++const config=JSON.parse(fs.readFileSync(path.join(root,'config/local.json')));assert.equal(config.port,3080);
++fs.writeFileSync(path.join(alias,'config/local.json'),JSON.stringify({...config,home}));
++fs.copyFileSync(path.join(root,'plugins/naumi-enterprise/assets/symbol.svg'),path.join(alias,'plugins/naumi-enterprise/assets/symbol.svg'));
++for(const f of ['server.out.log','server.err.log'])fs.copyFileSync(path.join(root,'logs',f),path.join(alias,'logs',f));
++const server=http.createServer(async(req,res)=>{const send=v=>{res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(v));};
++ if(req.url==='/api/auth/session')return send({user:req.headers.cookie?.includes('nv_user=repair')?{email:'repair@example.test',name:'Update QA'}:null});
++ if(req.url==='/api/auth/login'){for await(const _ of req){}res.setHeader('set-cookie','nv_user=repair; HttpOnly; Path=/; SameSite=Lax');return send({ok:true,user:{email:'repair@example.test'}});}
++ if(req.url.split('?')[0]==='/latest.yml'){res.writeHead(200,{'content-type':'text/yaml'});return res.end('version: 0.3.7\nfiles:\n  - url: Naumi-Setup-0.3.7-x64.exe\n    sha512: '+Buffer.alloc(64).toString('base64')+'\npath: Naumi-Setup-0.3.7-x64.exe\nsha512: '+Buffer.alloc(64).toString('base64')+'\n');}
++ res.writeHead(404).end();
++});await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;
++const env={...process.env,NAUMI_ROOT:alias,NAUMI_USER_DATA:userData,NAUMI_IDENTITY_ORIGIN:origin,NAUMI_UPDATE_URL:origin,NAUMI_TEST:'1',NAUMI_TEST_HIDDEN:'1'};
++for(const key of ['ELECTRON_RUN_AS_NODE','NAUMI_DSH_HOME','NAUMI_HOST_URL','NAUMI_ENTERPRISE_ORIGIN'])delete env[key];
++let app;
++try{
++ app=await _electron.launch({executablePath:exe,env,timeout:90000});const page=await app.firstWindow();page.setDefaultTimeout(20000);console.log('QA launched');
++ await page.waitForURL('**/identity.html');await page.locator('#account').fill('repair@example.test');await page.locator('#password').fill('fixture-only');if(await page.locator('#legacy-claim').isVisible())await page.locator('#legacy-claim').check();await page.locator('#submit').click();console.log('QA fixture_login_submitted');
++ await page.waitForURL('http://127.0.0.1:3080/**',{timeout:90000});await page.getByRole('button',{name:'设置',exact:true}).waitFor({timeout:45000});
++ const info=await app.evaluate(({app})=>({version:app.getVersion(),owned:globalThis.__naumiTest.backend.owned,isolated:globalThis.__naumiTest.settings.isolated}));assert.equal(info.version,'0.3.7');assert.equal(info.owned,false);assert.equal(info.isolated,false);
++ await page.getByRole('button',{name:'设置',exact:true}).click();await page.getByRole('button',{name:'通用设置',exact:true}).click();
++ const versionLabel=page.getByText(/^Naumi 0\.3\.\d+$/).first();await versionLabel.waitFor();const footerVersion=await versionLabel.innerText(),updates=await page.locator('.nup-trigger').count();await page.keyboard.press('Escape');
++ if(mode==='baseline'){assert.equal(footerVersion,'Naumi 0.3.2');assert.equal(updates,0);}
++ else{
++  await page.locator('.nup-trigger').waitFor();assert.equal(footerVersion,'Naumi 0.3.7');
++  const geometry=await page.evaluate(()=>{const se=document.querySelector('[aria-label="设置"]'),ue=document.querySelector('.nup-trigger'),s=se.getBoundingClientRect(),u=ue.getBoundingClientRect(),f=ue.closest('[class*="_footArea"]');return {sameRow:Math.abs((s.top+s.height/2)-(u.top+u.height/2))<2,right:u.left>=s.right-1,visible:u.width>0&&u.height>0,settings:{x:s.x,y:s.y,width:s.width,height:s.height},updates:{x:u.x,y:u.y,width:u.width,height:u.height},wide:ue.dataset.wide,footerDisplay:f&&getComputedStyle(f).display,cssLoaded:[...document.styleSheets].some(s=>s.href?.includes('desktop-updates.css'))};});fs.writeFileSync(path.join(out,'GEOMETRY.json'),JSON.stringify(geometry,null,2));assert(geometry.sameRow&&geometry.right&&geometry.visible,JSON.stringify(geometry));
++  await page.locator('.nup-trigger').click();await page.locator('.nup-panel').waitFor();await page.waitForFunction(()=>document.querySelector('.nup-status')?.textContent==='已是最新版本',{},{timeout:30000});
++  assert((await page.locator('.nup-version').innerText()).includes('0.3.7'));await page.keyboard.press('Escape');assert.equal(await page.locator('.nup-panel').count(),0);
++ }
++ const report={status:'PASS',mode,installedVersion:info.version,footerVersion,updateEntry:mode==='modified',nativeIPC:true,linkedExistingBackend:true,existingBackendOwned:false,sameRowSettingsRight:mode==='modified',checkUpdates:mode==='modified'?'PASS':'MISSING_REPRODUCED',realAccountPasswordRead:false,userProfileTouched:false,modelCalls:0};
++ fs.writeFileSync(path.join(out,mode.toUpperCase()+'.json'),JSON.stringify(report,null,2)+'\n');
++ console.log(mode.toUpperCase()+' installed=0.3.7 footer='+footerVersion.replace('Naumi ','')+' update_entry='+Number(mode==='modified')+' native_ipc=1 linked_backend=1 model_calls=0 exit=0');
++}finally{if(app)await app.close();await new Promise(r=>server.close(r));}
+diff --git a/docs/changes/2026-11-18-update-entry-repair.md b/docs/changes/2026-11-18-update-entry-repair.md
+new file mode 100644
+index 0000000..0ead805
+--- /dev/null
++++ b/docs/changes/2026-11-18-update-entry-repair.md
+@@ -0,0 +1,21 @@
++# 已安装新版仍显示旧版本 / 检查更新缺失
++
++模块与职责：只修复开发期遗留桌面入口与 linked 本地服务的更新展示接入；不重建会话执行器、输入器或更新器。
++
++基线：main/origin/main de4c321da2a152eec70bca0bb874ff66c2a7e12a。负责人为本任务；独立分支 codex/update-entry-fix-20261118。代码归属仅新 repair/QA 脚本、新测试及本记录，不覆盖并行线程 host/client 源码。
++
++公共接口、依赖方向、数据/状态/事务归属：沿用已安装 app.asar 原生 updateState/checkUpdates/onUpdateState IPC、原 sidebar.footer.action slot、原 desktop-updates 组件。backend-link 指向用户原 .dsh，不移除 link、不切换账号 namespace、不迁移任何用户数据。运行服务依赖原生维护脚本，running=0 才短暂停服加载。个人桌面旧快捷方式仅在已识别的 Naumi/client-builds 原件标记存在时改指正式安装；不碰外部同名快捷方式。
++
++调研结论：C:/Program Files/Naumi 是0.3.7；个人桌面 Naumi.lnk 指向旧 client-builds 的0.3.5，遮蔽公共桌面的0.3.7。APPDATA/Naumi/backend-link.json 让安装版连接原3080服务；该运行副本 product-version.js 仍0.3.2，client/host 缺少 desktop-updates 接入，故新版安装包自己的 UI 代码没有生效。不是只改footer文字即可修复。
++
++本次实现与迁移状态：提供受保护的增量修复命令，从实际安装版复用其更新组件/样式/slot effect，给旧 host 添加两条静态资源及样式，更新 product-version 为安装版版本；只计划五个运行文件。原client/host其他字节保留，整个安装目录不修改；原快捷方式/运行原件先保存并逐项CAS核对。失败恢复运行原件与快捷方式。企业功能和模型配置保持。
++
++验证命令、结果及证据层级：node --test tests/desktop-update-entry-repair.test.mjs tests/desktop-update-ui.test.mjs tests/naumi-product-identity.test.mjs desktop/tests/updates.test.cjs，39/39 PASS。实际安装版主进程/preload与原3080 backend联调（独立QA账号服务及profile，无用户密码）：baseline installed0.3.7/footer0.3.2/update_entry0；modified installed0.3.7/footer0.3.7/update_entry1，原生IPC点击检查至已是最新版本、设置同排右侧（以中心线对齐，不要求42px/36px不同高度按钮顶边相同）、Escape关闭通过。真实加载main35fe459；running0才短停服加载五文件，前后106sessions/0running/4bots/revision47；150无关运行文件、4个模型/运行配置hash保持，原backend-link与安装ASAR保持。当前用户身份目录未参与QA。
++
++副本回滚：交付ZIP包含运行修改五文件与快捷方式、四份原件和manifest；ROLLBACK.sh只接受标记副本且先核对全部修改hash，恢复原host/client/0.3.2元数据与旧快捷方式、删除新增更新JS/CSS。独立解压副本恢复与无标记/文件已改拒绝的结果见ROLLBACK.log；实际修复保持0.3.7，不执行真实回退。
++
++QA错误如实保留：首轮漏勾独立fixture的本地归属确认；第二轮错误地在设置面板打开前查版本；修改后两次使用顶边而非中心线比较不同高度按钮；第三次更新fixture漏处理electron-updater的缓存查询参数。均只修QA代码，失败日志保留，不计为产品通过。最终版本/入口/原生检查结果见MODIFIED.json。
++
++迁移状态：功能源码已普通合入推送35fe459，本机五文件及快捷方式已应用；最终QA/文档/四件套归档在本分支收口后普通merge/push。3080重启窗口已工具正式释放给Bot主聊天切片，该线程后续十文件不得覆盖本次presentation五文件；本任务不再重启/发模型或操作共享UI。
++
++未完成项与下一步：本修复不重发已有公开0.3.7，不冒称新安装器已包含遗留开发目录自动迁移。旧网页标签仍需正常刷新以获取新的ES module；桌面重新打开使用已修复快捷方式。当前验收的检查feed为受控同版本清单，真实公开分发仍引用此前0.3.7验收而不重复宣称本轮重新下载。企业模块、真实密码/会话/任务和既有更新安装门禁不改变。
+diff --git a/scripts/repair-desktop-update-entry.mjs b/scripts/repair-desktop-update-entry.mjs
+new file mode 100644
+index 0000000..646cf40
+--- /dev/null
++++ b/scripts/repair-desktop-update-entry.mjs
+@@ -0,0 +1,88 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import assert from 'node:assert/strict';
++import {createHash} from 'node:crypto';
++import {spawnSync} from 'node:child_process';
++import {pathToFileURL} from 'node:url';
++import {createRequire} from 'node:module';
++
++const hash=b=>createHash('sha256').update(b).digest('hex');
++const normalize=s=>s.replaceAll('\r\n','\n');
++function replaceOnce(text,anchor,replacement){assert.equal(text.split(anchor).length,2,'REPAIR_ANCHOR_CHANGED');return text.replace(anchor,replacement);}
++
++/** Thin deployment adapter: reuse the installed release's actual slot component.
++ * Do not replace the legacy backend/client wholesale or change its data/profile. */
++export function planUpdateEntry({host,client,productVersion,sourceClient,sourceUI,sourceCSS,version}){
++ assert.match(version,/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/);
++ let nextHost=normalize(host),nextClient=normalize(client);
++ assert(nextHost.includes('productVersion:PRODUCT_VERSION'),'PRODUCT_VERSION_CONTRACT_MISSING');
++ const marker="import('/naumi/assets/desktop-updates.js')",source=normalize(sourceClient),at=source.indexOf(marker);
++ assert(at>=0,'INSTALLED_UPDATE_COMPONENT_MISSING');
++ const start=source.lastIndexOf('  ctx.effect(()=>{',at),end=source.indexOf('  });',at)+6;
++ assert(start>=0&&end>at,'UPDATE_EFFECT_CONTRACT_CHANGED');
++ if(!nextClient.includes(marker))nextClient=replaceOnce(nextClient,'function installNaumiContextUI(ctx,React,createPortal,Icon){','function installNaumiContextUI(ctx,React,createPortal,Icon){\n'+source.slice(start,end)+'\n');
++ for(const [name,type]of [['desktop-updates.js','text/javascript'],['desktop-updates.css','text/css']]){
++  // The declaration must precede these registrations. Keep every unrelated route intact.
++  if(!nextHost.includes("assets.set('"+name+"'")){
++   const anchor="  assets.set('product-copy-keys.js'";
++   nextHost=replaceOnce(nextHost,anchor,"  assets.set('"+name+"','"+type+"; charset=utf-8');\n"+anchor);
++  }
++ }
++ if(!nextHost.includes('href="/naumi/assets/desktop-updates.css"'))nextHost=replaceOnce(nextHost,'<link rel="stylesheet" href="/naumi/assets/style.css">','<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/desktop-updates.css">');
++ assert(sourceUI.includes("ctx.slots.inject('sidebar.footer.action'"),'NATIVE_SLOT_REQUIRED');
++ assert(sourceUI.includes('api?.checkUpdates'),'NATIVE_UPDATE_API_REQUIRED');
++ assert(/^export const PRODUCT_VERSION\s*=/.test(productVersion.trim()),'PRODUCT_VERSION_FILE_CHANGED');
++ return new Map([['host.js',nextHost],['client.js',nextClient],['product-version.js','export const PRODUCT_VERSION='+JSON.stringify(version)+';\n'],['assets/desktop-updates.js',sourceUI],['assets/desktop-updates.css',sourceCSS]]);
++}
++
++export function inventory(root){const result={};function visit(dir){for(const e of fs.readdirSync(dir,{withFileTypes:true})){const file=path.join(dir,e.name);assert(!e.isSymbolicLink(),'LINKED_PLUGIN_REJECTED');if(e.isDirectory())visit(file);else if(e.isFile())result[path.relative(root,file).replaceAll('\\','/')]=hash(fs.readFileSync(file));}}visit(root);return result;}
++function shell(script){const r=spawnSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-Command',script],{encoding:'utf8',windowsHide:true,timeout:150000});if(r.status!==0)throw Error('REPAIR_SHELL_FAILED '+r.stderr);return r.stdout;}
++const quote=s=>"'"+s.replaceAll("'","''")+"'";
++
++export async function repair({root,installed,out,apply=false}){
++ root=path.resolve(root);installed=path.resolve(installed);out=path.resolve(out);
++ assert(!out.startsWith(path.join(root,'.dsh')+path.sep),'EVIDENCE_IN_PROFILE_REJECTED');
++ assert(!fs.existsSync(path.join(out,'DEPLOYMENT.json')),'REPAIR_RECEIPT_ALREADY_EXISTS');
++ const require=createRequire(path.join(root,'desktop/package.json')),asar=require('@electron/asar'),archive=path.join(installed,'resources/app.asar'),pkg=JSON.parse(asar.extractFile(archive,'package.json'));
++ assert.equal(pkg.name,'naumi-desktop');assert(asar.extractFile(archive,'app/preload.cjs').toString().includes('checkUpdates'),'INSTALLED_NATIVE_API_MISSING');
++ const source=path.join(installed,'resources/backend/plugins/naumi-enterprise'),plugin=path.join(root,'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise');
++ assert(fs.realpathSync(plugin).startsWith(fs.realpathSync(root)+path.sep),'EXTERNAL_PLUGIN_REJECTED');
++ const read=(base,file)=>fs.readFileSync(path.join(base,file),'utf8');
++ const plan=planUpdateEntry({host:read(plugin,'host.js'),client:read(plugin,'client.js'),productVersion:read(plugin,'product-version.js'),sourceClient:read(source,'client.js'),sourceUI:read(source,'assets/desktop-updates.js'),sourceCSS:read(source,'assets/desktop-updates.css'),version:pkg.version});
++ fs.mkdirSync(out,{recursive:true});const before=inventory(plugin),entries=[];
++ for(const [file,text]of plan){const target=path.join(plugin,file),bytes=Buffer.from(text),old=fs.existsSync(target)?fs.readFileSync(target):null;if(old&&hash(old)===hash(bytes))continue;
++  const orig=path.join(out,'original',file),modified=path.join(out,'modified',file);fs.mkdirSync(path.dirname(modified),{recursive:true});fs.writeFileSync(modified,bytes);if(old){fs.mkdirSync(path.dirname(orig),{recursive:true});fs.writeFileSync(orig,old);}entries.push({path:file,original:old?hash(old):null,modified:hash(bytes)});
++ }
++ const shortcut=shell("$w=New-Object -ComObject WScript.Shell;$p=Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'Naumi.lnk';if(Test-Path -LiteralPath $p){$s=$w.CreateShortcut($p);[pscustomobject]@{path=$p;target=$s.TargetPath;arguments=$s.Arguments;icon=$s.IconLocation}|ConvertTo-Json -Compress}");
++ const link=shortcut.trim()?JSON.parse(shortcut):null,exe=path.join(installed,'Naumi.exe');
++ if(link){const old=path.resolve(link.target),cache=path.resolve(process.env.LOCALAPPDATA,'Naumi/client-builds');assert(old.toLowerCase()===exe.toLowerCase()||(old.toLowerCase().startsWith(cache.toLowerCase()+path.sep)&&path.basename(old).toLowerCase()==='naumi.exe'&&fs.existsSync(path.join(path.dirname(old),'naumi-client-build.json'))),'UNRECOGNIZED_SHORTCUT');fs.copyFileSync(link.path,path.join(out,'ORIGINAL_Naumi.lnk'));}
++ const manifest={version:pkg.version,installed,root,plugin,entries,shortcut:link,executable:exe,changedFields:['legacy host update asset routes/css','legacy client native sidebar slot hook','PRODUCT_VERSION from installed release','personal desktop shortcut target'],installedASAR:hash(fs.readFileSync(archive))};fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
++ if(!apply){console.log('BASELINE legacy_version='+read(plugin,'product-version.js').match(/"([^"]+)"/)?.[1]+' update_hook='+Number(read(plugin,'client.js').includes("import('/naumi/assets/desktop-updates.js')"))+' planned_files='+entries.length+' exit=0');return manifest;}
++ const probe=()=>{const r=spawnSync(process.execPath,[path.join(root,'scripts/check-bot-runtime.mjs'),root,'2'],{encoding:'utf8',windowsHide:true,timeout:30000});assert.equal(r.status,0,'RUNTIME_NOT_IDLE');return r.stdout.trim();};
++ const protectedPaths=['.dsh/.credentials.yaml','.dsh/cordis.patch.yml','.dsh/profiles/web/package.json','.dsh/profiles/web/cordis.patch.yml',path.relative(root,path.join(process.env.APPDATA,'Naumi/backend-link.json'))],protectedFiles=Object.fromEntries(protectedPaths.filter(p=>fs.existsSync(path.join(root,p))).map(p=>[p,hash(fs.readFileSync(path.join(root,p)))]));
++ const baseline=probe();let stopped=false,shortcutChanged=false;
++ try{
++  shell('& '+quote(path.join(root,'Stop-Naumi.ps1')));stopped=true;
++  for(const e of entries){const f=path.join(plugin,e.path);assert.equal(fs.existsSync(f)?hash(fs.readFileSync(f)):null,e.original,'RUNTIME_CHANGED');fs.mkdirSync(path.dirname(f),{recursive:true});fs.copyFileSync(path.join(out,'modified',e.path),f);}
++  shell('& '+quote(path.join(root,'Start-Naumi.ps1')));stopped=false;const afterProbe=probe();
++  const after=inventory(plugin);for(const e of entries)assert.equal(after[e.path],e.modified);for(const [p,h]of Object.entries(before))if(!entries.some(e=>e.path===p))assert.equal(after[p],h,'UNRELATED_RUNTIME_CHANGED');
++  for(const [p,h]of Object.entries(protectedFiles))assert.equal(hash(fs.readFileSync(path.join(root,p))),h,'CONFIG_CHANGED');
++  if(link&&path.resolve(link.target).toLowerCase()!==exe.toLowerCase()){
++   shell("$w=New-Object -ComObject WScript.Shell;$s=$w.CreateShortcut("+quote(link.path)+");$s.TargetPath="+quote(exe)+";$s.Arguments='';$s.WorkingDirectory="+quote(installed)+";$s.IconLocation="+quote(exe+',0')+";$s.Save();$s=$w.CreateShortcut("+quote(link.path)+");if($s.TargetPath -ne "+quote(exe)+"){throw 'SHORTCUT_VERIFY_FAILED'}");shortcutChanged=true;
++  }
++  if(link){manifest.shortcutModified=hash(fs.readFileSync(link.path));fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');fs.copyFileSync(link.path,path.join(out,'MODIFIED_Naumi.lnk'));}
++  assert.equal(hash(fs.readFileSync(archive)),manifest.installedASAR);
++  fs.writeFileSync(path.join(out,'DEPLOYMENT.json'),JSON.stringify({status:'PASS',version:pkg.version,baseline,after:afterProbe,runtimeFiles:entries.length,unrelatedRuntimeFilesPreserved:Object.keys(before).filter(p=>!entries.some(e=>e.path===p)).length,configHashesPreserved:Object.keys(protectedFiles).length,backendLinkRetained:true,installedASARUnchanged:true,shortcutTarget:exe,shortcutChanged,modelCalls:0},null,2)+'\n');
++  console.log('MODIFIED version='+pkg.version+' update_hook=1 files='+entries.length+' shortcut=INSTALLED config=UNCHANGED model_calls=0 exit=0');
++ }catch(error){
++  if(!stopped){shell('& '+quote(path.join(root,'Stop-Naumi.ps1')));stopped=true;}
++  for(const e of entries){const f=path.join(plugin,e.path);if(e.original)fs.copyFileSync(path.join(out,'original',e.path),f);else if(fs.existsSync(f))fs.unlinkSync(f);}
++  if(shortcutChanged)fs.copyFileSync(path.join(out,'ORIGINAL_Naumi.lnk'),link.path);
++  shell('& '+quote(path.join(root,'Start-Naumi.ps1')));throw error;
++ }
++ return manifest;
++}
++if(process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url){
++ const args=Object.fromEntries(process.argv.slice(2).filter(x=>x.includes('=')).map(x=>{const i=x.indexOf('=');return[x.slice(2,i),x.slice(i+1)];}));
++ await repair({root:args.root??process.cwd(),installed:args.installed??'C:/Program Files/Naumi',out:args.out??path.join(process.cwd(),'evidence/update-entry-fix'),apply:process.argv.includes('--apply')});
++}
+diff --git a/tests/desktop-update-entry-repair.test.mjs b/tests/desktop-update-entry-repair.test.mjs
+new file mode 100644
+index 0000000..97d2b69
+--- /dev/null
++++ b/tests/desktop-update-entry-repair.test.mjs
+@@ -0,0 +1,14 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import os from 'node:os';
++import path from 'node:path';
++import {planUpdateEntry,inventory} from '../scripts/repair-desktop-update-entry.mjs';
++const read=p=>fs.readFileSync(p,'utf8');
++function fixture(){return {host:"import {PRODUCT_VERSION} from './product-version.js';\nfunction apply(){\n  const assets=new Map();\n  assets.set('product-copy-keys.js','text/javascript');\n  const config={productVersion:PRODUCT_VERSION};\n  const css='<link rel=\"stylesheet\" href=\"/naumi/assets/style.css\">';\n  installBots(ctx);\n}",client:'function installNaumiContextUI(ctx,React,createPortal,Icon){\n  installOriginalFeatures(ctx);\n}',productVersion:'export const PRODUCT_VERSION="0.3.2";\n',sourceClient:read('plugins/naumi-enterprise/client.js'),sourceUI:read('plugins/naumi-enterprise/assets/desktop-updates.js'),sourceCSS:read('plugins/naumi-enterprise/assets/desktop-updates.css'),version:'0.3.7'};}
++test('baseline reproduces the linked legacy backend version and missing update hook',()=>{const f=fixture();assert(!f.client.includes('desktop-updates.js'));assert(f.productVersion.includes('0.3.2'));});
++test('repair changes only five presentation/version files and reuses native component byte-for-byte',()=>{const f=fixture(),p=planUpdateEntry(f);assert.equal(p.size,5);assert.equal(p.get('assets/desktop-updates.js'),f.sourceUI);assert.equal(p.get('assets/desktop-updates.css'),f.sourceCSS);assert(p.get('host.js').includes('installBots(ctx)'));assert(p.get('client.js').includes('installOriginalFeatures(ctx)'));assert(p.get('client.js').includes('installDesktopUpdatesUI(ctx,React,createPortal)'));assert.equal(p.get('product-version.js'),'export const PRODUCT_VERSION="0.3.7";\n');});
++test('reapplying the plan is idempotent, without duplicate slot hooks/routes/css',()=>{const f=fixture(),p=planUpdateEntry(f),again=planUpdateEntry({...f,host:p.get('host.js'),client:p.get('client.js'),productVersion:p.get('product-version.js')});assert.deepEqual([...again],[...p]);assert.equal(p.get('host.js').split("assets.set('desktop-updates.js'").length,2);assert.equal(p.get('client.js').split("import('/naumi/assets/desktop-updates.js')").length,2);});
++test('unrecognized host, duplicate insertion anchors or missing native slot fail before apply',()=>{const f=fixture();assert.throws(()=>planUpdateEntry({...f,host:f.host.replace('productVersion:PRODUCT_VERSION','x:1')}),/CONTRACT_MISSING/);assert.throws(()=>planUpdateEntry({...f,client:f.client+f.client}),/ANCHOR_CHANGED/);assert.throws(()=>planUpdateEntry({...f,sourceUI:'custom fake UI'}),/NATIVE_SLOT_REQUIRED/);assert.throws(()=>planUpdateEntry({...f,version:'0.3.7; arbitrary'}));});
++test('existing other slots, routes and business text remain unchanged',()=>{const f=fixture();f.client+='\n// User business text and existing dialogs stay.';f.host+='\ninstallSessionImport(ctx);';const p=planUpdateEntry(f);assert(p.get('client.js').endsWith('// User business text and existing dialogs stay.'));assert(p.get('host.js').endsWith('installSessionImport(ctx);'));});
++test('inventory hashes regular files and rejects directory indirection',()=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-update-repair-'));try{fs.mkdirSync(path.join(dir,'assets'));fs.writeFileSync(path.join(dir,'assets/file'),'original');assert.equal(Object.keys(inventory(dir)).length,1);fs.symlinkSync(path.join(dir,'assets'),path.join(dir,'linked'),'junction');assert.throws(()=>inventory(dir),/LINKED_PLUGIN/);fs.unlinkSync(path.join(dir,'linked'));}finally{fs.rmSync(dir,{recursive:true,force:true});}});
+
+diff --git a/original/Naumi.lnk b/modified/Naumi.lnk
+index 6373c7b93ecfcd87899bc14ef7dfb183a011b404..6f0a8457c6d50224437cfbf3e1509dcda783747b 100644
+GIT binary patch
+literal 1723
+zcmeZaU|?VrVFHp23<tm@gWG)v1_lKnJ38jT!5?LJ89(;=D*Xo1-BTVM2Jsm_t>*(N
+zWdspOAe~W!K|bJt{{@9tR+$2eZg4PY8yL)$WYBlEia}BaWA-o@f|*6Jy&QrJ0YU!m
+zL5_7mp%Mm81{Q|*`x+x$tU+>mKvn8sl?V&H!2D?%KN$iTiWu@4(t%_mLoU$SZVZ_W
+zISi=`#XuDfKr#c!&H+MW1|tSNh7>Schd~#}Gh{GlumHP30%!`%E$cZ182l1Tb2Axi
+zpzZ*<p(u7e*d5GmprFbJ+m0YO)Xy^b0qrjZx*!uMEW!{2G#?a9MX?h&6d>m5rB<Xe
+zxWLWq1DZJjY-Yw=UZ5T`gmGY2X|)_9!c0A&FDihTfk6U@gMnBEh(X~2q9JZ)U<d-T
+zMS++Zhy^X>7zBXy`K@O+GXNtXpeR4RC^1*TEi)&zI0o!P2nlu<11pjT)PMn{2lN6m
+zi948MkaQxmVNMofaAvRqnns)n3M8q<W}gVq_v{P|3sj*#276c))5pND8TLRGEz}X2
+zLlqb!h~$OLhQ-^k51bL?K~O=!3d|E~Kzb(-g9;69Ab(qO+=TrH{X93#N!@OA`H~b!
+zE&+&vS!h87kOqMluOT#y6jE)v?YH=V;}l_yF9FJh_B-6qaKC)?QE*v;K^VW~lm&$3
+zU4aI10?oGs(uTnS!5hVLUDoy%cr5pD&|6|#(IX2K&j4BG0mSzjUMZ%2a`2gE^RzXw
+L@$q|*I1B&)bpP3r
+
+literal 1617
+zcmd5+T}V_x6h7+@WJ&5~Dq>|s;)~1fUR}LfsIA&s%Oa?mF&p09dsi3#cHOmv#8j{l
+zjEKsh9ukUtsE9BlB18hIhcu#sKupL2DNwW^2>SWvu0OXjdg-AV&N*{u=6vVOnQyM0
+zh;;E`&_tuErjlvcREQjyuw6egrCYd@<hTJF{A#wGfu+S;8~IipSDJP&ESI*G?oAG_
+zZpj}k>K&^*|E=CQmxg_5G(QrHox>H%u^wSc_n<kipr>_8XIL=x4*@Zrx+zF0WGyK#
+zNg$JondFQ~*HfX-S0n``%mkCG5BE<$x1Fj@6duf_-ya+QGJU!BKw<CRu}AfzcaIlP
+z6h$Bo_wzebyA1F-G|ZvGxze<^mPslkA9@i<h|AIUP}x#kzq4H*OZH~B)Iht|z<jJ?
+zMriQ(uybaF?9@zdpf%t-UW1p{5larKwb8qR=XZMberH|>&++WDD0M%SroDO?t#bgY
+zl^V&5`FN67^5b|`dug$wq64L}FXhPbmN8F$UJoBZgU5#)(~a!Bq)-#iok1?(dod$Z
+z0P9I~@uwJBW}~Ut%42k|5u?+nhYydVZL=3<D2vQw1d@VkWFiX}x|uu}DG(VW4~bak
+zGcqKba$rUH@VypwO@j8Qs}{f~5d#9}o!?ofq=u?#P}&sSVCdGhr$4%o2%mM@v@q_A
+zj?z@rfLz)j9Gj>gk^<q3<~GDYqVpJUhHwVOiCc+t`04QY5Lt6sWk6{OFq0r;WwRxg
+zGL<z<y=&%f@G4Eg3|FhSK@KopOU0cjxLjtBpa`<ZBbq#dEM(`%qET>JM3W?XWWf@0
+zR*y!Jw90@gGN7|xc*``LW18IzmH*Q{vwwa++Q`dwttKnwBHv0dOQ9BMhN=qaS-9{2
+z^Bmb!tma&Wcickt$k~S%=tlkw?`8QdW`LCn*6Q(snz4iZ_AROZ76y+1x`KWD^s5L4
+zyg4^~i@_$m{Q(iyR9;qoJE5`Y<|&_T&{kl$y1T7!3+C$}WP`l!e7{{;EU@?Qde<X$
+z&CK(8-Z&*A0rDL!7h_J}4ft-4nfRzHeX{R_?d6O85%Z_{S`7qL9ykcg+w6ysUDo=Y
+n-II<hqlM=-rGF~h;m@Cq*gt*g%|hI@8smW&@!Y`Q);Z1({vB8`
+
+diff --git a/modified/assets/desktop-updates.css b/modified/assets/desktop-updates.css
+new file mode 100644
+index 0000000..9c76585
+--- /dev/null
++++ b/modified/assets/desktop-updates.css
+@@ -0,0 +1,10 @@
++/* Native footer seat, with settings retained on the left. Pinned sidebar CSS contract. */
++[class*="_footArea"]:has(.nup-trigger[data-wide="true"]){display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:4px}
++[class*="_footArea"]:has(.nup-trigger[data-wide="true"])>[class*="_settingsArea"]{grid-column:1;grid-row:1;width:auto;min-width:0}
++[class*="_footArea"]:has(.nup-trigger[data-wide="true"])>[class*="_footerActions"]{display:contents}
++[class*="_footArea"]:has(.nup-trigger[data-wide="true"])>[class*="_footerActions"]>:not(.nup-trigger){grid-column:1/-1}
++.nup-trigger{grid-column:2;grid-row:1;position:relative;display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;padding:0 10px;border:0;border-radius:8px;background:transparent;color:#767983;font:inherit;font-size:12px;white-space:nowrap;cursor:pointer;flex:none;-webkit-app-region:no-drag}
++.nup-trigger:hover{color:#4e405e;background:#eeebf3}.nup-trigger:focus-visible,.nup-panel button:focus-visible{outline:2px solid #9683b6;outline-offset:2px}.nup-trigger[data-wide="false"]{padding:0;width:36px}
++.nup-dot{width:5px;height:5px;position:absolute;right:5px;top:5px;background:#8970a8;border-radius:50%}
++.nup-panel{position:fixed;z-index:1000;box-sizing:border-box;width:332px;max-width:calc(100vw - 24px);max-height:calc(100vh - 90px);overflow:auto;padding:20px;background:#fff;color:#29252f;border:1px solid #e9e5ee;border-radius:16px;box-shadow:0 12px 45px #2a173b1a;font:13px/1.6 "Segoe UI","Microsoft YaHei",sans-serif}
++.nup-panel header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}.nup-panel header strong{font-size:18px;font-weight:650;letter-spacing:-.6px}.nup-panel .nup-close{border:0;background:transparent;color:#99939e;font-size:23px;line-height:24px;border-radius:6px;cursor:pointer;padding:0 4px}.nup-status{font-size:15px;font-weight:600}.nup-version{display:flex;align-items:center;gap:10px;color:#99939e;font-variant-numeric:tabular-nums;margin-top:4px}.nup-version span{color:#77608d}.nup-download{display:flex;gap:12px;align-items:center;margin-top:17px;color:#77608d;font-size:12px}.nup-download progress{width:100%;height:5px;accent-color:#9683b6;border:0;border-radius:10px;overflow:hidden}.nup-download progress::-webkit-progress-bar{background:#f1edf6}.nup-download progress::-webkit-progress-value{background:#9683b6;border-radius:10px}.nup-notes{font:inherit;white-space:pre-wrap;overflow-wrap:anywhere;max-height:200px;overflow:auto;margin:17px 0 0;padding-top:14px;border-top:1px solid #f0edf4;color:#77717f}.nup-panel footer{display:flex;justify-content:flex-end;margin-top:20px}.nup-action{border:1px solid #e5deee;background:#f4f0f9;color:#69537f;padding:7px 14px;border-radius:8px;cursor:pointer;font:inherit;font-size:12px}.nup-action:hover{background:#ebe3f3}.nup-action:disabled{cursor:default;opacity:.5}
+diff --git a/modified/assets/desktop-updates.js b/modified/assets/desktop-updates.js
+new file mode 100644
+index 0000000..11126db
+--- /dev/null
++++ b/modified/assets/desktop-updates.js
+@@ -0,0 +1,45 @@
++/** Desktop-only presentation over the native updater; no network/update logic in the renderer. */
++export function createUpdateStore(api) {
++  let state={enabled:false,status:'loading',currentVersion:'',version:null,notes:'',progress:null,error:null},revision=0,closed=false,pending=null;
++  const listeners=new Set();
++  const publish=value=>{if(closed)return;state={...state,...value};revision++;for(const fn of listeners)fn();};
++  const off=api.onUpdateState(publish),initialRevision=revision;
++  Promise.resolve().then(()=>api.updateState()).then(value=>{if(revision===initialRevision)publish(value);}).catch(()=>{if(revision===initialRevision)publish({status:'idle',error:'UPDATE_STATE_FAILED'});});
++  const run=method=>{
++    if(pending)return pending;
++    pending=Promise.resolve().then(()=>api[method]()).then(result=>{if(!result?.ok)publish({status:state.status==='ready'?'ready':'idle',error:result?.error||'UPDATE_CHECK_FAILED'});return result;}).catch(()=>{publish({status:state.status==='ready'?'ready':'idle',error:'UPDATE_CONNECTION_FAILED'});return {ok:false};}).finally(()=>{pending=null;});
++    return pending;
++  };
++  return {getSnapshot:()=>state,subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn);},check:()=>run('checkUpdates'),install:()=>run('installUpdate'),dispose(){closed=true;off?.();listeners.clear();}};
++}
++
++export function updateView(state) {
++  const status=state.status;
++  let title=status==='loading'?'正在读取版本':!state.enabled?'安装版支持更新':status==='checking'?'正在检查更新':status==='downloading'?'正在下载更新':status==='ready'?'更新已就绪':state.lastChecked?'已是最新版本':'检查更新';
++  if(state.error)title=state.error==='UPDATE_INSTALL_BUSY'?'任务运行中，稍后更新':state.error==='UPDATE_FEED_UNCONFIGURED'?'安装版支持更新':state.error==='UPDATE_INSTALL_FAILED'?'安装未完成，请重试':state.error==='UPDATE_DOWNLOAD_FAILED'?'下载失败，请重试':'检查失败，请重试';
++  return {title,busy:['loading','checking','downloading'].includes(status),percent:Math.round(Math.max(0,Math.min(100,Number(state.progress?.percent)||0))),ready:status==='ready'};
++}
++
++export function installDesktopUpdatesUI(ctx,React,createPortal,api=globalThis.naumiDesktop) {
++  if(!api?.updateState||!api?.checkUpdates||!api?.onUpdateState)return()=>{};
++  const h=React.createElement,store=createUpdateStore(api);
++  function Updates({wide}) {
++    const state=React.useSyncExternalStore(store.subscribe,store.getSnapshot),view=updateView(state),[open,setOpen]=React.useState(false),[position,setPosition]=React.useState({left:16,bottom:60});
++    const trigger=React.useRef(null),panel=React.useRef(null),id=React.useId();
++    const close=()=>{setOpen(false);trigger.current?.focus();};
++    React.useEffect(()=>{
++      if(!open)return;
++      const rect=trigger.current.getBoundingClientRect();setPosition({left:Math.max(12,Math.min(rect.left,innerWidth-344)),bottom:Math.max(12,innerHeight-rect.top+10)});
++      panel.current?.querySelector('button')?.focus();
++      const outside=e=>{if(!panel.current?.contains(e.target)&&!trigger.current?.contains(e.target))setOpen(false);};
++      const key=e=>{if(e.key==='Escape'){e.preventDefault();close();}};
++      const resize=close;
++      document.addEventListener('pointerdown',outside);document.addEventListener('keydown',key);window.addEventListener('resize',resize);
++      return()=>{document.removeEventListener('pointerdown',outside);document.removeEventListener('keydown',key);window.removeEventListener('resize',resize);};
++    },[open]);
++    const icon=h('svg',{width:16,height:16,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.6,strokeLinecap:'round',strokeLinejoin:'round','aria-hidden':true},h('path',{d:'M20 7v5h-5 M4 17v-5h5 M19 10a7 7 0 0 0-12-5L4 8 M5 14a7 7 0 0 0 12 5l3-3'}));
++    return h(React.Fragment,null,h('button',{ref:trigger,type:'button',className:'nup-trigger','data-wide':String(wide),'aria-label':'检查更新',title:'检查更新','aria-haspopup':'dialog','aria-expanded':open,'aria-controls':open?id:undefined,onClick:()=>{if(open){close();return;}setOpen(true);if(!view.ready)void store.check();}},icon,wide&&h('span',null,'检查更新'),view.ready&&h('i',{className:'nup-dot'})),open&&createPortal(h('section',{ref:panel,id,role:'dialog','aria-label':'Naumi 更新',className:'nup-panel',style:position},h('header',null,h('strong',null,'Naumi'),h('button',{type:'button',className:'nup-close','aria-label':'关闭更新面板',onClick:close},'×')),h('div',{className:'nup-status',role:'status','aria-live':'polite'},view.title),h('div',{className:'nup-version'},state.currentVersion?'v'+state.currentVersion:'',state.version&&h('span',null,'→ v'+state.version)),state.status==='downloading'&&h('div',{className:'nup-download'},h('progress',{max:100,value:view.percent,'aria-label':'更新下载进度'}),h('span',null,view.percent+'%')),state.notes&&h('pre',{className:'nup-notes'},state.notes),h('footer',null,h('button',{type:'button',className:'nup-action',disabled:view.busy||!state.enabled||(!api.installUpdate&&view.ready),onClick:()=>void(view.ready?store.install():store.check())},view.ready?'重启并更新':view.busy?'检查中…':'重新检查'))),document.body));
++  }
++  const off=ctx.slots.inject('sidebar.footer.action',()=>ctx.slots.register({name:'sidebar.footer.action',id:'naumi-updates',order:100},Updates));
++  return()=>{off?.();store.dispose();};
++}
+diff --git a/original/client.js b/modified/client.js
+index 1c9aa82..713a12b 100644
+--- a/original/client.js
++++ b/modified/client.js
+@@ -1,5 +1,12 @@
+ /** Async presentation-only module; the original enterprise app below stays intact. */
+ function installNaumiContextUI(ctx,React,createPortal,Icon){
++  ctx.effect(()=>{
++    let dispose,closed=false;
++    void import('/naumi/assets/desktop-updates.js').then(module=>{if(!closed)dispose=module.installDesktopUpdatesUI(ctx,React,createPortal);}).catch(error=>console.error('Naumi updates:',error));
++    return()=>{closed=true;dispose?.();};
++  });
++
++
+   ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/session-import.js').then(m=>{if(!closed)dispose=m.installSessionImportUI(ctx,React);}).catch(e=>console.error('Naumi session import:',e));return()=>{closed=true;dispose?.();};});
+   ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/bot-overview.js').then(module=>{if(!closed)dispose=module.installBotOverviewUI(ctx,React);});return()=>{closed=true;dispose?.();};});
+   ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/plugin-market.js').then(module=>{if(!closed)dispose=module.installPluginMarketUI(ctx,React);}).catch(error=>console.error('Naumi plugin market:',error));return()=>{closed=true;dispose?.();};});
+diff --git a/original/host.js b/modified/host.js
+index 88b632f..e89c0d2 100644
+--- a/original/host.js
++++ b/modified/host.js
+@@ -24,6 +24,8 @@ export function apply(ctx,config) {
+   const collaborationOrigin=validateOrigin(config.collaborationOrigin);
+   const designOrigin=validateOrigin(config.designOrigin);
+   const assets=new Map([['employee-enterprise-work.js','text/javascript; charset=utf-8'],['employee-memory-maintenance.js','text/javascript; charset=utf-8'],['employee-sync-panel.js','text/javascript; charset=utf-8'],['employee-center.js','text/javascript; charset=utf-8'],['employee-center-model.js','text/javascript; charset=utf-8'],['employee-center.css','text/css; charset=utf-8'],['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml'],['browser-client.js','text/javascript; charset=utf-8'],['browser-native-client.js','text/javascript; charset=utf-8'],['browser-native.css','text/css; charset=utf-8'],['browser-scheduler.js','text/javascript; charset=utf-8'],['browser.css','text/css; charset=utf-8'],['team-panel.css','text/css; charset=utf-8'],['team-panel.js','text/javascript; charset=utf-8'],['team-panel-model.js','text/javascript; charset=utf-8'],['bot-sidebar.js','text/javascript; charset=utf-8'],['bot-sidebar-model.js','text/javascript; charset=utf-8'],['bot-sidebar.css','text/css; charset=utf-8']]);
++  assets.set('desktop-updates.js','text/javascript; charset=utf-8');
++  assets.set('desktop-updates.css','text/css; charset=utf-8');
+   assets.set('product-copy-keys.js','text/javascript; charset=utf-8');
+   assets.set('product-identity.js','text/javascript; charset=utf-8');
+   assets.set('product-identity.css','text/css; charset=utf-8');
+@@ -84,7 +86,7 @@ export function apply(ctx,config) {
+   ctx.on('webserver/index-inject',table=>{
+     table.push({kind:'global',name:'__NAUMI__',value:{collaborationOrigin,designOrigin,version:'0.3.0',product:'Naumi',productVersion:PRODUCT_VERSION}});
+     table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/bot-groups.css"><link rel="stylesheet" href="/naumi/assets/primary-bot.css"><link rel="stylesheet" href="/naumi/assets/bot-overview.css"><link rel="stylesheet" href="/naumi/assets/session-import.css"><link rel="stylesheet" href="/naumi/assets/plugin-market.css">'});
+-    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/blender-settings.css"><link rel="stylesheet" href="/naumi/assets/product-identity.css"><link rel="stylesheet" href="/naumi/assets/model-connections.css"><link rel="stylesheet" href="/naumi/assets/im-settings.css"><link rel="stylesheet" href="/naumi/assets/employee-center.css"><link rel="stylesheet" href="/naumi/assets/employee-experience.css"><link rel="stylesheet" href="/naumi/assets/browser.css"><link rel="stylesheet" href="/naumi/assets/browser-native.css"><link rel="stylesheet" href="/naumi/assets/team-panel.css"><link rel="stylesheet" href="/naumi/assets/bot-sidebar.css"><link rel="stylesheet" href="/naumi/assets/bot-task.css"><link rel="stylesheet" href="/naumi/assets/bot-avatar.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
++    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/desktop-updates.css"><link rel="stylesheet" href="/naumi/assets/blender-settings.css"><link rel="stylesheet" href="/naumi/assets/product-identity.css"><link rel="stylesheet" href="/naumi/assets/model-connections.css"><link rel="stylesheet" href="/naumi/assets/im-settings.css"><link rel="stylesheet" href="/naumi/assets/employee-center.css"><link rel="stylesheet" href="/naumi/assets/employee-experience.css"><link rel="stylesheet" href="/naumi/assets/browser.css"><link rel="stylesheet" href="/naumi/assets/browser-native.css"><link rel="stylesheet" href="/naumi/assets/team-panel.css"><link rel="stylesheet" href="/naumi/assets/bot-sidebar.css"><link rel="stylesheet" href="/naumi/assets/bot-task.css"><link rel="stylesheet" href="/naumi/assets/bot-avatar.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
+   });
+   ctx.effect(()=>ctx.webServer.tapIndex(html=>html.replace(/<title>[^<]*<\/title>/i,'<title>Naumi</title>').replace(/<link[^>]+rel="(?:shortcut )?icon"[^>]*href="(?!\/naumi\/)[^"]*"[^>]*>/g,'')));
+ }
+diff --git a/original/product-version.js b/modified/product-version.js
+index 2cef7f0..2aab04d 100644
+--- a/original/product-version.js
++++ b/modified/product-version.js
+@@ -1 +1 @@
+-export const PRODUCT_VERSION="0.3.2";
++export const PRODUCT_VERSION="0.3.7";

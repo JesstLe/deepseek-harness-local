@@ -12,7 +12,7 @@ for(const f of ['server.out.log','server.err.log'])fs.copyFileSync(path.join(roo
 const server=http.createServer(async(req,res)=>{const send=v=>{res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(v));};
  if(req.url==='/api/auth/session')return send({user:req.headers.cookie?.includes('nv_user=repair')?{email:'repair@example.test',name:'Update QA'}:null});
  if(req.url==='/api/auth/login'){for await(const _ of req){}res.setHeader('set-cookie','nv_user=repair; HttpOnly; Path=/; SameSite=Lax');return send({ok:true,user:{email:'repair@example.test'}});}
- if(req.url==='/latest.yml'){res.writeHead(200,{'content-type':'text/yaml'});return res.end('version: 0.3.7\nfiles:\n  - url: Naumi-Setup-0.3.7-x64.exe\n    sha512: '+Buffer.alloc(64).toString('base64')+'\npath: Naumi-Setup-0.3.7-x64.exe\nsha512: '+Buffer.alloc(64).toString('base64')+'\n');}
+ if(req.url.split('?')[0]==='/latest.yml'){res.writeHead(200,{'content-type':'text/yaml'});return res.end('version: 0.3.7\nfiles:\n  - url: Naumi-Setup-0.3.7-x64.exe\n    sha512: '+Buffer.alloc(64).toString('base64')+'\npath: Naumi-Setup-0.3.7-x64.exe\nsha512: '+Buffer.alloc(64).toString('base64')+'\n');}
  res.writeHead(404).end();
 });await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;
 const env={...process.env,NAUMI_ROOT:alias,NAUMI_USER_DATA:userData,NAUMI_IDENTITY_ORIGIN:origin,NAUMI_UPDATE_URL:origin,NAUMI_TEST:'1',NAUMI_TEST_HIDDEN:'1'};
@@ -28,7 +28,7 @@ try{
  if(mode==='baseline'){assert.equal(footerVersion,'Naumi 0.3.2');assert.equal(updates,0);}
  else{
   await page.locator('.nup-trigger').waitFor();assert.equal(footerVersion,'Naumi 0.3.7');
-  const geometry=await page.evaluate(()=>{const s=document.querySelector('[aria-label="设置"]').getBoundingClientRect(),u=document.querySelector('.nup-trigger').getBoundingClientRect();return {sameRow:Math.abs(s.top-u.top)<2,right:u.left>=s.right-1,visible:u.width>0&&u.height>0};});assert(geometry.sameRow&&geometry.right&&geometry.visible);
+  const geometry=await page.evaluate(()=>{const se=document.querySelector('[aria-label="设置"]'),ue=document.querySelector('.nup-trigger'),s=se.getBoundingClientRect(),u=ue.getBoundingClientRect(),f=ue.closest('[class*="_footArea"]');return {sameRow:Math.abs((s.top+s.height/2)-(u.top+u.height/2))<2,right:u.left>=s.right-1,visible:u.width>0&&u.height>0,settings:{x:s.x,y:s.y,width:s.width,height:s.height},updates:{x:u.x,y:u.y,width:u.width,height:u.height},wide:ue.dataset.wide,footerDisplay:f&&getComputedStyle(f).display,cssLoaded:[...document.styleSheets].some(s=>s.href?.includes('desktop-updates.css'))};});fs.writeFileSync(path.join(out,'GEOMETRY.json'),JSON.stringify(geometry,null,2));assert(geometry.sameRow&&geometry.right&&geometry.visible,JSON.stringify(geometry));
   await page.locator('.nup-trigger').click();await page.locator('.nup-panel').waitFor();await page.waitForFunction(()=>document.querySelector('.nup-status')?.textContent==='已是最新版本',{},{timeout:30000});
   assert((await page.locator('.nup-version').innerText()).includes('0.3.7'));await page.keyboard.press('Escape');assert.equal(await page.locator('.nup-panel').count(),0);
  }
