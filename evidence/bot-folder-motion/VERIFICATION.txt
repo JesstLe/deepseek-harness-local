@@ -1,0 +1,77 @@
+Bot folder-motion verification
+Changed branch: codex/bot-folder-motion-20261118
+Baseline: 6d861b8b784d6e40084445df50e9245abb7c8c18
+Feature: 70c228a; integrated main / loaded source: 3f39e371b5ae9f582eb21b312099189b7962eb8b
+Changed presentation fields: folderPreview, data-folder-arrived, original Avatar drag image, naumi-folder-open/absorb/settle; textual drop hints removed.
+Deployment helper: explicit --folder-motion allows only bot-sidebar.js/css; original six-file default retained.
+Four paths:
+MODIFIED_FILE=E:/Workspace/naumi-desktop/evidence/bot-folder-motion/MODIFIED_FILE.zip
+DIFF_FILE=E:/Workspace/naumi-desktop/evidence/bot-folder-motion/DIFF_FILE.patch
+VERIFICATION=E:/Workspace/naumi-desktop/evidence/bot-folder-motion/VERIFICATION.txt
+ROLLBACK=E:/Workspace/naumi-desktop/evidence/bot-folder-motion/ROLLBACK.sh
+
+BASELINE
+cwd=E:/Workspace/naumi-bot-folder-motion/runtime/folder-motion-source-copy
+command=node --test tests/bot-drag-groups.test.mjs tests/naumi-unified-chat.test.mjs tests/naumi-bot-groups-http.test.mjs tests/naumi-group-rename.test.mjs
+input=original Git 6d861b8 sidebar JS/CSS; isolated finite HTTP/SQLite test fixtures, no provider or real business data
+literal result from BASELINE_TESTS.log:
+ℹ tests 24
+ℹ pass 24
+ℹ fail 0
+exit=0
+UI baseline command=node scripts/verify-bot-folder-motion.mjs
+input=baseline JS/CSS supplied by git show 6d861b8, native isolated Harness and Chrome mouse
+literal result=UI_PASS baseline_uses_text_drop_hint
+The UI runner then switches to modified assets in the same isolated fixture.
+
+MODIFIED
+cwd=E:/Workspace/naumi-bot-folder-motion
+command=node --test tests/bot-folder-motion.test.mjs tests/bot-drag-groups.test.mjs tests/naumi-unified-chat.test.mjs tests/naumi-bot-groups-http.test.mjs tests/naumi-group-rename.test.mjs tests/naumi-bot-appearance.test.mjs tests/naumi-bot-groups.test.mjs
+input=changed source and finite test fixtures, existing group/Avatar APIs preserved
+literal result from INTEGRATED_MODULE.log:
+ℹ tests 44
+ℹ pass 44
+ℹ fail 0
+exit=0
+command=node scripts/verify-bot-folder-motion.mjs
+input=5 isolated Bots, native React/Chrome mouse, finite local response fixtures, 0 shared3080 writes, 0 model calls
+literal output=BOT_FOLDER_UI checks=24 sorting=PASS grouping=PASS multi=PASS retry=PASS drafts=PASS models=0 shared3080=UNTOUCHED exit=0
+exit=0
+UI_COMPLETE.log/UI.json are final results; UI.log/UI_RECHECK.log/UI_FINAL.log retain earlier QA trajectory/event-wait/compact-coordinate failures rather than rewriting them.
+
+ROLLBACK
+command=D:/DEV/Git/bin/bash.exe E:/Workspace/naumi-bot-folder-motion/evidence/bot-folder-motion/ROLLBACK.sh E:/Workspace/naumi-bot-folder-motion/runtime/folder-motion-source-copy
+input=separate marked copy with 3 modified source files; exact original/modified SHA256 in manifest.json
+literal output=ROLLBACK files=3 hashes=PASS text_hint=RESTORED motion=REMOVED live=UNTOUCHED exit=0
+exit=0
+command=node --test tests/bot-drag-groups.test.mjs tests/naumi-unified-chat.test.mjs tests/naumi-bot-groups-http.test.mjs tests/naumi-group-rename.test.mjs
+cwd=the restored source copy
+literal result from ROLLBACK_TESTS.log:
+ℹ tests 24
+ℹ pass 24
+ℹ fail 0
+exit=0
+restored behavior/status=old text drop hint and original six-file deploy helper restored in copy; folder animation absent; original grouping/sorting/tests work. Actual source and live two assets remain modified.
+portable command=D:/DEV/Git/bin/bash.exe E:/Workspace/naumi-bot-folder-motion/runtime/folder-motion-portable-copy/ROLLBACK.sh E:/Workspace/naumi-bot-folder-motion/runtime/folder-motion-portable-copy
+portable output=ROLLBACK files=3 hashes=PASS text_hint=RESTORED motion=REMOVED live=UNTOUCHED exit=0
+portable exit=0; ZIP entries=8, CRC=PASS, restored 3 hashes=PASS, source modified=RETAINED.
+
+ACTUAL LOCAL LOAD (not a clean business-hash acceptance)
+command=node scripts/deploy-bot-drag-groups.mjs --folder-motion --out=evidence/bot-folder-motion --apply
+cwd=E:/Workspace/naumi-desktop
+input=fixed main 3f39e37, precheck 107sessions/0running/4bots/revision47; CAS plan exactly 2 assets
+literal failure=AssertionError [ERR_ASSERTION]: LIVE_RUNNING
+exit=1
+Two files had already been written and service restarted. Concurrent real sessions started before post-load/catch idle gate, so no forced rollback or additional restart. No claim that business/config hashes completed their post-load gate.
+command=node runtime/folder-motion-http.mjs
+input=read-only authenticated HTTP asset reads and exact RUNTIME_PLAN hashes; runtime idle is reported, not required for reads
+literal output from LIVE_HTTP.log:
+BOT_FOLDER_HTTP assets=2 HTTP=200 hashes=PASS unrelated=168 PASS initial_gate=LIVE_RUNNING additional_restart=0 exit=0
+RUNTIME sessions=109 running=2 bots=4 revision=48 http=200 contract=2
+exit=0
+DEPLOYMENT_AUDIT.json=status APPLIED_HTTP_VERIFIED_AFTER_CONCURRENT_ACTIVITY; PID45444, service0.3.9. No new installer, model call, real group mutation, or task replay by this task.
+Earlier readonly-driver failures (Fetch Response.status property typo, and idle probe rejecting concurrent running) remain in LIVE_HTTP_FIRST.log/LIVE_HTTP_BUSY.log; corrected read-only verification above exits0, without changing product code or restarting service.
+
+ARTIFACTS
+Three canonical repository originals saved with hashes; runtime backup separately preserves exact pre-load bytes. MODIFIED_FILE.zip contains changed JS/CSS/deploy helper, original bytes, manifest, executable rollback. Patch covers the same 3 paths. Tests/docs/QA remain tracked separately in repository.
+Package entries=8 CRC=PASS; reverse patch check=PASS; portable rollback=PASS; source remains modified.
