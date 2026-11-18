@@ -31,7 +31,7 @@ test('UI commands serialize and IPC failures are visible and retryable',async()=
 
 test('view distinguishes unchecked, confirmed latest, progress, disabled, busy and ready',()=>{
  assert.equal(updateView({enabled:true,status:'idle'}).title,'检查更新');
- assert.equal(updateView({enabled:true,status:'idle',lastChecked:1}).title,'已是最新版本');
+ assert.equal(updateView({enabled:true,status:'idle',lastChecked:1}).title,'客户端已是最新版本');
  assert.equal(updateView({enabled:false,status:'disabled'}).title,'安装版支持更新');
  assert.equal(updateView({enabled:true,status:'downloading',progress:{percent:150}}).percent,100);
  assert.equal(updateView({enabled:true,status:'ready',error:'UPDATE_INSTALL_BUSY'}).title,'当前操作未结束，稍后更新');
@@ -73,4 +73,16 @@ test('install preparation and unknown activity are visible without disguising ba
  assert.equal(updateView({enabled:true,status:'ready',installPhase:'preparing'}).title,'正在保存并准备更新');
  assert.equal(updateView({enabled:true,status:'ready',installPhase:'restarting'}).busy,true);
  assert.equal(updateView({enabled:true,status:'ready',error:'UPDATE_ACTIVITY_UNKNOWN'}).title,'未确认连接状态，请重试');
+});
+
+test('native update result is client-only and service version stays visible when equal or different',async()=>{
+ const prior=globalThis.__NAUMI__,document=globalThis.document;globalThis.document={body:{}};
+ try{for(const serviceVersion of ['0.3.7','0.3.9']){
+  globalThis.__NAUMI__={productVersion:serviceVersion};let component;
+  const React={Fragment:'fragment',createElement:(type,props,...children)=>({type,props,children}),useSyncExternalStore:(_subscribe,snapshot)=>snapshot(),useState:value=>[typeof value==='boolean'?true:value,()=>{}],useRef:()=>({current:null}),useId:()=> 'update-test',useEffect:()=>{}};
+  const api={onUpdateState:()=>()=>{},checkUpdates:async()=>({ok:true}),updateState:async()=>({enabled:true,status:'idle',currentVersion:'0.3.9',lastChecked:1})};
+  const off=installDesktopUpdatesUI({slots:{inject:(_name,fn)=>fn(),register:(_options,fn)=>{component=fn;return()=>{};}}},React,v=>v,api);await tick();
+  const tree=component({wide:true}),strings=[];function visit(v){if(typeof v==='string')strings.push(v);else if(Array.isArray(v))v.forEach(visit);else if(v?.children)visit(v.children);}visit(tree);
+  assert(strings.includes('客户端已是最新版本'));assert(strings.includes('客户端 v0.3.9'));assert(strings.includes('服务 v'+serviceVersion));off();
+ }}finally{if(prior===undefined)delete globalThis.__NAUMI__;else globalThis.__NAUMI__=prior;if(document===undefined)delete globalThis.document;else globalThis.document=document;}
 });
