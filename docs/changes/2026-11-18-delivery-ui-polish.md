@@ -17,3 +17,5 @@ QA修正留痕：原生折叠展开状态在reload后不持久；展开按钮文
 运行加载：仅client交付函数/一行分支、host新增CSS白名单与link、bot-sidebar.css增量、新CSS共四文件；运行host/client存在与main不同的既有增量，故禁止整份覆盖。独立部署脚本逐片段CAS、保留无关文件/配置hash和Bot/员工export，失败恢复原件，running=0后才调用原维护脚本。本机加载结果以DEPLOYMENT.json为准，不用Git合并替代。
 
 未完成项与下一步：普通合入推送、窗口协调后四文件实际加载，再重开归档并清理本任务。发布安装包由并行更新闭环任务单独负责，本切片不改版本，不覆盖其desktop-updates/product-identity/native/0.3.9准备，不重发旧包。企业连接与真实业务权限仍由原服务负责，UI优化不自动连接企业。
+
+最终运行状态：源码已普通合入推送1880e590fe9ffe359f77d2d3c9e3a699f28c95bb，四文件增量最终exit0，PID44844/HTTP200，106sessions/0running/4bots/revision47前后保持；152无关运行文件、5配置hash与Bot目录/员工export hash保持。原桌面更新/版本/身份/native/权限不变；3080窗口已通过工具正式释放，不再重启。只读HTTP重开确认原页面head含新CSS，stylesheet200且与source哈希一致。企业连接仍按用户原登录状态，不自动启用或填入演示数据。
