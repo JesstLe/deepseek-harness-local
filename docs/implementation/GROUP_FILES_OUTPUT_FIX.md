@@ -18,8 +18,21 @@
 
 ## 验证命令、结果及证据层级
 基线：`node --test tests/naumi-bot-groups.test.mjs tests/naumi-group-collaboration.test.mjs tests/naumi-model-specs.test.mjs tests/naumi-bot-sidebar.test.mjs`，37 pass / 0 fail / exit 0。证据 `evidence/group-files-output/BASELINE.log`。
-集中验证结果在模块完成后补录。
+集中回归第一轮：44 tests / 44 pass / 0 fail / exit 0。
+隔离真实 Harness + Chrome 验收：`node scripts/verify-group-files-output-ui.mjs`，`FIX_UI_COMPLETE checks=19 errors=0 inference=0`，exit 0。实际原 native present executor 创建持久化 deliverables/presented；真实 source Session 文件读与原生 Markdown/HTML 右栏；普通线程与群卡片相同 CSS/class/component；群抽屉、切群/草稿恢复、入群反馈过期；模型输入128000不改上下文，384000/128000/未知官方输出/私有别名预算经 owner CAS 与实际 YAML 保存、重开保持；超官方值明确无效而非静默缩小。
+群消息 read projection 使用验收 fixture 引用上述真实 native 回执，不把 fixture 写成真实供应商或线上业务完成。浏览器无 pageerror、无推理；fixture 未接通企业账号/OS opener 的401/500资源回执保留在 UI 日志，不声称这些外围服务就绪。
+首次预览联调发现原生 child slot 不能重复声明；现只在共享 factory 中声明一次 children，普通 DeliverablesTail 转交该 factory，不复制/重复注册 actions。fixture 初版缺 assistant/message.stream，已按上游事件类型补齐 stream:[] 与 step/end；该修正只在隔离测试生成器，不修改产品 Session 数据。
+
+## 主线同步
+首任务提交9ebf77e；刷新并普通 merge origin/main 1bee995，整合提交7fd3fc1。CSS 冲突保留双方：群工作指示器以及原生卡片宿主宽度，未删他人工作。初始基线与整合前主线分别记录；回滚基准采用1bee995，保留已合入的新工作指示器。
 
 ## 未完成项与下一步
-完成集中回归、隔离真实 Harness/HTTP/native 预览/参数保存/反馈消失验证，再刷新主线、普通 merge/push。源码、main、实际安装运行版本分别记录，不以局部测试冒充上线。
+已完成19项UI/HTTP验证；整合后集中回归、main merge/push、窄范围runtime接线与副本回滚证据继续记录。源码、main、实际安装运行版本分别记录，不以局部测试冒充上线。
 功能迭代计数：本切片 1（含三个修复点）。
+
+## 集中验收与回滚
+- 整合后集中验证104项：104 pass / 0 fail / exit 0；覆盖群CRUD/路由/恢复、原生transport、主线工作指示器、改名、模型连接/推理、原生文件交付单路径、文件snapshot权限及提示计时。
+- 初次扩围回归出现两个源码契约测试失配：一个是Git checkout行尾差异；另一个是新增显式sidebar lease导致原composer effect字节不再相等。现统一换行后比对；仅剥离本任务三处lease接线后仍逐字核对既有transport。bot-chat只更新对照为已经合入的1bee995，继续保护当前群路由与新工作指示器。不是通过删业务断言跳过回归。
+- `node scripts/package-group-files-output.mjs`：18文件修复包/patch重开，标记副本rollback恢复12文件并删除6新增文件，原37项回归全部通过，活动源码保持修改态；patch在还原副本上check通过。
+- 四项产物位于 `evidence/group-files-output/{MODIFIED_FILE.zip,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`；manifest保存原始及修改SHA256。ROLLBACK.sh仅接受标记副本并校验全部哈希后操作，不直接改活动工作区。
+- 桌面运行探针确认当前C:/Program Files/Naumi/Naumi.exe以external模式连接127.0.0.1:3080；不把独立打包fixture的58062端口混成用户实例。runtime载入前读取110个Session与任务账本，running=0、activeTasks=0；只接线本切片6个plugin文件+2个原生bundle，保留配置与预算。
