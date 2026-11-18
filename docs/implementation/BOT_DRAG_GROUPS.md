@@ -19,3 +19,7 @@
 未完成项与下一步：终验/副本回滚、主线普通整合推送、running=0窗口六文件增量加载、归档重开；本任务不安装客户端、不发模型、不重放任务、不重发既有安装包。真实加载及数据保持以DEPLOYMENT.json为准。
 
 最终集中验收：原整合版本终验858/858通过（REGRESSION_FINAL.log），包含新增创建回执用例；随后整合dae76e3的员工设置功能，不触碰其文件。新上游5项设置测试使用共享补丁后依赖但无原备份时有2项原件假设断言失败；只在独立副本逆变换并核对固定上游91f464...原hash后5/5通过（UPSTREAM_SETTINGS_COPY.log），共享依赖/测试不改，失败留证；不将这两份测试口径混成一次863全仓绿。运行模型/真实群写入均为0。
+
+最终加载：功能普通合入推送main68572483027d450b18c9170aff707b3cf9a43122；六文件RUNTIME_PLAN/backup哈希固定并CAS增量成功，PID25144/HTTP200。107sessions/0running/4bots/revision47、Session IDs/Bot/群/任务/员工export前后一致；164无关代码文件、6配置原字节保持，service0.3.9、设置/身份/更新/native/host/client不改。回执source字段在完成时读取HEAD为fd5d4555646191f921f45d4933c15d6b7b34c4a1，这期间其他线程仅修改deploy-employee-settings.mjs一个脚本，六个产品文件完全无差异；开始SHA与结束SHA分别记录，不冒称又加载其他模块。原始receipt保留，另加DEPLOYMENT_AUDIT解释。没有真实群写入、模型或任务重放；新增空receipt侧表而非业务数据迁移。3080窗口已工具正式释放。
+
+副本恢复：portable ZIP19条目（11源码、7原件、manifest1）解压另一标记副本执行ROLLBACK，恢复7文件/移除4新增；原24测试通过；已写新receipt侧表的schema1群DB由恢复的旧源码重开，3位成员与Session保持。无标记或副本已改会在写入前拒绝，实际源/运行修改仍保留。
