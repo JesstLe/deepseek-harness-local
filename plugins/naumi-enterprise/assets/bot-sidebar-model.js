@@ -71,3 +71,9 @@ export function createBotCatalog({fetcher=globalThis.fetch,eventSource=url=>new 
 }
 let shared;
 export function botCatalog(){return shared??=createBotCatalog();}
+
+/** Success messages expire; drag guidance/errors have their own lifetime. */
+export function transientDragNotice(publish,{schedule=setTimeout,cancel=clearTimeout}={}){
+ let timer=null;const clear=()=>{if(timer!==null)cancel(timer);timer=null;};
+ return {set(value){clear();publish(value);if(['群聊已创建','成员已加入群聊','顺序已保存'].includes(value))timer=schedule(()=>{timer=null;publish('');},3000);},dispose:clear};
+}

@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import {installNativeDeliveryExtensions} from './native-delivery-extension.mjs';
 import path from 'node:path';
 import {installReasoningDefaults} from './native-reasoning-extension.mjs';
 import {installAgentTriggers} from './native-agent-mentions-extension.mjs';
@@ -30,6 +31,7 @@ if(!profile.dsh.profile.bundles.includes('@naumi/dsh-enterprise'))profile.dsh.pr
 const serialized=JSON.stringify(profile,null,2)+'\n';
 if(fs.readFileSync(manifest,'utf8')!==serialized)fs.writeFileSync(manifest,serialized);
 console.log('NAUMI_SYNC packages=3 bundle_enabled=1');
+installNativeDeliveryExtensions(path.resolve('node_modules'));
 installNativeComposer(path.resolve('node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'));
 installAgentTriggers(path.resolve('node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js'));
 installNativeSettings(path.resolve('node_modules/@deepseek-ai/dsh-client-ui-settings-general/lib/client.js'));
