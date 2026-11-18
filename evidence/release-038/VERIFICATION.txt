@@ -1,0 +1,84 @@
+Naumi Desktop 0.3.8 release verification
+branch=codex/release-038-20261118
+baseline=f48b33833fc8abf367c8541616b236d741846454
+fixed main build=87d2460136547d19459c59d8b6c77fe0487ec9a6
+changed fields:desktop/package.version 0.3.7->0.3.8; lock root and packages[''].version; PRODUCT_VERSION; CHANGELOG0.3.8; QA runners. Product Bot main chat and self tasks already included on baseline main, not newly reimplemented in release.
+MODIFIED_FILE=E:/Workspace/naumi-desktop/evidence/release-038/MODIFIED_FILE.zip
+DIFF_FILE=E:/Workspace/naumi-desktop/evidence/release-038/DIFF_FILE.patch
+VERIFICATION=E:/Workspace/naumi-desktop/evidence/release-038/VERIFICATION.txt
+ROLLBACK=E:/Workspace/naumi-desktop/evidence/release-038/ROLLBACK.sh
+These four artifacts archive eight changed source/QA paths and original hashes, not the 495MB installer. ROLLBACK.sh is mode100755 in ZIP/Git and accepts only an explicitly marked source copy, never the live installation or user data.
+
+BASELINE command:node --test --test-concurrency=1 desktop/tests/updates.test.cjs desktop/tests/installer-maintenance.test.cjs desktop/tests/installer-ui.test.cjs
+input:original main f48b338 (0.3.7 metadata), original update/installer module tests.
+literal output:
+ℹ tests 42
+ℹ pass 42
+ℹ fail 0
+exit status:0
+
+MODIFIED command:node --test --test-concurrency=1 desktop/tests/updates.test.cjs desktop/tests/installer-maintenance.test.cjs desktop/tests/installer-ui.test.cjs desktop/tests/identity.test.cjs desktop/tests/backend.test.cjs tests/naumi-bot-main-chat.test.mjs tests/naumi-primary-bot.test.mjs
+input:release0.3.8 version metadata and original production code/tests, deterministic fixtures, zero real supplier calls.
+literal output:
+ℹ tests 119
+ℹ pass 119
+ℹ fail 0
+exit status:0
+
+ROLLBACK command:node scripts/package-release-038.mjs rollback
+input:second marked source copy overlaid with8 modified files; exact historical test-copy path:
+E:\Workspace\naumi-release-038-20261118\runtime\release-038-rollback-d8bee049-0cb6-4aaf-9d5e-8e404c21dc9f\copy
+inner test command:node --test --test-concurrency=1 desktop/tests/updates.test.cjs desktop/tests/installer-maintenance.test.cjs desktop/tests/installer-ui.test.cjs
+literal output:
+ROLLBACK_COPY restored=8 baseline=f48b33833fc8abf367c8541616b236d741846454 active_modified=retained
+ℹ tests 42
+ℹ pass 42
+ℹ fail 0
+ROLLBACK_PASS tests=42 pass=42 fail=0 exit=0 active_modified=retained
+exit status:0
+restored behavior/status:source copy desktop/package/lock/PRODUCT_VERSION/CHANGELOG restored to0.3.7; new QA paths removed; existing Bot feature code retained. Original SHA256 matched. Active modified source remains0.3.8; no installed downgrade or live data change.
+
+BUILD command:npm --prefix desktop run build
+input:clean fixed main87d2460; entire runtime restaged from declared dependencies/plugins, no employee home/config.
+observed:DESKTOP_RUNTIME_READY files45650 closurePASS forbiddenPaths0; STAGED_RUNTIME_VERIFIED files45650 version0.3.8 hashesPASS; NSIS stock uninstaller/signing pipeline/size validation retained.
+exit status:0
+UNPACKED command:node E:/Workspace/naumi-release-038-20261118/desktop/scripts/verify-release-038.mjs E:/Workspace/naumi-desktop E:/Workspace/naumi-desktop/runtime/naumi-desktop-release/win-unpacked/Naumi.exe 0.3.8 E:/Workspace/naumi-desktop/evidence/release-038/unpacked-smoke E:/Workspace/naumi-desktop/runtime/release-038-unpacked-profile
+input:actual packaged Electron and bundled backend; isolated identity fixture/random port/profile; no real models.
+literal:PACKAGE version=0.3.8 login=PASS bundled_backend=PASS settings_right=PASS check_update=PASS dingtalk=PASS worker_stop=PASS model_calls=0 exit=0
+exit status:0
+botChat:stableHome=true,repeatedClickNewSessions=0,tasksSecondary=true,returnHome=true,selfTaskAPI=true,modelPrompts=0.
+
+First validation failures retained:rollback copy initially lacked desktop/node_modules junction (added only on owned copy); native generated latest.yml omits optional files[0].size (verifier now validates size only when present and always validates full SHA512/actual bytes/GitHub size). No production code/build artifact changed for these QA corrections.
+INSTALL command:$env:NAUMI_QA_KEEP_037_COPY='1'; node E:/Workspace/naumi-release-038-20261118/scripts/verify-release-038-install.mjs
+input:public0.3.7 EXE SHA1a0c96e99b35f31f722bf3c6450bfe4fa7ba8cbdff8acfe3505323d8a8b83e43; newly built0.3.8; own/currentuser unicode-space slot; own identity/profile.
+literal output:
+NSIS_CURRENTUSER install-0.3.7 exit=0
+NSIS_CURRENTUSER install-0.3.8 exit=0
+NSIS_CURRENTUSER uninstall-0.3.8 exit=0
+INSTALLATION_PASS baseline=0.3.7 upgrade=0.3.8 unicode=PASS packaged=PASS retained=PASS uninstall=PASS real_install=unchanged
+exit status:0
+restored/preserved status:installed QA slot removed; fixture profile/session/memory/persona/binary retained; originalHKLM/ProgramFiles/shortcuts exact; real user install not upgraded, shared3080 not restarted.
+
+PACKAGE command:node E:/Workspace/naumi-release-038-20261118/scripts/verify-release-038-package.mjs local
+input:fixedmain87d2460 staged/win-unpacked45650 files, generated latest.yml, realEXE.
+literal:RELEASE_038_PACKAGE_PASS files=45650 bytes=495308146 sha256=df0a9e441d6e590ffda0d2cf7ff9b35cab10bd34b92f2d1e167821b690e447de private_paths=0
+exit status:0
+
+PUBLISH commands:gh release create v0.3.8 --repo JesstLe/naumi-desktop --target 87d2460136547d19459c59d8b6c77fe0487ec9a6 --title "Naumi Desktop v0.3.8" --notes-file evidence/release-038/RELEASE_NOTES.md --draft runtime/naumi-desktop-release/Naumi-Setup-0.3.8-x64.exe runtime/naumi-desktop-release/latest.yml; gh release edit v0.3.8 --repo JesstLe/naumi-desktop --draft=false --latest
+input:verifiedEXE+latest.yml only, existing authenticated GitHub release channel.
+observed:Latest stable v0.3.8 published2026-11-18T02:17:51Z; tag87d2460; draft=false; prerelease=false; releasehttps://github.com/JesstLe/naumi-desktop/releases/tag/v0.3.8
+exit status:0
+PUBLIC command:node E:/Workspace/naumi-release-038-20261118/scripts/verify-release-038-package.mjs public
+input:anonymous officiallatest.yml and officialv0.3.8 installer download; first interrupted connection resumed with exact HTTP Range/Content-Range.
+literal:RELEASE_038_PUBLIC_PASS latest=v0.3.8 anonymous_http=206_ranges bytes=495308146 sha256=df0a9e441d6e590ffda0d2cf7ff9b35cab10bd34b92f2d1e167821b690e447de previous037=unchanged
+exit status:0
+SHA512:I23H1wjH7Xy3wttHRnwL88ppoKw/9DJ8xw6wRhiXJYrysrfvT75J2RFKycHrDna64Q8b8ex2BLDUCjIPw/xkuw==
+Public package:https://github.com/JesstLe/naumi-desktop/releases/download/v0.3.8/Naumi-Setup-0.3.8-x64.exe
+Local package:E:/Workspace/naumi-desktop/runtime/naumi-desktop-release/Naumi-Setup-0.3.8-x64.exe
+
+REAL OLD CLIENT UPDATE command:node E:/Workspace/naumi-release-038-20261118/desktop/scripts/verify-release-037-to-038-update.mjs E:/Workspace/naumi-desktop E:/Workspace/naumi-desktop/runtime/release-038-old-public-app/Naumi.exe 0.3.7 E:/Workspace/naumi-desktop/evidence/release-038/real-update E:/Workspace/naumi-desktop/runtime/release-038-real-update-profile
+input:exact real public0.3.7 app with original mirror/GitHub default feed, isolated updater cache/profile, controlled identity API only, no update feed override/no precached installer.
+observed:0.3.8 version and newnotes correctly detected, real download begins; connection closed after104972288/495308146 bytes; literal error REAL_UPDATE_ERROR UPDATE_DOWNLOAD_FAILED; exit status:1.
+Status:DOWNLOAD_INTERRUPTED; ready=false; autoInstallExecuted=false. This failed single-connection network acceptance is retained, not relabeled ready. Independent official full-asset range download subsequently verified both hashes. No runtime update-module change or cache planting to simulate success.
+Current shared service:PID46840;106sessions/0running/4bots/0activeTasks, unchanged throughout release. No real supplier calls.
+
