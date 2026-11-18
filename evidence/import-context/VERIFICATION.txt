@@ -1,0 +1,74 @@
+导入会话上下文修复 / VERIFICATION
+任务分支：codex/import-context-budget-20261118
+原基线：5154aecf729d6b9155050f25403122a2b0906ace
+实现main与实际加载固定SHA：63e98bfa2adc3ed3e399598e2428395916e79931
+工件源码提交：1a60817bf68e796eed0a77cd20e4fdd53135908a；各文件以HASHES.json为准。
+改变的分支/字段：导入Session的agent/pre-step在首轮先调用原生BasicCompaction.compactRegion；importBudget历史预算最多32768 UTF-8 bytes，importCheckpoint最多12000 bytes。session_import_history只读取当前导入快照、有界分页。新导入events增加空system受保护头；精确旧日志+5 events，原seq+5/turn+1；消息ID/正文保留。package.files只追加2项；模型能力/URL/API Key不改。
+四工件绝对路径：
+E:/Workspace/naumi-desktop/evidence/import-context/MODIFIED_FILE.zip
+E:/Workspace/naumi-desktop/evidence/import-context/DIFF_FILE.patch
+E:/Workspace/naumi-desktop/evidence/import-context/VERIFICATION.txt
+E:/Workspace/naumi-desktop/evidence/import-context/ROLLBACK.sh
+
+BASELINE
+command: node --test tests/naumi-session-import.test.mjs
+cwd/input: 任务工作树、原导入模块26项基线；BASELINE.log
+literal output/result: ℹ tests 26 / ℹ pass 26 / ℹ fail 0
+exit status: 0
+基线回归通过不代表原大历史续聊正常；原实际会话模型可见消息3532294 bytes，旧日志另缺受保护system首头。
+
+MODIFIED
+command: node --test tests/naumi-import-context.test.mjs tests/naumi-session-import.test.mjs tests/naumi-bot-task-continuity.test.mjs tests/naumi-model-connections.test.mjs
+input: 首轮无header、长文本/CJK/emoji、并发隔离、取消/失败、分页/篡改、旧头修复；MODULE_MAIN.log
+literal output/result: ℹ tests 68 / ℹ pass 68 / ℹ fail 0
+exit status: 0
+command: node --test tests/*.test.mjs desktop/tests/*.test.cjs
+input: 整合main后的全仓测试；REGRESSION_MAIN.log
+literal output/result: ℹ tests 899 / ℹ pass 899 / ℹ fail 0
+exit status: 0
+command: node scripts/verify-import-context.mjs
+input: 6401407 bytes合成历史，隔离真实Harness/native AgentLoop/TokenMeter/BasicCompaction/JSONL，loopback供应商；INTEGRATION_FINAL.log
+literal output/result: IMPORT_CONTEXT_HTTP_PASS checks=10 boots=3 requests=3 real_supplier_calls=0 max_request_bytes=150700
+exit status: 0
+wire JSON bytes: 140439,150700,147063；不是供应商token计数。
+command: node scripts/verify-import-context-copy.mjs E:/Workspace/naumi-desktop naumi-import-38c4e233404340f17d84346618c20e6e006058fb
+input: 精确受影响会话副本；ACTUAL_COPY.json/log
+literal output/result: ACTUAL_COPY_PASS source_unchanged=1 original_events=3174 before_bytes=3532294 after_bytes=53564 native_reopen=PASS model_calls=0
+exit status: 0
+beforeMessageBytes=3532294; afterMessageBytes=53564; sourceUnchanged=true; modelCalls=0
+command: node scripts/deploy-import-context.mjs prepare E:/Workspace/naumi-desktop naumi-import-38c4e233404340f17d84346618c20e6e006058fb
+input: 固定main、真实空闲实例、精确旧会话；PREPARE.log
+literal output/result: IMPORT_CONTEXT_PREPARE_PASS files=4 native_copies=1 running=0 model_calls=0
+exit status: 0
+command: node scripts/deploy-import-context.mjs apply E:/Workspace/naumi-desktop naumi-import-38c4e233404340f17d84346618c20e6e006058fb
+input: 原SHA 14e4464fc82f5a8faf33da932e06572aa1c7fb350895df56025c140bad97e8f0，真实4运行文件增量+精确1份原生日志头修复；DEPLOYMENT.json/log
+literal output/result: IMPORT_CONTEXT_LOADED files=4 native_heads_repaired=1 HTTP=200 running=0 archive=UNCHANGED models=UNCHANGED real_supplier_calls=0
+exit status: 0
+restored service status: RUNNING PID=39012 URL=http://127.0.0.1:3080 HTTP=200
+114 sessions/0running/4bots/revision49；168其他插件文件与123受保护文件原字节保持，Bot/tasks/groups/models/employees导出哈希一致，原plan/receipt不改。
+生产只修头；有界上下文将在下次用户发送的pre-step提交，未重发hi，未调用真实供应商。不冒称真实供应商续聊已验收。
+原会话可恢复备份：E:\Workspace\naumi-desktop\runtime\import-context-load-00edb134-859b-46a3-911d-16d3a62753dc\before\native\session.v4.jsonl.zstd
+备份SHA256：14e4464fc82f5a8faf33da932e06572aa1c7fb350895df56025c140bad97e8f0
+复核生产native：修复前缀保持，其后原生日志追加79 bytes，未覆盖。初次副本回滚验证错误地要求活动日志整文件hash固定，断言失败；改用保存的修复候选副本验证，生产文件从未写入。
+
+ROLLBACK
+command: node scripts/package-import-context.mjs
+input: 11个明确源码/配置/文档文件，修改ZIP独立解包核hash；marker副本撤销本任务文件并跑原基线
+literal output/result: IMPORT_CONTEXT_ARTIFACTS_PASS files=11 zip_reopened=1 rollback_exit=0 restored_tests=26 source_unchanged=1
+exit status: 0
+exact rollback command: D:/DEV/Git/bin/bash.exe evidence/import-context/ROLLBACK.sh E:/Workspace/naumi-import-context-20261118/runtime/import-context-artifacts-44574e49-5a0c-422d-abbf-f5a650da02ad/rollback-copy
+input: 带.import-context-copy.json的独立副本，HASHES.json+original原件；不对生产运行目录执行
+literal output/result: IMPORT_CONTEXT_ROLLBACK_PASS files=11 original_hashes=restored added_files=removed
+exit status: 0
+restored behavior command: node --test tests/naumi-session-import.test.mjs
+cwd/input: E:\Workspace\naumi-import-context-20261118\runtime\import-context-artifacts-44574e49-5a0c-422d-abbf-f5a650da02ad\rollback-copy；ROLLBACK_TESTS.log
+literal output/result: ℹ tests 26 / ℹ pass 26 / ℹ fail 0
+exit status: 0
+restored status: 11个文件恢复原hash/新增文件移除，基线行为26/26；工作源码和MODIFIED_FILE.zip仍为修改版。源码回滚保留旧版本大历史限制，不称回滚后bug被修复。
+原会话字节回滚额外验证：独立native副本从修复候选恢复备份并核原SHA；生产修复前缀与追加内容保持。
+literal output/result: IMPORT_NATIVE_COPY_ROLLBACK_PASS original_bytes=restored production_modified=retained
+exit status: 0
+
+已知未通过/证据边界：verify-session-import-ui.mjs的390px布局断言light_responsive_layout_390失败exit1，SMALL_UI.log保留；未改UI/CSS，不称浏览器全通过。早期UTF8/缺引擎/原生首帧/seed/等待问题见初始失败日志，最终原生链与全仓通过。第一次prepare日志目录缺失导致PowerShell重定向失败，Node未执行；创建目录后prepare/apply均真实通过。
+本地节选是有界原文，不是完整语义摘要；完整历史仍可分页检索。没有真实模型请求、收费重试、密钥修改、UI图标修改、安装包构建。
+服务加载窗口已释放；验收临时宿主已退出；Naumi正式服务保持运行，不再重启。
