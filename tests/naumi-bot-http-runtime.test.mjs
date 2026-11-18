@@ -4,7 +4,7 @@ import {botTaskHost} from './helpers/bot-task-host.mjs';
 
 test('real Cordis and HTTP dispatch through public registry preserves target profile and returns a durable relay',async()=>{
   const f=await botTaskHost();try{
-    assert.equal(f.sender.tools.size,8);assert(f.sender.prompts.get('naumi:bot-routing'));
+    assert.equal(f.sender.tools.size,9);assert(f.sender.tools.has('bot_task_start'));assert(f.sender.prompts.get('naumi:bot-routing'));
     const before=JSON.stringify(f.sender.session.snapshotEvents());
     const response=await f.request({action:'dispatch',sourceSessionId:f.sender.id,targetBotId:f.targetBot.id,task:'返回验证文本',idempotencyKey:'http-dispatch-1'});
     assert.equal(response.status,200);assert.equal(response.headers.get('x-naumi-bot-router'),'1');const task=await response.json();

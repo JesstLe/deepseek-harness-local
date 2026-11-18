@@ -68,10 +68,10 @@ test('claim validates root home, archive and live Session existence',async t=>{
  f.options.workspaceRegistry.archivedSessionIds=[];await f.directory.update('old-home',{expectedRevision:1,status:'archived'});await assert.rejects(f.service.execute({...input,expectedRevision:2}),/BOT_ARCHIVED/);assert.equal(f.directory.primary(),null);
 });
 test('two account profile directories have independent primary IDs, Sessions and reservations',async t=>{const a=fixture(t),b=fixture(t);await a.service.execute(a.input);assert.equal(b.directory.primary(),null);await b.service.execute(b.input);assert.notEqual(a.directory.primary().id,b.directory.primary().id);assert.notEqual(a.directory.primary().homeSessionId,b.directory.primary().homeSessionId);});
-test('Bot entry requires ready catalog and opens the work overview without creating or selecting a task',async()=>{
+test('Bot entry requires ready catalog and opens the stable main chat without creating or selecting a task',async()=>{
  const calls=[],ctx={layout:{beginNavigation(){},selectPanel:id=>calls.push(id)},uiWorkspace:{openSession:id=>calls.push(id)}};
  assert.throws(()=>enterBotMode(ctx,{status:'error',bots:[]}),/BOT_DIRECTORY_UNAVAILABLE/);assert.deepEqual(calls,[]);
- await enterBotMode(ctx,{status:'ready',bots:[]});assert.equal(calls.pop(),'naumi-primary-bot');await enterBotMode(ctx,{status:'ready',primaryBotId:'b',bots:[{id:'b',status:'active',homeSessionId:'home',sessionIds:['home','running-task']}]});assert.equal(calls.pop(),'naumi-bot-overview');
+ await enterBotMode(ctx,{status:'ready',bots:[]});assert.equal(calls.pop(),'naumi-primary-bot');await enterBotMode(ctx,{status:'ready',primaryBotId:'b',bots:[{id:'b',status:'active',homeSessionId:'home',sessionIds:['home','running-task']}]});assert.equal(calls.pop(),'home');
 });
 test('primary alignment preserves legacy member Sessions/posts and reserves a thirteenth legacy seat without dropping staff',async t=>{
  const f=fixture(t),store=new BotGroupStore(path.join(f.home,'groups.sqlite'));f.cleanup.push(()=>store.db.close());
