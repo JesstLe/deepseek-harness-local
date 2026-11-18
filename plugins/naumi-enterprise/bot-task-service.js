@@ -11,7 +11,7 @@ const errorCode=error=>/^BOT_[A-Z_]+$/.test(error?.message)?error.message:'BOT_T
 const bounded=value=>value.length<=30000?value:value.slice(0,29800)+'\n[结果已截短，完整交付见目标任务会话。]';
 const publicTask=task=>{const {profile,targetCwd,...view}=task;return view;};
 const sameAcceptance=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
-const sameDispatch=(task,args)=>task.targetBotId===args.targetBotId&&task.task===args.task&&(task.output??'text')===args.output&&
+const sameDispatch=(task,args,executionKind)=>task.executionKind===executionKind&&task.targetBotId===args.targetBotId&&task.task===args.task&&(task.output??'text')===args.output&&
   (task.replyMode??'wait')===args.replyMode&&task.intent?.goal===args.goal&&sameAcceptance(task.intent?.acceptance,args.acceptance)&&
   task.workGoal?.goalId===args.workGoalId&&task.workGoal?.revision===args.workGoalRevision&&
   task.handoff?.taskId===args.handoffTaskId&&task.handoff?.revision===args.handoffRevision;
@@ -31,12 +31,12 @@ export class BotTaskService{
   }
   assertAdmission(...ids){for(const id of ids){if(this.directory.lifecycleLocks?.has(id))fail('BOT_BUSY');if(this.directory.list().bots.find(b=>b.id===id)?.status!=='active')fail('BOT_ARCHIVED');}}
   current(taskId){const task=this.store.read().tasks.find(t=>t.id===taskId);if(!task)fail('BOT_TASK_NOT_FOUND');return task;}
-  authorized(agent,taskId,write=false){const caller=this.caller(agent,write),task=this.current(taskId);
+  authorized(agent,taskId,write=false,executorReply=false){const caller=this.caller(agent,write),task=this.current(taskId);
     if(![task.sourceBotId,task.targetBotId].includes(caller.bot.id))fail('BOT_TASK_FORBIDDEN');
     // Bot-wide reads are intentional; writes belong to the exact task endpoints.
     // A new reception/test Session bound to the same Bot is not a write grant.
     if(write)this.assertAdmission(task.sourceBotId,task.targetBotId);
-    if(write&&caller.bot.id===task.sourceBotId&&caller.root.id!==task.sourceSessionId)fail('BOT_TASK_SESSION_REQUIRED');
+    if(write&&caller.bot.id===task.sourceBotId&&caller.root.id!==task.sourceSessionId&&!(executorReply&&task.executionKind==='self'&&caller.root.id===task.targetSessionId))fail('BOT_TASK_SESSION_REQUIRED');
     return {caller,task};}
   serial(taskId,fn){
     const run=(this.lanes.get(taskId)??Promise.resolve()).then(fn),tail=run.then(()=>{},()=>{});this.lanes.set(taskId,tail);
@@ -51,7 +51,14 @@ export class BotTaskService{
   currentWorkReference(task){return task.workGoalUpdates?.at(-1)??task.workGoal;}
   validateWorkReference(task,revision){const ref=this.currentWorkReference(task);if(!ref){if(revision!==undefined)fail('BOT_WORK_GOAL_REFERENCE_REQUIRED');return;}if(revision!==undefined)return this.workReference(ref.botId,ref.goalId,revision);const current=this.readWorkGoal?.(ref.botId,ref.goalId);const fresh=this.workReference(ref.botId,ref.goalId,current?.revision);if(fresh.title!==ref.title||fresh.description!==ref.description||!sameAcceptance(fresh.criteria,ref.criteria))fail('BOT_WORK_GOAL_CHANGED');return ref;}
   updateWorkReference(task,reference){if(reference&&reference.revision!==this.currentWorkReference(task)?.revision){if((task.workGoalUpdates?.length??0)>=100)fail('BOT_WORK_GOAL_UPDATE_LIMIT');task.workGoalUpdates=[...task.workGoalUpdates??[],reference];}}
-  async dispatch(agent,input,{signal,callId}={}){
+  start(agent,input,exec={}){
+    const args=z.object({task:body,idempotencyKey:key,output:z.enum(['text','files']).optional(),workGoalId:id.optional(),workGoalRevision:z.number().int().positive().optional(),goal:taskGoal.optional(),acceptance:taskAcceptance.optional()}).strict().parse(input);
+    const {root,bot}=this.caller(agent,true);
+    if(root.id!==bot.homeSessionId||this.store.read().tasks.some(t=>t.targetSessionId===root.id))fail('BOT_RECEPTION_SESSION_REQUIRED');
+    return this.enqueue(agent,{...args,targetBotId:bot.id,replyMode:'background'},exec,'self');
+  }
+  dispatch(agent,input,exec={}){return this.enqueue(agent,input,exec);}
+  async enqueue(agent,input,{signal,callId}={},executionKind){
     const args=z.object({targetBotId:id,task:body,idempotencyKey:key,output:z.enum(['text','files']).default('text'),replyMode:z.enum(['background','wait']).optional(),
       workGoalId:id.optional(),workGoalRevision:z.number().int().positive().optional(),goal:taskGoal.optional(),acceptance:taskAcceptance.optional(),handoffTaskId:id.optional(),handoffRevision:z.number().int().positive().optional()}).strict().parse(input);signal?.throwIfAborted();
     if(Boolean(args.workGoalId)!==Boolean(args.workGoalRevision))fail('BOT_WORK_GOAL_REFERENCE_REQUIRED');
@@ -60,7 +67,7 @@ export class BotTaskService{
     const parent=this.store.read().tasks.find(t=>t.targetSessionId===root.id);
     const prior=this.store.read().tasks.find(t=>t.sourceSessionId===root.id&&t.key===args.idempotencyKey);
     args.replyMode??=prior?(prior.replyMode??'wait'):parent?'wait':'background';
-    if(prior){if(!sameDispatch(prior,args))fail('BOT_TASK_IDEMPOTENCY_CONFLICT');this.kick();return this.view(prior);}
+    if(prior){if(!sameDispatch(prior,args,executionKind))fail('BOT_TASK_IDEMPOTENCY_CONFLICT');this.kick();return this.view(prior);}
     if(args.handoffTaskId){
       const {task}=this.authorized(agent,args.handoffTaskId,true);
       if(task.sourceSessionId!==root.id)fail('BOT_TASK_SENDER_REQUIRED');
@@ -70,15 +77,16 @@ export class BotTaskService{
     if(!target)fail('BOT_NOT_FOUND');this.assertAdmission(source.id,target.id);if(target.status!=='active')fail('BOT_ARCHIVED');
     const lineage=parent?.lineage??[source.id];
     if(parent&&TERMINAL.has(parent.status))fail('BOT_PARENT_TASK_CLOSED');
-    if(lineage.includes(target.id))fail('BOT_TASK_CYCLE');if(lineage.length>=5)fail('BOT_TASK_DEPTH_LIMIT');
+    if(executionKind!=='self'&&lineage.includes(target.id))fail('BOT_TASK_CYCLE');if(lineage.length>=5)fail('BOT_TASK_DEPTH_LIMIT');
     const sourceMessage=callId?userSource(root.session):undefined;
     const intent={...(args.goal?{goal:args.goal}:{}),...(args.acceptance!==undefined?{acceptance:args.acceptance}:{}),...(sourceMessage?{source:sourceMessage}:{})};
     if(args.workGoalId)this.workReference(source.id,args.workGoalId,args.workGoalRevision);
     const profile=await this.runtime.profile(target);signal?.throwIfAborted();
     const value=await this.store.change(doc=>{
       this.assertAdmission(source.id,target.id);
+      if(executionKind==='self'&&(this.directory.forSession(root.id)?.homeSessionId!==root.id||parent))fail('BOT_RECEPTION_SESSION_REQUIRED');
       const existing=doc.tasks.find(t=>t.sourceSessionId===root.id&&t.key===args.idempotencyKey);
-      if(existing){if(!sameDispatch(existing,args))fail('BOT_TASK_IDEMPOTENCY_CONFLICT');return {value:existing,unchanged:true};}
+      if(existing){if(!sameDispatch(existing,args,executionKind))fail('BOT_TASK_IDEMPOTENCY_CONFLICT');return {value:existing,unchanged:true};}
       if(doc.tasks.length>=1000)fail('BOT_TASK_CAPACITY');
       if(this.directory.forSession(root.id)?.status!=='active'||this.directory.list().bots.find(b=>b.id===target.id)?.status!=='active')fail('BOT_ARCHIVED');
       const previous=args.handoffTaskId?doc.tasks.find(t=>t.id===args.handoffTaskId):undefined;
@@ -87,7 +95,7 @@ export class BotTaskService{
       const workGoal=args.workGoalId?this.workReference(source.id,args.workGoalId,args.workGoalRevision):undefined;
       const time=now(),task={id:'task-'+randomUUID(),key:args.idempotencyKey,sourceBotId:source.id,sourceSessionId:root.id,
         targetBotId:target.id,targetSessionId:'session-'+randomUUID(),targetCwd:target.cwd,profile,task:args.task,output:args.output,replyMode:args.replyMode,status:'queued',revision:1,
-        attempt:1,messageId:randomUUID(),lineage:[...lineage,target.id],...(parent?{parentTaskId:parent.id}:{}),
+        attempt:1,messageId:randomUUID(),lineage:executionKind==='self'?[source.id]:[...lineage,target.id],...(executionKind?{executionKind}:{}),...(parent?{parentTaskId:parent.id}:{}),
         ...(workGoal?{workGoal}:{}),...(Object.keys(intent).length?{intent}:{}),...(previous?{handoff:handoffSnapshot(previous)}:{}),createdAt:time,updatedAt:time};
       doc.tasks.push(task);return {value:task};
     });this.kick();return this.view(value);
@@ -115,7 +123,7 @@ export class BotTaskService{
   }
   async reply(agent,input,exec={}){
     const args=z.object({taskId:id,idempotencyKey:key,kind:z.enum(['message','progress','blocked','result']),message:body,files:deliveryFiles.optional()}).strict().parse(input);
-    const {caller,task}=this.authorized(agent,args.taskId,true),isTarget=caller.root.id===task.targetSessionId;
+    const {caller,task}=this.authorized(agent,args.taskId,true,true),isTarget=caller.root.id===task.targetSessionId;
     if(caller.bot.id!==task.sourceBotId&&!isTarget)fail('BOT_TASK_EXECUTOR_REQUIRED');
     if(!isTarget&&args.kind!=='message')fail('BOT_TASK_EXECUTOR_REQUIRED');
     if(args.files&&(!isTarget||args.kind!=='result'))fail('BOT_TASK_EXECUTOR_REQUIRED');

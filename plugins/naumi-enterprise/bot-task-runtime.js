@@ -85,6 +85,24 @@ export function createBotTaskRuntime(ctx){
   });
   return {
     snapshot,profile,ensure,
+    async threads(rootId,{limit=128,maxDepth=8}={}){
+      const subagents=ctx.get('subagents');if(!subagents?.listChildren)return {threads:[],partial:true};
+      const threads=[],seen=new Set([rootId]),queue=[{id:rootId,depth:0}],signal=AbortSignal.timeout(10000);let partial=false;
+      while(queue.length){const parent=queue.shift();let children;
+        try{children=await subagents.listChildren(parent.id,signal);}catch{partial=true;continue;}
+        for(const child of children){
+          if(seen.has(child.id))continue;seen.add(child.id);
+          if(threads.length>=limit||parent.depth>=maxDepth){partial=true;continue;}
+          if(child.mode==='external'){threads.push({sessionId:child.id,parentSessionId:parent.id,depth:parent.depth+1,title:child.label??child.id,mode:child.mode,available:false});continue;}
+          let stored;try{stored=await snapshot(child.id);}catch{}
+          // Catalog identity and persisted direct-parent identity must both agree.
+          if(!stored||stored.header.parentSession!==parent.id){partial=true;continue;}
+          threads.push({sessionId:child.id,parentSessionId:parent.id,depth:parent.depth+1,title:child.label??child.id,mode:child.mode,available:true,running:this.isRunning(child.id)});
+          queue.push({id:child.id,depth:parent.depth+1});
+        }
+      }
+      return {threads,partial};
+    },
     async verifyVersion(ref){const s=await snapshot(ref.sessionId);const event=s?.events.find(e=>e.type==='deliverables/presented'&&e.seq===ref.seq&&e.data.turn===ref.turn);if(event?.data.files[ref.index]?.path!==ref.path)throw Error('BOT_VERSION_REFERENCE');return verifyVersion(ctx,{id:ref.sessionId,header:s.header},ref,AbortSignal.timeout(10000));},
     async admitGroupAttachments(sessionId,parts,requestId){
       const agent=ctx.agents.get(sessionId),uploads=ctx.get('fileUploads'),attachments=ctx.get('attachments');

@@ -13,7 +13,7 @@ const profileSchema=z.object({agentPreset:id.optional(),model:z.object({provider
 export const workGoalReference=z.object({botId:id,goalId:id,revision:z.number().int().positive(),title:z.string().min(1).max(120),description:z.string().max(4000).default(''),criteria:z.array(z.string().min(1).max(500)).min(1).max(20)}).strict();
 const taskSchema=z.object({id,key:id,sourceBotId:id,sourceSessionId:id,targetBotId:id,targetSessionId:id,targetCwd:z.string().min(1).max(4096),
   profile:profileSchema,task:text,status:z.enum(TASK_STATES),revision:z.number().int().positive(),attempt:z.number().int().positive().max(100),
-  messageId:id,lineage:z.array(id).min(2).max(5),parentTaskId:id.optional(),createdAt:stamp,updatedAt:stamp,
+  messageId:id,lineage:z.array(id).min(1).max(5),executionKind:z.literal('self').optional(),parentTaskId:id.optional(),createdAt:stamp,updatedAt:stamp,
   output:z.enum(['text','files']).optional(),replyMode:z.enum(['background','wait']).optional(),delivery:deliveryCheck.optional(),deliveryHistory:z.array(z.object({attempt:z.number().int().positive(),files:z.array(fileReference).max(8),createdAt:stamp}).strict()).max(100).optional(),
   workGoal:workGoalReference.optional(),workGoalUpdates:z.array(workGoalReference).max(100).optional(),
   intent:taskIntent.optional(),amendment:taskAmendment.optional(),handoff:taskHandoff.optional(),
@@ -23,6 +23,7 @@ const outboxSchema=z.object({id,taskId:id,key:z.string().min(1).max(400),message
 const schema=z.object({version:z.literal(1),revision:z.number().int().nonnegative(),tasks:z.array(taskSchema).max(1000),outbox:z.array(outboxSchema).max(10000)}).strict().superRefine((doc,ctx)=>{
   const ids=new Set(),keys=new Set(),sessions=new Set();
   for(const task of doc.tasks){const key=task.sourceSessionId+'\0'+task.key;if(ids.has(task.id)||keys.has(key)||sessions.has(task.targetSessionId)||new Set(task.lineage).size!==task.lineage.length)ctx.addIssue({code:'custom',message:'Duplicate Bot task identity'});
+    if(task.executionKind==='self'?(task.sourceBotId!==task.targetBotId||task.sourceSessionId===task.targetSessionId||task.lineage.length!==1||task.lineage[0]!==task.sourceBotId||task.parentTaskId!==undefined||task.replyMode!=='background'):(task.lineage.length<2||task.sourceBotId===task.targetBotId))ctx.addIssue({code:'custom',message:'Invalid Bot task execution kind'});
     if(task.workGoal&&(task.workGoal.botId!==task.sourceBotId||(task.workGoalUpdates??[]).some((r,i,rows)=>r.botId!==task.workGoal.botId||r.goalId!==task.workGoal.goalId||r.revision<=(i?rows[i-1].revision:task.workGoal.revision))))ctx.addIssue({code:'custom',message:'Invalid task work goal reference'});
     if(!task.workGoal&&task.workGoalUpdates?.length)ctx.addIssue({code:'custom',message:'Missing initial task work goal reference'});
     if(task.handoff&&!ids.has(task.handoff.taskId))ctx.addIssue({code:'custom',message:'Invalid Bot task handoff'});

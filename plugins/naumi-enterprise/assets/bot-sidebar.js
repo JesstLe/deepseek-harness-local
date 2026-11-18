@@ -2,7 +2,7 @@ import {openBotOverview,BOT_OVERVIEW_PANEL,selectedBotId} from './bot-overview.j
 import {createBotAvatar} from './bot-avatar.js';
 import {EXPERIENCE_EVENT,EXPERIENCE_ACTIONS,advancedEmployeeAccess} from './employee-experience-model.js';
 import {taskActivity,employeeTaskState,employeeTasks,receptionTarget} from './bot-task-model.js';
-import {MODE_KEY,navigationMode,botActivity,botSessions,botSummary,botTone,newBotTaskRequest,botCatalog,currentSessionId,botSelected} from './bot-sidebar-model.js';
+import {MODE_KEY,navigationMode,botActivity,botSummary,botTone,botCatalog,currentSessionId,botSelected} from './bot-sidebar-model.js';
 import {CHAT_PANEL,CHAT_EVENT,PIN_KEY,groupCatalog,conversationRows,roomPreview,roomWorking} from './bot-chat-model.js';
 import {PRIMARY_PANEL,CREATE_BOT_EVENT,primaryBot,enterBotMode} from './primary-bot.js';
 
@@ -14,30 +14,20 @@ function installNavigation(ctx,React,Icon,createPortal){
   function BotRow({bot,props,pinned,onPin,primary=false}){
     const {useSessions,useSessionStatus,usePanelInfo,useWorkspaces}=props;
     const sessions=useSessions(s=>s),status=useSessionStatus(s=>s),workspaces=useWorkspaces(s=>s),panelId=usePanelInfo(s=>s.activePanelId),currentId=currentSessionId(sessions,panelId);
-    const [history,setHistory]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(null),[unbound,setUnbound]=useState(null),[menu,setMenu]=useState(null),[advanced,setAdvanced]=useState(false),menuButton=useRef(null),menuRef=useRef(null),alive=useRef(true),flight=useRef(false);
-    useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
+    const [error,setError]=useState(null),[menu,setMenu]=useState(null),[advanced,setAdvanced]=useState(false),menuButton=useRef(null),menuRef=useRef(null);
     useEffect(()=>{if(!menu)return;const abort=new AbortController();setAdvanced(false);void advancedEmployeeAccess(globalThis.fetch,abort.signal).then(value=>{if(!abort.signal.aborted)setAdvanced(value);});menuRef.current?.querySelector('button')?.focus({preventScroll:true});const close=()=>setMenu(null),pointer=e=>{if(!menuRef.current?.contains(e.target)&&!menuButton.current?.contains(e.target))close();},key=e=>{if(e.key==='Escape'){e.preventDefault();close();menuButton.current?.focus({preventScroll:true});}else if(['ArrowDown','ArrowUp','Home','End'].includes(e.key)){const buttons=[...menuRef.current.querySelectorAll('button')],index=buttons.indexOf(document.activeElement),next=e.key==='Home'?0:e.key==='End'?buttons.length-1:(index+(e.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length;e.preventDefault();buttons[next]?.focus({preventScroll:true});}else if(e.key==='Tab')close();};document.addEventListener('pointerdown',pointer);document.addEventListener('keydown',key);window.addEventListener('resize',close);window.addEventListener('wheel',close,{passive:true});return()=>{abort.abort();document.removeEventListener('pointerdown',pointer);document.removeEventListener('keydown',key);window.removeEventListener('resize',close);window.removeEventListener('wheel',close);};},[menu]);
     const openSettings=mode=>{setMenu(null);window.dispatchEvent(new CustomEvent(EXPERIENCE_EVENT,{detail:{bot,mode}}));};
     const jobs=useSyncExternalStore(activity.subscribe,activity.getSnapshot,activity.getSnapshot);
-    const target=receptionTarget(bot,jobs.tasks,sessions,workspaces),state=jobs.status==='ready'?employeeTaskState(bot,jobs.tasks,botActivity(bot,sessions,status)):botActivity(bot,sessions,status),rows=botSessions(bot,sessions,workspaces);
+    const target=receptionTarget(bot,jobs.tasks,sessions,workspaces),state=jobs.status==='ready'?employeeTaskState(bot,jobs.tasks,botActivity(bot,sessions,status)):botActivity(bot,sessions,status);
     const active=employeeTasks(bot,jobs.tasks).active.filter(t=>t.targetBotId===bot.id);
     const stateName={running:'工作中',starting:'准备中',waiting:'待你确认',queued:'排队中',idle:'待命',unknown:'待同步'}[state];
     const open=id=>{setError(null);try{ctx.layout.beginNavigation?.();ctx.uiWorkspace.openSession(id);}catch{setError('任务暂未就绪');}};
-    const newTask=async()=>{
-      if(flight.current)return;flight.current=true;setBusy(true);setError(null);let id=unbound;
-      try{
-        if(!id){const response=await ctx.remote.session.create(newBotTaskRequest(bot,workspaces));if(!response.ok)throw Error('BOT_CREATE_SESSION_FAILED');id=response.value.sessionId;if(alive.current)setUnbound(id);}
-        await source.bind(bot,id);if(alive.current){setUnbound(null);open(id);setHistory(true);}
-      }catch(error){if(alive.current)setError(error.message==='BOT_CONFLICT'?'Bot 已更新，请重试关联':error.message==='BOT_ARCHIVED'?'Bot 已归档':'任务关联失败，可重试或在线程模式查看');}
-      finally{flight.current=false;if(alive.current)setBusy(false);}
-    };
     return h('div',{className:'naumi-bot-entry','data-bot-id':bot.id,'data-primary':primary,'data-pinned':!!pinned,'data-selected':panelId===BOT_OVERVIEW_PANEL?selectedBotId()===bot.id:botSelected(bot,currentId,sessions),'data-bot-state':state},
-      h('div',{className:'naumi-bot-row'},h('button',{type:'button',className:'naumi-bot-open',onClick:()=>openBotOverview(ctx,bot.id),'aria-label':bot.name+'，'+stateName,title:bot.name},h(Avatar,{bot,state}),h('span',{className:'naumi-bot-caption'},h('strong',null,bot.name),h('span',null,state!=='idle'&&state!=='unknown'?stateName:botSummary(bot,sessions))),state!=='idle'&&state!=='unknown'&&h('span',{className:'naumi-bot-state',title:stateName,'aria-label':stateName})),
-        active.length>0&&h('button',{type:'button',className:'naumi-bot-current','aria-label':'查看'+bot.name+'的当前任务（'+active.length+'）',title:'查看当前任务',onClick:()=>{const task=active[0];if(sessions.byId[task.targetSessionId])open(task.targetSessionId);else{setHistory(true);if(target)open(target);}}},active.length),
-        h('button',{ref:menuButton,type:'button',className:'naumi-bot-menu-toggle','aria-label':bot.name+'的设置','aria-haspopup':'menu','aria-expanded':!!menu,onClick:e=>{const r=e.currentTarget.getBoundingClientRect();setMenu(v=>v?null:{left:Math.max(8,Math.min(window.innerWidth-205,r.left)),top:Math.max(8,Math.min(window.innerHeight-240,r.bottom+5))});}},'⋯'),h('button',{type:'button',className:'naumi-bot-history-toggle','aria-label':bot.name+'的任务记录','aria-expanded':history,onClick:()=>setHistory(v=>!v)},'⌄')),
+      h('div',{className:'naumi-bot-row'},h('button',{type:'button',className:'naumi-bot-open',onClick:()=>target?open(target):setError('主聊天暂未就绪'),'aria-label':bot.name+'，'+stateName,title:bot.name},h(Avatar,{bot,state}),h('span',{className:'naumi-bot-caption'},h('strong',null,bot.name),h('span',null,state!=='idle'&&state!=='unknown'?stateName:botSummary(bot,sessions))),state!=='idle'&&state!=='unknown'&&h('span',{className:'naumi-bot-state',title:stateName,'aria-label':stateName})),
+        active.length>0&&h('button',{type:'button',className:'naumi-bot-current','aria-label':'查看'+bot.name+'的当前任务（'+active.length+'）',title:'查看当前任务',onClick:()=>openBotOverview(ctx,bot.id)},active.length),
+        h('button',{ref:menuButton,type:'button',className:'naumi-bot-menu-toggle','aria-label':bot.name+'的设置','aria-haspopup':'menu','aria-expanded':!!menu,onClick:e=>{const r=e.currentTarget.getBoundingClientRect();setMenu(v=>v?null:{left:Math.max(8,Math.min(window.innerWidth-205,r.left)),top:Math.max(8,Math.min(window.innerHeight-240,r.bottom+5))});}},'⋯'),h('button',{type:'button',className:'naumi-bot-history-toggle','aria-label':bot.name+'的任务记录',title:'任务',onClick:()=>openBotOverview(ctx,bot.id)},'任务')),
       menu&&createPortal(h('div',{ref:menuRef,className:'nx-bot-menu',role:'menu','aria-label':bot.name+'的设置',style:menu},h('button',{type:'button',role:'menuitem',onClick:()=>{onPin(pinned?null:bot.id);setMenu(null);}},pinned?'取消置顶':'置顶'),[...EXPERIENCE_ACTIONS,...(advanced?[['advanced','高级管理']]:[])].map(([mode,label])=>h('button',{type:'button',key:mode,role:'menuitem','data-advanced':mode==='advanced'||undefined,onClick:()=>openSettings(mode)},label))),document.body),
-      h('div',{className:'naumi-bot-history',hidden:!history},h('div',{className:'naumi-bot-history-head'},h('span',null,'任务记录'),h('button',{type:'button',className:'naumi-bot-link',disabled:busy,onClick:newTask},busy?'创建中…':unbound?'重试关联':'+ 新任务')),rows.length?rows.slice().reverse().map(row=>h('button',{type:'button',key:row.sessionId,className:'naumi-bot-task-link','aria-current':row.sessionId===currentId?'page':undefined,onClick:()=>open(row.sessionId)},h(Icon,{name:'chat',size:13}),h('span',null,sessions.projectionsBySession[row.sessionId]?.values.title??row.projections?.values?.title??'新任务'))):h('p',{className:'naumi-bot-empty'},'暂无可打开的任务')),
-      error&&h('div',{className:'naumi-bot-error',role:'alert'},error,unbound&&h('button',{type:'button',className:'naumi-bot-link',disabled:busy,onClick:newTask},'重试关联')));
+      error&&h('div',{className:'naumi-bot-error',role:'alert'},error));
   }
   function Navigation(props){
       const [mode,setMode]=useState(()=>{try{return navigationMode(localStorage.getItem(MODE_KEY));}catch{return 'threads';}}),[search,setSearch]=useState(''),[error,setError]=useState(null);
