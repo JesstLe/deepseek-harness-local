@@ -23,12 +23,15 @@ async function createManagedWorkspace(directory,{parent=path.dirname(directory),
   if(fs.existsSync(stage)&&fs.lstatSync(stage).isDirectory()&&!fs.lstatSync(stage).isSymbolicLink()&&!fs.readdirSync(stage).length)fs.rmdirSync(stage);
  }
 }
-async function prepareWindowsWorkspace(directory,parent){
- const executable=path.join(process.env.SystemRoot??'C:\\Windows','System32/WindowsPowerShell/v1.0/powershell.exe');
+async function prepareWindowsWorkspace(directory,parent,{execute=run,environment=process.env}={}){
+ const executable=path.join(environment.SystemRoot??'C:\\Windows','System32/WindowsPowerShell/v1.0/powershell.exe');
  // A pwsh parent can export incompatible PS7 module paths to Windows PS5.
  // This one child uses only the inbox modules, not any user profile/module.
- const env={...process.env,PSModulePath:path.join(process.env.SystemRoot??'C:\\Windows','System32/WindowsPowerShell/v1.0/Modules')};
- const {stdout}=await run(executable,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.join(__dirname,'managed-workspace.ps1'),'-Directory',directory,'-Parent',parent],{env,windowsHide:true,timeout:30000,maxBuffer:32768});
- const receipt=JSON.parse(stdout.replace(/^\uFEFF/,''));if(receipt.status!=='OWNER_LABEL_READY')throw Error('MANAGED_WORKSPACE_ACL_UNVERIFIED');return receipt;
+ const env={...environment,PSModulePath:path.join(environment.SystemRoot??'C:\\Windows','System32/WindowsPowerShell/v1.0/Modules')};
+ let stdout;try{({stdout}=await execute(executable,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.join(__dirname,'managed-workspace.ps1'),'-Directory',directory,'-Parent',parent],{env,windowsHide:true,encoding:'utf8',timeout:30000,maxBuffer:32768}));}catch(error){
+  const code=String(error.stderr??'').match(/\bMANAGED_WORKSPACE_[A-Z_]+\b/)?.[0]??'MANAGED_WORKSPACE_ACL_PREPARE_FAILED';
+  throw Object.assign(new Error(code,{cause:error}),{code});
+ }
+ let receipt;try{receipt=JSON.parse(stdout.replace(/^\uFEFF/,''));}catch{throw Error('MANAGED_WORKSPACE_ACL_UNVERIFIED');}if(receipt.status!=='OWNER_LABEL_READY')throw Error('MANAGED_WORKSPACE_ACL_UNVERIFIED');return receipt;
 }
-module.exports={createManagedWorkspace};
+module.exports={createManagedWorkspace,prepareWindowsWorkspace};
