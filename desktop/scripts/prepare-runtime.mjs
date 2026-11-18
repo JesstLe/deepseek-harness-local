@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import {installNativeDeliveryExtensions} from '../../scripts/native-delivery-extension.mjs';
 import path from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {createHash,randomUUID} from 'node:crypto';
@@ -42,6 +43,7 @@ export async function prepareRuntime({root=project,target=path.join(root,'runtim
     // Only runtime dependencies and source plugins are input. No user home/profile/config is copied.
     fs.cpSync(path.join(root,'node_modules'),path.join(staged,'node_modules'),{recursive:true,dereference:true,filter:source=>!source.split(path.sep).some(x=>['.cache','.bin','dingtalk-workspace-cli'].includes(x))&&!isRuntimeDevelopmentArtifact(source)});
     installReasoningDefaults(path.join(staged,'node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js'));
+    installNativeDeliveryExtensions(path.join(staged,'node_modules'));
     installNativeComposer(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'));
     installAgentTriggers(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js'));
     installNativeSettings(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-settings-general/lib/client.js'));

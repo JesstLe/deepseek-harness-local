@@ -2,7 +2,7 @@ import {openBotOverview,BOT_OVERVIEW_PANEL,selectedBotId} from './bot-overview.j
 import {createBotAvatar} from './bot-avatar.js';
 import {EXPERIENCE_EVENT,EXPERIENCE_ACTIONS,advancedEmployeeAccess} from './employee-experience-model.js';
 import {taskActivity,employeeTaskState,employeeTasks,receptionTarget} from './bot-task-model.js';
-import {MODE_KEY,navigationMode,botActivity,botSummary,botTone,botCatalog,currentSessionId,botSelected} from './bot-sidebar-model.js';
+import {MODE_KEY,transientDragNotice,navigationMode,botActivity,botSummary,botTone,botCatalog,currentSessionId,botSelected} from './bot-sidebar-model.js';
 import {CHAT_PANEL,CHAT_EVENT,PIN_KEY,ORDER_KEY,pendingBotGroup,readBotOrder,writeBotOrder,reorderBotIds,groupBotIds,groupRequest,groupError,groupCatalog,conversationRows,roomPreview,roomWorking} from './bot-chat-model.js';
 import {PRIMARY_PANEL,CREATE_BOT_EVENT,primaryBot,enterBotMode} from './primary-bot.js';
 
@@ -33,7 +33,9 @@ function installNavigation(ctx,React,Icon,createPortal){
   function Navigation(props){
       const [mode,setMode]=useState(()=>{try{return navigationMode(localStorage.getItem(MODE_KEY));}catch{return 'threads';}}),[search,setSearch]=useState(''),[error,setError]=useState(null);
       const [pinned,setPinned]=useState(()=>{try{return localStorage.getItem(PIN_KEY);}catch{return null;}}),[adding,setAdding]=useState(false),addRef=useRef(null),lastNative=useRef(null),entryIntent=useRef(0);
-      const [order,setOrder]=useState(()=>readBotOrder()),[selected,setSelected]=useState([]),[drop,setDrop]=useState(null),[busy,setBusy]=useState(false),[dragNotice,setDragNotice]=useState(''),[retry,setRetry]=useState(()=>pendingBotGroup());
+      const [order,setOrder]=useState(()=>readBotOrder()),[selected,setSelected]=useState([]),[drop,setDrop]=useState(null),[busy,setBusy]=useState(false),[dragNotice,publishDragNotice]=useState(''),[retry,setRetry]=useState(()=>pendingBotGroup());
+      const notice=useRef(null);notice.current??=transientDragNotice(publishDragNotice);const setDragNotice=value=>notice.current.set(value);
+      useEffect(()=>()=>notice.current.dispose(),[]);
       const [arrived,setArrived]=useState(null);
       useEffect(()=>{if(!arrived)return;const timer=setTimeout(()=>setArrived(null),640);return()=>clearTimeout(timer);},[arrived]);
       const dragging=useRef(null),dropRef=useRef(null),mutation=useRef(null),flight=useRef(false),anchor=useRef(null),alive=useRef(true);
