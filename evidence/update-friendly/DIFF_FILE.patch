@@ -1,0 +1,649 @@
+diff --git a/.gitattributes b/.gitattributes
+index ce177e8..db81da0 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -408,3 +408,7 @@ plugins/naumi-enterprise/third-party/ds-bot-im/** -text
+ /evidence/group-files-output/** -text whitespace=cr-at-eol
+ /evidence/group-files-output/DIFF_FILE.patch -text whitespace=-blank-at-eol
+ /evidence/group-files-output/ROLLBACK.sh text eol=lf
++
++# Visible update handoff exact artifacts and copy-only rollback.
++/evidence/update-friendly/** -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab,cr-at-eol
++/evidence/update-friendly/ROLLBACK.sh text eol=lf
+diff --git a/desktop/app/installer-state.cjs b/desktop/app/installer-state.cjs
+index 49d1097..ee70cc7 100644
+--- a/desktop/app/installer-state.cjs
++++ b/desktop/app/installer-state.cjs
+@@ -5,7 +5,7 @@ const canonical=p=>{let value=exists(p)?fs.realpathSync.native(p):path.resolve(p
+ function plain(file){if(!exists(file))return null;const s=fs.lstatSync(file);if(!s.isFile()||s.isSymbolicLink()||s.size>1024*1024)throw Error('INSTALL_METADATA_INVALID');try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{throw Error('INSTALL_METADATA_INVALID');}}
+ function inventory(){
+  const shell=path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe');
+- const result=execFileSync(shell,['-NoProfile','-NonInteractive','-Command',"$ErrorActionPreference='Stop';@(Get-CimInstance Win32_Process | ForEach-Object {@{pid=[int]$_.ProcessId;parent=[int]$_.ParentProcessId;exe=$_.ExecutablePath;created=$_.CreationDate.ToUniversalTime().ToString('O')}}) | ConvertTo-Json -Compress"],{encoding:'utf8',windowsHide:true,maxBuffer:4e6});
++ const result=execFileSync(shell,['-NoProfile','-NonInteractive','-WindowStyle','Hidden','-Command',"$ErrorActionPreference='Stop';@(Get-CimInstance Win32_Process | ForEach-Object {@{pid=[int]$_.ProcessId;parent=[int]$_.ParentProcessId;exe=$_.ExecutablePath;created=$_.CreationDate.ToUniversalTime().ToString('O')}}) | ConvertTo-Json -Compress"],{encoding:'utf8',windowsHide:true,maxBuffer:4e6});
+  const records=JSON.parse(result);if(!Array.isArray(records))throw Error('INSTALL_PROCESS_INVENTORY_UNKNOWN');return records;
+ }
+ const same=(a,b)=>!!a&&!!b&&a.pid===b.pid&&a.created===b.created&&typeof a.exe==='string'&&typeof b.exe==='string'&&a.exe.toLowerCase()===b.exe.toLowerCase();
+diff --git a/desktop/app/updates.cjs b/desktop/app/updates.cjs
+index 3d1e303..e7d92bd 100644
+--- a/desktop/app/updates.cjs
++++ b/desktop/app/updates.cjs
+@@ -59,7 +59,7 @@ function createDesktopUpdates({app,updater,notify,canInstall=()=>({ok:true}),pre
+   try{
+    gate=await canInstall();
+    if(!gate?.ok){log('install deferred',gate);const error=gate?.reason==='INSTALL_ACTIVITY_UNKNOWN'?'UPDATE_ACTIVITY_UNKNOWN':'UPDATE_INSTALL_BUSY';publish({error,installPhase:null});return {ok:false,error};}
+-   installGate=gate;installError=null;publish({error:null,installPhase:'preparing'});await prepareInstall();publish({installPhase:'restarting'});updater.quitAndInstall(true,true);
++   installGate=gate;installError=null;publish({error:null,installPhase:'preparing'});await prepareInstall();publish({installPhase:'restarting'});updater.quitAndInstall(false,true);
+    if(installError)throw installError;
+    handedOff=true;return {ok:true};
+   }catch(error){log('install failed',error);await releaseInstallGate();publish({error:'UPDATE_INSTALL_FAILED',installPhase:null});return {ok:false,error:'UPDATE_INSTALL_FAILED'};}
+diff --git a/desktop/installer/maintenance.nsh b/desktop/installer/maintenance.nsh
+index f47daa8..041bd81 100644
+--- a/desktop/installer/maintenance.nsh
++++ b/desktop/installer/maintenance.nsh
+@@ -57,6 +57,22 @@
+         ${EndIf}
+       ${EndIf}
+     ${EndIf}
++    ; Older clients also pass /S: reveal native progress without a path picker.
++    SetSilent normal
++    ; Stock assisted mode skips CHECK_APP_RUNNING in elevated inner instances.
++    ; Admit/extract here BEFORE old-version removal on that route too.
++    ${If} ${UAC_IsInnerInstance}
++      !insertmacro customCheckAppRunning
++    ${EndIf}
++  ${EndIf}
++!macroend
++!macro customInstallMode
++  ${If} ${isUpdated}
++    ${If} $installMode == "all"
++      StrCpy $isForceMachineInstall "1"
++    ${Else}
++      StrCpy $isForceCurrentInstall "1"
++    ${EndIf}
+   ${EndIf}
+ !macroend
+ !macro NaumiExtractMaintenance
+@@ -65,6 +81,7 @@
+   File /oname=naumi-maintenance-node.exe "${NAUMI_BUNDLED_NODE}"
+   File /oname=installer-preflight.cjs "${NAUMI_HELPER_DIR}\installer-preflight.cjs"
+   File /oname=installer-state.cjs "${NAUMI_HELPER_DIR}\installer-state.cjs"
++  File /oname=installer-relaunch.cjs "${NAUMI_HELPER_DIR}\installer-relaunch.cjs"
+   File /oname=profile.cjs "${NAUMI_HELPER_DIR}\profile.cjs"
+   File /oname=backend.cjs "${NAUMI_HELPER_DIR}\backend.cjs"
+   File /oname=workspaces.cjs "${NAUMI_HELPER_DIR}\workspaces.cjs"
+@@ -111,11 +128,21 @@
+     SetErrorLevel 42
+     Quit
+   ${endif}
++  !ifndef BUILD_UNINSTALLER
++    ${If} ${isUpdated}
++      nsExec::ExecToStack '"$PLUGINSDIR\naumi-maintenance-node.exe" "$PLUGINSDIR\installer-relaunch.cjs" "begin" "$PLUGINSDIR\update-launch.json" "$INSTDIR" "${VERSION}"'
++      Pop $R9
++      Pop $R8
++      ; Missing proof keeps the result page open, never claims false readiness.
++    ${EndIf}
++  !endif
+   Pop $R9
+   Pop $R8
+   Pop $7
+ !macroend
+ !macro customInstall
++  ; Self-contained even when the stock UAC route skipped the outer gate.
++  !insertmacro NaumiExtractMaintenance
+   System::Call 'kernel32::GetCurrentProcessId() i .r7'
+   nsExec::ExecToStack '"$PLUGINSDIR\naumi-maintenance-node.exe" "$PLUGINSDIR\installer-preflight.cjs" "$INSTDIR" "$APPDATA\Naumi" "finish" "${VERSION}" "$7"'
+   Pop $R9
+diff --git a/desktop/installer/pages.nsh b/desktop/installer/pages.nsh
+index 54ac666..cf7ff3f 100644
+--- a/desktop/installer/pages.nsh
++++ b/desktop/installer/pages.nsh
+@@ -7,6 +7,7 @@
+ !endif
+ !ifndef BUILD_UNINSTALLER
+   !insertmacro NaumiInstallerFunctions
++  !include "${NAUMI_WIZARD_DIR}\update-ui.nsh"
+   !ifmacrodef licensePage
+     !insertmacro skipPageIfUpdated
+     !insertmacro licensePage
+@@ -24,7 +25,12 @@
+     ${Else}
+       StrCpy $1 ""
+     ${EndIf}
+-    ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "$1"
++    ${If} ${isUpdated}
++      ; Open this exact updated installation, not a stale shortcut.
++      ${StdUtils.ExecShellAsUser} $0 "$appExe" "open" "$1"
++    ${Else}
++      ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "$1"
++    ${EndIf}
+   FunctionEnd
+ !else
+   !insertmacro NaumiUninstallerFunctions
+diff --git a/desktop/installer/presentation.nsh b/desktop/installer/presentation.nsh
+index fdf6384..701f4ee 100644
+--- a/desktop/installer/presentation.nsh
++++ b/desktop/installer/presentation.nsh
+@@ -161,13 +161,35 @@ Function ${PREFIX}NaumiProgressShow
+   !insertmacro NaumiRail $mui.InstFilesPage
+   !insertmacro NaumiNativeLabel 716 40 56 20 "${VERSION}" 9 400
+   !if "${MODE}" == "install"
+-    !insertmacro NaumiNativeLabel 248 112 524 44 "正在安装 Naumi" 22 600
++    !ifdef NAUMI_PRODUCT_ENGINE
++      ${If} ${isUpdated}
++        !insertmacro NaumiNativeLabel 248 112 524 44 "正在更新 Naumi" 22 600
++        !insertmacro NaumiNativeLabel 248 196 524 28 "更新完成后自动打开" 10 400
++        ; Removal has no percentage: use a real native marquee, not a fake ETA.
++        System::Call 'user32::GetWindowLongW(p $mui.InstFilesPage.ProgressBar, i -16) i .r0'
++        IntOp $0 $0 | 8
++        System::Call 'user32::SetWindowLongW(p $mui.InstFilesPage.ProgressBar, i -16, i r0)'
++        SendMessage $mui.InstFilesPage.ProgressBar 0x40A 1 40
++      ${Else}
++        !insertmacro NaumiNativeLabel 248 112 524 44 "正在安装 Naumi" 22 600
++      ${EndIf}
++    !else
++      !insertmacro NaumiNativeLabel 248 112 524 44 "正在安装 Naumi" 22 600
++    !endif
+   !else
+     !insertmacro NaumiNativeLabel 248 112 524 44 "正在卸载 Naumi" 22 600
+     !insertmacro NaumiNativeLabel 248 196 524 28 "个人数据将保留" 10 400
+   !endif
+ FunctionEnd
+ Function ${PREFIX}NaumiDone
++  !if "${MODE}" == "install"
++    !ifdef NAUMI_PRODUCT_ENGINE
++      ${If} ${isUpdated}
++        Call NaumiUpdateDone
++        Return
++      ${EndIf}
++    !endif
++  !endif
+   !insertmacro NaumiShell
+   !if "${MODE}" == "install"
+     !insertmacro NaumiLabel 248 112 524 44 "安装完成" 22 600
+@@ -330,6 +352,11 @@ Function NaumiInstallLeave
+   StrCpy $INSTDIR $NaumiCandidatePath
+ FunctionEnd
+ Function NaumiDoneLeave
++  !ifdef NAUMI_PRODUCT_ENGINE
++    ${If} ${isUpdated}
++      Return
++    ${EndIf}
++  !endif
+   ${NSD_GetState} $NaumiRunCheck $0
+   ${If} $0 == ${BST_CHECKED}
+     Call StartApp
+diff --git a/desktop/scripts/build-installer-ui.mjs b/desktop/scripts/build-installer-ui.mjs
+index f13ee36..b3dd204 100644
+--- a/desktop/scripts/build-installer-ui.mjs
++++ b/desktop/scripts/build-installer-ui.mjs
+@@ -6,7 +6,7 @@ const assisted=fs.readFileSync(path.join(upstream,'assistedInstaller.nsh'),'utf8
+ const util=fs.readFileSync(path.join(upstream,'include/installUtil.nsh'),'utf8').replaceAll('\r\n','\n'),macroStart=util.indexOf('!macro setIsTryToKeepShortcuts'),macroEnd=util.indexOf('!macroend',macroStart)+'!macroend'.length;if(macroStart<0||macroEnd<macroStart)throw Error('SHORTCUT_POLICY_UPSTREAM_CHANGED');const policy=fs.readFileSync(path.join(dir,'upgrade-shortcuts.nsh'),'utf8').replaceAll('\r\n','\n').replace('!macroundef setIsTryToKeepShortcuts\n','');fs.writeFileSync(path.join(dir,'install-util.nsh'),util.slice(0,macroStart)+policy.trim()+'\n'+util.slice(macroEnd));
+ function bmpFromRGB(rgb,width,height){const stride=Math.ceil(width*3/4)*4,bmp=Buffer.alloc(54+stride*height);bmp.write('BM');bmp.writeUInt32LE(bmp.length,2);bmp.writeUInt32LE(54,10);bmp.writeUInt32LE(40,14);bmp.writeInt32LE(width,18);bmp.writeInt32LE(height,22);bmp.writeUInt16LE(1,26);bmp.writeUInt16LE(24,28);bmp.writeUInt32LE(stride*height,34);for(let y=0;y<height;y++)for(let x=0;x<width;x++){const s=(y*width+x)*3,t=54+(height-1-y)*stride+x*3;bmp[t]=rgb[s+2];bmp[t+1]=rgb[s+1];bmp[t+2]=rgb[s];}return bmp;}
+ const rgba=await sharp(path.join(root,'plugins/naumi-enterprise/assets/symbol.svg')).resize(88,88).flatten({background:'#ffffff'}).removeAlpha().raw().toBuffer();fs.writeFileSync(path.join(dir,'assets/logo.bmp'),bmpFromRGB(rgba,88,88));
+-for(const[name,label,width,height,fill,color]of [['install','安装 Naumi',160,44,'#315ded','#ffffff'],['uninstall','卸载 Naumi',160,44,'#315ded','#ffffff'],['done','完成',160,44,'#315ded','#ffffff'],['cancel','取消',88,44,'#ffffff','#667085'],['browse','更改',84,40,'#f2f5fa','#44546f']]){const svg=Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="white"/><rect x="1" y="1" width="${width-2}" height="${height-2}" rx="9" fill="${fill}"/><text x="50%" y="50%" dy=".35em" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" font-size="14" font-weight="500" fill="${color}">${label}</text></svg>`);const rgb=await sharp(svg,{density:144}).resize(width*2,height*2).flatten({background:'#ffffff'}).removeAlpha().raw().toBuffer();fs.writeFileSync(path.join(dir,'assets/action-'+name+'.bmp'),bmpFromRGB(rgb,width*2,height*2));}
++for(const[name,label,width,height,fill,color]of [['install','安装 Naumi',160,44,'#315ded','#ffffff'],['uninstall','卸载 Naumi',160,44,'#315ded','#ffffff'],['done','完成',160,44,'#315ded','#ffffff'],['reopen','重新打开',160,44,'#315ded','#ffffff'],['close','关闭',88,44,'#ffffff','#667085'],['cancel','取消',88,44,'#ffffff','#667085'],['browse','更改',84,40,'#f2f5fa','#44546f']]){const svg=Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="white"/><rect x="1" y="1" width="${width-2}" height="${height-2}" rx="9" fill="${fill}"/><text x="50%" y="50%" dy=".35em" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" font-size="14" font-weight="500" fill="${color}">${label}</text></svg>`);const rgb=await sharp(svg,{density:144}).resize(width*2,height*2).flatten({background:'#ffffff'}).removeAlpha().raw().toBuffer();fs.writeFileSync(path.join(dir,'assets/action-'+name+'.bmp'),bmpFromRGB(rgb,width*2,height*2));}
+ const railSVG=Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="216" height="520"><defs><linearGradient id="g" x2=".55" y2="1"><stop stop-color="#f5f7ff"/><stop offset="1" stop-color="#e9efff"/></linearGradient></defs><rect width="216" height="520" fill="url(#g)"/><path d="M-42 467 L22 216 L157 463 L223 206" fill="none" stroke="#dbe4ff" stroke-width="36" stroke-linecap="round" stroke-linejoin="round"/><path d="M-25 548 L46 277 L190 526 L253 291" fill="none" stroke="#f9faff" stroke-width="1.2"/><text x="76" y="60" font-family="Microsoft YaHei UI, sans-serif" font-size="21" font-weight="650" fill="#202631">Naumi</text></svg>`);
+ const rail=await sharp(railSVG,{density:144}).resize(432,1040).composite([{input:await sharp(path.join(root,'plugins/naumi-enterprise/assets/symbol.svg')).resize(64,64).png().toBuffer(),left:64,top:64}]).flatten({background:'#f5f7ff'}).removeAlpha().raw().toBuffer();
+ fs.writeFileSync(path.join(dir,'assets/rail.bmp'),bmpFromRGB(rail,432,1040));
+diff --git a/desktop/tests/updates.test.cjs b/desktop/tests/updates.test.cjs
+index 29001da..8fc43c2 100644
+--- a/desktop/tests/updates.test.cjs
++++ b/desktop/tests/updates.test.cjs
+@@ -28,7 +28,7 @@ test('feed override accepts https and loopback only, never credentials',()=>{
+   process.env.NAUMI_UPDATE_URL='http://192.168.1.10/feed';process.env.NAUMI_UPDATE_ALLOW_INSECURE_HTTP='1';assert.deepEqual(feedOverride(),{url:'http://192.168.1.10/feed'});
+  }finally{if(previous===undefined)delete process.env.NAUMI_UPDATE_URL;else process.env.NAUMI_UPDATE_URL=previous;if(previousInsecure===undefined)delete process.env.NAUMI_UPDATE_ALLOW_INSECURE_HTTP;else process.env.NAUMI_UPDATE_ALLOW_INSECURE_HTTP=previousInsecure;}
+ });
+-test('update lifecycle reaches ready, notifies once and installs silently',async()=>{
++test('update lifecycle reaches ready, notifies once and hands off to visible native installer',async()=>{
+  const {updates,updater,notified}=harness();
+  assert.deepEqual(updates.start(),{ok:true});
+  assert.equal(updater.autoDownload,false);assert.equal(updater.autoInstallOnAppQuit,false);
+@@ -42,7 +42,7 @@ test('update lifecycle reaches ready, notifies once and installs silently',async
+  await new Promise(r=>setImmediate(r));
+  state=updates.snapshot();assert.equal(state.status,'ready');assert.equal(notified.length,1);assert.equal(notified[0].version,'0.3.0');
+  await new Promise(r=>setImmediate(r));
+- assert.equal(updater.installs,1);assert.deepEqual(updater.quit,{isSilent:true,isForceRunAfter:true});
++ assert.equal(updater.installs,1);assert.deepEqual(updater.quit,{isSilent:false,isForceRunAfter:true});
+ });
+ test('busy desktop defers install but stays ready',async()=>{
+  const {updates,updater,notified}=harness({gate:{ok:false,reason:'WORKSPACE_OPERATIONS_IN_FLIGHT'}});
+diff --git a/docs/implementation/DESKTOP_AUTO_UPDATE.md b/docs/implementation/DESKTOP_AUTO_UPDATE.md
+index 8b50e24..ae40ea2 100644
+--- a/docs/implementation/DESKTOP_AUTO_UPDATE.md
++++ b/docs/implementation/DESKTOP_AUTO_UPDATE.md
+@@ -74,3 +74,12 @@ npm run release -- --prerelease
+ - IPC：新增 `naumiDesktop.installUpdate()`；状态新增 `lastChecked`，只在确认无更新时展示「已是最新版本」。
+ - 开发壳未启用更新器时显示「安装版支持更新」，不伪报最新。
+ - 实现与证据边界见 [本次记录](../changes/2026-11-17-desktop-update-entry.md)。
++
++## 可见安装与重开确认（2026-11-18，待新版打包生效）
++
++- 交接改用可见原生安装；安装器兼容旧客户端的 `--updated /S`，复用原注册作用域/路径与stock提权，直接显示更新进度，不重复选择安装位置。
++- 删除旧版本没有可用百分比，使用native marquee，不编造进度或倒计时。进程检查显式隐藏PowerShell窗口，NSIS辅助命令使用nsExec；不引入cmd弹窗。
++- allusers elevated-inner补同一维护门禁，finish自包含解出helper，修正stock跳过outer准备时收尾辅助文件可能缺失的问题。
++- 完成后自动打开准确exe；只读原 `desktop-runtime.json`，核验新版本、安装位置、本次更新后的就绪时间和实际进程身份。ShellExecute返回成功不直接记为应用已就绪。
++- 未就绪时保留可关闭/重新打开的结果页，点击重试只重开，不重复安装、不强杀。常规首次安装和卸载保持原有页面。
++- 代码/原生隔离界面验收与实际用户更新必须分开报告；公开0.4.0固定包不覆盖。详见[切片记录](../changes/2026-11-18-update-friendly.md)。
+diff --git a/desktop/app/installer-relaunch.cjs b/desktop/app/installer-relaunch.cjs
+new file mode 100644
+index 0000000..54ad6ae
+--- /dev/null
++++ b/desktop/app/installer-relaunch.cjs
+@@ -0,0 +1,28 @@
++'use strict';
++// Read-only completion proof. Installed files or ShellExecute success alone do
++// not prove the new desktop finished booting. Never launch/kill a process here.
++const fs=require('node:fs'),path=require('node:path');
++const state=require('./installer-state.cjs');
++function begin(file,root,version,{now=Date.now(),userData=path.join(process.env.APPDATA||'', 'Naumi')}={}){
++ if(!path.isAbsolute(root)||!path.isAbsolute(userData)||!/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(version))throw Error('UPDATE_PROOF_INVALID');
++ const proof={version:1,root:state.canonical(root),targetVersion:version,startedAt:now,userData:path.resolve(userData)};
++ fs.writeFileSync(file,JSON.stringify(proof));return proof;
++}
++function check(file,{inspect=state.inventory,now=Date.now()}={}){
++ const proof=state.plain(file);
++ if(!proof||proof.version!==1||!path.isAbsolute(proof.root)||!path.isAbsolute(proof.userData)||!Number.isFinite(proof.startedAt)||proof.startedAt>now)throw Error('UPDATE_PROOF_INVALID');
++ const r=state.plain(path.join(proof.userData,'desktop-runtime.json'));
++ if(!r||r.version!==1||r.clientVersion!==proof.targetVersion||!Number.isInteger(r.pid)||r.pid<=0||typeof r.executable!=='string'||!Number.isFinite(Date.parse(r.readyAt))||Date.parse(r.readyAt)<proof.startedAt)return false;
++ const expected=state.canonical(path.join(proof.root,'Naumi.exe'));
++ if(state.canonical(r.executable)!==expected)return false;
++ const p=inspect().find(p=>p.pid===r.pid);
++ return !!(p?.exe&&state.canonical(p.exe)===expected&&Number.isFinite(Date.parse(p.created))&&Date.parse(p.created)>=proof.startedAt&&Date.parse(p.created)<=Date.parse(r.readyAt));
++}
++module.exports={begin,check};
++if(require.main===module){
++ try{const[mode,file,root,version]=process.argv.slice(2);
++  if(mode==='begin'){begin(file,root,version);console.log('UPDATE_LAUNCH_PROOF_STARTED');}
++  else if(mode==='check'){const ready=check(file);console.log(ready?'UPDATE_NEW_DESKTOP_READY':'UPDATE_DESKTOP_NOT_READY');process.exitCode=ready?0:10;}
++  else throw Error('UPDATE_PROOF_INVALID');
++ }catch{console.error('UPDATE_LAUNCH_PROOF_UNKNOWN');process.exitCode=20;}
++}
+
+diff --git a/desktop/installer/update-ui.nsh b/desktop/installer/update-ui.nsh
+new file mode 100644
+index 0000000..f50eba0
+--- /dev/null
++++ b/desktop/installer/update-ui.nsh
+@@ -0,0 +1,65 @@
++; Only presentation + observed post-install startup. The stock engine still
++; owns elevation, old-version removal, extraction, registration and shortcuts.
++Var NaumiUpdateHeading
++Var NaumiUpdateStatus
++Var NaumiUpdateRetry
++Var NaumiUpdateAttempts
++Var NaumiUpdateLaunchPending
++
++Function NaumiUpdateDone
++  !insertmacro NaumiShell
++  !insertmacro NaumiLabel 248 112 524 44 "正在打开 Naumi" 22 600
++  StrCpy $NaumiUpdateHeading $0
++  !insertmacro NaumiLabel 248 196 524 48 "${VERSION} 已安装" 10 400
++  StrCpy $NaumiUpdateStatus $0
++  !insertmacro NaumiButton 248 388 88 44 "关闭" action-close NaumiNext
++  !insertmacro NaumiButton 612 388 160 44 "重新打开" action-reopen NaumiUpdateLaunch
++  StrCpy $NaumiUpdateRetry $NaumiAction
++  EnableWindow $NaumiUpdateRetry 0
++  StrCpy $NaumiUpdateLaunchPending "0"
++  StrCpy $NaumiUpdateAttempts -1
++  ; One stable timer: do not replace a timer from inside its callback.
++  ${NSD_CreateTimer} NaumiUpdatePoll 2000
++  nsDialogs::Show
++  ${NSD_KillTimer} NaumiUpdatePoll
++FunctionEnd
++
++Function NaumiUpdateLaunch
++  ${If} $NaumiUpdateLaunchPending == "1"
++    Return
++  ${EndIf}
++  StrCpy $NaumiUpdateLaunchPending "1"
++  StrCpy $NaumiUpdateAttempts 0
++  EnableWindow $NaumiUpdateRetry 0
++  ${NSD_SetText} $NaumiUpdateHeading "正在打开 Naumi"
++  ${NSD_SetText} $NaumiUpdateStatus "${VERSION} 已安装"
++  Call StartApp
++FunctionEnd
++
++Function NaumiUpdatePoll
++  ${If} $NaumiUpdateAttempts == -1
++    Call NaumiUpdateLaunch
++    Return
++  ${EndIf}
++  ${If} $NaumiUpdateLaunchPending != "1"
++    Return
++  ${EndIf}
++  ; Exact target/version + fresh ready receipt + live process identity required.
++  ; Unknown, old or missing receipts keep this page open instead of fake success.
++  nsExec::ExecToStack /TIMEOUT=5000 '"$PLUGINSDIR\naumi-maintenance-node.exe" "$PLUGINSDIR\installer-relaunch.cjs" "check" "$PLUGINSDIR\update-launch.json"'
++  Pop $R9
++  Pop $R8
++  ${If} $R9 == 0
++    ${NSD_KillTimer} NaumiUpdatePoll
++    StrCpy $NaumiUpdateLaunchPending "0"
++    Call NaumiNext
++    Return
++  ${EndIf}
++  IntOp $NaumiUpdateAttempts $NaumiUpdateAttempts + 1
++  ${If} $NaumiUpdateAttempts >= 20
++    StrCpy $NaumiUpdateLaunchPending "0"
++    ${NSD_SetText} $NaumiUpdateHeading "更新已安装"
++    ${NSD_SetText} $NaumiUpdateStatus "Naumi 尚未就绪，可以重新打开"
++    EnableWindow $NaumiUpdateRetry 1
++  ${EndIf}
++FunctionEnd
+
+diff --git a/desktop/installer/assets/action-close.bmp b/desktop/installer/assets/action-close.bmp
+new file mode 100644
+index 0000000000000000000000000000000000000000..3eb145d5033336ada78c752cd31a9ddb27668357
+GIT binary patch
+literal 46518
+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
+
+literal 0
+HcmV?d00001
+
+
+diff --git a/desktop/installer/assets/action-reopen.bmp b/desktop/installer/assets/action-reopen.bmp
+new file mode 100644
+index 0000000000000000000000000000000000000000..35cc8c1879195534a2a4041d38d40f059acc59a7
+GIT binary patch
+literal 84534
+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
+
+literal 0
+HcmV?d00001
+
+
+diff --git a/desktop/scripts/verify-update-friendly.mjs b/desktop/scripts/verify-update-friendly.mjs
+new file mode 100644
+index 0000000..b74bcd3
+--- /dev/null
++++ b/desktop/scripts/verify-update-friendly.mjs
+@@ -0,0 +1,77 @@
++// Isolated native NSIS acceptance. Shares production maintenance, progress and
++// result functions. The tiny proof client is a fixture, NOT a production boot.
++import fs from 'node:fs';import path from 'node:path';import{fileURLToPath}from'node:url';import{createRequire}from'node:module';import{execFileSync,spawn}from'node:child_process';
++const root=fileURLToPath(new URL('../..',import.meta.url)),require=createRequire(import.meta.url),{getMakeNsisPath,getNsisPluginsPath}=require('app-builder-lib/out/toolsets/windows.js');
++const folder=path.join(root,'runtime/update-friendly-fixture'),out=path.join(root,'evidence/update-friendly');fs.mkdirSync(folder,{recursive:true});fs.mkdirSync(out,{recursive:true});
++const tool=await getMakeNsisPath(),plugins=await getNsisPluginsPath(),q=p=>p.replaceAll('/','\\'),include=path.join(root,'desktop/node_modules/app-builder-lib/templates/nsis/include');
++const nsi=String.raw`Unicode true
++SetCompressor zlib
++!addincludedir "${q(include)}"
++!addplugindir /x86-unicode "${q(path.join(plugins,'x86-unicode'))}"
++!include LogicLib.nsh
++!include UAC.nsh
++!include StdUtils.nsh
++!define VERSION "0.4.1"
++!define NAUMI_MAX_INSTALLDIR_CHARS 220
++!define isUpdated '1 == 1'
++!define INSTALL_REGISTRY_KEY "Software\Naumi-Update-Friendly-Fixture-Only"
++!define NAUMI_PRODUCT_ENGINE
++Var installMode
++Var hasPerMachineInstallation
++Var hasPerUserInstallation
++Var appExe
++!macro GetDParameter OUT
++  StrCpy ${'${OUT}'} ""
++!macroend
++!macro setInstallModePerUser
++  StrCpy $installMode "current"
++!macroend
++!macro setInstallModePerAllUsers
++  StrCpy $installMode "all"
++!macroend
++!include "${q(path.join(root,'desktop/installer/maintenance.nsh'))}"
++Name "Naumi update acceptance"
++Caption "Naumi · 更新验收"
++OutFile "${q(path.join(folder,'Naumi-Update-Fixture.exe'))}"
++InstallDir "${q(path.join(folder,'app/Naumi'))}"
++RequestExecutionLevel user
++!insertmacro NaumiInstallerFunctions
++!include "${q(path.join(root,'desktop/installer/update-ui.nsh'))}"
++Page custom NaumiInstall NaumiInstallLeave
++!define MUI_PAGE_CUSTOMFUNCTION_SHOW NaumiProgressShow
++!insertmacro MUI_PAGE_INSTFILES
++Page custom NaumiDone NaumiDoneLeave
++!insertmacro MUI_LANGUAGE "SimpChinese"
++Function .onInit
++  StrCpy $installMode "current"
++  !insertmacro customInit
++FunctionEnd
++Function StartApp
++  FileOpen $0 "${q(path.join(folder,'launches.txt'))}" a
++  FileWrite $0 "launch$\r$\n"
++  FileClose $0
++  ; The proof client is a console-only fixture, never flash it on the desktop.
++  ExecShell "open" "$appExe" '"${q(path.join(folder,'proof-client.cjs'))}"' SW_HIDE
++FunctionEnd
++Section
++  SetDetailsPrint none
++  !insertmacro customCheckAppRunning
++  Sleep 10000
++  SetOutPath "$INSTDIR"
++  File /oname=Naumi.exe "${q(path.join(root,'runtime/desktop-backend/node.exe'))}"
++  StrCpy $appExe "$INSTDIR\Naumi.exe"
++  !insertmacro customInstall
++SectionEnd
++`;
++fs.writeFileSync(path.join(folder,'fixture.nsi'),nsi);
++fs.writeFileSync(path.join(folder,'proof-client.cjs'),`const fs=require('node:fs'),p=require('node:path');const dir=__dirname;setTimeout(()=>{if(!fs.existsSync(p.join(dir,'ready.flag')))process.exit(0);const home=p.join(dir,'profile','Naumi');fs.mkdirSync(home,{recursive:true});fs.writeFileSync(p.join(home,'desktop-runtime.json'),JSON.stringify({version:1,pid:process.pid,clientVersion:'0.4.1',executable:process.execPath,readyAt:new Date().toISOString()}));setTimeout(()=>process.exit(0),20000);},3000);`);
++const compiled=execFileSync(tool.path,['/INPUTCHARSET','UTF8','/V2',path.join(folder,'fixture.nsi')],{env:{...process.env,...tool.env},encoding:'utf8',windowsHide:true});fs.writeFileSync(path.join(out,'NATIVE_COMPILE.log'),compiled);
++if(/warning 6000/.test(compiled))throw Error('NSIS_UNRESOLVED_VARIABLE');
++if(process.argv.includes('--launch')){
++ const ready=process.argv.includes('--ready'),flag=path.join(folder,'ready.flag');if(ready)fs.writeFileSync(flag,'ready');else if(fs.existsSync(flag))fs.unlinkSync(flag);
++ fs.writeFileSync(path.join(folder,'launches.txt'),'');
++ const env={...process.env,APPDATA:path.join(folder,'profile'),LOCALAPPDATA:path.join(folder,'local')};delete env.ELECTRON_RUN_AS_NODE;
++ const child=spawn(path.join(folder,'Naumi-Update-Fixture.exe'),['/S'],{env,stdio:'ignore',detached:true});child.unref();
++ fs.writeFileSync(path.join(out,'NATIVE_RUN.json'),JSON.stringify({pid:child.pid,ready,exe:path.join(folder,'Naumi-Update-Fixture.exe'),scope:'isolated native fixture, no product install/registration'},null,2));
++ console.log('UPDATE_NATIVE_LAUNCHED pid='+child.pid+' oldSilentFlag=/S ready='+ready);
++}else console.log('UPDATE_NATIVE_COMPILE PASS');
+
+diff --git a/desktop/tests/installer-relaunch.test.cjs b/desktop/tests/installer-relaunch.test.cjs
+new file mode 100644
+index 0000000..669df58
+--- /dev/null
++++ b/desktop/tests/installer-relaunch.test.cjs
+@@ -0,0 +1,36 @@
++'use strict';
++const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os');
++const {begin,check}=require('../app/installer-relaunch.cjs');
++const read=file=>fs.readFileSync(path.join(__dirname,'..',file),'utf8');
++function fixture(){
++ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-launch-proof-')),root=path.join(dir,'Naumi'),userData=path.join(dir,'profile'),file=path.join(dir,'proof.json');fs.mkdirSync(root);fs.mkdirSync(userData);
++ const time=Date.now()-5000,receipt={version:1,pid:123,clientVersion:'0.4.1',executable:path.join(root,'Naumi.exe'),readyAt:new Date(time+2000).toISOString()},process={pid:123,exe:receipt.executable,created:new Date(time+1000).toISOString()};
++ begin(file,root,'0.4.1',{now:time,userData});
++ return {dir,root,userData,file,time,receipt,process,write(r=receipt){fs.writeFileSync(path.join(userData,'desktop-runtime.json'),JSON.stringify(r));},close(){fs.rmSync(dir,{recursive:true,force:true});}};
++}
++test('new version fresh ready receipt and exact live process prove completion',()=>{const f=fixture();try{f.write();assert.equal(check(f.file,{inspect:()=>[f.process]}),true);}finally{f.close();}});
++test('old/missing/stale/wrong-install receipts never claim startup',()=>{const f=fixture();try{assert.equal(check(f.file),false);for(const change of [{clientVersion:'0.4.0'},{readyAt:new Date(f.time-1).toISOString()},{executable:path.join(f.dir,'other','Naumi.exe')},{pid:0},{readyAt:'invalid'}]){f.write({...f.receipt,...change});assert.equal(check(f.file,{inspect:()=>[f.process]}),false,JSON.stringify(change));}}finally{f.close();}});
++test('exited, reused or identity-unknown PIDs never close result page',()=>{const f=fixture();try{f.write();for(const records of [[],[{...f.process,exe:null}],[{...f.process,exe:path.join(f.dir,'other.exe')}],[{...f.process,created:new Date(f.time-1).toISOString()}],[{...f.process,created:new Date(f.time+3000).toISOString()}]])assert.equal(check(f.file,{inspect:()=>records}),false);}finally{f.close();}});
++test('inventory failure remains unknown and does not mutate receipt or launch processes',()=>{const f=fixture();try{f.write();const before=fs.readFileSync(path.join(f.userData,'desktop-runtime.json'));assert.throws(()=>check(f.file,{inspect:()=>{throw Error('query blocked');}}),/query blocked/);assert.deepEqual(fs.readFileSync(path.join(f.userData,'desktop-runtime.json')),before);}finally{f.close();}});
++test('invalid proofs fail closed; no receipt changes or app/data removal',()=>{const f=fixture();try{f.write();fs.writeFileSync(f.file,'{}');assert.throws(()=>check(f.file),/PROOF_INVALID/);assert.throws(()=>begin(f.file,'relative','0.4.1',{userData:f.userData}),/PROOF_INVALID/);assert(fs.existsSync(path.join(f.userData,'desktop-runtime.json')));}finally{f.close();}});
++test('old silent clients reveal native update UI while keeping registered scope/elevation',()=>{
++ const hook=read('installer/maintenance.nsh');assert(hook.includes('SetSilent normal'));assert(hook.indexOf('SetSilent normal')>hook.indexOf('ReadRegStr $R2 HKLM'));
++ assert(hook.includes('!macro customInstallMode'));assert(hook.includes('StrCpy $isForceMachineInstall "1"'));assert(hook.includes('StrCpy $isForceCurrentInstall "1"'));
++ const init=hook.slice(hook.indexOf('!macro customInit'),hook.indexOf('!macro customInstallMode'));
++ assert(init.includes('${If} ${UAC_IsInnerInstance}\n      !insertmacro customCheckAppRunning'));
++ const finish=hook.slice(hook.indexOf('!macro customInstall\n'));assert(finish.indexOf('!insertmacro NaumiExtractMaintenance')<finish.indexOf('"finish"'));
++});
++test('updated completion uses exact executable, no second checkbox launch, retry without reinstall',()=>{
++ const page=read('installer/pages.nsh'),ui=read('installer/update-ui.nsh'),presentation=read('installer/presentation.nsh');
++ assert(page.includes('${StdUtils.ExecShellAsUser} $0 "$appExe"'));assert(ui.includes('Call StartApp'));assert(ui.includes('"check" "$PLUGINSDIR\\update-launch.json"'));
++ assert(ui.includes('EnableWindow $NaumiUpdateRetry 0'));assert(ui.includes('EnableWindow $NaumiUpdateRetry 1'));assert(ui.includes('$NaumiUpdateLaunchPending == "1"'));
++ assert(ui.includes('Naumi 尚未就绪'));assert(ui.includes('${NSD_KillTimer} NaumiUpdatePoll'));
++ assert(presentation.includes('Call NaumiUpdateDone'));assert(presentation.includes('SendMessage $mui.InstFilesPage.ProgressBar 0x40A 1 40'));
++ assert(!/RMDir|DeleteReg|taskkill|quitAndInstall/.test(ui));
++});
++test('maintenance probes are hidden at process creation and never route through a visible shell',()=>{
++ const inventory=read('app/installer-state.cjs'),ui=read('installer/update-ui.nsh'),hook=read('installer/maintenance.nsh');
++ assert(inventory.includes("'-WindowStyle','Hidden'"));assert(inventory.includes('windowsHide:true'));
++ assert(!inventory.includes('shell:true'));assert(ui.includes('nsExec::ExecToStack'));assert(hook.includes('nsExec::ExecToStack'));
++ const qa=read('scripts/verify-update-friendly.mjs');assert.match(qa,/ExecShell "open" "\$appExe".+SW_HIDE/);
++});
+
+diff --git a/docs/changes/2026-11-18-update-friendly.md b/docs/changes/2026-11-18-update-friendly.md
+new file mode 100644
+index 0000000..1321a73
+--- /dev/null
++++ b/docs/changes/2026-11-18-update-friendly.md
+@@ -0,0 +1,33 @@
++# 更新可见性与新版重开闭环
++
++模块与职责：`codex/update-friendly-20261118`，初始基线 `b2156a7732f56f07c4b719c5f3cc8181851edfb6`。负责 desktop updates、NSIS maintenance/pages/presentation 和只读启动证明；不改共享3080、模型、Bot或企业数据，不覆盖已公开0.4.0包。功能切片计数1。
++
++公共接口、依赖方向、数据/状态/事务归属：继续使用 electron-updater 下载校验与 quitAndInstall、stock NSIS 提权/卸载/解压/注册/快捷方式、StdUtils 去提权打开。界面不拥有安装事务。installer-relaunch 只读原 desktop-runtime.json 和进程清单；其临时proof仅存在本次安装器PLUGINSDIR。原数据、身份与backend-link不迁移。
++
++调研：真实0.3.9→0.4.0全用户更新期间约4分钟不可见；旧exe暂时不存在；文件替换结束后未检测到客户端自动重开，原快捷方式手动恢复0.4.0成功。源码另发现stock assisted elevated-inner跳过CHECK_APP_RUNNING，而customInstall依赖该步骤解出的辅助程序；这是可确定的控制流缺口，但没有旧安装器退出码现场回执，不把它冒充唯一已证实的现场根因。
++
++本次实现与迁移状态：
++- 新客户端改用可见原生安装交接；新安装器也将旧客户端的 --updated /S 转为可见流程。已绑定原注册路径/作用域，复用stock安装模式页的提权而不再问安装位置。
++- 提权inner在旧版本移除前执行相同维护门禁；finish自包含解出helper。普通卸载仍可静默，未更换底层引擎。
++- 更新期间显示真实native marquee，覆盖无百分比的旧版本删除，不捏造百分比/预计剩余时间。
++- 完成页自动按准确exe、标准用户打开一次；新版本/当前安装位置/本次之后的readyAt/活进程身份全部成立才自动结束。缺失、旧回执、PID复用或查询未知均保留窗口，等待后开放重新打开；用户可关闭结果页，无重复安装或强杀。
++- 常规首次安装、手动完成页checkbox和卸载页面保持原入口与行为。
++
++验证命令、结果及证据层级：开发前 `node --test desktop/tests/updates.test.cjs desktop/tests/installer-maintenance.test.cjs desktop/tests/installer-ui.test.cjs desktop/tests/update-gate.test.cjs`，50/50，exit0。后续集中模块/原生UI/副本回滚待补。
++
++未完成项与下一步：原生UI编译/交互、超时/重试/成功回执、副本回滚与Git收口；当前已安装0.4.0不会因源码修改自动变成新版。公开0.4.0固定字节不改；下一版固定main构建和真实安装升级另计。
++
++
++## 集中验收与边界
++- 首轮完整切片全仓896/896，exit0；隐藏PowerShell参数、隐藏QA编译/console fixture并加入窗口契约后，最终更新相关58/58，exit0。
++- 真NSIS夹具复用生产maintenance/presentation/update-ui，以旧客户端/S参数进入可见更新。失败/未就绪时实际原生树显示“更新已安装”“Naumi尚未就绪，可以重新打开”和enabled重新打开/关闭；不误报已启动。
++- 就绪路径：真实stock NSIS完成页调用一次隔离proof-client，fresh receipt + live image/time proof使installer PID7488自动exit0，launches=1，约21秒；真实用户desktop-runtime.json原字节保持。proof-client不是Electron，故不称完整新版或提权allusers升级验收。
++- 首轮native动态替换timer导致轮询未继续，改成稳定单timer；fixture编译SetCompressor位置错误exit1已修正。首个console fixture与编译命令窗口暴露点已显式隐藏；这些开发失败均未加载真实客户端。
++- CUA对native结果页的activate_window失败，未把实际鼠标点击重试记PASS；按钮绑定/去重/失败后再调用能力由模块契约覆盖，原生自动启动及超时保留页另有实际证据。
++- 原生实际完成页文字/状态已经检查；未宣称高DPI/其他电脑/远端Administrator验收通过。
++- 已整合最新origin/main，保留会话导入及服务loader修订。最终固定源码SHA、证据和回滚见evidence/update-friendly。当前公开及本机安装仍0.4.0；本次不覆盖旧release、不重装用户客户端、不重启3080、不调用模型。
++
++## 交付收口
++- 整合基线 a48a7d243b570b6ad2aa401eab8055eefac0571a，更新/原有更新UI/导入上下文联合77/77，exit0；本任务不改变导入、Bot、服务loader资产。
++- 四件套包含17个本任务文件的原始和修改hash，回滚仅接受带标记且hash匹配的独立源码副本；恢复50/50旧测试及isSilent=true，活动源码保留isSilent=false。不是实际安装降级，不回退其他模块。
++- 开发切片已完成；剩余发布门是下一版本固定main构建、实际Electron完整更新及真实allusers/提权重开验收。公开0.4.0和当前用户安装原字节保持。
+
+diff --git a/scripts/package-update-friendly.mjs b/scripts/package-update-friendly.mjs
+new file mode 100644
+index 0000000..fe0bcce
+--- /dev/null
++++ b/scripts/package-update-friendly.mjs
+@@ -0,0 +1,28 @@
++import fs from'node:fs';import path from'node:path';import os from'node:os';import assert from'node:assert/strict';import{fileURLToPath}from'node:url';import{execFileSync,spawnSync}from'node:child_process';import{createHash}from'node:crypto';
++const root=fileURLToPath(new URL('..',import.meta.url)),out=path.join(root,'evidence/update-friendly'),base='a48a7d243b570b6ad2aa401eab8055eefac0571a',sha=b=>createHash('sha256').update(b).digest('hex'),run=(cmd,args,options={})=>execFileSync(cmd,args,{cwd:root,windowsHide:true,...options}),text=(file,value)=>fs.writeFileSync(path.join(out,file),value),mode=process.argv[2];
++const files=['.gitattributes','desktop/app/updates.cjs','desktop/app/installer-state.cjs','desktop/app/installer-relaunch.cjs','desktop/installer/maintenance.nsh','desktop/installer/pages.nsh','desktop/installer/presentation.nsh','desktop/installer/update-ui.nsh','desktop/installer/assets/action-close.bmp','desktop/installer/assets/action-reopen.bmp','desktop/scripts/build-installer-ui.mjs','desktop/scripts/verify-update-friendly.mjs','desktop/tests/updates.test.cjs','desktop/tests/installer-relaunch.test.cjs','docs/implementation/DESKTOP_AUTO_UPDATE.md','docs/changes/2026-11-18-update-friendly.md','scripts/package-update-friendly.mjs'];
++const baselineTests=['desktop/tests/updates.test.cjs','desktop/tests/installer-maintenance.test.cjs','desktop/tests/installer-ui.test.cjs','desktop/tests/update-gate.test.cjs'];fs.mkdirSync(out,{recursive:true});
++if(mode==='prepare'){
++ const pack=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-update-pack-')),records=[];
++ for(const file of files){const modified=fs.readFileSync(path.join(root,file));let original=null;try{original=run('git',['show',base+':'+file],{stdio:['ignore','pipe','ignore']});}catch{}for(const[k,b]of[['modified',modified],['original',original]])if(b){const p=path.join(pack,k,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,b);}records.push({file,originalSHA256:original?sha(original):null,modifiedSHA256:sha(modified)});}
++ const manifest={baseline:base,files:records};text('MANIFEST.json',JSON.stringify(manifest,null,2)+'\n');
++ text('PROBE.cjs',`const p=require('node:path'),{EventEmitter}=require('node:events');const root=p.resolve(process.argv[2]),{createDesktopUpdates}=require(p.join(root,'desktop/app/updates.cjs'));const updater=new EventEmitter();updater.quitAndInstall=(isSilent,isForceRunAfter)=>console.log(JSON.stringify({isSilent,isForceRunAfter}));const u=createDesktopUpdates({app:{getVersion:()=> '0.4.0'},updater,notify:async()=>1,startupDelayMs:1e9,intervalMs:0});u.start();updater.emit('update-downloaded');u.install().then(()=>u.stop());\n`);
++ text('ROLLBACK.cjs',`const fs=require('node:fs'),p=require('node:path'),a=require('node:assert/strict'),c=require('node:crypto'),cp=require('node:child_process');const root=p.resolve(process.argv[2]),mark=JSON.parse(fs.readFileSync(p.join(root,'.update-friendly-copy.json')));a.equal(mark.purpose,'update-friendly-copy');a.equal(mark.root,root);a(root.startsWith(p.resolve(mark.owner,'runtime')+p.sep));const m=JSON.parse(fs.readFileSync(p.join(__dirname,'MANIFEST.json'))),hash=b=>c.createHash('sha256').update(b).digest('hex');for(const r of m.files){const f=p.resolve(root,r.file);a(f.startsWith(root+p.sep));a.equal(hash(fs.readFileSync(f)),r.modifiedSHA256,'COPY_DRIFT '+r.file);}for(const r of m.files){const f=p.join(root,r.file);if(r.originalSHA256){const b=cp.execFileSync('python',['-c','import sys,zipfile;sys.stdout.buffer.write(zipfile.ZipFile(sys.argv[1]).read(sys.argv[2]))',p.join(__dirname,'MODIFIED_FILE.zip'),'original/'+r.file],{windowsHide:true,maxBuffer:20e6});a.equal(hash(b),r.originalSHA256);fs.writeFileSync(f,b);}else fs.unlinkSync(f);}console.log('ROLLBACK_COPY restored='+m.files.length+' original_hashes=PASS active_modified=retained');\n`);
++ text('ROLLBACK.sh','#!/usr/bin/env bash\nset -euo pipefail\nHERE="$(cd -- "$(dirname -- "$0")" && pwd)"\nnode "$HERE/ROLLBACK.cjs" "${1:?marked source copy required}"\n');
++ run('python',['-c',"import sys,pathlib,zipfile;p=pathlib.Path(sys.argv[1]);o=pathlib.Path(sys.argv[2]);z=zipfile.ZipFile(o/'MODIFIED_FILE.zip','w',zipfile.ZIP_DEFLATED);[z.write(f,f.relative_to(p).as_posix()) for f in sorted(p.rglob('*')) if f.is_file()];[z.write(o/f,f) for f in ['MANIFEST.json','ROLLBACK.cjs']];i=zipfile.ZipInfo('ROLLBACK.sh');i.create_system=3;i.external_attr=0o100755<<16;z.writestr(i,(o/'ROLLBACK.sh').read_bytes());z.close()",pack,out]);
++ const diff=run('git',['diff','--binary',base,'--',...files],{encoding:'utf8'});const additions=records.filter(r=>!r.originalSHA256).map(r=>{const d=spawnSync('git',['diff','--no-index','--binary','--','/dev/null',r.file],{cwd:root,encoding:'utf8',windowsHide:true});assert.equal(d.status,1,d.stderr);return d.stdout;}).join('\n');text('DIFF_FILE.patch',diff+additions);
++ console.log('UPDATE_ARTIFACTS files='+records.length+' original_hashes=PASS modified_hashes=PASS');
++}else if(mode==='rollback'){
++ const m=JSON.parse(fs.readFileSync(path.join(out,'MANIFEST.json'))),copy=path.join(root,'runtime/update-friendly-rollback-copy');fs.mkdirSync(copy,{recursive:true});assert(!fs.existsSync(path.join(copy,'.git')));const archive=path.join(root,'runtime/update-friendly-baseline.tar');run('git',['archive','--output='+archive,m.baseline]);run('python',['-c',"import tarfile,sys;tarfile.open(sys.argv[1]).extractall(sys.argv[2],filter='data')",archive,copy]);
++ for(const dir of['node_modules','desktop/node_modules'])if(!fs.existsSync(path.join(copy,dir)))fs.symlinkSync(path.join(root,dir),path.join(copy,dir),'junction');
++ const test=(label,args,expected)=>{const r=spawnSync(process.execPath,args,{cwd:copy,encoding:'utf8',windowsHide:true,maxBuffer:10e6,timeout:180000});text(label+'.log',r.stdout+r.stderr);assert.equal(r.status,0,r.stdout+r.stderr);if(expected)assert(r.stdout.includes(expected));return r.stdout;};
++ test('BASELINE_TESTS',['--test',...baselineTests],'pass 50');const before=test('BASELINE_PROBE',[path.join(out,'PROBE.cjs'),copy],'"isSilent":true');
++ run('python',['-c',"import zipfile,sys,pathlib;z=zipfile.ZipFile(sys.argv[1]);p=pathlib.Path(sys.argv[2]);[(lambda f,b:(f.parent.mkdir(parents=True,exist_ok=True),f.write_bytes(b)))(p/n[9:],z.read(n)) for n in z.namelist() if n.startswith('modified/')]",path.join(out,'MODIFIED_FILE.zip'),copy]);
++ fs.writeFileSync(path.join(copy,'.update-friendly-copy.json'),JSON.stringify({purpose:'update-friendly-copy',root:copy,owner:root}));const rollback=run('D:/DEV/Git/bin/bash.exe',[path.join(out,'ROLLBACK.sh'),copy],{encoding:'utf8'});text('ROLLBACK_ACTION.log',rollback);test('ROLLBACK_TESTS',['--test',...baselineTests],'pass 50');const after=test('ROLLBACK_PROBE',[path.join(out,'PROBE.cjs'),copy],'"isSilent":true');assert.equal(before,after);
++ for(const row of m.files){assert.equal(sha(fs.readFileSync(path.join(root,row.file))),row.modifiedSHA256);if(row.originalSHA256)assert.equal(sha(fs.readFileSync(path.join(copy,row.file))),row.originalSHA256);else assert(!fs.existsSync(path.join(copy,row.file)));}
++ const changed=run(process.execPath,[path.join(out,'PROBE.cjs'),root],{encoding:'utf8'});assert(changed.includes('"isSilent":false'));text('MODIFIED_PROBE.log',changed);text('ROLLBACK_RESULT.json',JSON.stringify({exit:0,copy,baselineProbe:before.trim(),modifiedProbe:changed.trim(),rollbackProbe:after.trim(),baselineTests:50,rollbackTests:50,restored:'old silent handoff and exact original bytes on marked copy only',activeModifiedRetained:true},null,2)+'\n');console.log('UPDATE_ROLLBACK tests=50 pass=50 fail=0 behavior=silent_restored active=visible_retained exit=0');
++}else if(mode==='reopen'){
++ for(const file of['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh'])assert(fs.readFileSync(path.join(out,file)).length);
++ const m=JSON.parse(fs.readFileSync(path.join(out,'MANIFEST.json')));for(const r of m.files)assert.equal(sha(fs.readFileSync(path.join(root,r.file))),r.modifiedSHA256);
++ run('python',['-c',"import sys,zipfile,json,hashlib;z=zipfile.ZipFile(sys.argv[1]);assert z.testzip() is None;assert (z.getinfo('ROLLBACK.sh').external_attr>>16)&0o111==0o111;m=json.loads(z.read('MANIFEST.json'));[(lambda r: (exec('assert hashlib.sha256(z.read(\"modified/\"+r[\"file\"])).hexdigest()==r[\"modifiedSHA256\"]'),exec('if r[\"originalSHA256\"]: assert hashlib.sha256(z.read(\"original/\"+r[\"file\"])).hexdigest()==r[\"originalSHA256\"]')))(r) for r in m['files']]",path.join(out,'MODIFIED_FILE.zip')]);run('D:/DEV/Git/bin/bash.exe',['-n',path.join(out,'ROLLBACK.sh')]);console.log('UPDATE_REOPEN artifacts=4 zip_crc=PASS original_and_modified_hashes=PASS rollback_executable=PASS exit=0');
++}else throw Error('Use prepare|rollback|reopen');

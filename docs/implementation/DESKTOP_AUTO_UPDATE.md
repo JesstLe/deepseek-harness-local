@@ -74,3 +74,12 @@ npm run release -- --prerelease
 - IPC：新增 `naumiDesktop.installUpdate()`；状态新增 `lastChecked`，只在确认无更新时展示「已是最新版本」。
 - 开发壳未启用更新器时显示「安装版支持更新」，不伪报最新。
 - 实现与证据边界见 [本次记录](../changes/2026-11-17-desktop-update-entry.md)。
+
+## 可见安装与重开确认（2026-11-18，待新版打包生效）
+
+- 交接改用可见原生安装；安装器兼容旧客户端的 `--updated /S`，复用原注册作用域/路径与stock提权，直接显示更新进度，不重复选择安装位置。
+- 删除旧版本没有可用百分比，使用native marquee，不编造进度或倒计时。进程检查显式隐藏PowerShell窗口，NSIS辅助命令使用nsExec；不引入cmd弹窗。
+- allusers elevated-inner补同一维护门禁，finish自包含解出helper，修正stock跳过outer准备时收尾辅助文件可能缺失的问题。
+- 完成后自动打开准确exe；只读原 `desktop-runtime.json`，核验新版本、安装位置、本次更新后的就绪时间和实际进程身份。ShellExecute返回成功不直接记为应用已就绪。
+- 未就绪时保留可关闭/重新打开的结果页，点击重试只重开，不重复安装、不强杀。常规首次安装和卸载保持原有页面。
+- 代码/原生隔离界面验收与实际用户更新必须分开报告；公开0.4.0固定包不覆盖。详见[切片记录](../changes/2026-11-18-update-friendly.md)。

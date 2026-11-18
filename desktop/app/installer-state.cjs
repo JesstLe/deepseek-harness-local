@@ -5,7 +5,7 @@ const canonical=p=>{let value=exists(p)?fs.realpathSync.native(p):path.resolve(p
 function plain(file){if(!exists(file))return null;const s=fs.lstatSync(file);if(!s.isFile()||s.isSymbolicLink()||s.size>1024*1024)throw Error('INSTALL_METADATA_INVALID');try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{throw Error('INSTALL_METADATA_INVALID');}}
 function inventory(){
  const shell=path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe');
- const result=execFileSync(shell,['-NoProfile','-NonInteractive','-Command',"$ErrorActionPreference='Stop';@(Get-CimInstance Win32_Process | ForEach-Object {@{pid=[int]$_.ProcessId;parent=[int]$_.ParentProcessId;exe=$_.ExecutablePath;created=$_.CreationDate.ToUniversalTime().ToString('O')}}) | ConvertTo-Json -Compress"],{encoding:'utf8',windowsHide:true,maxBuffer:4e6});
+ const result=execFileSync(shell,['-NoProfile','-NonInteractive','-WindowStyle','Hidden','-Command',"$ErrorActionPreference='Stop';@(Get-CimInstance Win32_Process | ForEach-Object {@{pid=[int]$_.ProcessId;parent=[int]$_.ParentProcessId;exe=$_.ExecutablePath;created=$_.CreationDate.ToUniversalTime().ToString('O')}}) | ConvertTo-Json -Compress"],{encoding:'utf8',windowsHide:true,maxBuffer:4e6});
  const records=JSON.parse(result);if(!Array.isArray(records))throw Error('INSTALL_PROCESS_INVENTORY_UNKNOWN');return records;
 }
 const same=(a,b)=>!!a&&!!b&&a.pid===b.pid&&a.created===b.created&&typeof a.exe==='string'&&typeof b.exe==='string'&&a.exe.toLowerCase()===b.exe.toLowerCase();

@@ -59,7 +59,7 @@ function createDesktopUpdates({app,updater,notify,canInstall=()=>({ok:true}),pre
   try{
    gate=await canInstall();
    if(!gate?.ok){log('install deferred',gate);const error=gate?.reason==='INSTALL_ACTIVITY_UNKNOWN'?'UPDATE_ACTIVITY_UNKNOWN':'UPDATE_INSTALL_BUSY';publish({error,installPhase:null});return {ok:false,error};}
-   installGate=gate;installError=null;publish({error:null,installPhase:'preparing'});await prepareInstall();publish({installPhase:'restarting'});updater.quitAndInstall(true,true);
+   installGate=gate;installError=null;publish({error:null,installPhase:'preparing'});await prepareInstall();publish({installPhase:'restarting'});updater.quitAndInstall(false,true);
    if(installError)throw installError;
    handedOff=true;return {ok:true};
   }catch(error){log('install failed',error);await releaseInstallGate();publish({error:'UPDATE_INSTALL_FAILED',installPhase:null});return {ok:false,error:'UPDATE_INSTALL_FAILED'};}

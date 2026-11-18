@@ -161,13 +161,35 @@ Function ${PREFIX}NaumiProgressShow
   !insertmacro NaumiRail $mui.InstFilesPage
   !insertmacro NaumiNativeLabel 716 40 56 20 "${VERSION}" 9 400
   !if "${MODE}" == "install"
-    !insertmacro NaumiNativeLabel 248 112 524 44 "正在安装 Naumi" 22 600
+    !ifdef NAUMI_PRODUCT_ENGINE
+      ${If} ${isUpdated}
+        !insertmacro NaumiNativeLabel 248 112 524 44 "正在更新 Naumi" 22 600
+        !insertmacro NaumiNativeLabel 248 196 524 28 "更新完成后自动打开" 10 400
+        ; Removal has no percentage: use a real native marquee, not a fake ETA.
+        System::Call 'user32::GetWindowLongW(p $mui.InstFilesPage.ProgressBar, i -16) i .r0'
+        IntOp $0 $0 | 8
+        System::Call 'user32::SetWindowLongW(p $mui.InstFilesPage.ProgressBar, i -16, i r0)'
+        SendMessage $mui.InstFilesPage.ProgressBar 0x40A 1 40
+      ${Else}
+        !insertmacro NaumiNativeLabel 248 112 524 44 "正在安装 Naumi" 22 600
+      ${EndIf}
+    !else
+      !insertmacro NaumiNativeLabel 248 112 524 44 "正在安装 Naumi" 22 600
+    !endif
   !else
     !insertmacro NaumiNativeLabel 248 112 524 44 "正在卸载 Naumi" 22 600
     !insertmacro NaumiNativeLabel 248 196 524 28 "个人数据将保留" 10 400
   !endif
 FunctionEnd
 Function ${PREFIX}NaumiDone
+  !if "${MODE}" == "install"
+    !ifdef NAUMI_PRODUCT_ENGINE
+      ${If} ${isUpdated}
+        Call NaumiUpdateDone
+        Return
+      ${EndIf}
+    !endif
+  !endif
   !insertmacro NaumiShell
   !if "${MODE}" == "install"
     !insertmacro NaumiLabel 248 112 524 44 "安装完成" 22 600
@@ -330,6 +352,11 @@ Function NaumiInstallLeave
   StrCpy $INSTDIR $NaumiCandidatePath
 FunctionEnd
 Function NaumiDoneLeave
+  !ifdef NAUMI_PRODUCT_ENGINE
+    ${If} ${isUpdated}
+      Return
+    ${EndIf}
+  !endif
   ${NSD_GetState} $NaumiRunCheck $0
   ${If} $0 == ${BST_CHECKED}
     Call StartApp
