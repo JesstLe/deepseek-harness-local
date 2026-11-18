@@ -57,6 +57,12 @@ export class BotGroupService {
 
   rename(input,actor='owner') { return this.store.rename(input,actor); }
 
+  addMembers(input){
+    this.alignPrimary();
+    const active=new Set(this.directory.list().bots.filter(bot=>bot.status==='active').map(bot=>bot.id));
+    return this.store.addMembers(input,(room,ids)=>{if(ids.some(id=>!active.has(id)))fail('BOT_GROUP_MEMBER_UNAVAILABLE');if(new Set(room.members.map(m=>m.botId)).size+ids.filter(id=>!room.members.some(m=>m.botId===id)).length>12)fail('BOT_GROUP_MEMBER_LIMIT');});
+  }
+
   post(input) {
     this.alignPrimary();
     const post = this.store.post(input, () => {
