@@ -25,6 +25,6 @@
 ## 完成状态
 - 修复代码已普通merge/push main fa48dec；保留b1bde23文档模板。未加载共享运行目录、未重启3080、未触碰Bot动效。
 - 最终871/871全仓；PS5策略7分支、真实restricted-token内外/兄弟/DACL边界通过。当前token非提升，远端Administrator真机仍需目标回执，不把SID夹具记为远端实测。
-- 原0.3.9 Release追加定点包，不覆盖NSIS/latest.yml；匿名HTTP200、8006字节，SHA256348fb81ae8e16b87bb14c486ed732a13376518ab8957733aed5e41b0165385d9。实际包PS5 APPLY/ROLLBACK+bundledNode中文空格fixture、幂等和6文件原字节撤销均通过。AppData不进入补丁。
+- 原0.3.9 Release追加定点包，不覆盖NSIS/latest.yml；匿名HTTP200、8006字节，SHA25666946baf6047ee125f2de294b96d475ea63d4b554d7c03f68d3a98ae75f47d16。实际包PS5 APPLY/ROLLBACK+bundledNode中文空格fixture、幂等和6文件原字节撤销均通过。AppData不进入补丁。
 - 源码副本7文件回滚5/5且原拒绝行为复现，活动源码保持修复；四件套CRC/hash/可执行撤销/重开通过，命令输入结果见evidence/admin-workspace-owner/VERIFICATION.txt。
 - 完整新版EXE及远端应用不记为本次已实测；当前交付可转发的0.3.9定点修复包。证据合main等待Bot动效窗口释放。
