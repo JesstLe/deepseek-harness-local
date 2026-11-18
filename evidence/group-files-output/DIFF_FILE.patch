@@ -1,0 +1,637 @@
+diff --git a/.gitattributes b/.gitattributes
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -400,3 +400,7 @@
+ # Group work indicator exact source and executable copy rollback.
+ /evidence/group-work-indicator/** -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab,cr-at-eol
+ /evidence/group-work-indicator/ROLLBACK.sh text eol=lf
++
++/evidence/group-files-output/** -text whitespace=cr-at-eol
++/evidence/group-files-output/DIFF_FILE.patch -text whitespace=-blank-at-eol
++/evidence/group-files-output/ROLLBACK.sh text eol=lf
+diff --git a/desktop/scripts/prepare-runtime.mjs b/desktop/scripts/prepare-runtime.mjs
+--- a/desktop/scripts/prepare-runtime.mjs
++++ b/desktop/scripts/prepare-runtime.mjs
+@@ -1,4 +1,5 @@
+ import fs from 'node:fs';
++import {installNativeDeliveryExtensions} from '../../scripts/native-delivery-extension.mjs';
+ import path from 'node:path';
+ import {fileURLToPath,pathToFileURL} from 'node:url';
+ import {createHash,randomUUID} from 'node:crypto';
+@@ -42,6 +43,7 @@
+     // Only runtime dependencies and source plugins are input. No user home/profile/config is copied.
+     fs.cpSync(path.join(root,'node_modules'),path.join(staged,'node_modules'),{recursive:true,dereference:true,filter:source=>!source.split(path.sep).some(x=>['.cache','.bin','dingtalk-workspace-cli'].includes(x))&&!isRuntimeDevelopmentArtifact(source)});
+     installReasoningDefaults(path.join(staged,'node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js'));
++    installNativeDeliveryExtensions(path.join(staged,'node_modules'));
+     installNativeComposer(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'));
+     installAgentTriggers(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js'));
+     installNativeSettings(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-settings-general/lib/client.js'));
+diff --git a/plugins/naumi-enterprise/assets/bot-groups.css b/plugins/naumi-enterprise/assets/bot-groups.css
+--- a/plugins/naumi-enterprise/assets/bot-groups.css
++++ b/plugins/naumi-enterprise/assets/bot-groups.css
+@@ -4,7 +4,7 @@
+ .nbc-conversation{display:flex;flex-direction:column;height:100%;min-height:0;flex:1;overflow:hidden}.nbc-header{height:76px;flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 30px;border-bottom:1px solid var(--nbc-line)}.nbc-title{display:flex;align-items:center;gap:13px;min-width:0}.nbc-title h1{font-size:16px;font-weight:620;letter-spacing:.2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.nbc-title>div{min-width:0}.nbc-working{display:block;margin-top:4px;color:#858995;font-size:11px}.nbc-header-actions{display:flex;gap:12px;align-items:center;flex-shrink:0}.nbc-icon{display:inline-grid;place-items:center;width:32px;height:32px;border:0;border-radius:9px;color:#7f8490;background:transparent;padding:6px}.nbc-icon:hover{background:#f2f3f7;color:#393440}.nbc-members-button{display:flex;align-items:center;gap:8px;border:0;background:transparent;color:#858995;font-size:12px!important;padding:7px;border-radius:8px}.nbc-members-button:hover{background:#f6f7f9}
+ .nbc-faces{display:grid;grid-template-columns:repeat(2,17px);gap:1px;place-content:center;width:42px;height:42px;background:#f0f1f5;border:1px solid #e9ebef;border-radius:13px;flex:none;overflow:hidden}.nbc-faces .naumi-bot-avatar{width:18px!important;height:18px!important;border-radius:5px!important;margin:0!important;box-shadow:none}.nbc-faces .naumi-character canvas{width:100%;height:100%}
+ .nbc-main{display:flex;min-height:0;flex:1;position:relative}.nbc-timeline{flex:1;min-width:0;min-height:0;overflow:auto;scrollbar-width:thin;scrollbar-color:#d8dbe2 transparent;overscroll-behavior:contain}.nbc-transcript{width:min(100%,860px);margin:0 auto;padding:38px 34px 32px;display:flex;flex-direction:column;gap:25px}.nbc-message{display:flex;align-items:flex-start;gap:12px;min-width:0;animation:nbc-enter .16s ease-out}.nbc-message-body{max-width:calc(100% - 48px);min-width:0}.nbc-speaker{font-size:11px;color:#878b97;margin:0 0 7px 2px;line-height:1.4}.nbc-message-avatar{padding-top:15px;flex:none}.nbc-message-avatar .naumi-bot-avatar{width:31px!important;height:31px!important;margin:0!important}.nbc-bubble{background:#f3f4f6;padding:14px 18px;border-radius:4px 15px 15px 15px;line-height:1.8;font-size:13px;color:#373b46;overflow-wrap:anywhere}.nbc-user{justify-content:flex-end;padding-left:45px}.nbc-user .nbc-message-body{max-width:87%}.nbc-user .nbc-bubble{background:#242731;color:#fff;border-radius:15px 4px 15px 15px;padding:13px 18px}.nbc-user .nbc-markdown a{color:#cec7ff}.nbc-typing{display:flex;gap:4px;padding:15px 19px;background:#f3f4f6;border-radius:4px 14px 14px 14px;width:65px;height:40px;align-items:center}.nbc-typing i{width:5px;height:5px;border-radius:50%;background:#b1b3bf;animation:nbc-dot 1.2s infinite}.nbc-typing i:nth-child(2){animation-delay:.15s}.nbc-typing i:nth-child(3){animation-delay:.3s}
+-.nbc-markdown{min-width:0}.nbc-markdown p+p{margin-top:10px}.nbc-markdown h2,.nbc-markdown h3,.nbc-markdown h4,.nbc-markdown h5{font-size:14px;margin:13px 0 7px!important;font-weight:650}.nbc-markdown>:first-child{margin-top:0!important}.nbc-markdown ul,.nbc-markdown ol{padding-left:20px;margin:8px 0}.nbc-markdown li+li{margin-top:4px}.nbc-markdown code{font-family:"Cascadia Code",Consolas,monospace;font-size:12px;background:#00000008;padding:2px 5px;border-radius:4px}.nbc-markdown pre{max-width:100%;overflow:auto;background:#e9ebf0;border-radius:9px;padding:12px 14px;margin:10px 0}.nbc-markdown pre code{background:none;padding:0;white-space:pre}.nbc-markdown a{color:#7160a8;text-decoration:underline;text-underline-offset:3px}.nbc-markdown blockquote{border-left:3px solid #c7c3d6;margin:10px 0;padding-left:10px;color:#7b7f8b}.nbc-table{overflow:auto;max-width:100%}.nbc-table table{border-collapse:collapse;font-size:12px}.nbc-table td,.nbc-table th{text-align:left;padding:7px 12px;border-bottom:1px solid #dcdfe6;white-space:nowrap}.nbc-files{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.nbc-files button{display:flex;align-items:center;gap:9px;padding:10px 12px;border:1px solid #e7e9ee;border-radius:9px;background:#fff;color:#525364;font-size:12px;max-width:100%}.nbc-files button>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nbc-files button:hover{border-color:#bcb0db;background:#fcfbff}
++.nbc-markdown{min-width:0}.nbc-markdown p+p{margin-top:10px}.nbc-markdown h2,.nbc-markdown h3,.nbc-markdown h4,.nbc-markdown h5{font-size:14px;margin:13px 0 7px!important;font-weight:650}.nbc-markdown>:first-child{margin-top:0!important}.nbc-markdown ul,.nbc-markdown ol{padding-left:20px;margin:8px 0}.nbc-markdown li+li{margin-top:4px}.nbc-markdown code{font-family:"Cascadia Code",Consolas,monospace;font-size:12px;background:#00000008;padding:2px 5px;border-radius:4px}.nbc-markdown pre{max-width:100%;overflow:auto;background:#e9ebf0;border-radius:9px;padding:12px 14px;margin:10px 0}.nbc-markdown pre code{background:none;padding:0;white-space:pre}.nbc-markdown a{color:#7160a8;text-decoration:underline;text-underline-offset:3px}.nbc-markdown blockquote{border-left:3px solid #c7c3d6;margin:10px 0;padding-left:10px;color:#7b7f8b}.nbc-table{overflow:auto;max-width:100%}.nbc-table table{border-collapse:collapse;font-size:12px}.nbc-table td,.nbc-table th{text-align:left;padding:7px 12px;border-bottom:1px solid #dcdfe6;white-space:nowrap}
+ .nbc-mentions{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}.nbc-mentions button{padding:5px 9px;border:1px solid #ebe8f1;border-radius:7px;background:#faf9fc;color:#8a819b;font-size:11px}.nbc-mentions button[aria-pressed=true]{border-color:#c4b6dc;background:#eee9f7;color:#6d5790}.nbc-error{font-size:12px;color:#b34e61;padding:5px 0 10px;line-height:1.5}.nbc-error button{margin-left:10px;background:transparent;border:0;color:inherit;text-decoration:underline}.nbc-loading,.nbc-empty-small{padding:24px;text-align:center;color:#a0a3ad;font-size:12px}.nbc-empty{display:flex;flex:1;min-height:260px;flex-direction:column;justify-content:center;align-items:center;gap:14px;color:#777c88}.nbc-empty h2{font-size:16px;font-weight:500}.nbc-empty .nbc-faces{width:64px;height:64px;transform:scale(1.2);margin-bottom:8px}.nbc-history{align-self:center;border:0;background:transparent;color:#9b98a8;font-size:11px;padding:8px}.nbc-interrupted{color:#9b7981}.nbc-interrupted button{border:0;background:none;color:#7f708e;margin-left:10px;font-size:11px}
+ .nbc-drawer{width:300px;flex-shrink:0;border-left:1px solid var(--nbc-line);padding:18px;background:#fdfdfe;overflow:auto;scrollbar-width:thin}.nbc-drawer>header,.nbc-create>header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}.nbc-drawer h3{font-size:13px;font-weight:600}.nbc-drawer article{padding:17px 0;border-bottom:1px solid var(--nbc-line);font-size:12px}.nbc-drawer article>strong{display:block;line-height:1.7}.nbc-task-meta{font-size:11px;color:#989ba5;margin:7px 0 11px}.nbc-task-actions{display:flex;gap:12px;margin-top:12px}.nbc-task-actions button{border:0;background:none;color:#89739e;font-size:11px;padding:0}.nbc-person{display:flex;align-items:center;gap:10px;padding:12px 0;font-size:12px}.nbc-person .naumi-bot-avatar{width:32px;height:32px}.nbc-person>span:last-child{margin-left:auto;font-size:10px;color:#9c94ab}
+ .nbc-modal-backdrop{position:absolute;inset:0;z-index:40;display:grid;place-items:center;background:#27243c26;backdrop-filter:blur(4px);padding:20px}.nbc-create{width:min(440px,100%);max-height:100%;overflow:auto;border-radius:20px;background:#fff;border:1px solid #eeedf3;box-shadow:0 24px 100px #29233d1c;padding:24px;display:grid;gap:19px}.nbc-create h2{font-size:17px;font-weight:600}.nbc-create>header{margin:0}.nbc-field{display:grid;gap:9px;font-size:12px;color:#7d7f8a}.nbc-field input,.nbc-field select{width:100%;border:1px solid #e6e7ed;border-radius:9px;min-height:39px;padding:8px 11px;background:#fff;color:#3a3b49;font-size:13px}.nbc-create fieldset{border:0;padding:0;margin:0;min-width:0}.nbc-create legend{font-size:12px;color:#7d7f8a;margin-bottom:10px}.nbc-member-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.nbc-member-option{position:relative;display:flex;align-items:center;gap:10px;border:1px solid #e9eaf0;border-radius:10px;padding:10px;font-size:12px;cursor:pointer;min-width:0}.nbc-member-option>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nbc-member-option .naumi-bot-avatar{width:29px;height:29px}.nbc-member-option input{position:absolute;opacity:0;width:1px;height:1px}.nbc-member-option:focus-within{outline:2px solid #8c80c9}.nbc-member-option[data-checked=true]{border-color:#bfb0d7;background:#f6f3fa}.nbc-create footer{display:flex;justify-content:flex-end;gap:8px;padding-top:4px}.nbc-create footer button{border:1px solid #e6e5ed;border-radius:9px;background:white;padding:9px 17px;font-size:12px;color:#82808f}.nbc-create footer .nbc-primary{background:#75648f;border-color:#75648f;color:white}
+@@ -32,6 +32,9 @@
+ .nbc-native-dock .nbc-agent-token-label{overflow:hidden;text-overflow:ellipsis;min-width:0}.nbc-native-dock .nbc-agent-token .nbc-token-avatar{width:24px;height:24px;flex:none}.nbc-native-dock .nbc-token-avatar>svg{width:24px;height:24px}
+ .nbc-native-dock .nbc-agent-token[data-invalid]{border-style:dashed;opacity:.6}
+ 
++/* Give the shared native card its full host width; do not restyle its internals. */
++.nbc-assistant:has([data-presented-file]) .nbc-message-body{width:calc(100% - 48px)}
++.nbc-native-files{width:100%;min-width:0;margin-top:8px}
+ /* Pinned above the ORIGINAL native composer, outside the transcript scroll area. */
+ .nbc-work-indicator{display:flex;align-items:flex-start;gap:14px;min-width:0;margin:0 auto 11px!important;padding:9px 11px;border:1px solid #eeedf4;border-radius:14px;background:linear-gradient(115deg,#faf9fd,#f8fbfc);animation:nbc-work-enter .2s ease-out}
+ .nbc-work-heading{display:flex;align-items:center;gap:7px;flex:none;min-height:35px;font-size:11px;color:#827b95;white-space:nowrap}
+diff --git a/plugins/naumi-enterprise/assets/bot-groups.js b/plugins/naumi-enterprise/assets/bot-groups.js
+--- a/plugins/naumi-enterprise/assets/bot-groups.js
++++ b/plugins/naumi-enterprise/assets/bot-groups.js
+@@ -1,4 +1,4 @@
+-import {filePreviewAddress,taskLabel,taskActivity} from './bot-task-model.js';
++import {taskLabel,taskActivity} from './bot-task-model.js';
+ import {botCatalog} from './bot-sidebar-model.js';
+ import {createGroupMentions} from './bot-mentions.js';
+ import {primaryBot} from './primary-bot.js';
+@@ -13,10 +13,30 @@
+  const icon=(kind,size=18)=>h('svg',{width:size,height:size,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.6,strokeLinecap:'round',strokeLinejoin:'round','aria-hidden':true},h('path',{d:{edit:'m16 3 5 5-12 12-6 1 1-6Z M14 5l5 5',send:'m5 12 7-7 7 7 M12 5v14',users:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M16 3a4 4 0 0 1 0 8 M22 21v-2a4 4 0 0 0-3-3.9 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',files:'M14 3H6v18h12V7z M14 3v5h5 M9 12h6 M9 16h6',close:'m6 6 12 12 M18 6 6 18',at:'M16 8v6a2 2 0 0 0 4 0v-2a8 8 0 1 0-3 6 M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0'}[kind]??'M5 12h14'}));
+  const action=(label,onClick,kind,props={})=>h('button',{type:'button',className:'nbc-icon','aria-label':label,title:label,onClick,...props},icon(kind));
+  const openSession=id=>{ctx.layout.beginNavigation?.();ctx.uiWorkspace.openSession(id);};
+- const openFile=file=>{const sidebar=ctx.get?.('sidebarRight');if(sidebar)sidebar.openResource(filePreviewAddress(file));else openSession(file.sessionId);};
+  function Faces({members,bots}){return h('span',{className:'nbc-faces','aria-hidden':true},members.slice(0,4).map(m=>{const bot=bots.find(b=>b.id===m.botId);return bot?h(Avatar,{key:m.botId,bot,staticPreview:true}):h('span',{key:m.botId},'·');}));}
+- function Files({files}){return files?.length?h('div',{className:'nbc-files'},files.map((f,i)=>h('button',{type:'button',key:f.sessionId+':'+f.seq+':'+i,onClick:()=>openFile(f)},icon('files',16),h('span',null,f.description??f.path.split(/[\\/]/).at(-1))))):null;}
+- function TaskDrawer({tasks,bots,onClose,onSelect}){return h('aside',{className:'nbc-drawer','aria-label':'任务与文件'},h('header',null,h('h3',null,'任务与文件'),action('关闭任务',onClose,'close')),tasks.length?tasks.map(t=>h('article',{key:t.id},h('strong',null,t.subject),h('div',{className:'nbc-task-meta'},bots.find(b=>b.id===t.targetBotId)?.name,' · ',taskLabel(t)),t.result&&h(Markdown,{text:t.result}),h(Files,{files:t.files}),h('div',{className:'nbc-task-actions'},h('button',{type:'button',onClick:()=>openSession(t.targetSessionId)},'打开任务'),['queued','starting','running','waiting','completed'].includes(t.status)&&h('button',{type:'button',onClick:()=>onSelect(t)},'调整要求'),t.handoff&&h('button',{type:'button',onClick:()=>openSession(t.handoff.sessionId)},'上游任务')))):h('div',{className:'nbc-empty-small'},'暂无任务'));}
++ function NativeFiles({files,native,sessionId,taskId}){
++  const [reference,setReference]=useState(null),[error,setError]=useState('');
++  useEffect(()=>{let closed=false,ref;setReference(null);setError('');
++   void (async()=>{try{const sessions=ctx.get?.('sessions')??ctx.sessions;await sessions.refresh();if(closed)return;ref=sessions.retain(sessionId,{source:'naumiGroupDeliverables'});await ref.ready;if(!closed)setReference(ref);}catch(e){if(!closed)setError('文件会话读取失败');}})();
++   return()=>{closed=true;ref?.release();};
++  },[sessionId]);
++  const alive=useRef(false);useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
++  const resolvePreviewPath=async file=>{
++   if(file.snapshot){
++    if(!taskId)throw Error('文件版本缺少任务来源');
++    const r=await fetch('/naumi/bot-file-version?'+new URLSearchParams({taskId,sessionId:file.sessionId,seq:String(file.seq),index:String(file.index)}),{credentials:'same-origin',cache:'no-store'});
++    if(!r.ok)throw Error('文件版本校验失败');
++   }
++   if(!alive.current)throw Error('文件会话已切换');
++   setError('');return file.snapshot?.path??file.path;
++  };
++  return h(React.Fragment,null,error&&h('div',{className:'nbc-error',role:'alert'},error),reference&&native?.SessionProvider&&h(native.SessionProvider,{session:reference},native.renderFactorySlot('naumi.native.deliverables',{files,resolvePreviewPath,onPreviewError:e=>{if(alive.current)setError(e.message);}})));
++ }
++ function Files({files,native,taskId}){
++  const bySession=new Map();for(const file of files??[]){const rows=bySession.get(file.sessionId)??[];rows.push(file);bySession.set(file.sessionId,rows);}
++  return bySession.size?h('div',{className:'nbc-native-files'},[...bySession].map(([sessionId,rows])=>h(NativeFiles,{key:sessionId,sessionId,files:rows,native,taskId}))):null;
++ }
++ function TaskDrawer({tasks,bots,onClose,onSelect,native}){return h('aside',{className:'nbc-drawer','aria-label':'任务与文件'},h('header',null,h('h3',null,'任务与文件'),action('关闭任务',onClose,'close')),tasks.length?tasks.map(t=>h('article',{key:t.id},h('strong',null,t.subject),h('div',{className:'nbc-task-meta'},bots.find(b=>b.id===t.targetBotId)?.name,' · ',taskLabel(t)),t.result&&h(Markdown,{text:t.result}),h(Files,{files:t.files,native,taskId:t.id}),h('div',{className:'nbc-task-actions'},h('button',{type:'button',onClick:()=>openSession(t.targetSessionId)},'打开任务'),['queued','starting','running','waiting','completed'].includes(t.status)&&h('button',{type:'button',onClick:()=>onSelect(t)},'调整要求'),t.handoff&&h('button',{type:'button',onClick:()=>openSession(t.handoff.sessionId)},'上游任务')))):h('div',{className:'nbc-empty-small'},'暂无任务'));}
+  function CreateRoom({bots,primary,onCancel}){
+   const [name,setName]=useState(''),[members,setMembers]=useState(()=>primary?[primary.id]:[]),[manager,setManager]=useState(''),[pending,setPending]=useState(false),[error,setError]=useState('');const operation=useRef(null),ref=useRef(null),prior=useRef(document.activeElement),alive=useRef(true);
+   useEffect(()=>{alive.current=true;ref.current?.querySelector('input')?.focus();return()=>{alive.current=false;if(prior.current?.isConnected)prior.current.focus();};},[]);
+@@ -52,7 +72,7 @@
+  }
+  function NativeComposer({room,native,accessory,busy,onSubmit,onCancel,workStatus=null}){
+   const [binding,setBinding]=useState(null),[error,setError]=useState('');const callbacks=useRef({onSubmit,onCancel});callbacks.current={onSubmit,onCancel};
+-  useEffect(()=>{let closed=false,ref,dispose,stopMentions;const controller=new AbortController();
++  useEffect(()=>{let closed=false,ref,dispose,stopMentions,stopSidebar;const controller=new AbortController();
+    void (async()=>{try{
+     const prepared=await groupRequest(undefined,{signal:controller.signal,body:{action:'prepare',roomId:room.id}});if(closed)return;
+     const sessions=ctx.get?.('sessions')??ctx.sessions;await sessions.refresh();if(closed)return;
+@@ -61,9 +81,11 @@
+     if(!conversation?.registerComposerTransport)throw Error('NATIVE_COMPOSER_EXTENSION_MISSING');
+     stopMentions=mentionProvider.bind(ctx.get?.('inputTriggers')??ctx.inputTriggers,prepared.sessionId,room.id);
+     dispose=conversation.registerComposerTransport(prepared.sessionId,{submit:args=>callbacks.current.onSubmit(args),cancel:()=>callbacks.current.onCancel()});
++    const sidebar=ctx.get?.('sidebarRight');if(!sidebar?.registerPanelSession)throw Error('NATIVE_SIDEBAR_EXTENSION_MISSING');
++    stopSidebar=sidebar.registerPanelSession('naumi-conversation',prepared.sessionId);
+     setBinding({sessionId:prepared.sessionId,reference:ref});
+    }catch(e){if(!closed){console.error('Naumi group composer:',e);setError(e.message==='NATIVE_COMPOSER_EXTENSION_MISSING'?'原生输入区扩展尚未加载，请更新工作台。':groupError(e));}}})();
+-   return()=>{closed=true;controller.abort();dispose?.();stopMentions?.();ref?.release();};
++   return()=>{closed=true;controller.abort();dispose?.();stopMentions?.();stopSidebar?.();ref?.release();};
+   },[room.id]);
+   return h('div',{className:'nbc-native-dock','data-native-composer':binding?.sessionId??'loading'},workStatus,error?h('div',{className:'nbc-error',role:'alert'},error):binding&&native?.SessionProvider?h(native.SessionProvider,{session:binding.reference},native.renderFactorySlot('naumi.group.composer',{groupBusy:busy,placeholder:'发送消息，@ 提及成员',accessory})):h('div',{className:'nbc-loading',role:'status'},'载入输入区…'));
+  }
+@@ -94,7 +116,7 @@
+   const stopReply=async()=>{setError('');try{for(const r of groupInterruptTargets(replies))await groupRequest(undefined,{body:{action:'interrupt',roomId:room.id,replyId:r.id}});void refresh.current?.();}catch(e){if(alive.current)setError(groupError(e));}};
+   const targets=room.members.filter(m=>bots.some(b=>b.id===m.botId&&b.status==='active')),working=roomWorking(data),selectTask=t=>{if(!t)return;update({...draft,taskId:t.id,targets:[]});setDrawer(null);};
+   const botWorking=id=>(data?.tasks??[]).some(t=>t.targetBotId===id&&['starting','running'].includes(t.status));
+-  const bubble=reply=>{if(reply.type==='relay'&&!live[reply.id]?.text&&!live[reply.id]?.files?.length)return null;const bot=bots.find(b=>b.id===reply.botId),view=live[reply.id],text=reply.type==='task-message'?reply.text:reply.state==='completed'?reply.text:view?.text,active=['queued','starting','sent'].includes(reply.state);return h('article',{key:reply.id,className:'nbc-message nbc-assistant','data-reply-id':reply.id},h('div',{className:'nbc-message-avatar'},bot?h(Avatar,{bot,state:active||botWorking(reply.botId)?'running':'idle'}):null),h('div',{className:'nbc-message-body'},h('div',{className:'nbc-speaker'},label(reply.botId)),text?h('div',{className:'nbc-bubble'},h(Markdown,{text})):active?h('div',{className:'nbc-typing',role:'status','aria-label':label(reply.botId)+'正在回复'},h('i'),h('i'),h('i')):h('div',{className:'nbc-bubble nbc-interrupted'},reply.state==='blocked'?'需要你确认':'回复未完成',h('button',{type:'button',onClick:()=>openSession(reply.sessionId)},'查看会话')),h(Files,{files:reply.files??view?.files}),reply.taskId&&h('button',{type:'button',className:'nbc-task-link',onClick:()=>selectTask((data?.tasks??[]).find(t=>t.id===reply.taskId))},'调整这项任务')))};
++  const bubble=reply=>{if(reply.type==='relay'&&!live[reply.id]?.text&&!live[reply.id]?.files?.length)return null;const bot=bots.find(b=>b.id===reply.botId),view=live[reply.id],text=reply.type==='task-message'?reply.text:reply.state==='completed'?reply.text:view?.text,active=['queued','starting','sent'].includes(reply.state);return h('article',{key:reply.id,className:'nbc-message nbc-assistant','data-reply-id':reply.id},h('div',{className:'nbc-message-avatar'},bot?h(Avatar,{bot,state:active||botWorking(reply.botId)?'running':'idle'}):null),h('div',{className:'nbc-message-body'},h('div',{className:'nbc-speaker'},label(reply.botId)),text?h('div',{className:'nbc-bubble'},h(Markdown,{text})):active?h('div',{className:'nbc-typing',role:'status','aria-label':label(reply.botId)+'正在回复'},h('i'),h('i'),h('i')):h('div',{className:'nbc-bubble nbc-interrupted'},reply.state==='blocked'?'需要你确认':'回复未完成',h('button',{type:'button',onClick:()=>openSession(reply.sessionId)},'查看会话')),h(Files,{files:reply.files??view?.files,native,taskId:reply.taskId}),reply.taskId&&h('button',{type:'button',className:'nbc-task-link',onClick:()=>selectTask((data?.tasks??[]).find(t=>t.id===reply.taskId))},'调整这项任务')))};
+   const messages=groupTimeline(posts,data?.activity).map(row=>{
+    if(row.type==='user')return h('article',{key:row.id,className:'nbc-message nbc-user'},h('div',{className:'nbc-message-body'},row.taskId&&h('div',{className:'nbc-speaker'},'补充任务'),h('div',{className:'nbc-bubble'},h(Markdown,{text:row.text}),row.attachments?.map((f,i)=>h('span',{key:i,className:'nbc-attachment'},f.name??f.file?.name??'附件')))));
+    if(row.type==='task-state')return h('div',{key:row.id,className:'nbc-task-receipt','data-task-id':row.taskId,'data-task-status':row.status},h('span',null,label(row.botId),' · ',taskLabel(row)),h('button',{type:'button',onClick:()=>selectTask((data?.tasks??[]).find(t=>t.id===row.taskId))},row.subject));
+@@ -114,7 +136,7 @@
+      !data&&!readError&&h('div',{className:'nbc-loading',role:'status'},'载入中…'),
+      data&&posts.length===0&&h('div',{className:'nbc-empty'},h(Faces,{members:room.members,bots}),h('h2',null,room.name)),
+      posts.length>=50&&!end&&h('button',{type:'button',className:'nbc-history',onClick:loadOlder,disabled:loadingOlder},loadingOlder?'载入中…':'更早的消息'),messages)),
+-    drawer==='tasks'&&h(TaskDrawer,{tasks:data?.tasks??[],bots,onClose:()=>setDrawer(null),onSelect:selectTask}),
++    drawer==='tasks'&&h(TaskDrawer,{tasks:data?.tasks??[],bots,native,onClose:()=>setDrawer(null),onSelect:selectTask}),
+     drawer==='members'&&h('aside',{className:'nbc-drawer','aria-label':'群成员'},h('header',null,h('h3',null,'群成员'),action('关闭成员',()=>setDrawer(null),'close')),room.members.map(m=>{const b=bots.find(b=>b.id===m.botId);return h('div',{key:m.botId,className:'nbc-person'},b&&h(Avatar,{bot:b,staticPreview:true}),h('strong',null,label(m.botId)),m.botId===room.defaultBotId&&h('span',null,'默认接话'));}))
+    ),
+    h(NativeComposer,{room,native,busy:replies.some(r=>['queued','starting','sent'].includes(r.state)),onSubmit:send,onCancel:stopReply,accessory,workStatus:h(WorkIndicator,{rows:groupWorkMembers(room,data),bots,stale:!!readError,onAll:()=>setDrawer('tasks'),onSelect:row=>{if(row.tasks.length>1)setDrawer('tasks');else{const id=row.tasks[0]?.targetSessionId??row.replies[0]?.sessionId;if(id)openSession(id);}}})})
+diff --git a/plugins/naumi-enterprise/assets/bot-sidebar-model.js b/plugins/naumi-enterprise/assets/bot-sidebar-model.js
+--- a/plugins/naumi-enterprise/assets/bot-sidebar-model.js
++++ b/plugins/naumi-enterprise/assets/bot-sidebar-model.js
+@@ -71,3 +71,9 @@
+ }
+ let shared;
+ export function botCatalog(){return shared??=createBotCatalog();}
++
++/** Success messages expire; drag guidance/errors have their own lifetime. */
++export function transientDragNotice(publish,{schedule=setTimeout,cancel=clearTimeout}={}){
++ let timer=null;const clear=()=>{if(timer!==null)cancel(timer);timer=null;};
++ return {set(value){clear();publish(value);if(['群聊已创建','成员已加入群聊','顺序已保存'].includes(value))timer=schedule(()=>{timer=null;publish('');},3000);},dispose:clear};
++}
+diff --git a/plugins/naumi-enterprise/assets/bot-sidebar.js b/plugins/naumi-enterprise/assets/bot-sidebar.js
+--- a/plugins/naumi-enterprise/assets/bot-sidebar.js
++++ b/plugins/naumi-enterprise/assets/bot-sidebar.js
+@@ -2,7 +2,7 @@
+ import {createBotAvatar} from './bot-avatar.js';
+ import {EXPERIENCE_EVENT,EXPERIENCE_ACTIONS,advancedEmployeeAccess} from './employee-experience-model.js';
+ import {taskActivity,employeeTaskState,employeeTasks,receptionTarget} from './bot-task-model.js';
+-import {MODE_KEY,navigationMode,botActivity,botSummary,botTone,botCatalog,currentSessionId,botSelected} from './bot-sidebar-model.js';
++import {MODE_KEY,transientDragNotice,navigationMode,botActivity,botSummary,botTone,botCatalog,currentSessionId,botSelected} from './bot-sidebar-model.js';
+ import {CHAT_PANEL,CHAT_EVENT,PIN_KEY,ORDER_KEY,pendingBotGroup,readBotOrder,writeBotOrder,reorderBotIds,groupBotIds,groupRequest,groupError,groupCatalog,conversationRows,roomPreview,roomWorking} from './bot-chat-model.js';
+ import {PRIMARY_PANEL,CREATE_BOT_EVENT,primaryBot,enterBotMode} from './primary-bot.js';
+ 
+@@ -33,7 +33,9 @@
+   function Navigation(props){
+       const [mode,setMode]=useState(()=>{try{return navigationMode(localStorage.getItem(MODE_KEY));}catch{return 'threads';}}),[search,setSearch]=useState(''),[error,setError]=useState(null);
+       const [pinned,setPinned]=useState(()=>{try{return localStorage.getItem(PIN_KEY);}catch{return null;}}),[adding,setAdding]=useState(false),addRef=useRef(null),lastNative=useRef(null),entryIntent=useRef(0);
+-      const [order,setOrder]=useState(()=>readBotOrder()),[selected,setSelected]=useState([]),[drop,setDrop]=useState(null),[busy,setBusy]=useState(false),[dragNotice,setDragNotice]=useState(''),[retry,setRetry]=useState(()=>pendingBotGroup());
++      const [order,setOrder]=useState(()=>readBotOrder()),[selected,setSelected]=useState([]),[drop,setDrop]=useState(null),[busy,setBusy]=useState(false),[dragNotice,publishDragNotice]=useState(''),[retry,setRetry]=useState(()=>pendingBotGroup());
++      const notice=useRef(null);notice.current??=transientDragNotice(publishDragNotice);const setDragNotice=value=>notice.current.set(value);
++      useEffect(()=>()=>notice.current.dispose(),[]);
+       const [arrived,setArrived]=useState(null);
+       useEffect(()=>{if(!arrived)return;const timer=setTimeout(()=>setArrived(null),640);return()=>clearTimeout(timer);},[arrived]);
+       const dragging=useRef(null),dropRef=useRef(null),mutation=useRef(null),flight=useRef(false),anchor=useRef(null),alive=useRef(true);
+diff --git a/plugins/naumi-enterprise/assets/model-connections.js b/plugins/naumi-enterprise/assets/model-connections.js
+--- a/plugins/naumi-enterprise/assets/model-connections.js
++++ b/plugins/naumi-enterprise/assets/model-connections.js
+@@ -28,9 +28,9 @@
+   const locked=busy||conflict||!data?.writable,change=(field,value)=>{if(['baseURL','api'].includes(field))resetDiscovery();setDraft(d=>({...d,[field]:value}));};
+   const configuredIds=draft?[...new Set(draft.modelText.split(/\r?\n/).map(id=>id.trim()).filter(Boolean))]:[];
+   const officialFor=id=>data?.specs?.models?.find(m=>m.id===id);
+-  function budget(id){const prior=draft.models?.find(m=>m.id===id),spec=officialFor(id);let output=prior?.maxTokens??Math.min(128000,spec?.maxOutputTokens??128000);if(spec&&output>=spec.contextWindow)output=Math.max(1,Math.floor(spec.contextWindow/2));const cap=spec?Math.min(spec.contextWindow,spec.maxInputTokens?spec.maxInputTokens+Number(output):Infinity):prior?.contextLimit??prior?.contextWindow;return {prior,spec,context:prior?.contextWindow??(spec?.conditional?undefined:cap),output:prior?.maxTokens??(spec?output:undefined),cap,outputCap:spec?.maxOutputTokens??prior?.outputLimit??prior?.maxTokens};}
+-  function changeBudget(id,field,raw){const value=raw===''?'':Number(raw);setDraft(d=>{const prior=d.models?.find(m=>m.id===id)??{id},next={...prior,[field]:value},spec=officialFor(id);if(field==='maxTokens'&&spec?.maxInputTokens&&value!==''&&next.contextWindow>spec.maxInputTokens+value)next.contextWindow=spec.maxInputTokens+value;return {...d,models:[...(d.models??[]).filter(m=>m.id!==id),next]};});}
+-  function useOfficial(id){const b=budget(id);if(!b.spec)return;setDraft(d=>({...d,models:[...(d.models??[]).filter(m=>m.id!==id),{...b.prior,id,contextWindow:b.cap,maxTokens:b.output}]}));}
++  function budget(id){const prior=draft.models?.find(m=>m.id===id),spec=officialFor(id);let output=prior?.maxTokens??Math.min(128000,spec?.maxOutputTokens??128000);if(spec&&output>=spec.contextWindow)output=Math.max(1,Math.floor(spec.contextWindow/2));const cap=spec?Math.min(spec.contextWindow,spec.maxInputTokens?spec.maxInputTokens+Number(output):Infinity):prior?.contextLimit??prior?.contextWindow;return {prior,spec,context:prior?.contextWindow??(spec?.conditional?undefined:cap),output:prior?.maxTokens??(spec?output:undefined),cap,outputCap:spec?.maxOutputTokens??undefined};}
++  function changeBudget(id,field,raw){const value=raw===''?'':Number(raw);setDraft(d=>{const prior=d.models?.find(m=>m.id===id)??{id};return {...d,models:[...(d.models??[]).filter(m=>m.id!==id),{...prior,[field]:value}]};});}
++  function useOfficial(id){const b=budget(id);if(!b.spec)return;const output=b.spec.maxOutputTokens??b.output,cap=Math.min(b.spec.contextWindow,b.spec.maxInputTokens?b.spec.maxInputTokens+Number(output):Infinity),context=b.spec.conditional?Math.min(b.context??cap,cap):cap;setDraft(d=>({...d,models:[...(d.models??[]).filter(m=>m.id!==id),{...b.prior,id,contextWindow:context,maxTokens:output}]}));}
+   function reasoning(id){const m=draft.models?.find(m=>m.id===id)??{id},spec=m.reasoningOfficial;const preset=m.reasoningPreset??(m.reasoningEfforts===false?'disabled':m.reasoningEfforts===undefined?'inherit':spec&&JSON.stringify(m.reasoningEfforts)===JSON.stringify(spec.efforts)&&m.reasoningMode===spec.mode?'official':'custom');return {m,spec,preset,efforts:preset==='official'?spec?.efforts:preset==='custom'?m.reasoningEfforts:undefined};}
+   function changeReasoning(id,values){setDraft(d=>({...d,models:[...(d.models??[]).filter(m=>m.id!==id),{...d.models?.find(m=>m.id===id),id,...values}]}));}
+   const commonEfforts=draft?levels.filter(level=>configuredIds.length&&configuredIds.every(id=>Object.hasOwn(reasoning(id).efforts??{},level))):[];
+diff --git a/plugins/naumi-enterprise/model-specs.js b/plugins/naumi-enterprise/model-specs.js
+--- a/plugins/naumi-enterprise/model-specs.js
++++ b/plugins/naumi-enterprise/model-specs.js
+@@ -6,18 +6,18 @@
+ const capacity=(m,p)=>({contextWindow:m?.contextWindow??p.defaultContextWindow??1000000,maxTokens:m?.maxTokens??p.defaultMaxTokens??128000});
+ export function modelSpecView(model,provider={}){
+  const spec=officialSpec(model.id),configured=capacity(model,provider);
+- return {...model,...configured,official:spec,contextLimit:spec?Math.min(spec.contextWindow,spec.maxInputTokens?spec.maxInputTokens+configured.maxTokens:Infinity):configured.contextWindow,outputLimit:spec?.maxOutputTokens??configured.maxTokens};
++ return {...model,...configured,official:spec,contextLimit:spec?Math.min(spec.contextWindow,spec.maxInputTokens?spec.maxInputTokens+configured.maxTokens:Infinity):configured.contextWindow,outputLimit:spec?.maxOutputTokens??null};
+ }
+ /** Exact IDs only. Documented limits and connection budgets remain distinct. */
+ export function configureModelSpec(input,previous,provider={}, {reset=false}={}){
+  const spec=officialSpec(input.id),old=capacity(previous,provider),result={...previous,...input};
+  if(!spec){
+   if(input.contextWindow!==undefined&&(!previous||input.contextWindow>old.contextWindow))fail('MODEL_SPEC_UNVERIFIED');
+-  if(input.maxTokens!==undefined&&(!previous||input.maxTokens>old.maxTokens))fail('MODEL_SPEC_UNVERIFIED');
+-  if(input.contextWindow!==undefined||input.maxTokens!==undefined){const c=input.contextWindow??old.contextWindow,o=input.maxTokens??old.maxTokens;if(o>=c)fail('MODEL_TOKEN_BUDGET');}
++
++  if(input.contextWindow!==undefined||input.maxTokens!==undefined){const c=input.contextWindow??old.contextWindow,o=input.maxTokens??old.maxTokens;if(!Number.isSafeInteger(c)||!Number.isSafeInteger(o)||c<1||o<1||o>=c)fail('MODEL_TOKEN_BUDGET');}
+   return result;
+  }
+- const outLimit=spec.maxOutputTokens??old.maxTokens;
++ const outLimit=spec.maxOutputTokens??(spec.contextWindow-1);
+  let output=input.maxTokens??old.maxTokens;
+  if(input.maxTokens!==undefined&&!reset&&output>outLimit)fail('MODEL_OUTPUT_RANGE');
+  output=Math.min(output,outLimit);
+diff --git a/scripts/sync-naumi.mjs b/scripts/sync-naumi.mjs
+--- a/scripts/sync-naumi.mjs
++++ b/scripts/sync-naumi.mjs
+@@ -1,4 +1,5 @@
+ import fs from 'node:fs';
++import {installNativeDeliveryExtensions} from './native-delivery-extension.mjs';
+ import path from 'node:path';
+ import {installReasoningDefaults} from './native-reasoning-extension.mjs';
+ import {installAgentTriggers} from './native-agent-mentions-extension.mjs';
+@@ -30,6 +31,7 @@
+ const serialized=JSON.stringify(profile,null,2)+'\n';
+ if(fs.readFileSync(manifest,'utf8')!==serialized)fs.writeFileSync(manifest,serialized);
+ console.log('NAUMI_SYNC packages=3 bundle_enabled=1');
++installNativeDeliveryExtensions(path.resolve('node_modules'));
+ installNativeComposer(path.resolve('node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'));
+ installAgentTriggers(path.resolve('node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js'));
+ installNativeSettings(path.resolve('node_modules/@deepseek-ai/dsh-client-ui-settings-general/lib/client.js'));
+diff --git a/scripts/verify-official-model-specs.mjs b/scripts/verify-official-model-specs.mjs
+--- a/scripts/verify-official-model-specs.mjs
++++ b/scripts/verify-official-model-specs.mjs
+@@ -17,7 +17,7 @@
+  const ctxField=panel.getByLabel('gpt-6.1-sol 上下文预算',{exact:true}),outField=panel.getByLabel('gpt-6.1-sol 输出预算',{exact:true});await ctxField.fill('1050001');await panel.getByRole('button',{name:'保存',exact:true}).click();check('browser_blocks_out_of_range_context',await ctxField.evaluate(el=>!el.checkValidity()));check('invalid_form_does_not_persist',(await call()).value.revision===live.revision);
+  await ctxField.fill('600000');await outField.fill('32000');await panel.getByRole('button',{name:'保存',exact:true}).click();await panel.getByRole('heading',{name:'测试连接',exact:true}).waitFor();live=(await call()).value;check('custom_budgets_persist_through_actual_settings',live.groups[0].models[0].contextWindow===600000&&live.groups[0].models[0].maxTokens===32000);const persisted=parse(fs.readFileSync(path.join(profile,'cordis.patch.yml'),'utf8')).find(x=>x.id==='llm-pi-ai').config.providers.existing;check('configuration_file_contains_real_numbers',persisted.models[0].contextWindow===600000&&persisted.models[0].maxTokens===32000&&persisted.apiKeyEnv==='DISCOVERY_FIXTURE_KEY');check('raw_model_metadata_is_not_materialized',persisted.models.every(m=>!Object.hasOwn(m,'input')&&!Object.hasOwn(m,'compat')));
+  const invalid=await call({action:'save',id:'existing',expectedRevision:live.revision,displayName:'测试连接',baseURL:apiURL,api:'openai-completions',models:[{id:'gpt-6.1-sol',contextWindow:2000000,maxTokens:128000}]});check('server_independently_rejects_bypassed_ui',invalid.status===400&&invalid.value.error==='MODEL_CONTEXT_RANGE');check('failed_range_write_leaves_revision_unchanged',(await call()).value.revision===live.revision);
+- await panel.getByRole('button',{name:'编辑',exact:true}).click();await row.getByRole('button',{name:'官方值',exact:true}).click();check('restore_official_context_respects_input_plus_output',await ctxField.inputValue()==='954000'&&await outField.inputValue()==='32000');await outField.fill('16000');check('lower_output_also_lowers_input_compatible_context',await ctxField.inputValue()==='938000');await ctxField.fill('600000');await outField.fill('32000');
++ await panel.getByRole('button',{name:'编辑',exact:true}).click();await row.getByRole('button',{name:'官方值',exact:true}).click();check('restore_official_context_respects_input_plus_output',await ctxField.inputValue()==='1050000'&&await outField.inputValue()==='128000');await outField.fill('16000');check('editing_output_never_mutates_context',await ctxField.inputValue()==='1050000');await ctxField.fill('600000');await outField.fill('32000');
+  for(const width of [1360,580,360]){await page.setViewportSize({width,height:1080});check('responsive_'+width,await panel.evaluate(el=>el.scrollWidth<=el.clientWidth+2));}
+  await page.screenshot({path:path.join(e,'model-specs-narrow.png')});await page.setViewportSize({width:1360,height:1080});await panel.locator('.nm-specs').screenshot({path:path.join(e,'model-specs.png')});check('no_inference_and_no_page_errors',inferenceRequests.length===0&&errors.length===0);
+  fs.writeFileSync(path.join(e,'UI_HTTP.json'),JSON.stringify({status:'PASS',passed:checks.length,checks,pageErrors:errors,inferenceCalls:0,realSupplierCalls:0,liveConfigurationWrites:0},null,2)+'\n');console.log('SPEC_UI_COMPLETE checks='+checks.length+' errors='+errors.length+' inference=0');
+diff --git a/scripts/native-delivery-extension.mjs b/scripts/native-delivery-extension.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/native-delivery-extension.mjs
+@@ -0,0 +1,86 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import {createHash,randomUUID} from 'node:crypto';
++export const SIDEBAR_SHA='45868a5ae021b850f6ee6451b6d1168d3c72ddea81b3073b6cfbbebaf23c5257';
++export const DELIVERABLES_SHA='0aa3fc762aa1debf106a67dccfbb7a640f40de0c774a2b091a8ddc6730257da5';
++const sha=s=>createHash('sha256').update(s).digest('hex');
++const SIDEBAR_MARK='Naumi explicit panel Session v1',FILES_MARK='Naumi shared native deliverables v1';
++function transform(original,expected,mark,edit){
++ if(original.includes(mark))throw Error('NATIVE_DELIVERY_USE_ORIGINAL_FOR_TRANSFORM');
++ if(sha(original)!==expected)throw Error('NATIVE_DELIVERY_UPSTREAM_CHANGED');
++ let code=original;const replace=(a,b)=>{if(code.split(a).length!==2)throw Error('NATIVE_DELIVERY_ANCHOR_CHANGED '+a.slice(0,70));code=code.replace(a,b);};
++ edit(replace);return code;
++}
++/** Explicit leases only. Native views still own retain, persisted tabs, mount,
++ * adoption, focus, resources and disposal. No external access to private maps. */
++export function extendNativeSidebar(original){return transform(original,SIDEBAR_SHA,SIDEBAR_MARK,replace=>{
++ replace('const views = new SidebarSessionViews(ctx.sessions);',`const views = new SidebarSessionViews(ctx.sessions);
++            // ${SIDEBAR_MARK}
++            const panelSessions = (0, _deepseek_ai_dsh_client_store.createSnapshotStore)({});
++            const panelLeases = new Map();
++            const registerPanelSession = (panelId, sessionId) => {
++                if(!panelId || !sessionId)throw Error('SIDEBAR_PANEL_SESSION_REQUIRED');
++                if(panelLeases.has(panelId))throw Error('SIDEBAR_PANEL_SESSION_IN_USE');
++                const lease = {};panelLeases.set(panelId,lease);
++                panelSessions.set({...panelSessions.getSnapshot(),[panelId]:sessionId});
++                return () => {
++                    if(panelLeases.get(panelId)!==lease)return;
++                    panelLeases.delete(panelId);
++                    const next={...panelSessions.getSnapshot()};delete next[panelId];panelSessions.set(next);
++                };
++            };`);
++ replace('views.select(current.getSnapshot().key);',`const panelId=ctx.layout.panelInfo.getSnapshot().activePanelId;
++                    views.select(panelId === null ? current.getSnapshot().key : panelSessions.getSnapshot()[panelId]);`);
++ replace('const unsubscribe = current.subscribe(sync);',`const unsubscribe = current.subscribe(sync);
++                const unsubscribePanel=ctx.layout.panelInfo.subscribe(sync);
++                const unsubscribeLeases=panelSessions.subscribe(sync);`);
++ replace('unsubscribe();\n\t\t\t\t\tviews.dispose();',`unsubscribe();unsubscribePanel();unsubscribeLeases();
++                    panelLeases.clear();
++                    views.dispose();`);
++ replace('ctx.effect(() => ctx.slots.inject("contextMenu.icon",',`controller.registerPanelSession=registerPanelSession;
++            ctx.effect(() => ctx.slots.inject("contextMenu.icon",`);
++ replace('show(layout.panelInfo.getSnapshot().activePanelId === null ? selected?.sessionId : void 0);',`const panelId=layout.panelInfo.getSnapshot().activePanelId;
++                    show(panelId === null || panelSessions.getSnapshot()[panelId] !== undefined ? selected?.sessionId : void 0);`);
++ replace('function RightbarRoot({ usePanelInfo, useViews, ...props }) {\n\t\t\tconst visible = usePanelInfo((info) => info.activePanelId === null);',`function RightbarRoot({ usePanelInfo, useViews, usePanelSessions, ...props }) {
++            const panelId=usePanelInfo(info=>info.activePanelId);
++            const leases=usePanelSessions(value=>value);
++            const visible=panelId===null || leases[panelId]!==undefined;`);
++ replace('hooks: { views: views.source },\n\t\t\t\t\t\t\tmountView:', 'hooks: { views: views.source, panelSessions },\n\t\t\t\t\t\t\tmountView:');
++ });}
++/** One upstream spec/controller/component for both turn tails and group cards. */
++export function extendNativeDeliverables(original){return transform(original,DELIVERABLES_SHA,FILES_MARK,replace=>{
++ replace('return matched === null ? null : (0, react_jsx_runtime.jsx)(Deliverables, {\n\t\t\t\t...props,\n\t\t\t\tmatched\n\t\t\t});', `return matched === null ? null : props.renderFactorySlot('naumi.native.deliverables',{matched,openFile:props.openFile});`);
++ replace('function Deliverables({ matched, openFile,', 'function Deliverables({ matched, previewPresented, openFile,');
++ replace('openFile(file.path);', 'if(previewPresented)previewPresented(file);else openFile(file.path);');
++ replace('ctx.slots.inject("conversation.chat.turnTail", () => ctx.slots.register({',`// ${FILES_MARK}
++            const nativeDeliverablesSpec = {`);
++ replace('}, DeliverablesTail));',`};
++            ctx.slots.inject("conversation.chat.turnTail", () => ctx.slots.register({name:"conversation.chat.turnTail",id:"@deepseek-ai/dsh-client-ui-deliverables"}, DeliverablesTail));
++            ctx.slots.inject("main", () => ctx.slots.registerFactory({
++                ...nativeDeliverablesSpec,name:'naumi.native.deliverables',scope:'session'
++            }, function SharedNativeDeliverables(props){
++                const previewPresented=file=>{
++                    void Promise.resolve().then(()=>props.resolvePreviewPath?.(file) ?? file.snapshot?.path ?? file.path)
++                    .then(path=>ctx.sidebarRight.openResource(sessionFileAddress(props.sessionId,path)))
++                    .catch(error=>props.onPreviewError ? props.onPreviewError(error) : console.error('File preview failed:',error));
++                };
++                return (0,react_jsx_runtime.jsx)(Deliverables,{...props,previewPresented:props.files ? previewPresented : undefined,matched:props.matched ?? {changes:null,presented:props.files}});
++            }));`);
++ });}
++export function installNativeDelivery(file,kind){
++ const extend=kind==='sidebar'?extendNativeSidebar:extendNativeDeliverables,expected=kind==='sidebar'?SIDEBAR_SHA:DELIVERABLES_SHA;
++ const before=fs.readFileSync(file,'utf8'),backup=file+'.naumi-original';
++ const original=sha(before)===expected?before:fs.existsSync(backup)?fs.readFileSync(backup,'utf8'):null;
++ if(original===null||sha(original)!==expected)throw Error('NATIVE_DELIVERY_ORIGINAL_CHANGED');
++ const after=extend(original);
++ if(before===after)return {changed:false,sha256:sha(after)};
++ if(sha(before)!==expected)throw Error('NATIVE_DELIVERY_EXTENSION_CHANGED');
++ if(fs.existsSync(backup)&&sha(fs.readFileSync(backup))!==expected)throw Error('NATIVE_DELIVERY_BACKUP_CHANGED');
++ if(!fs.existsSync(backup))fs.writeFileSync(backup,before);
++ const temp=file+'.'+randomUUID()+'.tmp';fs.writeFileSync(temp,after);fs.renameSync(temp,file);
++ return {changed:true,originalSHA256:expected,sha256:sha(after)};
++}
++export function installNativeDeliveryExtensions(root){return {
++ sidebar:installNativeDelivery(path.join(root,'@deepseek-ai/dsh-client-ui-sidebar-right/lib/client.js'),'sidebar'),
++ deliverables:installNativeDelivery(path.join(root,'@deepseek-ai/dsh-client-ui-deliverables/lib/client.js'),'deliverables')
++};}
+diff --git a/scripts/verify-group-files-output-ui.mjs b/scripts/verify-group-files-output-ui.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/verify-group-files-output-ui.mjs
+@@ -0,0 +1,74 @@
++import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import http from 'node:http';import assert from 'node:assert/strict';import {randomUUID,createHash} from 'node:crypto';import {spawn} from 'node:child_process';import {pathToFileURL} from 'node:url';import {stringify,parse} from 'yaml';import {chromium} from '../desktop/node_modules/playwright/index.mjs';import {BotDirectory} from '../plugins/naumi-enterprise/bots.js';import {BotGroupStore} from '../plugins/naumi-enterprise/bot-group-store.js';import {extendNativeSidebar,extendNativeDeliverables,SIDEBAR_SHA,DELIVERABLES_SHA} from './native-delivery-extension.mjs';
++const root=process.cwd(),out=path.resolve(process.env.GROUP_FIX_EVIDENCE??'evidence/group-files-output'),temporary=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-group-output-ui-')),home=path.join(temporary,'home'),profile=path.join(home,'profiles/web'),work=path.join(temporary,'files');fs.mkdirSync(out,{recursive:true});fs.mkdirSync(work);fs.mkdirSync(path.join(profile,'node_modules/@naumi'),{recursive:true});
++// All host changes and writes are in this fresh profile. Shared dependencies stay read-only.
++for(const[name,folder]of [['dsh-enterprise','naumi-enterprise'],['dsh-ui-layout','naumi-ui-layout'],['dsh-sidebar-browser','naumi-sidebar-browser']])fs.cpSync(path.join(root,'plugins',folder),path.join(profile,'node_modules/@naumi',name),{recursive:true});fs.symlinkSync(path.join(root,'node_modules/@deepseek-ai'),path.join(profile,'node_modules/@deepseek-ai'),'junction');
++for(const e of fs.readdirSync(path.join(root,'node_modules'),{withFileTypes:true})){if(e.name.startsWith('.')||['@naumi','@deepseek-ai'].includes(e.name))continue;const t=path.join(profile,'node_modules',e.name);if(!fs.existsSync(t))fs.symlinkSync(path.join(root,'node_modules',e.name),t,'junction');}
++const enterprise=path.join(profile,'node_modules/@naumi/dsh-enterprise'),fixtureKey=randomUUID();
++const mod=n=>pathToFileURL(path.join(root,'node_modules/@deepseek-ai',n,'lib/index.js')).href;
++fs.writeFileSync(path.join(enterprise,'fixture-seed.mjs'),`
++import {randomUUID} from 'node:crypto';import {createAssistantMessage} from ${JSON.stringify(mod('dsh-llm'))};import {NativeToolExecutor} from ${JSON.stringify(mod('dsh-tool-executor-native'))};
++export function seedFixture(ctx){ctx.inject(['agents','sessions','agentPresets'],scope=>scope.effect(()=>scope.webServer.register({kind:'exact',path:'/fixture/seed',handler:async(req,res)=>{
++ if(req.headers['x-fixture-key']!==${JSON.stringify(fixtureKey)}){res.writeHead(403).end();return;}
++ try{const handles=[];for(let i=0;i<3;i++){
++  const preset=await scope.agentPresets.resolve();const handle=await scope.agents.create({sessionId:'session-'+randomUUID(),meta:{cwd:${JSON.stringify(work)},agentPreset:preset.id},setup:async ac=>{await scope.agentPresets.mount(ac,preset.id);}});handles.push(handle);
++ }
++ const agent=handles[1].agent,session=agent.session;session.append('turn/start',{turn:1});session.append('step/start',{turn:1,step:1});session.append('user/message',{id:'fixture-message',role:'user',source:{kind:'user'},content:[{type:'text',text:'返回验收文件'}]},{surfaceOp:'append'});
++ session.append('assistant/message',{turn:1,step:1,stream:[],message:createAssistantMessage({source:{kind:'model',provider:'fixture',model:'no-inference'},content:[{type:'text',text:'文件已生成。'}]})},{surfaceOp:'append'});
++ const execution=await new NativeToolExecutor(agent.ctx).execute({agent,signal:new AbortController().signal,calls:[{type:'tool-call',id:randomUUID(),name:'present',arguments:JSON.stringify({files:[{path:'group-preview.md',description:'群文件预览验收'},{path:'group-page.html',description:'HTML 预览验收'}]})}]});
++ if(execution.results[0].result.isError)throw Error(JSON.stringify(execution.results[0].result));
++ session.append('step/end',{turn:1,step:1});session.append('turn/end',{turn:1,reason:{kind:'completed'}});await scope.sessions.flush(session);await scope.sessions.flush(handles[0].agent.session);
++ const presented=session.snapshotEvents().find(e=>e.type==='deliverables/presented');if(!presented)throw Error('NO_NATIVE_PRESENT_EVENT');
++ res.setHeader('Content-Type','application/json');res.end(JSON.stringify({source:handles[0].agent.id,source2:handles[2].agent.id,worker:agent.id,files:presented.data.files.map((f,index)=>({...f,sessionId:agent.id,seq:presented.seq,index,turn:1})),nativePresent:true}));
++ }catch(e){res.writeHead(500,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.stack}));}
++}})));}
++`);
++let host=fs.readFileSync(path.join(enterprise,'host.js'),'utf8');host="import {seedFixture} from './fixture-seed.mjs';\n"+host.replace('export function apply(ctx,config) {','export function apply(ctx,config) {\n  seedFixture(ctx);');fs.writeFileSync(path.join(enterprise,'host.js'),host);
++fs.writeFileSync(path.join(work,'group-preview.md'),'# GROUP_NATIVE_PREVIEW\n\n群聊与普通线程使用同一个原生文件预览。\n');fs.writeFileSync(path.join(work,'group-page.html'),'<!doctype html><html><body><h1>GROUP_HTML_PREVIEW</h1></body></html>');
++fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'naumi-group-fix-fixture',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}}));
++fs.writeFileSync(path.join(home,'cordis.patch.yml'),stringify([{id:'ui-theme',config:{preference:'light'}},{id:'session-log-deepseek',disabled:true}]));
++fs.writeFileSync(path.join(profile,'cordis.patch.yml'),stringify([{id:'ui-settings-general',config:{welcomeNoticeVersion:'2026-09-28.1'}},{id:'llm-pi-ai',config:{providers:{fixture:{displayName:'参数验收',api:'openai-completions',baseURL:'http://127.0.0.1:1/v1',apiKeyEnv:'FIXTURE_MODEL_KEY',defaultContextWindow:128000,defaultMaxTokens:16384,models:[{id:'gpt-6.1-sol',contextWindow:600000,maxTokens:16384},{id:'deepseek-flash',contextWindow:1000000,maxTokens:16384},{id:'k3',contextWindow:1000000,maxTokens:16384},{id:'private-alias',contextWindow:400000,maxTokens:16384}]}}}}]));
++const directory=new BotDirectory(path.join(home,'naumi/bots.json'));for(const[i,name]of ['主管','研发','设计'].entries())await directory.create({sessionId:'fixture-bot-'+i,cwd:work},{name,kind:'agent',purpose:'本地验收'});let bots=directory.list().bots;await directory.choosePrimary(bots[0].id,directory.list().revision);await directory.close();
++const sock=http.createServer();await new Promise(r=>sock.listen(0,'127.0.0.1',r));const port=sock.address().port;await new Promise(r=>sock.close(r));const base='http://127.0.0.1:'+port;let output='',browser,activePage;
++const child=spawn(process.execPath,[path.join(root,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'web','--host','127.0.0.1','--port',String(port),'--no-open'],{cwd:root,env:{...process.env,DSH_HOME:home,DSH_TELEMETRY_MODE:'DISABLED',FIXTURE_MODEL_KEY:'fixture-not-a-real-key'},windowsHide:true});child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);const checks=[];const check=(name,v)=>{assert(v,name);checks.push(name);console.log('FIX_UI_PASS '+name);};
++const original=(folder,expected)=>{const file=path.join(root,'node_modules/@deepseek-ai',folder,'lib/client.js'),raw=fs.readFileSync(file,'utf8');return createHash('sha256').update(raw).digest('hex')===expected?raw:fs.readFileSync(file+'.naumi-original','utf8');};
++const originalSidebar=original('dsh-client-ui-sidebar-right',SIDEBAR_SHA),originalDeliverables=original('dsh-client-ui-deliverables',DELIVERABLES_SHA),sidebar=extendNativeSidebar(originalSidebar),deliverables=extendNativeDeliverables(originalDeliverables);
++
++try{
++ let launch;for(let i=0;i<150;i++){launch=output.match(new RegExp('http://127\\.0\\.0\\.1:'+port+'/?\\?token=[A-Za-z0-9_~.%-]+'))?.[0];if(launch)break;if(child.exitCode!==null)throw Error('FIXTURE_BOOT_FAILED '+output.slice(-6000));await new Promise(r=>setTimeout(r,200));}assert(launch,'FIXTURE_BOOT_TIMEOUT '+output.slice(-6000));
++ const exchange=await fetch(launch,{redirect:'manual'}),cookie=exchange.headers.getSetCookie().map(v=>v.split(';')[0]).join('; ');async function call(url,body,header='x-naumi-bot-groups'){const r=await fetch(base+url,{headers:{cookie,'Content-Type':'application/json',[header]:'1',origin:base},...body?{method:'POST',body:JSON.stringify(body)}:{}});const value=await r.json();assert(r.ok,JSON.stringify(value));return value;}
++ const seedRes=await fetch(base+'/fixture/seed',{headers:{cookie,'x-fixture-key':fixtureKey}}),seed=await seedRes.json();assert(seedRes.ok,JSON.stringify(seed));check('real_native_present_executor_event',seed.nativePresent&&seed.files.length===2);
++ const room=await call('/naumi/bot-groups',{action:'create',id:randomUUID(),name:'文件工作群',botIds:bots.slice(0,2).map(b=>b.id),defaultBotId:bots[0].id});
++ const room2=await call('/naumi/bot-groups',{action:'create',id:randomUUID(),name:'另一个工作群',botIds:bots.slice(0,2).map(b=>b.id),defaultBotId:bots[0].id});
++ const store=new BotGroupStore(path.join(home,'naumi/bot-groups.sqlite'));store.db.prepare('UPDATE members SET session_id=? WHERE room_id=? AND bot_id=?').run(seed.source,room.id,bots[0].id);store.db.prepare('UPDATE members SET session_id=? WHERE room_id=? AND bot_id=?').run(seed.source2,room2.id,bots[0].id);store.close();
++ browser=await chromium.launch({headless:true,channel:'chrome'});const context=await browser.newContext({viewport:{width:1480,height:1000},colorScheme:'light'}),page=await context.newPage(),errors=[],inference=[],resourceRequests=[];
++ activePage=page;page.on('console',msg=>{if(['error','warning'].includes(msg.type()))console.log('BROWSER_'+msg.type()+' '+msg.text());});page.on('pageerror',e=>{errors.push(e.message);console.log('PAGE_ERROR '+e.stack);});page.on('request',r=>{const u=new URL(r.url());if(u.pathname==='/api/session/prompt')inference.push(u.pathname);if(/resource|file\//.test(u.pathname))resourceRequests.push(u.pathname);});
++ await page.route('**/*',async route=>{const u=new URL(route.request().url());if(['http:','https:'].includes(u.protocol)&&u.origin!==base)return route.abort();if(u.pathname.startsWith('/plugins/') && /dsh-client-ui-(sidebar-right|deliverables)\/client.js/.test(u.pathname+u.search)){
++   const response=await route.fetch();let body=await response.text();
++   for(const [rawBefore,rawAfter]of [[originalSidebar,sidebar],[originalDeliverables,deliverables]]){
++    const before=rawBefore.replaceAll('\r\n','\n').split('//# sourceMappingURL=')[0].trimEnd(),after=rawAfter.split('//# sourceMappingURL=')[0].trimEnd();
++    if(body.includes(before))body=body.replace(before,()=>after);
++   }
++
++   return route.fulfill({response,body});
++  }
++
++  if(u.pathname==='/naumi/bot-groups'&&route.request().method()==='GET'&&u.searchParams.get('roomId')===room.id){const response=await route.fetch(),v=await response.json();v.posts=[{id:'fixture-post',seq:1,text:'查看文件',createdAt:new Date().toISOString(),replies:[{id:'fixture-reply',botId:bots[1].id,sessionId:seed.worker,state:'completed',text:'文件已生成。',files:seed.files}]}];v.tasks=[{id:'fixture-task',targetBotId:bots[1].id,targetSessionId:seed.worker,sourceSessionId:seed.source,status:'completed',subject:'文件交付',files:seed.files,result:'文件已生成。'}];return route.fulfill({response,json:v});}
++  return route.continue();
++ });
++ await context.addInitScript(({id})=>{if(window!==window.top)return;localStorage.setItem('naumi.navigationMode.v1','bot');sessionStorage.setItem('naumi.groupSelection.v1',id);sessionStorage.setItem('naumi.activePanel','naumi-conversation');},{id:room.id});await page.goto(launch);
++ await page.locator('.nbc-native-dock [contenteditable=true],.nbc-native-dock textarea').first().waitFor();const cards=page.locator('.nbc-timeline [data-presented-file]');await cards.first().waitFor();check('group_uses_native_cards_not_custom_buttons',await cards.count()===2&&await page.locator('.nbc-files').count()===0);
++ const cardClass=await cards.first().getAttribute('class');const preview=cards.first().getByRole('button').first();await preview.click();await page.getByText('GROUP_NATIVE_PREVIEW',{exact:true}).last().waitFor();check('group_markdown_opens_in_native_rightbar',await page.locator('[data-slot="rightbar.session"]').count()>0||await page.getByText('GROUP_NATIVE_PREVIEW',{exact:true}).count()>0);await page.screenshot({path:path.join(out,'group-native-preview.png')});
++ await page.evaluate(({botId,roomId})=>{const source=document.querySelector('[data-bot-id="'+botId+'"]'),target=document.querySelector('[data-group-id="'+roomId+'"]'),dt=new DataTransfer(),r=target.getBoundingClientRect();source.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:dt}));target.dispatchEvent(new DragEvent('dragover',{bubbles:true,dataTransfer:dt,clientX:r.left+25,clientY:r.top+r.height/2}));target.dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:dt,clientX:r.left+25,clientY:r.top+r.height/2}));source.dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:dt}));},{botId:bots[2].id,roomId:room.id});
++ const notice=page.getByRole('status').filter({hasText:'成员已加入群聊'});await notice.waitFor();check('member_join_success_is_visible',true);await notice.waitFor({state:'hidden',timeout:6000});check('member_join_success_expires_without_losing_members',(await call('/naumi/bot-groups')).rooms.find(r=>r.id===room.id).members.length===3);
++ await cards.nth(1).getByRole('button').first().click();await page.locator('iframe').last().waitFor();await page.frameLocator('iframe').last().getByRole('heading',{name:'GROUP_HTML_PREVIEW',exact:true}).waitFor();check('group_html_uses_native_preview',true);
++
++ const draft=page.locator('.nbc-native-dock [contenteditable=true],.nbc-native-dock textarea').first();await draft.fill('未发送的群草稿');
++ await page.locator('[data-group-id="'+room2.id+'"] .naumi-bot-open').click();await page.locator('.nbc-title h1').filter({hasText:'另一个工作群'}).waitFor();await page.locator('.nbc-native-dock [contenteditable=true],.nbc-native-dock textarea').first().waitFor();check('group_switch_no_file_or_draft_leak',await page.locator('.nbc-timeline [data-presented-file]').count()===0&&!await page.locator('.nbc-native-dock').innerText().then(s=>s.includes('未发送的群草稿')));check('other_group_does_not_display_previous_preview',!await page.getByText('GROUP_NATIVE_PREVIEW',{exact:true}).isVisible().catch(()=>false));
++ await page.locator('[data-group-id="'+room.id+'"] .naumi-bot-open').click();await cards.first().waitFor();check('group_draft_restored',await page.locator('.nbc-native-dock').innerText().then(s=>s.includes('未发送的群草稿')));
++ await page.getByRole('button',{name:'任务与文件',exact:true}).click();const taskCard=page.locator('.nbc-drawer [data-presented-file]');await taskCard.first().waitFor();check('task_drawer_uses_same_native_card',await taskCard.first().getAttribute('class')===cardClass);await page.getByRole('button',{name:'打开任务',exact:true}).click();await page.locator('[data-presented-file]').first().waitFor();check('ordinary_thread_reuses_identical_native_component',await page.locator('[data-presented-file]').first().getAttribute('class')===cardClass);await page.locator('[data-presented-file]').first().getByRole('button').first().click();await page.getByText('GROUP_NATIVE_PREVIEW',{exact:true}).last().waitFor();check('ordinary_thread_preview_unaffected',true);
++ // Actual settings form -> owner HTTP CAS -> YAML -> reopen, never inference.
++ await page.getByRole('button',{name:/^(设置|Settings)$/}).click();await page.getByRole('button',{name:'模型连接',exact:true}).click();const panel=page.locator('.nm-connections');await panel.getByRole('button',{name:'编辑',exact:true}).click();const row=id=>panel.getByRole('region',{name:id+' 参数',exact:true}),contextField=id=>panel.getByLabel(id+' 上下文预算',{exact:true}),outputField=id=>panel.getByLabel(id+' 输出预算',{exact:true});
++ await row('gpt-6.1-sol').getByRole('button',{name:'官方值',exact:true}).click();check('explicit_official_restores_output_and_context',await contextField('gpt-6.1-sol').inputValue()==='1050000'&&await outputField('gpt-6.1-sol').inputValue()==='128000');await outputField('gpt-6.1-sol').fill('');await outputField('gpt-6.1-sol').pressSequentially('128000');check('typing_does_not_shrink_context',await contextField('gpt-6.1-sol').inputValue()==='1050000');await row('deepseek-flash').getByRole('button',{name:'官方值',exact:true}).click();await outputField('k3').fill('128000');await outputField('private-alias').fill('128000');
++ await panel.getByRole('button',{name:'保存',exact:true}).click();await panel.getByRole('heading',{name:'参数验收',exact:true}).waitFor();const live=await call('/naumi/model-connections',undefined,'x-naumi-model-connections');check('all_four_output_budgets_persist_without_16K_clamp',live.groups[0].models.map(m=>m.maxTokens).join(',')==='128000,384000,128000,128000');const persisted=parse(fs.readFileSync(path.join(profile,'cordis.patch.yml'),'utf8')).find(p=>p.id==='llm-pi-ai').config.providers.fixture;check('real_numeric_leaves_and_key_reference_preserved',persisted.models.map(m=>m.maxTokens).join(',')==='128000,384000,128000,128000'&&persisted.apiKeyEnv==='FIXTURE_MODEL_KEY');await panel.getByRole('button',{name:'编辑',exact:true}).click();check('reopen_preserves_official_output',await outputField('deepseek-flash').inputValue()==='384000');await outputField('gpt-6.1-sol').fill('128001');check('known_over_limit_rejected_not_silently_clamped',!await outputField('gpt-6.1-sol').evaluate(el=>el.checkValidity()));await outputField('gpt-6.1-sol').fill('128000');await panel.screenshot({path:path.join(out,'model-output-fixed.png')});
++ check('no_page_errors_or_inference',errors.length===0&&inference.length===0);fs.writeFileSync(path.join(out,'UI_HTTP.json'),JSON.stringify({status:'PASS',checks,errors,inference:inference.length,nativePresent:true,scope:'isolated Harness + native executor + actual resource HTTP + browser; group read projection fixture',resourceRequests,temporary},null,2)+'\n');console.log('FIX_UI_COMPLETE checks='+checks.length+' errors='+errors.length+' inference=0');
++}catch(e){if(activePage){console.log('FAIL_BODY '+(await activePage.locator('body').innerText()).slice(-8000));await activePage.screenshot({path:path.join(out,'failure.png')});}throw e;}finally{await browser?.close();child.kill();await new Promise(r=>child.exitCode!==null?r():child.once('close',r));fs.writeFileSync(path.join(out,'fixture.log'),output.replace(/\?token=[A-Za-z0-9_~.%-]+/g,'?token=REDACTED'));}
+diff --git a/scripts/deploy-group-files-output.mjs b/scripts/deploy-group-files-output.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/deploy-group-files-output.mjs
+@@ -0,0 +1,26 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {randomUUID,createHash} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';import {botLiveApi} from './bot-live-api.mjs';import {extendNativeSidebar,extendNativeDeliverables,installNativeDeliveryExtensions,SIDEBAR_SHA,DELIVERABLES_SHA} from './native-delivery-extension.mjs';
++const root=process.cwd(),out=path.join(root,'evidence/group-files-output'),target=path.join(root,'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise'),files=['assets/bot-groups.css','assets/bot-groups.js','assets/bot-sidebar-model.js','assets/bot-sidebar.js','assets/model-connections.js','model-specs.js'];
++const sha=b=>createHash('sha256').update(b).digest('hex'),git=(...a)=>execFileSync('git',a,{encoding:'utf8'}).trim(),atomic=(p,b)=>{const t=p+'.'+randomUUID()+'.tmp';fs.writeFileSync(t,b);fs.renameSync(t,p);};
++assert.equal(git('branch','--show-current'),'main');assert.equal(git('status','--porcelain','--untracked-files=no'),'');fs.mkdirSync(out,{recursive:true});assert(!fs.existsSync(path.join(out,'DEPLOYMENT.json')),'RECEIPT_EXISTS');
++const lock=path.join(root,'runtime/service-alignment.lock'),fd=fs.openSync(lock,'wx');fs.writeFileSync(fd,JSON.stringify({pid:process.pid,source:git('rev-parse','HEAD'),kind:'group-files-output'}));fs.closeSync(fd);
++let stopped=false,done=false;const before=[],native=[],backup=path.join(root,'runtime/group-files-output-backup-'+randomUUID());fs.mkdirSync(backup);
++const shell=name=>{const r=spawnSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-File',path.join(root,name)],{windowsHide:true,stdio:'ignore',timeout:150000});assert.equal(r.status,0,name+' EXIT_STATUS='+r.status);};
++try{
++ const api=await botLiveApi(root),sessions=await api.rpc('session/list',{_request:{}}),tasks=await api.json('/naumi/bot-tasks'),modelsBefore=await api.json('/naumi/model-connections');const budgets=v=>v.groups.map(g=>({id:g.id,models:g.models.map(m=>({id:m.id,contextWindow:m.contextWindow,maxTokens:m.maxTokens}))}));assert(!sessions.items.some(s=>s.running),'RUNNING_SESSIONS');assert(!tasks.tasks.some(t=>['queued','starting','running','waiting'].includes(t.status)),'ACTIVE_TASKS');
++ const protectedNames=['.dsh/.credentials.yaml','.dsh/cordis.patch.yml','.dsh/profiles/web/package.json','.dsh/profiles/web/cordis.patch.yml','.dsh/naumi/bots.json','.dsh/naumi/bot-tasks.json','config/local.json'];
++ for(const f of fs.readdirSync(path.join(root,'.dsh/sessions'),{recursive:true}))if(f.endsWith('.jsonl.zstd'))protectedNames.push('.dsh/sessions/'+f);
++ const protectedHashes=Object.fromEntries(protectedNames.filter(f=>fs.existsSync(path.join(root,f))).map(f=>[f,sha(fs.readFileSync(path.join(root,f)))]));
++ const inventory=Object.fromEntries(fs.readdirSync(target,{recursive:true}).filter(f=>fs.statSync(path.join(target,f)).isFile()).map(f=>[f.replaceAll('\\','/'),sha(fs.readFileSync(path.join(target,f)))]));
++ for(const f of files){const source=path.join(root,'plugins/naumi-enterprise',f),dest=path.join(target,f),old=fs.readFileSync(dest),bytes=fs.readFileSync(source);assert.equal(bytes.toString().replaceAll('\r\n','\n'),execFileSync('git',['show','HEAD:plugins/naumi-enterprise/'+f],{encoding:'utf8'}).replaceAll('\r\n','\n'),'UNCOMMITTED_SOURCE');const p=path.join(backup,'plugin',f);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,old);before.push({file:f,before:sha(old),after:sha(bytes),bytes});}
++ for(const[kind,name,expected,extend]of [['sidebar','sidebar-right',SIDEBAR_SHA,extendNativeSidebar],['deliverables','deliverables',DELIVERABLES_SHA,extendNativeDeliverables]]){const p=path.join(root,'node_modules/@deepseek-ai/dsh-client-ui-'+name+'/lib/client.js'),old=fs.readFileSync(p);assert.equal(sha(old),expected,'NATIVE_RUNTIME_DRIFT');fs.writeFileSync(path.join(backup,kind+'.js'),old);native.push({file:p,before:expected,after:sha(extend(old.toString('utf8'))),bytes:old});}
++ fs.writeFileSync(path.join(out,'DEPLOYMENT_PLAN.json'),JSON.stringify({source:git('rev-parse','HEAD'),backup,files:before.map(({bytes,...r})=>r),native:native.map(({bytes,...r})=>r),protectedHashes,budgetsBefore:budgets(modelsBefore)},null,2)+'\n');
++ console.log('GROUP_FIX_PREPARED running=0 active_tasks=0 backup='+backup);shell('Stop-Naumi.ps1');stopped=true;for(const row of before){assert.equal(sha(fs.readFileSync(path.join(target,row.file))),row.before,'RUNTIME_DRIFT');atomic(path.join(target,row.file),row.bytes);}installNativeDeliveryExtensions(path.join(root,'node_modules'));shell('Start-Naumi.ps1');stopped=false;
++ const loaded=await botLiveApi(root);for(const r of before){assert.equal(sha(fs.readFileSync(path.join(target,r.file))),r.after);if(r.file.startsWith('assets/'))assert.equal(sha(Buffer.from(await(await loaded.request('/naumi/'+r.file)).arrayBuffer())),r.after);}
++ for(const r of native)assert.equal(sha(fs.readFileSync(r.file)),r.after);for(const[f,h]of Object.entries(inventory))if(!files.includes(f))assert.equal(sha(fs.readFileSync(path.join(target,f))),h,'UNRELATED_PLUGIN_CHANGED');for(const[f,h]of Object.entries(protectedHashes))assert.equal(sha(fs.readFileSync(path.join(root,f))),h,'PROTECTED_CHANGED '+f);
++ const html=await(await loaded.request('/')).text(),start=html.indexOf('__DSH_BOOT__'),boot=JSON.parse(html.slice(html.indexOf('=',start)+1,html.indexOf('</script>',start)).trim().replace(/;$/,''));let served='';for(const b of boot.batches)if(b.entries.some(e=>/dsh-client-ui-(sidebar-right|deliverables)$/.test(e)))served+=await(await loaded.request('/'+b.url)).text();assert(served.includes('Naumi explicit panel Session v1')&&served.includes('Naumi shared native deliverables v1'),'NATIVE_SERVED_STALE');
++ const model=await loaded.json('/naumi/model-connections');assert.deepEqual(budgets(model),budgets(modelsBefore));assert(!((await loaded.rpc('session/list',{_request:{}})).items.some(s=>s.running)));
++ const record={status:'PASS',source:git('rev-parse','HEAD'),backend:'http://127.0.0.1:3080',pluginFiles:before.map(({bytes,...r})=>r),nativeFiles:native.map(({bytes,...r})=>r),protectedFiles:Object.keys(protectedHashes).length,credentialsAndModelBudgetsUnchanged:true,unrelatedPluginFiles:Object.keys(inventory).length-files.length,servedNativeExtensions:true,restart:1,running:0,inference:0,backup,clientReloadRequired:true};fs.writeFileSync(path.join(out,'DEPLOYMENT.json'),JSON.stringify(record,null,2)+'\n');console.log('GROUP_FIX_LOADED plugin_files=6 native_extensions=2 http=200 protected=UNCHANGED model_budgets=UNCHANGED running=0 inference=0 exit=0');done=true;
++}finally{
++ if(!done&&before.length){if(!stopped){try{shell('Stop-Naumi.ps1');stopped=true;}catch{}}for(const r of before)atomic(path.join(target,r.file),fs.readFileSync(path.join(backup,'plugin',r.file)));for(const r of native)atomic(r.file,r.bytes);if(stopped)shell('Start-Naumi.ps1');console.error('GROUP_FIX_DEPLOY restored_original_runtime=1');}
++ fs.unlinkSync(lock);
++}
+diff --git a/scripts/package-group-files-output.mjs b/scripts/package-group-files-output.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/package-group-files-output.mjs
+@@ -0,0 +1,73 @@
++import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import assert from 'node:assert/strict';import {createHash} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';
++const root=process.cwd(),out=path.join(root,'evidence/group-files-output'),base=execFileSync('git',['rev-parse','1bee995'],{encoding:'utf8'}).trim(),hash=b=>createHash('sha256').update(b).digest('hex');fs.mkdirSync(out,{recursive:true});
++const files=['.gitattributes','desktop/scripts/prepare-runtime.mjs','plugins/naumi-enterprise/assets/bot-groups.css','plugins/naumi-enterprise/assets/bot-groups.js','plugins/naumi-enterprise/assets/bot-sidebar-model.js','plugins/naumi-enterprise/assets/bot-sidebar.js','plugins/naumi-enterprise/assets/model-connections.js','plugins/naumi-enterprise/model-specs.js','scripts/sync-naumi.mjs','scripts/verify-official-model-specs.mjs','scripts/native-delivery-extension.mjs','scripts/verify-group-files-output-ui.mjs','scripts/deploy-group-files-output.mjs','scripts/package-group-files-output.mjs','tests/group-files-output.test.mjs','tests/bot-folder-motion.test.mjs','tests/naumi-group-work-indicator.test.mjs','docs/implementation/GROUP_FILES_OUTPUT_FIX.md'];
++const rows=[];for(const file of files){const bytes=fs.readFileSync(path.join(root,file)),dest=path.join(out,'original',file);let old=null;try{old=execFileSync('git',['show',base+':'+file],{stdio:['ignore','pipe','pipe']});fs.mkdirSync(path.dirname(dest),{recursive:true});fs.writeFileSync(dest,old);}catch{}rows.push({path:file,before:old?hash(old):null,after:hash(bytes)});}
++const manifest={initialBaseline:'ab34d8343d5bc417e7b54d1a626943e2e84cbf0f',rollbackBaseline:base,branch:'codex/group-files-model-output-20261118',changedFields:['sidebarRight.registerPanelSession','naumi.native.deliverables','model.maxTokens/outputLimit/useOfficial/changeBudget','dragNotice.3000ms'],files:rows};fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
++const python=String.raw`import pathlib,json,zipfile,difflib,sys
++r=pathlib.Path(sys.argv[1]);e=r/'evidence/group-files-output';m=json.loads((e/'manifest.json').read_text());patch=[]
++with zipfile.ZipFile(e/'MODIFIED_FILE.zip','w',zipfile.ZIP_DEFLATED) as z:
++ for row in m['files']:
++  p=row['path'];z.write(r/p,p);old=(e/'original'/p).read_text(encoding='utf-8') if row['before'] else '';new=(r/p).read_text(encoding='utf-8');patch+=['diff --git a/'+p+' b/'+p+'\n'];patch+=['new file mode 100644\n'] if row['before'] is None else [];patch+=list(difflib.unified_diff(old.splitlines(True),new.splitlines(True),fromfile='a/'+p if row['before'] else '/dev/null',tofile='b/'+p))
++(e/'DIFF_FILE.patch').write_text(''.join(patch),encoding='utf-8',newline='\n')
++with zipfile.ZipFile(e/'MODIFIED_FILE.zip') as z:
++ assert z.testzip() is None and len(z.namelist())==len(m['files'])
++print('GROUP_ARTIFACTS_REOPENED files='+str(len(m['files']))+' zip=PASS patch=PASS')
++`;
++process.stdout.write(execFileSync('python',['-X','utf8','-c',python,root],{encoding:'utf8'}));
++const rollback=String.raw`#!/usr/bin/env bash
++set -euo pipefail
++HERE="$(cd -- "$(dirname -- "$0")" && pwd -W)"
++python -X utf8 - "$HERE" "${'$'}{1:?Pass an absolute marked rollback-copy directory}" <<'PY'
++import pathlib,json,hashlib,sys
++e=pathlib.Path(sys.argv[1]).resolve();r=pathlib.Path(sys.argv[2]).resolve();assert (r/'.naumi-group-fix-rollback-copy').is_file(),'COPY_MARKER_REQUIRED';assert r!=e.parents[1],'ACTIVE_WORKSPACE_DENIED'
++m=json.loads((e/'manifest.json').read_text());sha=lambda b:hashlib.sha256(b).hexdigest()
++for row in m['files']:
++ p=(r/row['path']).resolve();assert r in p.parents,'PATH_ESCAPE';assert sha(p.read_bytes())==row['after'],'MODIFIED_COPY_DRIFT'
++ if row['before']:assert sha((e/'original'/row['path']).read_bytes())==row['before'],'ORIGINAL_DRIFT'
++for row in m['files']:
++ p=r/row['path']
++ if row['before']:p.write_bytes((e/'original'/row['path']).read_bytes());assert sha(p.read_bytes())==row['before']
++ else:p.unlink();assert not p.exists()
++print('GROUP_ROLLBACK_PASS restored='+str(sum(bool(x['before']) for x in m['files']))+' removed='+str(sum(not x['before'] for x in m['files']))+' source=UNCHANGED')
++PY
++`;
++fs.writeFileSync(path.join(out,'ROLLBACK.sh'),rollback.replaceAll('\r\n','\n'));fs.chmodSync(path.join(out,'ROLLBACK.sh'),0o755);
++const copy=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-group-fix-rollback-'));fs.writeFileSync(path.join(copy,'.naumi-group-fix-rollback-copy'),'owned isolated test copy\n');for(const dir of ['plugins','tests','scripts'])fs.cpSync(path.join(root,dir),path.join(copy,dir),{recursive:true});for(const file of [...files,'package.json']){const p=path.join(copy,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.copyFileSync(path.join(root,file),p);}fs.cpSync(path.join(root,'evidence/official-model-specs/sources'),path.join(copy,'evidence/official-model-specs/sources'),{recursive:true});fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');
++const rollbackCommand='D:/DEV/Git/bin/bash.exe evidence/group-files-output/ROLLBACK.sh '+copy.replaceAll('\\','/'),r=spawnSync('D:/DEV/Git/bin/bash.exe',[path.join(out,'ROLLBACK.sh'),copy],{encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK.log'),r.stdout+r.stderr+'EXIT_STATUS='+r.status+'\n');assert.equal(r.status,0,r.stderr);process.stdout.write(r.stdout);
++const baselineTests=['tests/naumi-bot-groups.test.mjs','tests/naumi-group-collaboration.test.mjs','tests/naumi-model-specs.test.mjs','tests/naumi-bot-sidebar.test.mjs'],testCommand='node --test '+baselineTests.join(' '),t=spawnSync(process.execPath,['--test',...baselineTests],{cwd:copy,encoding:'utf8'});fs.writeFileSync(path.join(out,'ROLLBACK_TESTS.log'),t.stdout+t.stderr+'EXIT_STATUS='+t.status+'\n');assert.equal(t.status,0,t.stdout+t.stderr);assert.match(t.stdout,/pass 37/);for(const row of rows)assert.equal(hash(fs.readFileSync(path.join(root,row.path))),row.after,'ACTIVE_SOURCE_CHANGED');
++execFileSync('git',['init','--quiet'],{cwd:copy});execFileSync('git',['apply','--check','--ignore-space-change',path.join(out,'DIFF_FILE.patch')],{cwd:copy,stdio:['ignore','pipe','pipe']});
++const state={status:'PASS',rollbackCopy:copy,rollbackCommand,rollbackOutput:r.stdout.trim(),rollbackExit:r.status,rollbackTestCommand:testCommand,rollbackTestOutput:'ℹ tests 37\nℹ pass 37\nℹ fail 0',rollbackTestExit:t.status,restoredBehavior:'pre-fix native/group/model behavior and 1bee995 work indicator retained',modifiedSourceRetained:true,patchCheck:'PASS'};fs.writeFileSync(path.join(out,'PACKAGE_RESULT.json'),JSON.stringify(state,null,2)+'\n');
++const modifiedCommand='node --test '+[...baselineTests,'tests/group-files-output.test.mjs','tests/naumi-group-work-indicator.test.mjs','tests/naumi-group-rename.test.mjs','tests/naumi-model-connections.test.mjs','tests/naumi-model-reasoning.test.mjs','tests/naumi-bot-deliverables.test.mjs','tests/naumi-file-delivery-single-path.test.mjs','tests/bot-folder-motion.test.mjs'].join(' ');
++const verification=`GROUP FILES / OUTPUT / NOTICE VERIFICATION
++BRANCH=${manifest.branch}
++INITIAL_BASELINE=${manifest.initialBaseline}
++ROLLBACK_BASELINE=${base}
++CHANGED_FIELDS=${manifest.changedFields.join(', ')}
++ARTIFACTS:
++${['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh'].map(n=>path.join(out,n)).join('\n')}
++BASELINE COMMAND=${testCommand}
++BASELINE INPUT=initial source; isolated fixtures; no inference
++BASELINE LITERAL RESULT=ℹ tests 37; ℹ pass 37; ℹ fail 0
++BASELINE EXIT_STATUS=0
++MODIFIED COMMAND=${modifiedCommand}
++MODIFIED INPUT=integrated source; isolated fixtures; no inference
++MODIFIED LITERAL RESULT=ℹ tests 104; ℹ pass 104; ℹ fail 0
++MODIFIED EXIT_STATUS=0
++UI COMMAND=node scripts/verify-group-files-output-ui.mjs
++UI INPUT=fresh isolated Harness + native present executor + real source Session files; bounded group read projection fixture
++UI LITERAL RESULT=FIX_UI_COMPLETE checks=19 errors=0 inference=0
++UI EXIT_STATUS=0
++ROLLBACK COMMAND=${rollbackCommand}
++ROLLBACK INPUT=marked independent copy ${copy}
++ROLLBACK LITERAL RESULT=${state.rollbackOutput}
++ROLLBACK EXIT_STATUS=0
++RESTORED TEST COMMAND=${testCommand}
++RESTORED TEST INPUT=restored copy
++RESTORED TEST LITERAL RESULT=ℹ tests 37; ℹ pass 37; ℹ fail 0
++RESTORED TEST EXIT_STATUS=0
++RESTORED BEHAVIOR=pre-fix source byte hashes restored; new task files removed; existing 1bee995 work indicator retained; original 37 tests pass.
++ACTIVE MODIFIED SOURCE=RETAINED
++PATCH CHECK=PASS
++RUNTIME=see DEPLOYMENT.json if present; Git/UI fixture proof alone is not installed release proof.
++`;
++fs.writeFileSync(path.join(out,'VERIFICATION.txt'),verification);for(const file of ['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh'])assert(fs.readFileSync(path.join(out,file)).length>0);console.log('GROUP_PACKAGE_COMPLETE rollback_tests=37 pass=37 fail=0 source=MODIFIED artifacts=4 reopened=4 exit=0');
+diff --git a/tests/group-files-output.test.mjs b/tests/group-files-output.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/tests/group-files-output.test.mjs
+@@ -0,0 +1,44 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import os from 'node:os';
++import path from 'node:path';
++import {createHash} from 'node:crypto';
++import {parse} from 'acorn';
++import {extendNativeSidebar,extendNativeDeliverables,installNativeDelivery,SIDEBAR_SHA,DELIVERABLES_SHA} from '../scripts/native-delivery-extension.mjs';
++import {configureModelSpec,modelSpecView,refreshModelSpecs} from '../plugins/naumi-enterprise/model-specs.js';
++import {transientDragNotice} from '../plugins/naumi-enterprise/assets/bot-sidebar-model.js';
++const hash=s=>createHash('sha256').update(s).digest('hex');
++for(const [name,expected,extend,kind]of [['sidebar-right',SIDEBAR_SHA,extendNativeSidebar,'sidebar'],['deliverables',DELIVERABLES_SHA,extendNativeDeliverables,'deliverables']]){
++ test('pinned native '+name+' reuses upstream, installs atomically and rejects drift',()=>{
++  const file='node_modules/@deepseek-ai/dsh-client-ui-'+name+'/lib/client.js',raw=fs.readFileSync(file,'utf8'),original=hash(raw)===expected?raw:fs.readFileSync(file+'.naumi-original','utf8');assert.equal(hash(original),expected);
++  const changed=extend(original);parse(changed,{ecmaVersion:'latest',sourceType:'module'});assert.throws(()=>extend(original+' '),/UPSTREAM_CHANGED/);
++  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-native-delivery-')),copy=path.join(dir,'client.js');try{
++   fs.writeFileSync(copy,original);assert(installNativeDelivery(copy,kind).changed);assert.equal(fs.readFileSync(copy,'utf8'),changed);assert.equal(hash(fs.readFileSync(copy+'.naumi-original')),expected);assert(!installNativeDelivery(copy,kind).changed);
++   fs.appendFileSync(copy,' ');assert.throws(()=>installNativeDelivery(copy,kind),/EXTENSION_CHANGED/);
++  }finally{fs.rmSync(dir,{recursive:true,force:true});}
++  if(kind==='deliverables'){assert.equal(changed.split('function PresentedFileCard(').length,2);assert.equal(changed.split('function Deliverables({').length,2);assert.match(changed,/props.renderFactorySlot\('naumi.native.deliverables',\{matched,openFile:props.openFile\}\)/);assert.match(changed,/\.\.\.nativeDeliverablesSpec,name:'naumi.native.deliverables'/);assert.match(changed,/previewPresented\(file\);else openFile\(file.path\)/);}
++  else {assert.match(changed,/controller.registerPanelSession=registerPanelSession/);assert.match(changed,/unsubscribePanel\(\);unsubscribeLeases\(\)/);assert.match(changed,/views.select\(panelId === null \? current.getSnapshot\(\).key : panelSessions/);}
++ });
++}
++test('unknown official output is not an old 16K budget hard cap',()=>{
++ const old={id:'k3',contextWindow:1000000,maxTokens:16384};const n=configureModelSpec({id:'k3',contextWindow:1000000,maxTokens:128000},old);assert.equal(n.maxTokens,128000);assert.equal(modelSpecView(old).outputLimit,null);assert.throws(()=>configureModelSpec({id:'k3',contextWindow:1000000,maxTokens:1000000},old),/MODEL_OUTPUT_RANGE/);
++});
++test('explicit official output 384K and 128K survive; no save silently truncates',()=>{
++ for(const [id,contextWindow,maxTokens]of [['deepseek-flash',1000000,384000],['gpt-6.1-sol',1050000,128000],['glm-5.3',1000000,128000]]){
++  assert.equal(configureModelSpec({id,contextWindow,maxTokens},{id,contextWindow,maxTokens:16384}).maxTokens,maxTokens);
++  assert.throws(()=>configureModelSpec({id,contextWindow,maxTokens:maxTokens+1}),/MODEL_OUTPUT_RANGE/);
++ }
++});
++test('unverified alias can explicitly set output within existing context without guessing official spec',()=>{
++ const old={id:'private-alias',contextWindow:400000,maxTokens:16384};assert.equal(configureModelSpec({id:old.id,contextWindow:400000,maxTokens:128000},old).maxTokens,128000);assert.throws(()=>configureModelSpec({id:old.id,maxTokens:400000},old),/MODEL_TOKEN_BUDGET/);assert.throws(()=>configureModelSpec({id:old.id,contextWindow:500000},old),/MODEL_SPEC_UNVERIFIED/);
++});
++test('global calibration keeps the users output reservation',()=>{
++ const p={x:{defaultMaxTokens:16384,models:[{id:'glm-5.3'},{id:'deepseek-flash'}]}};assert.deepEqual(refreshModelSpecs(p).providers.x.models.map(m=>m.maxTokens),[16384,16384]);
++});
++test('success expires at 3s, repeated successes restart, guidance and unmount cancel timers',()=>{
++ let now=0,next=0,value='',timers=new Map();const advance=ms=>{now+=ms;for(const[id,t]of [...timers])if(t.at<=now){timers.delete(id);t.fn();}};
++ const n=transientDragNotice(v=>value=v,{schedule:(fn,ms)=>{timers.set(++next,{fn,at:now+ms});return next;},cancel:id=>timers.delete(id)});
++ n.set('成员已加入群聊');advance(2999);assert.equal(value,'成员已加入群聊');n.set('成员已加入群聊');advance(1);assert.equal(value,'成员已加入群聊');advance(2999);assert.equal(value,'');
++ n.set('群聊已创建');n.set('拖动 2 位 Bot');advance(4000);assert.equal(value,'拖动 2 位 Bot');n.set('顺序已保存');n.dispose();assert.equal(timers.size,0);
++});
+diff --git a/tests/bot-folder-motion.test.mjs b/tests/bot-folder-motion.test.mjs
+--- a/tests/bot-folder-motion.test.mjs
++++ b/tests/bot-folder-motion.test.mjs
+@@ -1,7 +1,7 @@
+ import fs from 'node:fs';import test from 'node:test';import assert from 'node:assert/strict';import{execFileSync}from'node:child_process';
+-const s=fs.readFileSync('plugins/naumi-enterprise/assets/bot-sidebar.js','utf8'),css=fs.readFileSync('plugins/naumi-enterprise/assets/bot-sidebar.css','utf8'),baseline=execFileSync('git',['show','6d861b8:plugins/naumi-enterprise/assets/bot-sidebar.js'],{encoding:'utf8'});
++const s=fs.readFileSync('plugins/naumi-enterprise/assets/bot-sidebar.js','utf8').replaceAll('\r\n','\n'),css=fs.readFileSync('plugins/naumi-enterprise/assets/bot-sidebar.css','utf8'),baseline=execFileSync('git',['show','6d861b8:plugins/naumi-enterprise/assets/bot-sidebar.js'],{encoding:'utf8'});
+ test('folder preview reuses static original avatars with finite grid and no textual drop badge',()=>{assert(s.includes('folderPreview=null'));assert(s.includes('h(Avatar,{bot,staticPreview:true})'));assert(s.includes('members.slice(0,4)'));assert(s.includes("'data-preview-count':members.length"));for(const word of ['松开建群','加入群聊'])assert(!css.includes('content:"'+word+'"'));assert(!css.includes('content:"+"'));assert(css.includes('.naumi-folder-preview{position:absolute'));});
+ test('drag image is the actual avatar and arrival animation follows the persisted real room',()=>{assert(s.includes('e.dataTransfer.setDragImage(avatar,r.width/2,r.height/2)'));assert(s.includes('setArrived(room.id)'));assert(s.includes('clearTimeout(timer)'));assert(css.includes('@keyframes naumi-folder-settle'));assert(css.includes('naumi-folder-absorb'));assert(css.includes('prefers-reduced-motion'));assert(css.includes('animation:none!important'));});
+-test('all sort/group request and native mouse hit-testing logic stays exactly unchanged',()=>{for(const [start,end]of [['      const finishDrop=','      const dragProps='],['        onDragOver:','        onDragEnd:']]){const a=s.slice(s.indexOf(start),s.indexOf(end)),b=baseline.slice(baseline.indexOf(start),baseline.indexOf(end));assert.equal(a,b);}for(const p of ['bot-group-store.js','bot-group-service.js','bot-groups.js','assets/bot-chat-model.js'])assert.equal(fs.readFileSync('plugins/naumi-enterprise/'+p,'utf8').replaceAll('\r\n','\n'),execFileSync('git',['show','6d861b8:plugins/naumi-enterprise/'+p],{encoding:'utf8'}).replaceAll('\r\n','\n'));});
++test('all sort/group request and native mouse hit-testing logic stays exactly unchanged',()=>{for(const [start,end]of [['      const finishDrop=','      const dragProps='],['        onDragOver:','        onDragEnd:']]){const a=s.slice(s.indexOf(start),s.indexOf(end)),b=baseline.slice(baseline.indexOf(start),baseline.indexOf(end));assert.equal(a,b);}for(const p of ['bot-group-store.js','bot-group-service.js','bot-groups.js','assets/bot-chat-model.js'])assert.equal(fs.readFileSync('plugins/naumi-enterprise/'+p,'utf8').replaceAll('\r\n','\n'),execFileSync('git',['show',(p==='assets/bot-chat-model.js'?'1bee995':'6d861b8')+':plugins/naumi-enterprise/'+p],{encoding:'utf8'}).replaceAll('\r\n','\n'));});
+ 
+ test('incremental loader exposes only explicit two-asset profile and retains original six-file default',()=>{const d=fs.readFileSync('scripts/deploy-bot-drag-groups.mjs','utf8');assert(d.includes("folderMotion=process.argv.includes('--folder-motion')"));assert(d.includes("expectedFiles=folderMotion?2:6"));assert(d.includes("folderMotion?['assets/bot-sidebar.js','assets/bot-sidebar.css']:"));assert(d.includes('EXPECTED_PROFILE_FILES'));assert(d.includes('assertBefore(plan)'));assert(d.includes('restoreAlignment(plan,backup)'));});
+diff --git a/tests/naumi-group-work-indicator.test.mjs b/tests/naumi-group-work-indicator.test.mjs
+--- a/tests/naumi-group-work-indicator.test.mjs
++++ b/tests/naumi-group-work-indicator.test.mjs
+@@ -5,6 +5,6 @@
+ test('current group source identity is mandatory, not same-Bot global running or a stale previous group response',()=>{assert.deepEqual(groupWorkMembers(room,{...detail([task('other','b')]),room:{id:'group-b'}}),[]);assert.deepEqual(groupWorkMembers(room,detail([task('private','b','running',{sourceSessionId:'private-a'})],[{replies:[{id:'other',botId:'b',sessionId:'other-group-b',state:'sent'}]}])),[]);assert.deepEqual(groupWorkMembers(room,null),[]);assert.deepEqual(groupWorkMembers(null,detail()),[]);const outside=groupWorkMembers(room,detail([task('valid-dispatch','outside')]));assert.equal(outside[0].botId,'outside','a genuine current-group dispatch is visible even if its worker is not in the reception membership');});
+ test('one stable chip per Bot counts independent tasks and selects latest revision rather than stale duplicate activity',()=>{const d=detail([task('first','b','waiting'),task('second','b'),task('first','b','completed',{revision:2}),task('third','c','queued'),task('fourth','b','starting')],[{replies:[{id:'r',botId:'b',sessionId:'group-a-b',state:'sent'},{id:'r',botId:'b',sessionId:'group-a-b',state:'sent'}]}]);const rows=groupWorkMembers(room,d);assert.deepEqual(rows.map(r=>r.botId),['b','c']);assert.equal(rows[0].tasks.length,2);assert.equal(rows[0].replies.length,1);assert.equal(rows[0].state,'running');assert.equal(rows[1].state,'queued');});
+ test('12 working Bots are never sliced away and terminal transitions remove only the finished worker',()=>{const members=Array.from({length:12},(_,i)=>({botId:'b'+i,sessionId:'s'+i})),r={id:'many',members},d={room:r,posts:[],tasks:members.map((m,i)=>task('t'+i,m.botId,'running',{sourceSessionId:'s0'}))};assert.equal(groupWorkMembers(r,d).length,12);d.tasks[3].status='completed';assert.equal(groupWorkMembers(r,d).length,11);assert(!groupWorkMembers(r,d).some(v=>v.botId==='b3'));});
+-test('original input/transport and all task/group execution code stay unchanged; stale and reduced motion have explicit UI branches',()=>{const s=fs.readFileSync('plugins/naumi-enterprise/assets/bot-groups.js','utf8'),baseline=execFileSync('git',['show','ab34d83:plugins/naumi-enterprise/assets/bot-groups.js'],{encoding:'utf8'}),css=fs.readFileSync('plugins/naumi-enterprise/assets/bot-groups.css','utf8');for(const[start,end]of [['  const send=','  const targets='],['  useEffect(()=>{let closed=false,ref,dispose,stopMentions;','  return h(\'div\',{className:\'nbc-native-dock\'']])assert.equal(s.slice(s.indexOf(start),s.indexOf(end)),baseline.slice(baseline.indexOf(start),baseline.indexOf(end)));assert(s.includes("h(Avatar,{bot,staticPreview:true})"));assert(s.includes('workStatus,error?'));assert(s.includes("stale?'状态待同步'"));assert(css.includes('prefers-reduced-motion'));assert(css.includes('max-height:90px'));assert(css.includes('animation:none!important'));for(const p of ['bot-group-service.js','bot-group-store.js','bot-groups.js','bot-task-runtime.js','bot-task-service.js'])assert.equal(fs.readFileSync('plugins/naumi-enterprise/'+p,'utf8').replaceAll('\r\n','\n'),execFileSync('git',['show','ab34d83:plugins/naumi-enterprise/'+p],{encoding:'utf8'}).replaceAll('\r\n','\n'));});
++test('original input/transport and all task/group execution code stay unchanged; stale and reduced motion have explicit UI branches',()=>{const s=fs.readFileSync('plugins/naumi-enterprise/assets/bot-groups.js','utf8').replaceAll('\r\n','\n'),baseline=execFileSync('git',['show','ab34d83:plugins/naumi-enterprise/assets/bot-groups.js'],{encoding:'utf8'}),css=fs.readFileSync('plugins/naumi-enterprise/assets/bot-groups.css','utf8');for(const[start,end]of [['  const send=','  const targets='],['  useEffect(()=>{let closed=false,ref,dispose,stopMentions','  return h(\'div\',{className:\'nbc-native-dock\'']])assert.equal(s.slice(s.indexOf(start),s.indexOf(end)).replace('stopMentions,stopSidebar;','stopMentions;').replace("    const sidebar=ctx.get?.('sidebarRight');if(!sidebar?.registerPanelSession)throw Error('NATIVE_SIDEBAR_EXTENSION_MISSING');\n    stopSidebar=sidebar.registerPanelSession('naumi-conversation',prepared.sessionId);\n",'').replace('stopMentions?.();stopSidebar?.();','stopMentions?.();'),baseline.slice(baseline.indexOf(start),baseline.indexOf(end)));assert(s.includes("stopSidebar=sidebar.registerPanelSession('naumi-conversation',prepared.sessionId)"));assert(s.includes('stopMentions?.();stopSidebar?.();ref?.release()'));assert(s.includes("h(Avatar,{bot,staticPreview:true})"));assert(s.includes('workStatus,error?'));assert(s.includes("stale?'状态待同步'"));assert(css.includes('prefers-reduced-motion'));assert(css.includes('max-height:90px'));assert(css.includes('animation:none!important'));for(const p of ['bot-group-service.js','bot-group-store.js','bot-groups.js','bot-task-runtime.js','bot-task-service.js'])assert.equal(fs.readFileSync('plugins/naumi-enterprise/'+p,'utf8').replaceAll('\r\n','\n'),execFileSync('git',['show','ab34d83:plugins/naumi-enterprise/'+p],{encoding:'utf8'}).replaceAll('\r\n','\n'));});
+ 
+ test('hot loader is restricted to three assets, preserves model-before-entry ordering and never restarts live work',()=>{const s=fs.readFileSync('scripts/deploy-group-work-indicator.mjs','utf8');assert(s.includes("files=['assets/bot-chat-model.js','assets/bot-groups.css','assets/bot-groups.js']"));assert(s.includes('EXPECTED_THREE_ASSETS'));assert(s.includes('applyAlignment(plan,backup)'));assert(s.includes("changes:[...plan.changes].reverse()"));assert(s.includes('PID_CHANGED'));assert(!s.includes('Stop-Naumi'));assert(!s.includes('Start-Naumi'));assert(!s.includes('LIVE_RUNNING'));});
+diff --git a/docs/implementation/GROUP_FILES_OUTPUT_FIX.md b/docs/implementation/GROUP_FILES_OUTPUT_FIX.md
+new file mode 100644
+--- /dev/null
++++ b/docs/implementation/GROUP_FILES_OUTPUT_FIX.md
+@@ -0,0 +1,40 @@
++# 群文件、输出预算与入群反馈修复
++
++## 模块与职责
++负责人：本任务；隔离分支 `codex/group-files-model-output-20261118`；基线 `ab34d8343d5bc417e7b54d1a626943e2e84cbf0f`。
++文件范围：bot-groups、bot-sidebar/model、model-connections UI、model-specs；新增 pinned native-delivery 扩展及 sync/prepare-runtime 接线、对应测试和验收脚本。保留共享工作区未提交内容。
++
++## 公共接口、依赖方向、状态归属
++- 群原先自写文件按钮，且 sidebar-right 在 activePanelId 非空时卸载 surface，openResource 抛 no session surface。缺口是原生没有显式自定义面板 Session 接口和可复用文件卡 factory。
++- `sidebarRight.registerPanelSession(panelId, sessionId)` 返回幂等 disposer；只有注册面板可启用原生右栏。原生 SidebarSessionViews 继续持有引用、持久化 tab/store、焦点、资源预览和销毁。群使用 prepare 返回的发送 Session，不改普通线程选中状态。
++- `naumi.native.deliverables` Session factory 与普通 turnTail 共用一个 nativeDeliverablesSpec、同一个 Deliverables/PresentedFileCard、opener/host/menu/actions。群按文件源 Session retain/ready/SessionProvider/release；不以群发送者代替文件实际来源。
++- 工具源 seq/index 保持；snapshot 预览先经 taskId+source Session+seq/index 版本校验，校验失败显示错误，不打开当前工作文件代替历史快照。卸载后异步预览不落入下一个群。
++- 原生 bundle 按 SHA256 严格匹配、原子生成，保留原件；未知上游或扩展漂移即停止。开发验收只代理候选文件，不写共享 node_modules。
++
++## 本次实现与迁移状态
++1. 群回复及任务抽屉移除仿制文件按钮，走原生卡片与资源预览。
++2. 原表单官方值保留旧 maxTokens；未知官方输出上限被旧预算当硬上限；每次按键还会缩小 contextWindow。现区分三者：单模型显式官方值采用已公布输出最大值；未公布不猜数且允许合法自定义输出；输入不联动写另一字段，保存时校验组合。全局校准继续保留现有输出预算，不意外提高调用预算。
++3. 成功提示 3000ms 消失，重复成功重新计时；拖拽说明与错误不被计时误清除，卸载取消定时器。
++
++## 验证命令、结果及证据层级
++基线：`node --test tests/naumi-bot-groups.test.mjs tests/naumi-group-collaboration.test.mjs tests/naumi-model-specs.test.mjs tests/naumi-bot-sidebar.test.mjs`，37 pass / 0 fail / exit 0。证据 `evidence/group-files-output/BASELINE.log`。
++集中回归第一轮：44 tests / 44 pass / 0 fail / exit 0。
++隔离真实 Harness + Chrome 验收：`node scripts/verify-group-files-output-ui.mjs`，`FIX_UI_COMPLETE checks=19 errors=0 inference=0`，exit 0。实际原 native present executor 创建持久化 deliverables/presented；真实 source Session 文件读与原生 Markdown/HTML 右栏；普通线程与群卡片相同 CSS/class/component；群抽屉、切群/草稿恢复、入群反馈过期；模型输入128000不改上下文，384000/128000/未知官方输出/私有别名预算经 owner CAS 与实际 YAML 保存、重开保持；超官方值明确无效而非静默缩小。
++群消息 read projection 使用验收 fixture 引用上述真实 native 回执，不把 fixture 写成真实供应商或线上业务完成。浏览器无 pageerror、无推理；fixture 未接通企业账号/OS opener 的401/500资源回执保留在 UI 日志，不声称这些外围服务就绪。
++首次预览联调发现原生 child slot 不能重复声明；现只在共享 factory 中声明一次 children，普通 DeliverablesTail 转交该 factory，不复制/重复注册 actions。fixture 初版缺 assistant/message.stream，已按上游事件类型补齐 stream:[] 与 step/end；该修正只在隔离测试生成器，不修改产品 Session 数据。
++
++## 主线同步
++首任务提交9ebf77e；刷新并普通 merge origin/main 1bee995，整合提交7fd3fc1。CSS 冲突保留双方：群工作指示器以及原生卡片宿主宽度，未删他人工作。初始基线与整合前主线分别记录；回滚基准采用1bee995，保留已合入的新工作指示器。
++
++## 未完成项与下一步
++已完成19项UI/HTTP验证；整合后集中回归、main merge/push、窄范围runtime接线与副本回滚证据继续记录。源码、main、实际安装运行版本分别记录，不以局部测试冒充上线。
++功能迭代计数：本切片 1（含三个修复点）。
++
++## 集中验收与回滚
++- 整合后集中验证104项：104 pass / 0 fail / exit 0；覆盖群CRUD/路由/恢复、原生transport、主线工作指示器、改名、模型连接/推理、原生文件交付单路径、文件snapshot权限及提示计时。
++- 初次扩围回归出现两个源码契约测试失配：一个是Git checkout行尾差异；另一个是新增显式sidebar lease导致原composer effect字节不再相等。现统一换行后比对；仅剥离本任务三处lease接线后仍逐字核对既有transport。bot-chat只更新对照为已经合入的1bee995，继续保护当前群路由与新工作指示器。不是通过删业务断言跳过回归。
++- `node scripts/package-group-files-output.mjs`：18文件修复包/patch重开，标记副本rollback恢复12文件并删除6新增文件，原37项回归全部通过，活动源码保持修改态；patch在还原副本上check通过。
++- 四项产物位于 `evidence/group-files-output/{MODIFIED_FILE.zip,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`；manifest保存原始及修改SHA256。ROLLBACK.sh仅接受标记副本并校验全部哈希后操作，不直接改活动工作区。
++- 桌面运行探针确认当前C:/Program Files/Naumi/Naumi.exe以external模式连接127.0.0.1:3080；不把独立打包fixture的58062端口混成用户实例。runtime载入前读取110个Session与任务账本，running=0、activeTasks=0；只接线本切片6个plugin文件+2个原生bundle，保留配置与预算。
++
++载入脚本第一次尝试遇到PowerShell后台启动遗留stdio pipe，使同步子进程等待EOF而超时；脚本已恢复原6个plugin/2个native文件且HTTP200，经逐文件SHA核对后结束本任务悬挂driver。随后改为stdio ignore，运行前落盘完整哈希计划，不重复业务请求。该问题只影响载入driver，不涉及用户模型预算或Session。
