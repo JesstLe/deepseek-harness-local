@@ -35,3 +35,6 @@
 - 额外真实NSIS无安装参数观察器确认：Node spawn会将含空格/D参数整项包引号，pinned GetDParameter保留尾引号。customInit仅去除末尾包装引号、仍以canonical+注册目录精确匹配，并将INSTDIR设为检查后的路径，支持中文/空格。原始观察输出归档ARGV。
 
 - 第二轮已成功安装最终0.3.9（实际asar版本确认），但Explorer启动不继承测试进程env，隔离profile的回执门未满足；该轮作为验收夹具失败保留HANDOFF_SECOND，不计生产重开PASS。原生runner为自有临时开始菜单快捷方式增加仅夹具的context launcher，仍由NSIS自动调用，生产app.asar不改；不改真实账号/系统env。
+
+- 第三轮NSIS已自动创建新GUI PID53976，renderer原生参数为0.3.9且userdata为隔离profile；因夹具登录仅session cookie，退出后identity分区Cookies表为0（只读SQLite计数确认），工作台回执未满足。保留HANDOFF_THIRD；fixture登录改为Max-Age=3600再验收，不改变产品登录策略。
+- 副本回滚增强为从整合HEAD复制，再仅恢复本任务20文件；额外断言协作UI的host/client/两份CSS逐字保持，不回退其他线程UI。
