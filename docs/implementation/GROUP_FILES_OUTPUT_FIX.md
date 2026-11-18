@@ -36,3 +36,5 @@
 - `node scripts/package-group-files-output.mjs`：18文件修复包/patch重开，标记副本rollback恢复12文件并删除6新增文件，原37项回归全部通过，活动源码保持修改态；patch在还原副本上check通过。
 - 四项产物位于 `evidence/group-files-output/{MODIFIED_FILE.zip,DIFF_FILE.patch,VERIFICATION.txt,ROLLBACK.sh}`；manifest保存原始及修改SHA256。ROLLBACK.sh仅接受标记副本并校验全部哈希后操作，不直接改活动工作区。
 - 桌面运行探针确认当前C:/Program Files/Naumi/Naumi.exe以external模式连接127.0.0.1:3080；不把独立打包fixture的58062端口混成用户实例。runtime载入前读取110个Session与任务账本，running=0、activeTasks=0；只接线本切片6个plugin文件+2个原生bundle，保留配置与预算。
+
+载入脚本第一次尝试遇到PowerShell后台启动遗留stdio pipe，使同步子进程等待EOF而超时；脚本已恢复原6个plugin/2个native文件且HTTP200，经逐文件SHA核对后结束本任务悬挂driver。随后改为stdio ignore，运行前落盘完整哈希计划，不重复业务请求。该问题只影响载入driver，不涉及用户模型预算或Session。
