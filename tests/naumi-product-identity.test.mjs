@@ -87,3 +87,8 @@ test('desktop shortcut migrates to a GUI launcher and keeps rollback targets usa
 });
 
 test('generated brand allowlist covers every scanned active dictionary key without mutating interpolation values',()=>{const report=buildProductCopyKeys({write:false});assert(report.modules>30);for(const[ns,keys]of Object.entries(report.namespaces))for(const key of keys){assert(PRODUCT_COPY_KEYS[ns]?.has(key),ns+':'+key);assert(!/DeepSeek Harness|深度求索|\bDSH\b/.test(productCopy(ns,key,'DeepSeek Harness / DSH / 深度求索中','zh',PRODUCT_VERSION)));}const locale={translate:()=> 'DeepSeek Harness {value}',getSnapshot:()=>({active:'zh'})},dispose=installProductIdentity({locale});assert.equal(locale.translate('pluginManager','installGuideSafety',{value:'DeepSeek Harness DSH'}),'Naumi DeepSeek Harness DSH');dispose();});
+
+test('installed shell version wins over linked backend version without changing ordinary browser identity',()=>{
+ const prior=globalThis.naumiDesktop;const locale={translate:()=> 'old',getSnapshot:()=>({active:'zh'})};
+ try{globalThis.naumiDesktop={appVersion:'0.3.9'};const off=installProductIdentity({locale},{version:'0.3.7'});assert.equal(locale.translate('settings','general.currentVersion'),'Naumi 0.3.9');off();delete globalThis.naumiDesktop;const browser=installProductIdentity({locale},{version:'0.3.7'});assert.equal(locale.translate('settings','general.currentVersion'),'Naumi 0.3.7');browser();}finally{if(prior===undefined)delete globalThis.naumiDesktop;else globalThis.naumiDesktop=prior;}
+});

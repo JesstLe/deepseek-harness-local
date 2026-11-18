@@ -1,3 +1,4 @@
+import {createRequire} from 'node:module';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -33,7 +34,7 @@ test('view distinguishes unchecked, confirmed latest, progress, disabled, busy a
  assert.equal(updateView({enabled:true,status:'idle',lastChecked:1}).title,'已是最新版本');
  assert.equal(updateView({enabled:false,status:'disabled'}).title,'安装版支持更新');
  assert.equal(updateView({enabled:true,status:'downloading',progress:{percent:150}}).percent,100);
- assert.equal(updateView({enabled:true,status:'ready',error:'UPDATE_INSTALL_BUSY'}).title,'任务运行中，稍后更新');
+ assert.equal(updateView({enabled:true,status:'ready',error:'UPDATE_INSTALL_BUSY'}).title,'当前操作未结束，稍后更新');
  assert.equal(updateView({enabled:true,status:'ready'}).ready,true);
 });
 
@@ -52,7 +53,7 @@ test('actual native gate atomically quiesces owned backend and fails closed on b
  const gate=main.slice(main.indexOf('async function canInstallUpdate()'),main.indexOf('async function showUpdateNotice'));
  const maintenance=main.slice(main.indexOf('async function performMaintenance('),main.indexOf('function isAlive('));
  const calls=[],ctx={closing:false,booting:false,connecting:false,cloud:{running:0},cloudBusy:0,bridge:{runtime:{queues:new Map()}},enterprise:{running:0},market:{running:0},settings:{isolated:true},backend:{owned:true},maintenanceTicket:null,maintenanceUntil:0,maintenanceBlocked:()=>false,randomUUID:()=> 'fixture',maintenanceRequest:async(...args)=>{calls.push(args);}};
- vm.createContext(ctx);vm.runInContext(gate+maintenance,ctx);
+ ctx.admitUpdate=createRequire(import.meta.url)('../desktop/app/update-gate.cjs').admitUpdate;ctx.quitGate={phase:'idle'};vm.createContext(ctx);vm.runInContext(gate+maintenance,ctx);
  ctx.enterprise.running=1;assert.equal((await ctx.canInstallUpdate()).ok,false);assert.equal(calls.length,0);ctx.enterprise.running=0;
  ctx.market.running=1;assert.equal((await ctx.canInstallUpdate()).ok,false);assert.equal(calls.length,0);ctx.market.running=0;
  ctx.cloudBusy=1;assert.equal((await ctx.canInstallUpdate()).ok,false);assert.equal(calls.length,0);ctx.cloudBusy=0;
@@ -66,4 +67,10 @@ test('update IPC remains main-window/main-frame scoped and preload exposes no ge
   const line=main.split('\n').find(x=>x.includes("ipcMain.handle('"+channel+"'"));assert.ok(line.includes('e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame'));
  }
  const preload=fs.readFileSync('desktop/app/preload.cjs','utf8');assert.ok(preload.includes("installUpdate:()=>ipcRenderer.invoke('naumi:update-install')"));assert.ok(!preload.includes("exposeInMainWorld('ipc"));
+});
+
+test('install preparation and unknown activity are visible without disguising backend version as client',()=>{
+ assert.equal(updateView({enabled:true,status:'ready',installPhase:'preparing'}).title,'正在保存并准备更新');
+ assert.equal(updateView({enabled:true,status:'ready',installPhase:'restarting'}).busy,true);
+ assert.equal(updateView({enabled:true,status:'ready',error:'UPDATE_ACTIVITY_UNKNOWN'}).title,'未确认连接状态，请重试');
 });

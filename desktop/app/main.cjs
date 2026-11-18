@@ -9,6 +9,7 @@ const {startBridge}=require('./tools.cjs');
 const {localSettings,ensureBackend,stopBackend,createQuitGate,maintenanceRequest}=require('./backend.cjs');
 const installerState=require('./installer-state.cjs');
 const {createDesktopUpdates}=require('./updates.cjs');
+const {admitUpdate}=require('./update-gate.cjs');
 const {IdentityRuntime}=require('./identity-runtime.cjs');
 const {MarketSession}=require('./market.cjs');
 const {CloudSession,CloudBackup}=require('./cloud.cjs');
@@ -25,20 +26,20 @@ const cloud=new CloudSession({identity:()=>identityRuntime});
 const creation=new CreationVault({identity:()=>identityRuntime,safeStorage});
 const DEFAULT_IDENTITY_ORIGIN='https://47.105.59.142';
 let cloudBusy=0;
-let window,primarySession,guests,bridge,backend,settings,enterprise,login,loginAfterBoot=false,booting=false,closing=false,connecting=false,editingConnection=false,connectionFlight,maintenanceTicket=null,maintenanceUntil=0,updates=null;
+let window,primarySession,guests,bridge,backend,settings,enterprise,login,loginAfterBoot=false,booting=false,closing=false,connecting=false,editingConnection=false,connectionFlight,maintenanceTicket=null,maintenanceUntil=0,updates=null,quitGate;
 if(!locked){app.quit();}else{
 app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.show();window.focus();}});
 app.whenReady().then(async()=>{
  if(app.isPackaged){try{installerState.assertStartupAllowed(path.resolve(process.resourcesPath,'..'));}catch(error){if(error.message==='INSTALL_MAINTENANCE_ACTIVE'){app.exit(42);return;}throw error;}}
  nativeTheme.themeSource='light';Menu.setApplicationMenu(null);
  const icon=path.join(__dirname,'assets/naumi.ico');
- window=new BrowserWindow({width:1460,height:930,minWidth:1000,minHeight:640,show:false,title:'Naumi',backgroundColor:'#f7f9fc',icon,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webviewTag:true,partition:'persist:naumi-workbench',spellcheck:false,backgroundThrottling:false}});
+ window=new BrowserWindow({width:1460,height:930,minWidth:1000,minHeight:640,show:false,title:'Naumi',backgroundColor:'#f7f9fc',icon,webPreferences:{preload:path.join(__dirname,'preload.cjs'),additionalArguments:['--naumi-desktop-version='+app.getVersion()],contextIsolation:true,nodeIntegration:false,sandbox:true,webviewTag:true,partition:'persist:naumi-workbench',spellcheck:false,backgroundThrottling:false}});
  primarySession=window.webContents.session;
  if(app.isPackaged||process.env.NAUMI_UPDATE_DEV==='1'){
   try{
    const {autoUpdater}=require('electron-updater');
    if(process.env.NAUMI_UPDATE_DEV==='1')autoUpdater.forceDevUpdateConfig=true;
-   updates=createDesktopUpdates({app,updater:autoUpdater,notify:showUpdateNotice,canInstall:canInstallUpdate,broadcast:snapshot=>{if(window&&!window.isDestroyed())window.webContents.send('naumi:update-state',snapshot);},log:(...args)=>{if(process.env.NAUMI_UPDATE_DEV==='1')console.warn('[updates]',...args);}});
+   updates=createDesktopUpdates({app,updater:autoUpdater,notify:showUpdateNotice,canInstall:canInstallUpdate,prepareInstall:async()=>{closing=true;await quitGate.prepare();},broadcast:snapshot=>{if(window&&!window.isDestroyed())window.webContents.send('naumi:update-state',snapshot);},log:(...args)=>{if(process.env.NAUMI_UPDATE_DEV==='1')console.warn('[updates]',...args);}});
    const started=updates.start();if(!started.ok)console.warn('[updates] disabled:',started.error);
   }catch(error){console.warn('[updates] unavailable:',error.message);}
  }
@@ -65,6 +66,7 @@ app.whenReady().then(async()=>{
  ipcMain.handle('naumi:browser-bind',(e,value)=>{trusted(e);return guests.bind(e.sender,value);});
  ipcMain.handle('naumi:retry',e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');void boot();});
  ipcMain.handle('naumi:update-state',e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');return updates?updates.snapshot():{enabled:false,status:'disabled',currentVersion:app.getVersion(),version:null,notes:'',progress:null,error:null};});
+ ipcMain.handle('naumi:runtime-info',e=>{ownFrame(e);return {clientVersion:app.getVersion(),backendMode:settings?.isolated?'managed':'external',backendURL:settings?.url??null};});
  ipcMain.handle('naumi:update-check',async e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');return updates?updates.check():{ok:false,error:'UPDATE_FEED_UNCONFIGURED'};});
  ipcMain.handle('naumi:update-install',async e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');return updates?updates.install():{ok:false,error:'UPDATE_FEED_UNCONFIGURED'};});
  ipcMain.handle('naumi:connection-state',e=>{if(!localPage(e,['connect.html','startup.html']))trusted(e);if(!settings?.isolated)return {available:false};return {available:true,...workspaceSummary(identityUserData??app.getPath('userData'))};});
@@ -163,7 +165,7 @@ app.whenReady().then(async()=>{
  if(process.env.NAUMI_TEST_HIDDEN!=='1')window.show();
  await boot();
 }).catch(error=>{console.error('NAUMI_DESKTOP_START_FAILED',error.message);app.quit();});
-const quitGate=createQuitGate({shutdown:async()=>{try{connectionFlight?.abort();if(login&&!login.isDestroyed()){login.webContents.stop();login.destroy();}await guests?.flush();await primarySession?.cookies.flushStore();await enterprise?.session.cookies.flushStore();await identityRuntime?.client?.session.cookies.flushStore();}finally{await bridge?.close();await stopBackend(backend);await creation.release();}},onReady:()=>app.quit(),onError:()=>app.exit(1)});
+quitGate=createQuitGate({shutdown:async()=>{try{connectionFlight?.abort();if(login&&!login.isDestroyed()){login.webContents.stop();login.destroy();}await guests?.flush();await primarySession?.cookies.flushStore();await enterprise?.session.cookies.flushStore();await identityRuntime?.client?.session.cookies.flushStore();}finally{await bridge?.close();await stopBackend(backend);await creation.release();}},onReady:()=>app.quit(),onError:()=>app.exit(1)});
 app.on('before-quit',event=>{closing=true;quitGate.beforeQuit(event);});
 app.on('window-all-closed',()=>app.quit());
 }
@@ -200,6 +202,7 @@ async function boot(){
   else if(guests.hostURL!==settings.url||guests.account!==account)await guests.reset({hostURL:settings.url,account});
   if(!bridge)bridge=await startBridge({home:settings.home,guests,window,enterprise,market,maintenance:{blocked:maintenanceBlocked,perform:performMaintenance,quit:ticket=>{if(maintenanceBlocked()&&ticket===maintenanceTicket)app.quit();}}});
   editingConnection=false;await window.loadURL(backend.launchURL);
+  require('./profile.cjs').atomic(path.join(app.getPath('userData'),'desktop-runtime.json'),{version:1,pid:process.pid,clientVersion:app.getVersion(),executable:process.execPath,backendMode:settings.isolated?'managed':'external',backendURL:settings.url,readyAt:new Date().toISOString()});
   if(loginAfterBoot){loginAfterBoot=false;openEnterpriseLogin();}
  }catch(error){await showStartup(error.message);}
  finally{booting=false;if(process.env.NAUMI_TEST==='1')globalThis.__naumiTest={window,guests,bridge,settings,backend,enterprise,get login(){return login;}};}
@@ -212,12 +215,9 @@ async function assertAccountIdle(){
 }
 function maintenanceBlocked(){if(maintenanceTicket&&Date.now()>=maintenanceUntil){maintenanceTicket=null;}return !!maintenanceTicket;}
 async function canInstallUpdate(){
- if(closing||booting||connecting)return {ok:false,reason:'WORKSPACE_BUSY'};
- if(maintenanceBlocked())return {ok:false,reason:'INSTALL_MAINTENANCE_ACTIVE'};
- if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0||market.running>0||cloud.running>0||cloudBusy>0)return {ok:false,reason:'WORKSPACE_OPERATIONS_IN_FLIGHT'};
  const ticket=randomUUID().replaceAll('-','')+randomUUID().replaceAll('-','');
- try{await performMaintenance('quiesce',ticket);return {ok:true,release:()=>performMaintenance('resume',ticket)};}
- catch{return {ok:false,reason:'INSTALL_ACTIVITY_UNKNOWN'};}
+ const gate=await admitUpdate({settings,backend,prepared:quitGate?.phase==='ready',busy:closing||booting||connecting||(bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0||market.running>0||cloud.running>0||cloudBusy>0,maintenance:maintenanceBlocked(),request:(...args)=>primarySession.fetch(...args),quiesce:()=>performMaintenance('quiesce',ticket),resume:()=>performMaintenance('resume',ticket)});
+ if(gate.ok){if(gate.mode==='external'){maintenanceTicket=ticket;maintenanceUntil=Date.now()+30000;}const release=gate.release;gate.release=async()=>{if(quitGate?.phase==='ready'||quitGate?.phase==='failed'){quitGate.reset();closing=false;maintenanceTicket=null;backend=null;bridge=null;await boot();}else if(gate.mode==='external')maintenanceTicket=null;else await release?.();};}return gate;
 }
 async function showUpdateNotice(snapshot){
  if(!window||window.isDestroyed())return 1;
