@@ -45,6 +45,10 @@ export class BotGroupStore {
         operation_id TEXT PRIMARY KEY, room_id TEXT NOT NULL REFERENCES rooms(id),
         expected_name TEXT NOT NULL, name TEXT NOT NULL, actor TEXT NOT NULL,
         result_json TEXT NOT NULL, created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS room_member_operations (
+        operation_id TEXT PRIMARY KEY, room_id TEXT NOT NULL REFERENCES rooms(id),
+        bot_ids TEXT NOT NULL, result_json TEXT NOT NULL, created_at TEXT NOT NULL
       )`);
     } catch (error) {
       this.db.close();
@@ -117,6 +121,19 @@ export class BotGroupStore {
       const result=this.room(roomId);
       this.db.prepare('INSERT INTO room_name_operations VALUES(?,?,?,?,?,?,?)').run(operationId,roomId,expectedName,name,JSON.stringify(actor),JSON.stringify(result),timestamp());
       return result;
+    });
+  }
+
+  addMembers({operationId,roomId,botIds},validate){
+    const ids=[...new Set(botIds)];
+    return this.write(()=>{
+      const prior=this.db.prepare('SELECT room_id,bot_ids,result_json FROM room_member_operations WHERE operation_id=?').get(operationId);
+      if(prior){if(prior.room_id!==roomId||prior.bot_ids!==JSON.stringify(ids))fail('BOT_GROUP_CONFLICT');return this.room(roomId);}
+      const room=this.room(roomId);if(!room)fail('BOT_GROUP_NOT_FOUND');validate(room,ids);
+      const existing=new Set(room.members.map(m=>m.botId)),missing=ids.filter(id=>!existing.has(id));
+      const add=this.db.prepare('INSERT INTO members VALUES (?, ?, ?, ?)');let position=room.members.length;
+      for(const botId of missing)add.run(roomId,botId,'session-'+randomUUID(),position++);
+      const result=this.room(roomId);this.db.prepare('INSERT INTO room_member_operations VALUES (?,?,?,?,?)').run(operationId,roomId,JSON.stringify(ids),JSON.stringify(result),timestamp());return result;
     });
   }
 

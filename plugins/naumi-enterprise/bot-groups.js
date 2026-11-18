@@ -19,6 +19,7 @@ const commands = z.discriminatedUnion('action', [
   z.object({action:z.literal('prepare'),roomId:requestId}).strict(),
   z.object({action:z.literal('interrupt'),roomId:requestId,replyId:requestId}).strict(),
   z.object({action:z.literal('rename'),operationId:requestId,roomId:requestId,expectedName:z.string().min(1).max(80),name:z.string().trim().min(1).max(80).refine(v=>!/[\u0000-\u001f\u007f]/.test(v))}).strict(),
+  z.object({action:z.literal('add-members'),operationId:requestId,roomId:requestId,botIds:botIds.refine(ids=>ids.length>=1)}).strict(),
 ]);
 
 export function createBotGroupTools(ctx,service){
@@ -108,6 +109,7 @@ export function installBotGroups(ctx, directory, getTasks, {onReady}={}) {
         catch { send(400,{error:'BOT_GROUP_INVALID_REQUEST'}); return; }
         if(input.action==='create'){send(200,service.create(input));return;}
         if(input.action==='rename'){send(200,service.rename(input));return;}
+        if(input.action==='add-members'){send(200,service.addMembers(input));return;}
         if(input.action==='prepare'){send(200,await service.prepare(input.roomId));return;}
         if(input.action==='interrupt'){send(200,await service.interrupt(input.roomId,input.replyId));return;}
         const requestAttachments=input.attachments??[];

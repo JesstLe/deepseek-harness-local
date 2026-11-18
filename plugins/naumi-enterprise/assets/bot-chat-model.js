@@ -1,6 +1,9 @@
 export const CHAT_PANEL='naumi-conversation';
 export const CHAT_EVENT='naumi:conversation';
 export const PIN_KEY='naumi.botPinned.v1';
+export const ORDER_KEY='naumi.botOrder.v1';
+const DRAG_PENDING_KEY='naumi.botDragPending.v1';
+export function pendingBotGroup(value,storage=globalThis.sessionStorage){try{if(value===null){storage?.removeItem(DRAG_PENDING_KEY);return null;}if(value!==undefined){storage?.setItem(DRAG_PENDING_KEY,JSON.stringify(value));return value;}const saved=JSON.parse(storage?.getItem(DRAG_PENDING_KEY)??'null');if(saved&&['create','add-members'].includes(saved.action)&&Array.isArray(saved.botIds)&&saved.botIds.every(v=>typeof v==='string')&&saved.botIds.length<=12&&typeof(saved.id??saved.operationId)==='string')return saved;}catch{}return null;}
 const ACTIVE_KEY='naumi.groupSelection.v1';
 const memoryDrafts=new Map();
 export function roomDraft(id,value){
@@ -25,12 +28,16 @@ export function groupInterruptTargets(replies){
  }
  return [...targets.values()];
 }
-export function conversationRows(bots,rooms,query='',pinned=null){const q=query.trim().toLocaleLowerCase();const rows=[...bots.filter(b=>b.status==='active').map(bot=>({kind:'bot',id:bot.id,bot,name:bot.name,pinned:bot.id===pinned})),...rooms.map(room=>({kind:'group',id:room.id,room,name:room.name,pinned:false}))];return rows.filter(r=>!q||r.name.toLocaleLowerCase().includes(q)).sort((a,b)=>Number(b.pinned)-Number(a.pinned));}
+export function readBotOrder(storage=globalThis.localStorage){try{const value=JSON.parse(storage?.getItem(ORDER_KEY)??'[]');return Array.isArray(value)?value.filter(v=>typeof v==='string'):[];}catch{return[];}}
+export function writeBotOrder(order,storage=globalThis.localStorage){const value=[...new Set(order.filter(v=>typeof v==='string'))];try{storage?.setItem(ORDER_KEY,JSON.stringify(value));}catch{}return value;}
+export function reorderBotIds(order,dragged,target,before){const ids=[...new Set(order)],moving=new Set(dragged.filter(id=>ids.includes(id)));if(moving.has(target)||!ids.includes(target))return ids;const remaining=ids.filter(id=>!moving.has(id)),index=remaining.indexOf(target)+(before?0:1);remaining.splice(index,0,...ids.filter(id=>moving.has(id)));return remaining;}
+export function groupBotIds(selected,target){return [...new Set([target,...selected])];}
+export function conversationRows(bots,rooms,query='',pinned=null,order=[]){const q=query.trim().toLocaleLowerCase(),rank=new Map(order.map((id,i)=>[id,i])),active=bots.filter(b=>b.status==='active');const rows=[...active.map(bot=>({kind:'bot',id:bot.id,bot,name:bot.name,pinned:bot.id===pinned})),...rooms.map(room=>({kind:'group',id:room.id,room,name:room.name,pinned:false}))];return rows.filter(r=>!q||r.name.toLocaleLowerCase().includes(q)).sort((a,b)=>Number(b.pinned)-Number(a.pinned)||(a.kind==='bot'&&b.kind==='bot'?(rank.get(a.id)??active.length)-(rank.get(b.id)??active.length):a.kind==='bot'?-1:b.kind==='bot'?1:0));}
 export async function groupRequest(url='/naumi/bot-groups',{signal,body,fetcher=globalThis.fetch}={}){
  const r=await fetcher(url,{credentials:'same-origin',cache:'no-store',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(15000)]):AbortSignal.timeout(15000),...(body?{method:'POST',headers:{'Content-Type':'application/json','x-naumi-bot-groups':'1'},body:JSON.stringify(body)}:{})});
  const data=await r.json().catch(()=>null);if(!r.ok||!data){const error=Error(data?.error??'BOT_GROUP_UNAVAILABLE');error.status=r.status;throw error;}return data;
 }
-export const groupError=e=>({BOT_GROUP_MENTION_REQUIRED:'请 @ 一位成员，或选择默认接话者。',BOT_GROUP_MEMBER_UNAVAILABLE:'有成员已归档，请重新选择。',BOT_GROUP_INVALID_NAME:'群名需为 1–80 个字符。',BOT_GROUP_CONFLICT:'内容已变化，请刷新后重试。',BOT_GROUP_DEFAULT_NOT_MEMBER:'默认接话者必须在群内。',BOT_GROUP_TASK_NOT_FOUND:'这项任务不属于当前群。',BOT_GROUP_TASK_RECIPIENT_CONFLICT:'任务补充需交给原派单成员。',BOT_GROUP_ATTACHMENT_NOT_STAGED:'附件已失效，请重新添加。',BOT_GROUP_STOP_PENDING:'停止尚未确认，请稍后核对回复状态。'}[e?.message]??([401,403].includes(e?.status)?'连接已失效，请重新进入工作台。':'操作未完成，请重试。'));
+export const groupError=e=>({BOT_GROUP_MENTION_REQUIRED:'请 @ 一位成员，或选择默认接话者。',BOT_GROUP_MEMBER_UNAVAILABLE:'有成员已归档，请重新选择。',BOT_GROUP_MEMBER_LIMIT:'群组最多容纳 12 位成员。',BOT_GROUP_INVALID_NAME:'群名需为 1–80 个字符。',BOT_GROUP_CONFLICT:'内容已变化，请刷新后重试。',BOT_GROUP_DEFAULT_NOT_MEMBER:'默认接话者必须在群内。',BOT_GROUP_TASK_NOT_FOUND:'这项任务不属于当前群。',BOT_GROUP_TASK_RECIPIENT_CONFLICT:'任务补充需交给原派单成员。',BOT_GROUP_ATTACHMENT_NOT_STAGED:'附件已失效，请重新添加。',BOT_GROUP_STOP_PENDING:'停止尚未确认，请稍后核对回复状态。'}[e?.message]??([401,403].includes(e?.status)?'连接已失效，请重新进入工作台。':'操作未完成，请重试。'));
 export function createGroupCatalog({fetcher=globalThis.fetch,target=globalThis.window,storage=globalThis.sessionStorage}={}){
  let selected=null;try{selected=storage?.getItem(ACTIVE_KEY)??null;}catch{}
  let snapshot={status:'idle',rooms:[],details:{},selected,creating:false},abort=null,pending=null,timer=null,alive=false,generation=0;
