@@ -12,6 +12,11 @@ const edits=[
  ['children: renderSlot("settings.action", {})','children: null /* Employee settings has no configuration-file action. */'],
 ];
 function transform(code){for(const [before,after] of edits){if(code.split(before).length!==2)throw Error('SETTINGS_ANCHOR_CHANGED');code=code.replace(before,after);}return code;}
+export function nativeSettingsOriginal(code){
+ let original=code;for(const [before,after]of edits)original=original.replace(after,before);
+ if(sha(original)!==SETTINGS_UPSTREAM_SHA)throw Error('SETTINGS_UPSTREAM_CHANGED');
+ return original;
+}
 export function extendNativeSettings(code){
  if(sha(code)===SETTINGS_UPSTREAM_SHA)return transform(code);
  let original=code;for(const [before,after]of edits)original=original.replace(after,before);
