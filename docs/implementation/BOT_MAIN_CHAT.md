@@ -36,3 +36,8 @@
 - 最终原生UI固定树17项通过，另验证真实子线程点击打开历史。整合dd764f7后固定f8e651a全仓828/828，exit0；上游新增6项均保留。.gitattributes仅尾部双追加冲突，保留双方规则。
 - 四件套原件/修改件15源文件SHA/ZIP CRC/可执行rollback重开通过；另一标记源码副本恢复15路径，原六模块46/46，exit0；当前修改保持。首次archive stdout超maxBuffer已留证，改用git archive --output而非提高缓冲。
 - 收到对方3080与共享Git窗口释放；下一步普通merge/push再10文件短停加载，保护5个presentation增量。
+
+## 首次真实加载保护门与修正
+- main47b80a4 prepare10通过。初次PowerShell包装读取了Stop脚本遗留LASTEXITCODE，Stop已执行但包装提前退出，未写源码；后续正确续接。
+- 10文件apply后HTTP200/PID26356，但员工库整库hash门遇employee_activity_clock启动时更新而失败；自动恢复10原文件并启动PID45992，原失败保留，不计加载通过。四个员工export核验保持。
+- 源码employee-activity-store.js第71–73行表明该表为既有防时钟回拨高水位；只将该运行时表单独记录并验证单调，entities/events/operations及其余3库完整hash继续要求不变。无员工代码变更、数据回写或规则启用。
