@@ -49,6 +49,9 @@ export class BotGroupStore {
       CREATE TABLE IF NOT EXISTS room_member_operations (
         operation_id TEXT PRIMARY KEY, room_id TEXT NOT NULL REFERENCES rooms(id),
         bot_ids TEXT NOT NULL, result_json TEXT NOT NULL, created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS room_creation_operations (
+        room_id TEXT PRIMARY KEY REFERENCES rooms(id), payload TEXT NOT NULL
       )`);
     } catch (error) {
       this.db.close();
@@ -93,7 +96,10 @@ export class BotGroupStore {
   create({id, name, botIds, defaultBotId}, validate) {
     return this.write(() => {
       const existing = this.room(id);
+      const payload=JSON.stringify({name,botIds,defaultBotId});
       if (existing) {
+        const prior=this.db.prepare('SELECT payload FROM room_creation_operations WHERE room_id=?').get(id);
+        if(prior){if(prior.payload!==payload)fail('BOT_GROUP_CONFLICT');return existing;}
         if (existing.name !== name || existing.defaultBotId !== defaultBotId ||
           JSON.stringify(existing.members.map(member => member.botId)) !== JSON.stringify(botIds)) fail('BOT_GROUP_CONFLICT');
         return existing;
@@ -102,6 +108,7 @@ export class BotGroupStore {
       this.db.prepare('INSERT INTO rooms VALUES (?, ?, ?, ?)').run(id, name, defaultBotId, timestamp());
       const add = this.db.prepare('INSERT INTO members VALUES (?, ?, ?, ?)');
       botIds.forEach((botId, position) => add.run(id, botId, 'session-' + randomUUID(), position));
+      this.db.prepare('INSERT INTO room_creation_operations VALUES (?,?)').run(id,payload);
       return this.room(id);
     });
   }
