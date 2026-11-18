@@ -1,0 +1,142 @@
+diff --git a/plugins/naumi-enterprise/assets/bot-sidebar.css b/plugins/naumi-enterprise/assets/bot-sidebar.css
+index 03f03b0..ab878ea 100644
+--- a/plugins/naumi-enterprise/assets/bot-sidebar.css
++++ b/plugins/naumi-enterprise/assets/bot-sidebar.css
+@@ -80,19 +80,34 @@
+ .naumi-navigation[data-wide=false] .naumi-group-avatar .naumi-bot-avatar{min-width:0;width:13px!important;height:13px!important}
+ .naumi-navigation[data-wide=false] .naumi-bot-entry[data-pinned=true]{padding-bottom:8px;margin-bottom:8px}
+ 
+-/* Pointer drag operates on the existing rows; no duplicated avatar or chat tree. */
++/* Pointer drag retains original rows/state. Folder thumbnails reuse static Avatar. */
+ .naumi-navigation .naumi-bot-entry[draggable=true]{position:relative;cursor:grab}
+ .naumi-navigation .naumi-bot-entry[draggable=true]:active{cursor:grabbing}
+ .naumi-bot-entry[data-drag-selected=true]{background:#eeebf8;box-shadow:inset 0 0 0 1px #d7cdeb}
+ .naumi-bot-entry[data-drag-source=true]{opacity:.6}
+ .naumi-bot-entry[data-drop-zone=before]:before,.naumi-bot-entry[data-drop-zone=after]:after{content:"";position:absolute;left:4px;right:4px;height:2px;border-radius:2px;background:#9273c8;pointer-events:none;z-index:3}
+ .naumi-bot-entry[data-drop-zone=before]:before{top:-3px}.naumi-bot-entry[data-drop-zone=after]:after{bottom:-3px}
+-.naumi-bot-entry[data-drop-zone=group]{outline:2px solid #b29bd2;outline-offset:1px;background:#f0ebf8;box-shadow:0 0 0 4px #b29bd216}
+-.naumi-bot-entry[data-drop-zone=group]:after{content:"松开建群";position:absolute;right:8px;top:50%;transform:translateY(-50%);border-radius:6px;padding:4px 7px;background:#7c63a4;color:#fff;font:11px/1.3 "Segoe UI","Microsoft YaHei",sans-serif;pointer-events:none;z-index:4}
+-.naumi-group-entry[data-drop-zone=group]:after{content:"加入群聊"}
+ .naumi-drag-selection{display:flex;align-items:center;gap:8px;min-height:29px;margin:0 5px 8px;padding:4px 8px;border:1px solid #e7e1f1;background:#f7f4fc;border-radius:8px;font-size:11px;color:#8a739e}
+ .naumi-drag-selection>span{flex:1}.naumi-drag-selection>button{border:0;background:transparent;color:#78549d;font:inherit;padding:3px;cursor:pointer}
+ .naumi-navigation{position:relative}.naumi-drag-notice{position:absolute;bottom:5px;left:6px;right:12px;z-index:4;pointer-events:none;display:block;margin:0;padding:4px 8px;background:#faf8fdee;border:1px solid #ede7f3;border-radius:6px;font-size:11px;color:#927aa6;line-height:1.6}.naumi-drag-notice:empty{display:none}
+ .naumi-navigation[data-wide=false] .naumi-drag-selection{flex-direction:column;gap:2px;padding:4px 1px;margin-inline:0;font-size:10px}.naumi-navigation[data-wide=false] .naumi-drag-notice{font-size:0;height:0;overflow:hidden}
+-.naumi-navigation[data-wide=false] .naumi-bot-entry[data-drop-zone=group]:after{content:"+";right:-2px;top:4px;transform:none;padding:1px 4px;font-size:11px}
+ @media(prefers-reduced-motion:reduce){.naumi-bot-entry{transition:none}}
++
++/* App-folder motion: transform/opacity only; hit geometry and drop zones never move. */
++.naumi-bot-entry{position:relative}
++.naumi-bot-entry .naumi-bot-open>.naumi-bot-avatar,.naumi-group-entry .naumi-bot-open>.naumi-group-avatar{transition:transform .24s cubic-bezier(.2,.8,.2,1),opacity .18s ease,filter .2s ease;transform-origin:center}
++.naumi-bot-entry[data-drag-source=true] .naumi-bot-open>.naumi-bot-avatar{transform:scale(1.1) rotate(-3deg);filter:drop-shadow(0 4px 5px #55466b20)}
++.naumi-bot-entry[data-drop-zone=group]{background:#f0edf6;outline:none;box-shadow:none}
++.naumi-bot-entry[data-drop-zone=group] .naumi-bot-open>.naumi-bot-avatar,.naumi-group-entry[data-drop-zone=group] .naumi-bot-open>.naumi-group-avatar{opacity:0;transform:scale(.54)}
++.naumi-folder-preview{position:absolute;z-index:5;pointer-events:none;left:6px;top:50%;width:46px;height:46px;box-sizing:border-box;padding:6px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(2,minmax(0,1fr));gap:3px;border:1px solid #ddd8e8;border-radius:13px;background:linear-gradient(145deg,#eeebf4f5,#e5e0edf5);box-shadow:inset 0 1px 1px #ffffffc0,0 4px 10px #51426310;transform:translateY(-50%) scale(1.03);animation:naumi-folder-open .3s cubic-bezier(.16,1,.3,1) both}
++.naumi-folder-cell{display:grid;place-items:center;min-width:0;min-height:0;animation:naumi-folder-absorb .28s cubic-bezier(.16,1,.3,1) both;animation-delay:calc(var(--folder-index,0)*25ms)}
++.naumi-folder-preview .naumi-bot-avatar.naumi-character{width:15px!important;height:15px!important;min-width:0!important;margin:0!important;border-radius:0;background:transparent;box-shadow:none;overflow:visible}
++.naumi-folder-preview .naumi-character>svg{width:100%;height:100%;display:block}
++.naumi-folder-count{position:absolute;right:-5px;bottom:-4px;min-width:15px;height:15px;display:grid;place-items:center;padding:0 2px;border:2px solid #fff;border-radius:9px;background:#8d78ad;color:#fff;font:normal 9px/1 "Segoe UI",sans-serif}
++.naumi-group-entry[data-folder-arrived=true]>.naumi-bot-open>.naumi-group-avatar{animation:naumi-folder-settle .48s cubic-bezier(.2,.9,.25,1) both}
++@keyframes naumi-folder-open{0%{opacity:.25;transform:translateY(-50%) scale(.7);border-radius:18px}65%{opacity:1;transform:translateY(-50%) scale(1.09)}100%{opacity:1;transform:translateY(-50%) scale(1.03)}}
++@keyframes naumi-folder-absorb{from{opacity:0;transform:translate(4px,3px) scale(1.5)}to{opacity:1;transform:translate(0,0) scale(1)}}
++@keyframes naumi-folder-settle{0%{transform:scale(.82)}45%{transform:scale(1.12)}75%{transform:scale(.97)}100%{transform:scale(1)}}
++.naumi-navigation[data-wide=false] .naumi-folder-preview{left:50%;width:34px;height:34px;padding:4px;gap:2px;border-radius:10px;translate:-50% 0}
++.naumi-navigation[data-wide=false] .naumi-folder-preview .naumi-bot-avatar.naumi-character{width:11px!important;height:11px!important}
++@media(prefers-reduced-motion:reduce){.naumi-folder-preview,.naumi-folder-cell,.naumi-group-entry[data-folder-arrived=true]>.naumi-bot-open>.naumi-group-avatar{animation:none!important}.naumi-bot-entry .naumi-bot-open>.naumi-bot-avatar,.naumi-group-entry .naumi-bot-open>.naumi-group-avatar{transition:none!important}.naumi-folder-preview{transform:translateY(-50%)}.naumi-bot-entry[data-drag-source=true] .naumi-bot-open>.naumi-bot-avatar{transform:none;filter:none}}
+diff --git a/plugins/naumi-enterprise/assets/bot-sidebar.js b/plugins/naumi-enterprise/assets/bot-sidebar.js
+index d5ce76d..876636c 100644
+--- a/plugins/naumi-enterprise/assets/bot-sidebar.js
++++ b/plugins/naumi-enterprise/assets/bot-sidebar.js
+@@ -11,7 +11,7 @@ export function installBotSidebar(ctx,React,Icon,createPortal){
+ }
+ function installNavigation(ctx,React,Icon,createPortal){
+   const h=React.createElement,{useState,useEffect,useLayoutEffect,useRef,useSyncExternalStore}=React,source=botCatalog(),activity=taskActivity(),groups=groupCatalog(),Avatar=createBotAvatar(React);
+-  function BotRow({bot,props,pinned,onPin,primary=false,dragProps={}}){
++  function BotRow({bot,props,pinned,onPin,primary=false,dragProps={},folderPreview=null}){
+     const {useSessions,useSessionStatus,usePanelInfo,useWorkspaces}=props;
+     const sessions=useSessions(s=>s),status=useSessionStatus(s=>s),workspaces=useWorkspaces(s=>s),panelId=usePanelInfo(s=>s.activePanelId),currentId=currentSessionId(sessions,panelId);
+     const [error,setError]=useState(null),[menu,setMenu]=useState(null),[advanced,setAdvanced]=useState(false),menuButton=useRef(null),menuRef=useRef(null);
+@@ -26,6 +26,7 @@ function installNavigation(ctx,React,Icon,createPortal){
+       h('div',{className:'naumi-bot-row'},h('button',{type:'button',className:'naumi-bot-open',onClick:()=>target?open(target):setError('主聊天暂未就绪'),'aria-label':bot.name+'，'+stateName,title:bot.name},h(Avatar,{bot,state}),h('span',{className:'naumi-bot-caption'},h('strong',null,bot.name),h('span',null,state!=='idle'&&state!=='unknown'?stateName:botSummary(bot,sessions))),state!=='idle'&&state!=='unknown'&&h('span',{className:'naumi-bot-state',title:stateName,'aria-label':stateName})),
+         active.length>0&&h('button',{type:'button',className:'naumi-bot-current','aria-label':'查看'+bot.name+'的当前任务（'+active.length+'）',title:'查看当前任务',onClick:()=>openBotOverview(ctx,bot.id)},active.length),
+         h('button',{ref:menuButton,type:'button',className:'naumi-bot-menu-toggle','aria-label':bot.name+'的设置','aria-haspopup':'menu','aria-expanded':!!menu,onClick:e=>{const r=e.currentTarget.getBoundingClientRect();setMenu(v=>v?null:{left:Math.max(8,Math.min(window.innerWidth-205,r.left)),top:Math.max(8,Math.min(window.innerHeight-240,r.bottom+5))});}},'⋯'),h('button',{type:'button',className:'naumi-bot-history-toggle','aria-label':bot.name+'的任务记录',title:'任务',onClick:()=>openBotOverview(ctx,bot.id)},'任务')),
++      folderPreview,
+       menu&&createPortal(h('div',{ref:menuRef,className:'nx-bot-menu',role:'menu','aria-label':bot.name+'的设置',style:menu},h('button',{type:'button',role:'menuitem',onClick:()=>{onPin(pinned?null:bot.id);setMenu(null);}},pinned?'取消置顶':'置顶'),[...EXPERIENCE_ACTIONS,...(advanced?[['advanced','高级管理']]:[])].map(([mode,label])=>h('button',{type:'button',key:mode,role:'menuitem','data-advanced':mode==='advanced'||undefined,onClick:()=>openSettings(mode)},label))),document.body),
+       error&&h('div',{className:'naumi-bot-error',role:'alert'},error));
+   }
+@@ -33,6 +34,8 @@ function installNavigation(ctx,React,Icon,createPortal){
+       const [mode,setMode]=useState(()=>{try{return navigationMode(localStorage.getItem(MODE_KEY));}catch{return 'threads';}}),[search,setSearch]=useState(''),[error,setError]=useState(null);
+       const [pinned,setPinned]=useState(()=>{try{return localStorage.getItem(PIN_KEY);}catch{return null;}}),[adding,setAdding]=useState(false),addRef=useRef(null),lastNative=useRef(null),entryIntent=useRef(0);
+       const [order,setOrder]=useState(()=>readBotOrder()),[selected,setSelected]=useState([]),[drop,setDrop]=useState(null),[busy,setBusy]=useState(false),[dragNotice,setDragNotice]=useState(''),[retry,setRetry]=useState(()=>pendingBotGroup());
++      const [arrived,setArrived]=useState(null);
++      useEffect(()=>{if(!arrived)return;const timer=setTimeout(()=>setArrived(null),640);return()=>clearTimeout(timer);},[arrived]);
+       const dragging=useRef(null),dropRef=useRef(null),mutation=useRef(null),flight=useRef(false),anchor=useRef(null),alive=useRef(true);
+       useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
+       const roomState=useSyncExternalStore(mode==='bot'?groups.subscribe:()=>()=>{},groups.getSnapshot,groups.getSnapshot),panel=props.usePanelInfo(s=>s.activePanelId),sessions=props.useSessions(s=>s);
+@@ -73,7 +76,7 @@ function installNavigation(ctx,React,Icon,createPortal){
+       useEffect(()=>{const escape=e=>{if(e.key==='Escape'){dragging.current=null;dropRef.current=null;setDrop(null);setSelected([]);setDragNotice('');}};document.addEventListener('keydown',escape);return()=>document.removeEventListener('keydown',escape);},[]);
+       const runGroup=async command=>{
+         if(flight.current)return;flight.current=true;pendingBotGroup(command);setBusy(true);setError(null);setRetry(null);
+-        try{const room=await groupRequest(undefined,{body:command});pendingBotGroup(null);if(!alive.current)return;mutation.current=null;setSelected([]);setDragNotice(command.action==='create'?'群聊已创建':'成员已加入群聊');if(command.action==='create')groups.created(ctx,room);else{groups.renamed(room);groups.select(ctx,room.id);}}
++        try{const room=await groupRequest(undefined,{body:command});pendingBotGroup(null);if(!alive.current)return;mutation.current=null;setSelected([]);setArrived(room.id);setDragNotice(command.action==='create'?'群聊已创建':'成员已加入群聊');if(command.action==='create')groups.created(ctx,room);else{groups.renamed(room);groups.select(ctx,room.id);}}
+         catch(e){if(alive.current){setError(groupError(e));setRetry(command);}}
+         finally{flight.current=false;if(alive.current)setBusy(false);}
+       };
+@@ -90,15 +93,20 @@ function installNavigation(ctx,React,Icon,createPortal){
+         void runGroup(mutation.current.command);
+       };
+       const dragProps=row=>({
+-        draggable:row.kind==='bot'&&!busy,'data-drag-selected':selected.includes(row.id),'data-drop-zone':drop?.id===row.id?drop.zone:undefined,'data-drag-source':dragging.current?.includes(row.id)||undefined,
++        draggable:row.kind==='bot'&&!busy,'data-drag-selected':selected.includes(row.id),'data-drop-zone':drop?.id===row.id?drop.zone:undefined,'data-drag-source':dragging.current?.includes(row.id)||undefined,'data-folder-arrived':arrived===row.id||undefined,
+         onClickCapture:e=>{if(row.kind!=='bot'||!e.target.closest('.naumi-bot-open'))return;if(e.ctrlKey||e.metaKey||e.shiftKey){e.preventDefault();e.stopPropagation();const visible=rows.filter(r=>r.kind==='bot').map(r=>r.id);if(e.shiftKey&&anchor.current&&visible.includes(anchor.current)){const a=visible.indexOf(anchor.current),b=visible.indexOf(row.id);setSelected([...new Set([...selected,...visible.slice(Math.min(a,b),Math.max(a,b)+1)])]);}else{setSelected(v=>v.includes(row.id)?v.filter(id=>id!==row.id):[...v,row.id]);anchor.current=row.id;}}else setSelected([]);},
+-        onDragStart:e=>{if(row.kind!=='bot'||flight.current||e.target.closest('.naumi-bot-menu-toggle,.naumi-bot-history-toggle,.naumi-bot-current')){e.preventDefault();return;}const ids=selected.includes(row.id)?orderedIds.filter(id=>selected.includes(id)):[row.id];dragging.current=ids;if(selected.length<2)setSelected(ids);setDragNotice(ids.length>1?'拖动 '+ids.length+' 位 Bot':'');e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('application/x-naumi-bots',JSON.stringify(ids));e.dataTransfer.setData('text/plain',row.name);},
++        onDragStart:e=>{if(row.kind!=='bot'||flight.current||e.target.closest('.naumi-bot-menu-toggle,.naumi-bot-history-toggle,.naumi-bot-current')){e.preventDefault();return;}const ids=selected.includes(row.id)?orderedIds.filter(id=>selected.includes(id)):[row.id];dragging.current=ids;if(selected.length<2)setSelected(ids);setDragNotice(ids.length>1?'拖动 '+ids.length+' 位 Bot':'');e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('application/x-naumi-bots',JSON.stringify(ids));e.dataTransfer.setData('text/plain',row.name);const avatar=e.currentTarget.querySelector('.naumi-bot-avatar');if(avatar){const r=avatar.getBoundingClientRect();e.dataTransfer.setDragImage(avatar,r.width/2,r.height/2);}},
+         onDragOver:e=>{const ids=dragging.current;if(!ids?.length||flight.current||row.kind==='bot'&&ids.includes(row.id))return;e.preventDefault();e.dataTransfer.dropEffect='move';const rect=e.currentTarget.getBoundingClientRect(),ratio=(e.clientY-rect.top)/rect.height,zone=row.kind==='group'?'group':ratio<.24?'before':ratio>.76?'after':'group',next={id:row.id,zone};dropRef.current=next;setDrop(v=>v?.id===next.id&&v.zone===next.zone?v:next);const scroller=surface?.querySelector('.naumi-bot-navigation');if(scroller){const r=scroller.getBoundingClientRect();if(e.clientY<r.top+32)scroller.scrollTop-=12;if(e.clientY>r.bottom-32)scroller.scrollTop+=12;}},
+         onDragLeave:e=>{const r=e.currentTarget.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom){dropRef.current=null;setDrop(null);}},
+         onDrop:e=>{const ids=dragging.current;if(!ids?.length||row.kind==='bot'&&ids.includes(row.id))return;e.preventDefault();e.stopPropagation();const r=e.currentTarget.getBoundingClientRect(),ratio=(e.clientY-r.top)/r.height,zone=row.kind==='group'?'group':ratio<.24?'before':ratio>.76?'after':'group';dragging.current=null;dropRef.current=null;setDrop(null);finishDrop(row,zone,ids);},
+         onDragEnd:()=>{dragging.current=null;dropRef.current=null;setDrop(null);},
+         onKeyDown:e=>{if(row.kind==='bot'&&e.altKey&&['ArrowUp','ArrowDown'].includes(e.key)){const i=orderedIds.indexOf(row.id),other=orderedIds[i+(e.key==='ArrowUp'?-1:1)];if(other){e.preventDefault();saveOrder(reorderBotIds(orderedIds,[row.id],other,e.key==='ArrowUp'));setDragNotice('顺序已保存');}}},
+       });
++      const folderPreview=row=>{
++        if(drop?.id!==row.id||drop.zone!=='group'||!dragging.current?.length)return null;
++        const ids=[...new Set([...(row.kind==='group'?row.room.members.map(m=>m.botId):[row.id]),...dragging.current])],members=ids.map(id=>catalog.bots.find(b=>b.id===id)).filter(Boolean);
++        return h('span',{className:'naumi-folder-preview','aria-hidden':true,'data-preview-count':members.length},members.slice(0,4).map((bot,index)=>h('span',{key:bot.id,className:'naumi-folder-cell',style:{'--folder-index':index}},h(Avatar,{bot,staticPreview:true}))),members.length>4&&h('i',{className:'naumi-folder-count'},members.length));
++      };
+       const create=()=>{setError(null);if(!primaryBot(catalog)){void enterBotMode(ctx,catalog).catch(()=>setError('目录尚未读取，请重试。'));return;}window.dispatchEvent(new CustomEvent(CREATE_BOT_EVENT));};
+       if(!surface)return null;
+       return createPortal(h(React.Fragment,null,
+@@ -111,7 +119,7 @@ function installNavigation(ctx,React,Icon,createPortal){
+           h('span',{className:'naumi-drag-notice',role:'status','aria-live':'polite'},dragNotice),
+           retry&&h('button',{type:'button',className:'naumi-bot-link',disabled:busy,onClick:()=>runGroup(retry)},'重试保存'),
+           roomState.status==='error'&&h('button',{type:'button',className:'naumi-bot-link',onClick:()=>groups.refresh()},'群列表重试'),
+-          rows.map(row=>row.kind==='bot'?h(BotRow,{key:row.id,bot:row.bot,props,pinned:row.pinned,onPin:pin,primary:row.id===catalog.primaryBotId,dragProps:dragProps(row)}):h('div',{key:row.id,className:'naumi-bot-entry naumi-group-entry',...dragProps(row),'data-group-id':row.id,'data-selected':panel===CHAT_PANEL&&roomState.selected===row.id,'data-bot-state':roomWorking(roomState.details[row.id])?'running':'idle'},h('button',{type:'button',className:'naumi-bot-open',onClick:()=>groups.select(ctx,row.id),'aria-label':row.name,title:row.name},h('span',{className:'naumi-group-avatar','aria-hidden':true},row.room.members.slice(0,4).map(m=>{const bot=catalog.bots.find(b=>b.id===m.botId);return bot?h(Avatar,{key:m.botId,bot,staticPreview:true}):null;})),h('span',{className:'naumi-bot-caption'},h('strong',null,row.name),h('span',null,roomPreview(row.room,catalog.bots,roomState.details[row.id]))),roomWorking(roomState.details[row.id])&&h('span',{className:'naumi-bot-state','aria-label':'正在协作'})))),error&&h('p',{className:'naumi-bot-error',role:'alert'},error))),surface);
++          rows.map(row=>row.kind==='bot'?h(BotRow,{key:row.id,bot:row.bot,props,pinned:row.pinned,onPin:pin,primary:row.id===catalog.primaryBotId,dragProps:dragProps(row),folderPreview:folderPreview(row)}):h('div',{key:row.id,className:'naumi-bot-entry naumi-group-entry',...dragProps(row),'data-group-id':row.id,'data-selected':panel===CHAT_PANEL&&roomState.selected===row.id,'data-bot-state':roomWorking(roomState.details[row.id])?'running':'idle'},h('button',{type:'button',className:'naumi-bot-open',onClick:()=>groups.select(ctx,row.id),'aria-label':row.name,title:row.name},h('span',{className:'naumi-group-avatar','aria-hidden':true},row.room.members.slice(0,4).map(m=>{const bot=catalog.bots.find(b=>b.id===m.botId);return bot?h(Avatar,{key:m.botId,bot,staticPreview:true}):null;})),h('span',{className:'naumi-bot-caption'},h('strong',null,row.name),h('span',null,roomPreview(row.room,catalog.bots,roomState.details[row.id]))),roomWorking(roomState.details[row.id])&&h('span',{className:'naumi-bot-state','aria-label':'正在协作'})),folderPreview(row))),error&&h('p',{className:'naumi-bot-error',role:'alert'},error))),surface);
+   }
+   // Additive overlay registration: the native workspace parent keeps sole ownership of all child slots.
+   return ctx.slots.inject('shell.overlay',()=>ctx.slots.register({name:'shell.overlay',id:'naumi-navigation-modes',order:90},Navigation));
+diff --git a/scripts/deploy-bot-drag-groups.mjs b/scripts/deploy-bot-drag-groups.mjs
+index c37fab2..06b439c 100644
+--- a/scripts/deploy-bot-drag-groups.mjs
++++ b/scripts/deploy-bot-drag-groups.mjs
+@@ -4,17 +4,18 @@ import fs from 'node:fs';import path from 'node:path';import assert from 'node:a
+ import {randomUUID} from 'node:crypto';
+ import {inventory} from './repair-desktop-update-entry.mjs';
+ import {planAlignment,applyAlignment,restoreAlignment,verifyAligned,assertBefore,hash} from './lib/service-alignment.mjs';
+-const root=process.cwd(),out=path.resolve(process.argv.find(x=>x.startsWith('--out='))?.slice(6)??'evidence/bot-drag-groups'),target=path.join(root,'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise'),official=path.join(root,'plugins/naumi-enterprise'),allowed=new Set(['assets/bot-sidebar.js','assets/bot-sidebar.css','assets/bot-chat-model.js','bot-group-service.js','bot-group-store.js','bot-groups.js']);
++const folderMotion=process.argv.includes('--folder-motion'),expectedFiles=folderMotion?2:6,label=folderMotion?'BOT_FOLDER':'BOT_DRAG';
++const root=process.cwd(),out=path.resolve(process.argv.find(x=>x.startsWith('--out='))?.slice(6)??(folderMotion?'evidence/bot-folder-motion':'evidence/bot-drag-groups')),target=path.join(root,'.dsh/profiles/web/node_modules/@naumi/dsh-enterprise'),official=path.join(root,'plugins/naumi-enterprise'),allowed=new Set(folderMotion?['assets/bot-sidebar.js','assets/bot-sidebar.css']:['assets/bot-sidebar.js','assets/bot-sidebar.css','assets/bot-chat-model.js','bot-group-service.js','bot-group-store.js','bot-groups.js']);
+ // Do not normalize unrelated runtime bytes (e.g. CRLF copies) or redo service alignment.
+ // Existing inventory rejects indirection; candidate contains only trusted code files.
+ inventory(target);const source=path.join(root,'runtime/bot-drag-code-'+randomUUID());fs.cpSync(target,source,{recursive:true});for(const file of allowed)fs.copyFileSync(path.join(official,file),path.join(source,file));
+ fs.mkdirSync(out,{recursive:true});const plan=planAlignment({source,target});assert(plan.changes.every(r=>allowed.has(r.file)),'UNRELATED_SOURCE_DRIFT');assert.equal(plan.version,plan.previousVersion,'VERSION_CHANGED');fs.writeFileSync(path.join(out,'RUNTIME_PLAN.json'),JSON.stringify(plan,null,2)+'\n');
+-if(!process.argv.includes('--apply')){console.log('BOT_DRAG_PLAN files='+plan.changes.length+' version='+plan.version+' unrelated=0 exit=0');process.exit(0);}
+-const git=(...a)=>execFileSync('git',a,{encoding:'utf8'}).trim();assert.equal(git('branch','--show-current'),'main');assert.equal(git('status','--porcelain','--untracked-files=no'),'','DIRTY_MAIN');assert(!fs.existsSync(path.join(out,'DEPLOYMENT.json')),'DEPLOYMENT_EXISTS');assert.equal(plan.changes.length,6,'EXPECTED_SIX_FILES');
++if(!process.argv.includes('--apply')){console.log(label+'_PLAN files='+plan.changes.length+' version='+plan.version+' unrelated=0 exit=0');process.exit(0);}
++const git=(...a)=>execFileSync('git',a,{encoding:'utf8'}).trim();assert.equal(git('branch','--show-current'),'main');assert.equal(git('status','--porcelain','--untracked-files=no'),'','DIRTY_MAIN');assert(!fs.existsSync(path.join(out,'DEPLOYMENT.json')),'DEPLOYMENT_EXISTS');assert.equal(plan.changes.length,expectedFiles,'EXPECTED_PROFILE_FILES');
+ const lock=path.join(root,'runtime/service-alignment.lock'),backup=path.join(out,'runtime-backup'),fd=fs.openSync(lock,'wx');fs.writeFileSync(fd,JSON.stringify({pid:process.pid,source:git('rev-parse','HEAD')}));fs.closeSync(fd);let stopped=false,wrote=false;
+ const files=['config/local.json','.dsh/.credentials.yaml','.dsh/cordis.patch.yml','.dsh/profiles/web/package.json','.dsh/profiles/web/cordis.patch.yml','.dsh/naumi-legacy-owner.json'],protectedFiles=Object.fromEntries(files.filter(p=>fs.existsSync(path.join(root,p))).map(p=>[p,hash(fs.readFileSync(path.join(root,p)))]));
+ function shell(file){const r=spawnSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-File',path.join(root,file)],{encoding:'utf8',windowsHide:true,timeout:180000});assert.equal(r.status,0,'SERVICE_LIFECYCLE_FAILED '+file+' '+r.stderr);return r.stdout.trim();}
+ async function business(){const log=['server.out.log','server.err.log'].map(f=>fs.readFileSync(path.join(root,'logs',f),'utf8')).join('\n'),launch=[...log.matchAll(/http:\/\/127\.0\.0\.1:3080\/?\?token=[A-Za-z0-9_~.%-]+/g)].at(-1)?.[0];assert(launch);const r=await fetch(launch,{redirect:'manual',signal:AbortSignal.timeout(5000)});assert.equal(r.status,303);const cookie=r.headers.getSetCookie().map(v=>v.split(';')[0]).join('; '),get=async(route,body)=>{const r=await fetch('http://127.0.0.1:3080'+route,{headers:{cookie,'Content-Type':'application/json'},...body?{method:'POST',body:JSON.stringify(body)}:{},signal:AbortSignal.timeout(15000)});assert(r.ok);return r.json();};const s=await get('/api/session/list',{type:'client-request',rpcId:'bot-drag-load-readonly',method:'session/list',payload:{args:{_request:{}}}});assert(s.result?.ok);const sessions=s.result.value.items;assert(sessions.every(v=>!v.running),'LIVE_RUNNING');const bots=await get('/naumi/bots'),groups=await get('/naumi/bot-groups'),tasks=await get('/naumi/bot-tasks?view=activity');assert(tasks.tasks.every(t=>!['queued','starting','running','waiting'].includes(t.status)),'LIVE_TASK_PENDING');const employees=[];for(const b of bots.bots)if(b.status!=='archived'){const e=await get('/naumi/employees?'+new URLSearchParams({botId:b.id,view:'export'}));delete e.exportedAt;employees.push(e);}return{sessions:sessions.length,running:0,bots:bots.bots.length,revision:bots.revision,sessionIds:hash(JSON.stringify(sessions.map(s=>s.sessionId??s.id).sort())),botsHash:hash(JSON.stringify(bots)),groupsHash:hash(JSON.stringify(groups)),tasksHash:hash(JSON.stringify(tasks)),employeesHash:hash(JSON.stringify(employees))};}
+-try{const before=await business();assertBefore(plan);assert.deepEqual(await business(),before);shell('Stop-Naumi.ps1');stopped=true;assertBefore(plan);applyAlignment(plan,backup);wrote=true;const start=shell('Start-Naumi.ps1');stopped=false;const after=await business();assert.deepEqual(after,before,'BUSINESS_CHANGED');verifyAligned(plan);for(const[p,h]of Object.entries(protectedFiles))assert.equal(hash(fs.readFileSync(path.join(root,p))),h,'CONFIG_CHANGED');fs.writeFileSync(path.join(out,'DEPLOYMENT.json'),JSON.stringify({status:'PASS',source:git('rev-parse','HEAD'),files:plan.changes,before,after,start,version:plan.version,unrelatedRuntimeFiles:plan.files.length-plan.changes.length,configHashesPreserved:Object.keys(protectedFiles).length,modelCalls:0,realGroupWrites:0},null,2)+'\n');console.log('BOT_DRAG_DEPLOY files=6 unrelated=PASS data=UNCHANGED config=UNCHANGED model_calls=0 group_writes=0 exit=0');}
++try{const before=await business();assertBefore(plan);assert.deepEqual(await business(),before);shell('Stop-Naumi.ps1');stopped=true;assertBefore(plan);applyAlignment(plan,backup);wrote=true;const start=shell('Start-Naumi.ps1');stopped=false;const after=await business();assert.deepEqual(after,before,'BUSINESS_CHANGED');verifyAligned(plan);for(const[p,h]of Object.entries(protectedFiles))assert.equal(hash(fs.readFileSync(path.join(root,p))),h,'CONFIG_CHANGED');fs.writeFileSync(path.join(out,'DEPLOYMENT.json'),JSON.stringify({status:'PASS',source:git('rev-parse','HEAD'),files:plan.changes,before,after,start,version:plan.version,unrelatedRuntimeFiles:plan.files.length-plan.changes.length,configHashesPreserved:Object.keys(protectedFiles).length,modelCalls:0,realGroupWrites:0},null,2)+'\n');console.log(label+'_DEPLOY files='+expectedFiles+' unrelated=PASS data=UNCHANGED config=UNCHANGED model_calls=0 group_writes=0 exit=0');}
+ catch(error){if(wrote){if(!stopped){await business();shell('Stop-Naumi.ps1');stopped=true;}restoreAlignment(plan,backup);shell('Start-Naumi.ps1');stopped=false;}else if(stopped)shell('Start-Naumi.ps1');throw error;}
+ finally{fs.unlinkSync(lock);}
