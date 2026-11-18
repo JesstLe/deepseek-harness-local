@@ -1,0 +1,166 @@
+diff --git a/plugins/naumi-enterprise/managed-workspace.cjs b/plugins/naumi-enterprise/managed-workspace.cjs
+index 84cf9e2..3ea52b3 100644
+--- a/plugins/naumi-enterprise/managed-workspace.cjs
++++ b/plugins/naumi-enterprise/managed-workspace.cjs
+@@ -23,12 +23,15 @@ async function createManagedWorkspace(directory,{parent=path.dirname(directory),
+   if(fs.existsSync(stage)&&fs.lstatSync(stage).isDirectory()&&!fs.lstatSync(stage).isSymbolicLink()&&!fs.readdirSync(stage).length)fs.rmdirSync(stage);
+  }
+ }
+-async function prepareWindowsWorkspace(directory,parent){
+- const executable=path.join(process.env.SystemRoot??'C:\\Windows','System32/WindowsPowerShell/v1.0/powershell.exe');
++async function prepareWindowsWorkspace(directory,parent,{execute=run,environment=process.env}={}){
++ const executable=path.join(environment.SystemRoot??'C:\\Windows','System32/WindowsPowerShell/v1.0/powershell.exe');
+  // A pwsh parent can export incompatible PS7 module paths to Windows PS5.
+  // This one child uses only the inbox modules, not any user profile/module.
+- const env={...process.env,PSModulePath:path.join(process.env.SystemRoot??'C:\\Windows','System32/WindowsPowerShell/v1.0/Modules')};
+- const {stdout}=await run(executable,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.join(__dirname,'managed-workspace.ps1'),'-Directory',directory,'-Parent',parent],{env,windowsHide:true,timeout:30000,maxBuffer:32768});
+- const receipt=JSON.parse(stdout.replace(/^\uFEFF/,''));if(receipt.status!=='OWNER_LABEL_READY')throw Error('MANAGED_WORKSPACE_ACL_UNVERIFIED');return receipt;
++ const env={...environment,PSModulePath:path.join(environment.SystemRoot??'C:\\Windows','System32/WindowsPowerShell/v1.0/Modules')};
++ let stdout;try{({stdout}=await execute(executable,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.join(__dirname,'managed-workspace.ps1'),'-Directory',directory,'-Parent',parent],{env,windowsHide:true,encoding:'utf8',timeout:30000,maxBuffer:32768}));}catch(error){
++  const code=String(error.stderr??'').match(/\bMANAGED_WORKSPACE_[A-Z_]+\b/)?.[0]??'MANAGED_WORKSPACE_ACL_PREPARE_FAILED';
++  throw Object.assign(new Error(code,{cause:error}),{code});
++ }
++ let receipt;try{receipt=JSON.parse(stdout.replace(/^\uFEFF/,''));}catch{throw Error('MANAGED_WORKSPACE_ACL_UNVERIFIED');}if(receipt.status!=='OWNER_LABEL_READY')throw Error('MANAGED_WORKSPACE_ACL_UNVERIFIED');return receipt;
+ }
+-module.exports={createManagedWorkspace};
++module.exports={createManagedWorkspace,prepareWindowsWorkspace};
+diff --git a/plugins/naumi-enterprise/managed-workspace.ps1 b/plugins/naumi-enterprise/managed-workspace.ps1
+index e713c34..842d0e9 100644
+--- a/plugins/naumi-enterprise/managed-workspace.ps1
++++ b/plugins/naumi-enterprise/managed-workspace.ps1
+@@ -1,19 +1,32 @@
+ param([Parameter(Mandatory=$true)][string]$Directory,[Parameter(Mandatory=$true)][string]$Parent)
+ $ErrorActionPreference='Stop'
++[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
++$OutputEncoding=[Console]::OutputEncoding
++function Test-ManagedWorkspaceOwner {
++  param([string]$DirectoryOwner,[string]$UserSid,[string]$TokenOwnerSid)
++  # Windows can assign the token's default owner (e.g. enabled Administrators
++  # for an elevated process), not TokenUser. Never accept arbitrary group SIDs.
++  return (-not [string]::IsNullOrEmpty($DirectoryOwner) -and
++    ($DirectoryOwner -eq $UserSid -or
++      (-not [string]::IsNullOrEmpty($TokenOwnerSid) -and $DirectoryOwner -eq $TokenOwnerSid)))
++}
+ $item=Get-Item -LiteralPath $Directory -Force
+ $base=Get-Item -LiteralPath $Parent -Force
+ if(-not $item.PSIsContainer -or -not $base.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or ($base.Attributes -band [IO.FileAttributes]::ReparsePoint)) {throw 'MANAGED_WORKSPACE_UNMANAGED'}
+ if($item.Parent.FullName -ne $base.FullName -or -not $item.Name.StartsWith('.naumi-workspace-') -or @(Get-ChildItem -LiteralPath $Directory -Force).Count -ne 0) {throw 'MANAGED_WORKSPACE_BOUNDARY'}
+-$user=[Security.Principal.WindowsIdentity]::GetCurrent().User
++$identity=[Security.Principal.WindowsIdentity]::GetCurrent()
++$user=$identity.User
++$tokenOwner=$identity.Owner
+ $acl=Get-Acl -LiteralPath $Directory
+-if($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $user.Value) {throw 'MANAGED_WORKSPACE_OWNER_MISMATCH'}
++$originalOwner=$acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
++if(-not (Test-ManagedWorkspaceOwner $originalOwner $user.Value $tokenOwner.Value)) {throw 'MANAGED_WORKSPACE_OWNER_MISMATCH'}
+ $before=$acl.Sddl
+-# Owner already has implicit WRITE_DAC. Only WRITE_OWNER is missing on some
++# The user/token owner has WRITE_DAC. Only WRITE_OWNER is missing on some
+ # inherited Modify-only drives; native Low-label setup needs this right.
+ # No Everyone/Users grant, ownership change, inheritance reset, or elevation.
+ $rule=New-Object Security.AccessControl.FileSystemAccessRule($user,[Security.AccessControl.FileSystemRights]::TakeOwnership,[Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit',[Security.AccessControl.PropagationFlags]::None,[Security.AccessControl.AccessControlType]::Allow)
+ $acl.AddAccessRule($rule)
+ Set-Acl -LiteralPath $Directory -AclObject $acl
+ $after=Get-Acl -LiteralPath $Directory
+-if($after.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $user.Value) {throw 'MANAGED_WORKSPACE_OWNER_CHANGED'}
+-@{status='OWNER_LABEL_READY';sid=$user.Value;before=$before;after=$after.Sddl;right='WRITE_OWNER';elevated=$false}|ConvertTo-Json -Compress
++if($after.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $originalOwner) {throw 'MANAGED_WORKSPACE_OWNER_CHANGED'}
++@{status='OWNER_LABEL_READY';sid=$user.Value;owner=$originalOwner;tokenOwner=$tokenOwner.Value;ownerMode=$(if($originalOwner -eq $user.Value){'user'}else{'token-default'});before=$before;after=$after.Sddl;right='WRITE_OWNER';elevated=([Security.Principal.WindowsPrincipal]::new($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)}|ConvertTo-Json -Compress
+diff --git a/scripts/admin-workspace-hotfix.cjs b/scripts/admin-workspace-hotfix.cjs
+new file mode 100644
+index 0000000..f4dba8d
+--- /dev/null
++++ b/scripts/admin-workspace-hotfix.cjs
+@@ -0,0 +1,39 @@
++'use strict';
++// Self-contained .9 code-only hotfix, executed by the installation's bundled Node.
++// No profile, credentials, ACL or application data are edited by this distributor.
++const fs=require('node:fs'),path=require('node:path'),{createHash,randomUUID}=require('node:crypto'),{execFileSync}=require('node:child_process');
++const parse=(bytes)=>{try{return JSON.parse(bytes);}catch{fail('HOTFIX_METADATA_INVALID');}};
++const id='admin-workspace-owner-20261118',sha=b=>createHash('sha256').update(b).digest('hex'),fail=code=>{throw Error(code);};
++function guard(root,relative){const target=path.resolve(root,relative);if(!target.startsWith(root+path.sep))fail('HOTFIX_PATH_REJECTED');let p=root;for(const name of path.relative(root,target).split(path.sep)){p=path.join(p,name);if(fs.existsSync(p)&&fs.lstatSync(p).isSymbolicLink())fail('HOTFIX_REPARSE_REJECTED');}return target;}
++function idle(root){
++ if(process.platform!=='win32')return;
++ const ps=path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe'),raw=execFileSync(ps,['-NoProfile','-NonInteractive','-Command',"$ErrorActionPreference='Stop';[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);@(Get-CimInstance Win32_Process | ForEach-Object {@{pid=[int]$_.ProcessId;name=$_.Name;exe=$_.ExecutablePath}})|ConvertTo-Json -Compress"],{env:{...process.env,PSModulePath:path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/Modules')},encoding:'utf8',windowsHide:true,maxBuffer:4e6}),rows=JSON.parse(raw);if(!Array.isArray(rows))fail('HOTFIX_PROCESS_UNKNOWN');
++ for(const p of rows){if(p.pid===process.pid)continue;if(p.exe&&path.resolve(p.exe).toLowerCase().startsWith(root.toLowerCase()+path.sep)||p.name?.toLowerCase()==='naumi.exe'&&!p.exe)fail('HOTFIX_CLOSE_NAUMI_FIRST');}
++}
++function atomic(file,bytes){const tmp=file+'.'+randomUUID()+'.tmp';try{fs.writeFileSync(tmp,bytes,{flag:'wx'});fs.renameSync(tmp,file);}finally{if(fs.existsSync(tmp))fs.unlinkSync(tmp);}}
++function main({installRoot,packageRoot=__dirname,action='apply'}){
++ if(!['apply','rollback'].includes(action))fail('HOTFIX_ACTION_INVALID');
++ const root=path.resolve(installRoot);if(!fs.existsSync(root)||fs.lstatSync(root).isSymbolicLink()||fs.realpathSync.native(root).toLowerCase()!==root.toLowerCase())fail('HOTFIX_INSTALL_ROOT_INVALID');
++ if(!fs.existsSync(guard(root,'Naumi.exe'))||!fs.existsSync(guard(root,'resources/app.asar')))fail('HOTFIX_NAUMI_INSTALL_REQUIRED');idle(root);
++ const base=guard(root,'resources/backend'),backup=guard(root,'.naumi-hotfix-'+id),record=path.join(backup,'receipt.json'),definition=parse(fs.readFileSync(path.join(packageRoot,'HOTFIX.json')));
++ if(definition.id!==id)fail('HOTFIX_PACKAGE_INVALID');
++ function restore(plan){for(const r of plan.files){const file=guard(root,r.relative),now=sha(fs.readFileSync(file));if(now!==r.modified&&now!==r.original)fail('HOTFIX_ROLLBACK_DRIFT');}for(const r of [...plan.files].reverse()){const bytes=fs.readFileSync(guard(backup,r.backup));if(sha(bytes)!==r.original)fail('HOTFIX_BACKUP_INVALID');atomic(guard(root,r.relative),bytes);}}
++ if(action==='rollback'){
++  const plan=parse(fs.readFileSync(record));if(plan.id!==id||plan.root.toLowerCase()!==root.toLowerCase()||plan.status!=='applied')fail('HOTFIX_RECEIPT_INVALID');restore(plan);plan.status='rolled-back';atomic(record,Buffer.from(JSON.stringify(plan,null,2)));console.log('OWNER_HOTFIX_ROLLBACK files='+plan.files.length+' original_hashes=PASS data=UNTOUCHED exit=0');return;
++ }
++ if(fs.existsSync(record)){const old=parse(fs.readFileSync(record));if(old.status==='applied'&&old.root.toLowerCase()===root.toLowerCase()&&old.files.every(r=>sha(fs.readFileSync(guard(root,r.relative)))===r.modified)){console.log('OWNER_HOTFIX_ALREADY_APPLIED exit=0');return;}fail('HOTFIX_EXISTING_RECEIPT_REVIEW_REQUIRED');}
++ const inventoryFile=guard(base,'runtime-files.json'),manifestFile=guard(base,'runtime-manifest.json'),inventoryRaw=fs.readFileSync(inventoryFile),manifestRaw=fs.readFileSync(manifestFile),manifest=parse(manifestRaw),rows=parse(inventoryRaw);if(manifest.product!=='Naumi'||manifest.version!=='0.3.9'||sha(inventoryRaw)!==manifest.inventorySHA256||!Array.isArray(rows))fail('HOTFIX_SUPPORTED_039_INVENTORY_REQUIRED');
++ const changes=[];
++ for(const dir of ['plugins/naumi-enterprise','node_modules/@naumi/dsh-enterprise'])for(const r of definition.files){
++  const relative=dir+'/'+r.file,file=guard(base,relative),old=fs.readFileSync(file),normalized=Buffer.from(old.toString('utf8').replaceAll('\r\n','\n'));
++  if(sha(normalized)!==r.originalNormalized)fail('HOTFIX_UNRECOGNIZED_ORIGINAL '+relative);
++  const bytes=fs.readFileSync(guard(path.resolve(packageRoot),'payload/'+r.file));if(sha(bytes)!==r.modified)fail('HOTFIX_PAYLOAD_INVALID');const matches=rows.filter(v=>v.path===relative);if(matches.length!==1||matches[0].sha256!==sha(old))fail('HOTFIX_FILE_INVENTORY_MISMATCH '+relative);matches[0].size=bytes.length;matches[0].sha256=sha(bytes);changes.push({relative:'resources/backend/'+relative,old,bytes});
++ }
++ const newInventory=Buffer.from(JSON.stringify(rows,null,2)+'\n');manifest.inventorySHA256=sha(newInventory);if(manifest.hotfixes!==undefined&&!Array.isArray(manifest.hotfixes))fail('HOTFIX_MANIFEST_INVALID');manifest.hotfixes=[...(manifest.hotfixes??[]),id];changes.push({relative:'resources/backend/runtime-files.json',old:inventoryRaw,bytes:newInventory},{relative:'resources/backend/runtime-manifest.json',old:manifestRaw,bytes:Buffer.from(JSON.stringify(manifest,null,2)+'\n')});
++ if(fs.existsSync(backup))fail('HOTFIX_BACKUP_ALREADY_EXISTS');fs.mkdirSync(backup);const plan={id,root,status:'preparing',files:changes.map((r,i)=>({relative:r.relative,original:sha(r.old),modified:sha(r.bytes),backup:i+'.bin'}))};
++ for(let i=0;i<changes.length;i++)fs.writeFileSync(path.join(backup,i+'.bin'),changes[i].old,{flag:'wx'});atomic(record,Buffer.from(JSON.stringify(plan,null,2)));
++ try{idle(root);for(const r of changes){const file=guard(root,r.relative);if(sha(fs.readFileSync(file))!==sha(r.old))fail('HOTFIX_CONCURRENT_CHANGE');atomic(file,r.bytes);}for(const r of plan.files)if(sha(fs.readFileSync(guard(root,r.relative)))!==r.modified)fail('HOTFIX_VERIFY_FAILED');const updated=parse(fs.readFileSync(manifestFile));if(updated.inventorySHA256!==sha(fs.readFileSync(inventoryFile)))fail('HOTFIX_INVENTORY_VERIFY_FAILED');plan.status='applied';atomic(record,Buffer.from(JSON.stringify(plan,null,2)));console.log('OWNER_HOTFIX_APPLIED files='+changes.length+' inventory=PASS data=UNTOUCHED restart=REQUIRED exit=0');}
++ catch(error){restore(plan);plan.status='rolled-back';atomic(record,Buffer.from(JSON.stringify(plan,null,2)));throw error;}
++}
++module.exports={main};
++if(require.main===module){try{main({action:process.argv[2]??'apply',installRoot:process.argv[3],packageRoot:__dirname});}catch(error){console.error(error.message);process.exitCode=1;}}
+diff --git a/scripts/package-admin-workspace-hotfix.mjs b/scripts/package-admin-workspace-hotfix.mjs
+new file mode 100644
+index 0000000..bfc7c81
+--- /dev/null
++++ b/scripts/package-admin-workspace-hotfix.mjs
+@@ -0,0 +1,8 @@
++import fs from 'node:fs';import path from 'node:path';import {execFileSync} from 'node:child_process';import {createHash} from 'node:crypto';
++const root=process.cwd(),out=path.join(root,'evidence/admin-workspace-owner'),dest=path.join(out,'Naumi-0.3.9-Owner-Hotfix'),baseline='6d861b8b784d6e40084445df50e9245abb7c8c18',sha=b=>createHash('sha256').update(b).digest('hex');fs.mkdirSync(path.join(dest,'payload'),{recursive:true});
++const files=[];for(const file of ['managed-workspace.cjs','managed-workspace.ps1']){const old=execFileSync('git',['show',baseline+':plugins/naumi-enterprise/'+file]),bytes=fs.readFileSync(path.join(root,'plugins/naumi-enterprise',file));fs.writeFileSync(path.join(dest,'payload',file),bytes);files.push({file,originalNormalized:sha(Buffer.from(old.toString('utf8').replaceAll('\r\n','\n'))),modified:sha(bytes)});}
++fs.writeFileSync(path.join(dest,'HOTFIX.json'),JSON.stringify({id:'admin-workspace-owner-20261118',version:'0.3.9',files},null,2));fs.copyFileSync(path.join(root,'scripts/admin-workspace-hotfix.cjs'),path.join(dest,'admin-workspace-hotfix.cjs'));
++for(const [name,action]of [['APPLY.ps1','apply'],['ROLLBACK.ps1','rollback']])fs.writeFileSync(path.join(dest,name),`param([Parameter(Mandatory=$true)][string]$InstallRoot)\n$ErrorActionPreference='Stop'\n$root=[IO.Path]::GetFullPath($InstallRoot)\n$node=Join-Path $root 'resources/backend/node.exe'\nif(!(Test-Path -LiteralPath $node)){throw 'HOTFIX_BUNDLED_NODE_MISSING'}\n& $node (Join-Path $PSScriptRoot 'admin-workspace-hotfix.cjs') '${action}' $root\nif($LASTEXITCODE -ne 0){throw 'HOTFIX_FAILED'}\n`.replaceAll('\\n','\n'));
++fs.writeFileSync(path.join(dest,'REPAIR-F-Naumi.cmd'), '@echo off\r\n"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0APPLY.ps1" -InstallRoot "F:\\Naumi"\r\nset "result=%ERRORLEVEL%"\r\npause\r\nexit /b %result%\r\n');
++fs.writeFileSync(path.join(dest,'README.txt'),'Naumi 0.3.9 administrator workspace owner hotfix\n1. Close Naumi on the affected computer (all windows).\n2. Extract this folder, then run in PowerShell:\n   powershell -NoProfile -ExecutionPolicy Bypass -File .\\APPLY.ps1 -InstallRoot "F:\\Naumi"\n3. Require OWNER_HOTFIX_APPLIED ... exit=0, then reopen Naumi.\nRollback after closing Naumi:\n   powershell -NoProfile -ExecutionPolicy Bypass -File .\\ROLLBACK.ps1 -InstallRoot "F:\\Naumi"\nOnly known .9 code plus runtime inventory are patched; original bytes are kept in .naumi-hotfix-admin-workspace-owner-20261118 under the installation. No AppData/workspace/account/model data are touched. No restart is performed by this package.\n');
++execFileSync('python',['-c',"import pathlib,sys,zipfile;p=pathlib.Path(sys.argv[1]);z=zipfile.ZipFile(sys.argv[2],'w',zipfile.ZIP_DEFLATED);[z.write(f,f.relative_to(p.parent).as_posix()) for f in p.rglob('*') if f.is_file()];z.close()",dest,path.join(out,'Naumi-0.3.9-Owner-Hotfix.zip')]);console.log('OWNER_HOTFIX_PACKAGED files=8 version=0.3.9 remote_install=UNTOUCHED');
+diff --git a/scripts/probe-managed-owner.mjs b/scripts/probe-managed-owner.mjs
+new file mode 100644
+index 0000000..2f23f4a
+--- /dev/null
++++ b/scripts/probe-managed-owner.mjs
+@@ -0,0 +1,5 @@
++// Same production PS guard, identical token-default SID fixture. No ACL writes/elevation.
++import fs from 'node:fs';import path from 'node:path';import {execFileSync,spawnSync} from 'node:child_process';
++const baseline=process.argv.includes('--baseline'),root=process.argv.includes('--root')?path.resolve(process.argv[process.argv.indexOf('--root')+1]):process.cwd(),source=baseline?execFileSync('git',['show','6d861b8b784d6e40084445df50e9245abb7c8c18:plugins/naumi-enterprise/managed-workspace.ps1'],{cwd:root,encoding:'utf8'}):fs.readFileSync(path.join(root,'plugins/naumi-enterprise/managed-workspace.ps1'),'utf8'),helper=source.includes('function Test-ManagedWorkspaceOwner')?source.slice(source.indexOf('function Test-ManagedWorkspaceOwner'),source.indexOf('$item=Get-Item')):'',guard=source.split('\n').find(l=>l.includes("throw 'MANAGED_WORKSPACE_OWNER_MISMATCH'"));if(!guard)throw Error('GUARD_NOT_FOUND');
++const program=`$ErrorActionPreference='Stop';${helper}\n$user=[pscustomobject]@{Value='S-1-5-21-1-2-3-1001'};$tokenOwner=[pscustomobject]@{Value='S-1-5-32-544'};$originalOwner='S-1-5-32-544';$acl=New-Object psobject;$acl|Add-Member ScriptMethod GetOwner {param($type)[pscustomobject]@{Value='S-1-5-32-544'}};try{${guard};'OWNER_GUARD mode=token-default accepted=true code=none'}catch{'OWNER_GUARD mode=token-default accepted=false code='+$_.Exception.Message}`;
++const r=spawnSync(path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe'),['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(program,'utf16le').toString('base64')],{windowsHide:true,encoding:'utf8'});process.stdout.write(r.stdout);if(r.status)process.stderr.write(r.stderr);process.exitCode=r.status;
+diff --git a/tests/naumi-admin-workspace-hotfix.test.mjs b/tests/naumi-admin-workspace-hotfix.test.mjs
+new file mode 100644
+index 0000000..5d41285
+--- /dev/null
++++ b/tests/naumi-admin-workspace-hotfix.test.mjs
+@@ -0,0 +1,7 @@
++import test from 'node:test';import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import assert from 'node:assert/strict';import {createRequire} from 'node:module';import {execFileSync,spawnSync} from 'node:child_process';import {createHash} from 'node:crypto';
++const {main}=createRequire(import.meta.url)('../scripts/admin-workspace-hotfix.cjs'),sha=b=>createHash('sha256').update(b).digest('hex'),baseline='6d861b8b784d6e40084445df50e9245abb7c8c18',packageRoot=path.resolve('evidence/admin-workspace-owner/Naumi-0.3.9-Owner-Hotfix');
++function fixture(){const root=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-owner-hotfix-')),base=path.join(root,'resources/backend'),rows=[];fs.mkdirSync(base,{recursive:true});fs.writeFileSync(path.join(root,'Naumi.exe'),'fixture-not-executed');fs.writeFileSync(path.join(root,'resources/app.asar'),'fixture-not-executed');for(const d of ['plugins/naumi-enterprise','node_modules/@naumi/dsh-enterprise'])for(const f of ['managed-workspace.cjs','managed-workspace.ps1']){const bytes=execFileSync('git',['show',baseline+':plugins/naumi-enterprise/'+f]);const file=path.join(base,d,f);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,bytes);rows.push({path:d+'/'+f,size:bytes.length,sha256:sha(bytes)});}const raw=Buffer.from(JSON.stringify(rows,null,2)+'\n');fs.writeFileSync(path.join(base,'runtime-files.json'),raw);fs.writeFileSync(path.join(base,'runtime-manifest.json'),JSON.stringify({product:'Naumi',version:'0.3.9',inventorySHA256:sha(raw)}));fs.writeFileSync(path.join(root,'retained.bin'),Buffer.from([0,1,255]));return{root,base};}
++test('actual package applies both copies and refreshes inventory, is idempotent, and restores every original byte',()=>{const f=fixture(),before={};for(const file of fs.readdirSync(f.base,{recursive:true}).filter(n=>fs.statSync(path.join(f.base,n)).isFile()))before[file]=sha(fs.readFileSync(path.join(f.base,file)));main({installRoot:f.root,packageRoot});main({installRoot:f.root,packageRoot});const m=JSON.parse(fs.readFileSync(path.join(f.base,'runtime-manifest.json')));assert(m.hotfixes.includes('admin-workspace-owner-20261118'));assert.equal(m.inventorySHA256,sha(fs.readFileSync(path.join(f.base,'runtime-files.json'))));main({installRoot:f.root,packageRoot,action:'rollback'});for(const[file,h]of Object.entries(before))assert.equal(sha(fs.readFileSync(path.join(f.base,file))),h);assert.equal(fs.readFileSync(path.join(f.root,'retained.bin')).toString('hex'),'0001ff');});
++test('unknown original or broken inventory refuses without modifying code',()=>{for(const kind of ['code','inventory']){const f=fixture(),file=path.join(f.base,kind==='code'?'plugins/naumi-enterprise/managed-workspace.ps1':'runtime-files.json');fs.appendFileSync(file,'changed');assert.throws(()=>main({installRoot:f.root,packageRoot}),/HOTFIX_(UNRECOGNIZED|SUPPORTED|FILE_INVENTORY|METADATA_INVALID)/);assert(!fs.existsSync(path.join(f.root,'.naumi-hotfix-admin-workspace-owner-20261118')));}});
++test('rollback refuses later user edits',()=>{const f=fixture();main({installRoot:f.root,packageRoot});const file=path.join(f.base,'plugins/naumi-enterprise/managed-workspace.ps1');fs.appendFileSync(file,'user-change');assert.throws(()=>main({installRoot:f.root,packageRoot,action:'rollback'}),/ROLLBACK_DRIFT/);assert(fs.readFileSync(file,'utf8').endsWith('user-change'));});
++test('distributable PS5 APPLY and ROLLBACK actually execute with bundled Node and a Unicode-space install path',{skip:process.platform!=='win32'},()=>{const f=fixture(),root=path.join(f.root,'中文 安装');fs.mkdirSync(root);for(const n of ['Naumi.exe','resources','retained.bin'])fs.renameSync(path.join(f.root,n),path.join(root,n));const base=path.join(root,'resources/backend');fs.copyFileSync(process.execPath,path.join(base,'node.exe'));const before=sha(fs.readFileSync(path.join(base,'runtime-manifest.json')));for(const[name,output]of [['APPLY.ps1','OWNER_HOTFIX_APPLIED'],['ROLLBACK.ps1','OWNER_HOTFIX_ROLLBACK']]){const r=spawnSync(path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe'),['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.join(packageRoot,name),'-InstallRoot',root],{windowsHide:true,encoding:'utf8',timeout:60000});assert.equal(r.status,0,r.stdout+r.stderr);assert(r.stdout.includes(output));console.log('HOTFIX_PS5 '+name+' unicode_space=PASS exit=0');}assert.equal(sha(fs.readFileSync(path.join(base,'runtime-manifest.json'))),before);assert.equal(fs.readFileSync(path.join(root,'retained.bin')).toString('hex'),'0001ff');fs.unlinkSync(path.join(base,'node.exe'));});
+diff --git a/tests/naumi-managed-workspace-owner.test.mjs b/tests/naumi-managed-workspace-owner.test.mjs
+new file mode 100644
+index 0000000..c11f8de
+--- /dev/null
++++ b/tests/naumi-managed-workspace-owner.test.mjs
+@@ -0,0 +1,9 @@
++import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import {spawnSync} from 'node:child_process';import {createRequire} from 'node:module';
++const {prepareWindowsWorkspace}=createRequire(import.meta.url)('../plugins/naumi-enterprise/managed-workspace.cjs'),script=path.resolve('plugins/naumi-enterprise/managed-workspace.ps1');
++test('actual PS5 owner policy accepts current user/default token owner but not generic administrator or foreign group',{skip:process.platform!=='win32'},()=>{
++ const program=`$ErrorActionPreference='Stop';$tokens=$null;$errors=$null;$ast=[Management.Automation.Language.Parser]::ParseFile('${script.replaceAll("'","''")}',[ref]$tokens,[ref]$errors);if($errors.Count){throw 'PS_PARSE_FAILED'};$f=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-ManagedWorkspaceOwner'},$true);Invoke-Expression $f.Extent.Text;$user='S-1-5-21-1-2-3-1001';$admin='S-1-5-32-544';$cases=@(@{owner=$user;token=$user;want=$true},@{owner=$admin;token=$admin;want=$true},@{owner=$user;token=$admin;want=$true},@{owner=$admin;token=$user;want=$false},@{owner='S-1-1-0';token=$admin;want=$false},@{owner='S-1-5-21-1-2-3-1002';token=$admin;want=$false},@{owner='';token='';want=$false});foreach($c in $cases){if((Test-ManagedWorkspaceOwner $c.owner $user $c.token) -ne $c.want){throw 'OWNER_POLICY_FAILED'}};'OWNER_POLICY cases=7 PASS'`;
++ const r=spawnSync(path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe'),['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(program,'utf16le').toString('base64')],{encoding:'utf8',windowsHide:true});assert.equal(r.status,0,r.stdout+r.stderr);assert.match(r.stdout,/cases=7 PASS/);console.log(r.stdout.trim());
++});
++test('PS ACL change keeps exact original owner and grants only user WRITE_OWNER',()=>{const s=fs.readFileSync(script,'utf8');assert(s.includes('$tokenOwner=$identity.Owner'));assert(s.includes('Test-ManagedWorkspaceOwner $originalOwner $user.Value $tokenOwner.Value'));assert(s.includes('.Value -ne $originalOwner'));assert(s.includes('FileSystemAccessRule($user,'));assert(!s.includes('SetOwner('));assert(!s.includes('SetAccessRuleProtection('));assert(s.includes('$item.Name.StartsWith(\'.naumi-workspace-\')'));assert(s.includes('Get-ChildItem -LiteralPath $Directory -Force).Count -ne 0'));});
++test('PowerShell error codes stay readable without dumping raw command line or mojibake',async()=>{for(const [stderr,code]of [['MANAGED_WORKSPACE_OWNER_MISMATCH ����λ��','MANAGED_WORKSPACE_OWNER_MISMATCH'],['random underlying error','MANAGED_WORKSPACE_ACL_PREPARE_FAILED']]){const original=Object.assign(Error('Command failed: secret path'),{stderr});await assert.rejects(prepareWindowsWorkspace('target','parent',{execute:async()=>{throw original;}}),e=>e.message===code&&e.code===code&&e.cause===original&&!e.message.includes('Command failed'));}});
++test('PS invocation preserves inbox module isolation and validates receipt',async()=>{let options;const value=await prepareWindowsWorkspace('target','parent',{environment:{SystemRoot:'C:\\Windows',PSModulePath:'foreign'},execute:async(_exe,_args,o)=>{options=o;return{stdout:'\uFEFF{"status":"OWNER_LABEL_READY","ownerMode":"token-default"}'};}});assert.equal(value.ownerMode,'token-default');assert.equal(options.encoding,'utf8');assert(options.env.PSModulePath.endsWith('System32\\WindowsPowerShell\\v1.0\\Modules'));for(const stdout of ['bad','{"status":"bad"}'])await assert.rejects(prepareWindowsWorkspace('a','b',{execute:async()=>({stdout})}),/ACL_UNVERIFIED/);});
