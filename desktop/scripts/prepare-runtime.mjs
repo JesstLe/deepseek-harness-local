@@ -8,6 +8,7 @@ import {auditPackage} from '../../scripts/audit-enterprise-package.mjs';
 import {installReasoningDefaults} from '../../scripts/native-reasoning-extension.mjs';
 import {installAgentTriggers} from '../../scripts/native-agent-mentions-extension.mjs';
 import {installNativeComposer} from '../../scripts/native-composer-extension.mjs';
+import {installNativeSettings} from '../../scripts/native-settings-extension.mjs';
 const project=fileURLToPath(new URL('../..',import.meta.url));
 const sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 // Match normal production packaging: declarations and external source maps are development
@@ -43,6 +44,7 @@ export async function prepareRuntime({root=project,target=path.join(root,'runtim
     installReasoningDefaults(path.join(staged,'node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js'));
     installNativeComposer(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'));
     installAgentTriggers(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js'));
+    installNativeSettings(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-settings-general/lib/client.js'));
     fs.cpSync(path.join(root,'plugins'),path.join(staged,'plugins'),{recursive:true});
     for(const [source,name]of [['naumi-enterprise','dsh-enterprise'],['naumi-ui-layout','dsh-ui-layout'],['naumi-sidebar-browser','dsh-sidebar-browser']])fs.cpSync(path.join(root,'plugins',source),path.join(staged,'node_modules/@naumi',name),{recursive:true});
     fs.copyFileSync(process.execPath,path.join(staged,'node.exe'));
