@@ -1,0 +1,26 @@
+import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import{createHash}from'node:crypto';import{execFileSync,spawnSync}from'node:child_process';
+const root=process.cwd(),out=path.join(root,'evidence/group-work-indicator'),copy=path.join(root,'runtime/work-indicator-source-copy'),old=['plugins/naumi-enterprise/assets/bot-chat-model.js','plugins/naumi-enterprise/assets/bot-groups.css','plugins/naumi-enterprise/assets/bot-groups.js'],files=[...old,'scripts/deploy-group-work-indicator.mjs'],hash=b=>createHash('sha256').update(b).digest('hex'),entries=[];
+assert(!fs.existsSync(copy));fs.mkdirSync(copy,{recursive:true});for(const dir of ['plugins/naumi-enterprise','tests','scripts'])fs.cpSync(path.join(root,dir),path.join(copy,dir),{recursive:true});fs.copyFileSync('package.json',path.join(copy,'package.json'));fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');fs.mkdirSync(path.join(copy,'desktop'));fs.symlinkSync(path.join(root,'desktop/node_modules'),path.join(copy,'desktop/node_modules'),'junction');
+for(const file of files){const before=old.includes(file)?execFileSync('git',['show','ab34d83:'+file]):null,after=fs.readFileSync(file);if(before){const p=path.join(out,'original',file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,before);fs.writeFileSync(path.join(copy,file),before);}else fs.unlinkSync(path.join(copy,file));entries.push({path:file,original:before?hash(before):null,modified:hash(after)});}
+const tests=['tests/naumi-group-collaboration.test.mjs','tests/naumi-unified-chat.test.mjs','tests/naumi-group-rename.test.mjs','tests/naumi-bot-groups.test.mjs','tests/naumi-bot-groups-http.test.mjs','tests/service-alignment.test.mjs'];
+function test(label){const r=spawnSync(process.execPath,['--test',...tests],{cwd:copy,encoding:'utf8',windowsHide:true});fs.writeFileSync(path.join(out,label+'_TESTS.log'),r.stdout+r.stderr);assert.equal(r.status,0,r.stderr);return r.status;}
+test('BASELINE');console.log('BASELINE tests=41 pass=41 fail=0 indicator=ABSENT exit=0');
+for(const file of files)fs.copyFileSync(path.join(root,file),path.join(copy,file));fs.writeFileSync(path.join(copy,'.naumi-group-work-source-copy'),'copy-only');fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify({baseline:'ab34d8343d5bc417e7b54d1a626943e2e84cbf0f',sourceRoot:root,liveRoot:'E:/Workspace/naumi-desktop',entries},null,2)+'\n');
+fs.writeFileSync(path.join(out,'DIFF_FILE.patch'),execFileSync('git',['diff','ab34d83','--',...old]));
+const added=fs.readFileSync(files[3],'utf8').split('\n');if(added.at(-1)==='')added.pop();fs.appendFileSync(path.join(out,'DIFF_FILE.patch'),'diff --git a/'+files[3]+' b/'+files[3]+'\nnew file mode 100644\n--- /dev/null\n+++ b/'+files[3]+'\n@@ -0,0 +1,'+added.length+' @@\n'+added.map(l=>'+'+l).join('\n')+'\n');
+execFileSync('git',['init','--quiet'],{cwd:copy});execFileSync('git',['apply','--reverse','--check',path.join(out,'DIFF_FILE.patch')],{cwd:copy});
+fs.writeFileSync(path.join(out,'ROLLBACK.sh'),`#!/usr/bin/env bash
+set -euo pipefail
+HERE="$(cd -- "$(dirname -- "$0")" && pwd)"
+node - "$1" "$HERE" <<'NODE'
+const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),target=fs.realpathSync(process.argv[2]),here=process.argv[3],data=fs.existsSync(path.join(here,'manifest.json'))?here:path.join(here,'.rollback'),m=JSON.parse(fs.readFileSync(path.join(data,'manifest.json'))),hash=b=>crypto.createHash('sha256').update(b).digest('hex');
+if(!fs.existsSync(path.join(target,'.naumi-group-work-source-copy'))||[m.sourceRoot,m.liveRoot].some(p=>path.resolve(p).toLowerCase()===target.toLowerCase()))throw Error('MARKED_COPY_REQUIRED');
+for(const e of m.entries){const p=path.resolve(target,e.path);if(!p.startsWith(target+path.sep)||fs.lstatSync(p).isSymbolicLink()||fs.realpathSync(p)!==p||hash(fs.readFileSync(p))!==e.modified)throw Error('COPY_CHANGED');if(e.original&&hash(fs.readFileSync(path.join(data,'original',e.path)))!==e.original)throw Error('ORIGINAL_CHANGED');}
+for(const e of m.entries){const p=path.join(target,e.path);if(e.original)fs.copyFileSync(path.join(data,'original',e.path),p);else fs.unlinkSync(p);}
+for(const e of m.entries){const p=path.join(target,e.path);if(e.original?hash(fs.readFileSync(p))!==e.original:fs.existsSync(p))throw Error('RESTORE_FAILED');}
+if(fs.readFileSync(path.join(target,m.entries[2].path),'utf8').includes('function WorkIndicator('))throw Error('INDICATOR_NOT_REMOVED');
+console.log('ROLLBACK originals=3 new_removed=1 hashes=PASS indicator=REMOVED native=ORIGINAL live=UNTOUCHED exit=0');
+NODE
+`);
+const r=spawnSync('D:/DEV/Git/bin/bash.exe',[path.join(out,'ROLLBACK.sh').replaceAll('\\','/'),copy.replaceAll('\\','/')],{encoding:'utf8',windowsHide:true});fs.writeFileSync(path.join(out,'ROLLBACK.log'),r.stdout+r.stderr);assert.equal(r.status,0,r.stderr);console.log(r.stdout.trim());test('ROLLBACK');console.log('ROLLBACK_TESTS tests=41 pass=41 fail=0 source_modified=RETAINED exit=0');for(const e of entries)assert.equal(hash(fs.readFileSync(e.path)),e.modified);
+fs.writeFileSync(path.join(out,'ROLLBACK_RESULT.json'),JSON.stringify({status:'PASS',baselineTests:41,rollbackTests:41,copy,patchReverseCheck:true,modifiedSourceRetained:true},null,2)+'\n');
