@@ -15,6 +15,28 @@ export function roomDraft(id,value){
 export function previewText(text,max=70){return String(text??'').replace(/```[\s\S]*?```/g,'代码').replace(/[#*_`>]/g,'').replace(/\s+/g,' ').trim().slice(0,max);}
 export function roomPreview(room,bots,detail){const post=detail?.posts?.at(-1),reply=post?.replies?.findLast(r=>r.text);return previewText(reply?`${bots.find(b=>b.id===reply.botId)?.name??'成员'}：${reply.text}`:post?.text) || room.members.map(m=>bots.find(b=>b.id===m.botId)?.name).filter(Boolean).join('、');}
 export function roomWorking(detail){return !!(detail?.posts?.some(p=>p.replies.some(r=>['queued','starting','sent'].includes(r.state)))||detail?.tasks?.some(t=>['queued','starting','running','waiting'].includes(t.status)));}
+/** Read-only current-room work projection; never infer activity from a Bot's other chats. */
+export function groupWorkMembers(room,detail){
+ if(!room?.id||detail?.room?.id!==room.id)return [];
+ const members=new Map((room.members??[]).map(m=>[m.botId,m])),sessions=new Set([...members.values()].map(m=>m.sessionId).filter(Boolean)),rows=new Map(),latest=new Map();
+ const rank={running:0,starting:1,replying:2,waiting:3,queued:4};
+ const rowFor=id=>{if(!rows.has(id))rows.set(id,{botId:id,state:'queued',tasks:[],replies:[]});return rows.get(id);};
+ const stateFor=(row,state)=>{if(rank[state]<rank[row.state])row.state=state;};
+ for(const task of detail.tasks??[]){
+  if(!task.id||!task.targetBotId||!sessions.has(task.sourceSessionId))continue;
+  const prior=latest.get(task.id);if(!prior||Number(task.revision??0)>=Number(prior.revision??0))latest.set(task.id,task);
+ }
+ for(const task of latest.values())if(['queued','starting','running','waiting'].includes(task.status)){
+  const row=rowFor(task.targetBotId);row.tasks.push(task);stateFor(row,task.status);
+ }
+ const seen=new Set();
+ for(const post of detail.posts??[])for(const reply of post.replies??[]){
+  const member=members.get(reply.botId);if(!member||reply.sessionId!==member.sessionId||seen.has(reply.id)||!['queued','starting','sent'].includes(reply.state))continue;
+  seen.add(reply.id);const row=rowFor(reply.botId);row.replies.push(reply);stateFor(row,reply.state==='sent'?'replying':reply.state);
+ }
+ const order=new Map([...members.keys()].map((id,i)=>[id,i]));
+ return [...rows.values()].sort((a,b)=>rank[a.state]-rank[b.state]||(order.get(a.botId)??members.size)-(order.get(b.botId)??members.size)||a.botId.localeCompare(b.botId));
+}
 export function groupTimeline(posts,activity=[]){
  const rows=posts.flatMap(p=>[{...p,type:'user',order:p.seq*100,createdAt:p.createdAt??''},...p.replies.map((r,i)=>({...r,type:'reply',order:p.seq*100+i+1,createdAt:r.updatedAt??p.createdAt??''}))]);
  for(const item of activity)rows.push({...item,order:Number.MAX_SAFE_INTEGER});
