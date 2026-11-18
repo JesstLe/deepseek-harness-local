@@ -1,0 +1,9 @@
+Observed first wrapper command: Stop-Naumi.ps1; check $LASTEXITCODE; apply/start/verify.
+Literal: STOPPED PID=31868; STOP_FAILED; exit1. Stop script had succeeded; stale LASTEXITCODE caused wrapper early exit before source apply. Continued from prepared/stopped state.
+Observed first actual apply/start/verify: MAIN_CHAT_LOAD_APPLIED files=10; RUNNING PID=26356 URL=http://127.0.0.1:3080 HTTP=200; verify assertion employees.sqlite aggregate hash mismatch.
+Expected aggregate: 4497a74c25754691d95f352cc881255b94ec7c039456f2bc2a37b531c43f86d3
+Actual aggregate: f10bf43d76b4c125a7f29941e4f7eb2d43dc91728985d764546208495c007327
+The other three database aggregates matched. Automatic source rollback literal: STOPPED PID=26356; MAIN_CHAT_LOAD_RESTORED files=10 data=retained; RUNNING PID=45992 URL=http://127.0.0.1:3080 HTTP=200; exit1. Current four employee exports individually checked unchanged after rollback.
+Source diagnosis: employee-activity-store.js:71-73 updates employee_activity_clock.high_water_ms for monotonic clock protection; runtime table is not an employee business entity. Narrow correction excludes only this one table from business aggregate, records its original/current values and checks current>=original. Every other table remains hashed. No source employee logic or schema changed.
+First deployment intent/backup retained at E:/Workspace/naumi-desktop/runtime/bot-main-chat-load-first-restored.json; successful retry uses a fresh prepared baseline after the automatic restore.
+Final successful retry receipt is DEPLOY_APPLY_FINAL.log / DEPLOYMENT.json. First failures are not counted as a successful load.

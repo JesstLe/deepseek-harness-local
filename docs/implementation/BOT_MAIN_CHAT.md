@@ -41,3 +41,16 @@
 - main47b80a4 prepare10通过。初次PowerShell包装读取了Stop脚本遗留LASTEXITCODE，Stop已执行但包装提前退出，未写源码；后续正确续接。
 - 10文件apply后HTTP200/PID26356，但员工库整库hash门遇employee_activity_clock启动时更新而失败；自动恢复10原文件并启动PID45992，原失败保留，不计加载通过。四个员工export核验保持。
 - 源码employee-activity-store.js第71–73行表明该表为既有防时钟回拨高水位；只将该运行时表单独记录并验证单调，entities/events/operations及其余3库完整hash继续要求不变。无员工代码变更、数据回写或规则启用。
+
+## 实际加载收口
+- 正式功能main47b80a4，部署校验修正main d1bbfbe82facadc6cfcba6a80b5fce7b2528bab7；第二轮10文件增量exit0，PID46840/HTTP200/X-Naumi-Bot-Main-Chat=1。106sessions/0running/4bots/catalog47。
+- 145无关运行文件和117权威文件原hash保持；4个SQLite库业务表、模型、四员工export、任务、群及44其他证据前缀保持。employee_activity_clock由1794965908863增加至1794965948743单独记录，不当作业务写入。
+- host/client/package/product-version/desktop-updates两资产及已修快捷方式均未触碰；公开0.3.7不重建、不改版。0真实供应商/真实任务/规则/迁移/企业变更。
+- 已工具通知释放3080，此后不再重启；最后仅证据、主线产物重开、清理本任务worktree。
+
+## 实际UI与最终原数据核验
+- 额外实际3080导航19项通过，4 Bot逐一点击验证原生DOM的data-conversation-session=各自home，任务次入口常显、任务页返回主聊天，106会话不增加，0prompt/cancel/任务写入、0页面异常。启动原生session/create仅恢复已有同ID空会话，不新增身份。
+- 验收脚本前几轮错误使用折叠的右侧团队DOM/未就绪页面作断言，以及把原生空会话恢复当作新建；保留失败日志，最终用原生会话DOM与返回ID验证。不是产品改动。
+- 导航后的严格部署全hash重开按设计拒绝一份正常追加的session；另有既有activity_observation入库。没有重启/回滚/数据写回。专用POST_UI对原压缩帧逐边界找SHA：116文件原hash保持；1份session原413字节前缀保持，追加80字节仅session/end-seed空数据。employees库仅新event seq170/activity_observation revision1与对应实体/observe操作；在只读内存投影去掉这三个追加行后，整个旧库业务行聚合hash精确匹配加载前值。原行未改，其他三库整表hash保持，四员工export/任务/群/模型保持。该观测不是新业务目标、规则或模型调用。
+- POST_UI_FINAL.log: MAIN_CHAT_POST_UI_PASS exact_files=116 session_prefixes=1 sessions=106 running=0 original_employee_rows=PASS activity_appends=1 prompts=0，exit0。不再笼统声称导航后117份文件整hash或4库全表hash不变。
+- 本切片功能、Git、实际加载与导航验收均完成；最终只收口证据及清理自有worktree，不发布新的EXE。
