@@ -8,6 +8,10 @@
 
 验证命令、结果及证据层级：node --test tests/naumi-group-work-indicator.test.mjs tests/naumi-group-collaboration.test.mjs tests/naumi-unified-chat.test.mjs tests/naumi-group-rename.test.mjs tests/naumi-bot-groups.test.mjs tests/naumi-bot-groups-http.test.mjs tests/service-alignment.test.mjs，48/48通过。node scripts/verify-group-work-indicator.mjs：真实隔离Harness/原生SessionProvider/InputBar与Chrome鼠标20项通过，含12人/360px/全部任务入口、等待与排队不动、断连标记、不串群、工作完成收起、原生编辑器DOM身份及草稿保持、单任务精确打开、停止基础链未改。首次19项后增加总数入口，最终20项；2张实际截图已打开检查。确定性HTTP投影夹具、0模型、0共享3080写入，不是供应商业务验收。原3文件副本基线41项通过；恢复3原件/删除新增部署脚本后41项通过，portable ZIP9项CRC与原件hash通过，实际修改保留。
 
-未完成项与下一步：模块/浏览器验证、源码副本回滚、普通merge/push、只读资产热加载和HTTP字节验证。不会把确定性任务夹具当真实供应商长任务验收；不在群状态条伪造进度百分比。
+验收边界：不把确定性任务夹具当真实供应商长任务验收；不在群状态条伪造进度百分比。固定0.4.0安装包不含这个后续切片，本轮不重打安装器。
 
 部署调研与实现：host.js按每次GET readFile，Cache-Control:no-cache，静态3资产无需服务重启。新增薄脚本deploy-group-work-indicator.mjs复用service-alignment hash/CAS/atomic/rollback，强制model→CSS→entry顺序，失败按entry→CSS→model撤回，保护无关代码/6份配置与原生composer hash，PID前后相同。仅从干净固定main加载，不以running=0为只读前端资产必要条件，不暂停真实任务。
+
+主线与实际加载：整合5154aec发布脚本后，功能85f21bd普通merge/push至main5ea9ca71a5b98434ae9a9aa8f4bd6eca5d217266。加载前3运行资产的normalized内容与ab34d83原件匹配；实际热加载exit0/HTTP200逐资产SHA匹配，PID45444前后相同，restart=0，167无关运行文件及6份配置/原生composer hash保持。未改业务账本、会话、模型或真实群，也未停/重启任务。运行service0.3.9不变。与协作线程窗口已工具正式释放，固定0.4.0包ab34d83不追加本功能。
+
+收口状态：48模块/20浏览器/基线41/副本恢复41/portable9项CRC均通过。四项归档见evidence/group-work-indicator；截图为隔离数据的真实UI渲染，非真实业务任务。没有剩余本切片代码或本机资产加载项；真实供应商长任务表现仍以实际业务观察为准，不用测试夹具替代。后续若发新包需从包含本切片的固定main重新构建。
