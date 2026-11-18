@@ -57,6 +57,22 @@
         ${EndIf}
       ${EndIf}
     ${EndIf}
+    ; Older clients also pass /S: reveal native progress without a path picker.
+    SetSilent normal
+    ; Stock assisted mode skips CHECK_APP_RUNNING in elevated inner instances.
+    ; Admit/extract here BEFORE old-version removal on that route too.
+    ${If} ${UAC_IsInnerInstance}
+      !insertmacro customCheckAppRunning
+    ${EndIf}
+  ${EndIf}
+!macroend
+!macro customInstallMode
+  ${If} ${isUpdated}
+    ${If} $installMode == "all"
+      StrCpy $isForceMachineInstall "1"
+    ${Else}
+      StrCpy $isForceCurrentInstall "1"
+    ${EndIf}
   ${EndIf}
 !macroend
 !macro NaumiExtractMaintenance
@@ -65,6 +81,7 @@
   File /oname=naumi-maintenance-node.exe "${NAUMI_BUNDLED_NODE}"
   File /oname=installer-preflight.cjs "${NAUMI_HELPER_DIR}\installer-preflight.cjs"
   File /oname=installer-state.cjs "${NAUMI_HELPER_DIR}\installer-state.cjs"
+  File /oname=installer-relaunch.cjs "${NAUMI_HELPER_DIR}\installer-relaunch.cjs"
   File /oname=profile.cjs "${NAUMI_HELPER_DIR}\profile.cjs"
   File /oname=backend.cjs "${NAUMI_HELPER_DIR}\backend.cjs"
   File /oname=workspaces.cjs "${NAUMI_HELPER_DIR}\workspaces.cjs"
@@ -111,11 +128,21 @@
     SetErrorLevel 42
     Quit
   ${endif}
+  !ifndef BUILD_UNINSTALLER
+    ${If} ${isUpdated}
+      nsExec::ExecToStack '"$PLUGINSDIR\naumi-maintenance-node.exe" "$PLUGINSDIR\installer-relaunch.cjs" "begin" "$PLUGINSDIR\update-launch.json" "$INSTDIR" "${VERSION}"'
+      Pop $R9
+      Pop $R8
+      ; Missing proof keeps the result page open, never claims false readiness.
+    ${EndIf}
+  !endif
   Pop $R9
   Pop $R8
   Pop $7
 !macroend
 !macro customInstall
+  ; Self-contained even when the stock UAC route skipped the outer gate.
+  !insertmacro NaumiExtractMaintenance
   System::Call 'kernel32::GetCurrentProcessId() i .r7'
   nsExec::ExecToStack '"$PLUGINSDIR\naumi-maintenance-node.exe" "$PLUGINSDIR\installer-preflight.cjs" "$INSTDIR" "$APPDATA\Naumi" "finish" "${VERSION}" "$7"'
   Pop $R9

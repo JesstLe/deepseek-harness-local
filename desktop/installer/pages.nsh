@@ -7,6 +7,7 @@
 !endif
 !ifndef BUILD_UNINSTALLER
   !insertmacro NaumiInstallerFunctions
+  !include "${NAUMI_WIZARD_DIR}\update-ui.nsh"
   !ifmacrodef licensePage
     !insertmacro skipPageIfUpdated
     !insertmacro licensePage
@@ -24,7 +25,12 @@
     ${Else}
       StrCpy $1 ""
     ${EndIf}
-    ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "$1"
+    ${If} ${isUpdated}
+      ; Open this exact updated installation, not a stale shortcut.
+      ${StdUtils.ExecShellAsUser} $0 "$appExe" "open" "$1"
+    ${Else}
+      ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "$1"
+    ${EndIf}
   FunctionEnd
 !else
   !insertmacro NaumiUninstallerFunctions

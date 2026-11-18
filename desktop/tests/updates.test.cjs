@@ -28,7 +28,7 @@ test('feed override accepts https and loopback only, never credentials',()=>{
   process.env.NAUMI_UPDATE_URL='http://192.168.1.10/feed';process.env.NAUMI_UPDATE_ALLOW_INSECURE_HTTP='1';assert.deepEqual(feedOverride(),{url:'http://192.168.1.10/feed'});
  }finally{if(previous===undefined)delete process.env.NAUMI_UPDATE_URL;else process.env.NAUMI_UPDATE_URL=previous;if(previousInsecure===undefined)delete process.env.NAUMI_UPDATE_ALLOW_INSECURE_HTTP;else process.env.NAUMI_UPDATE_ALLOW_INSECURE_HTTP=previousInsecure;}
 });
-test('update lifecycle reaches ready, notifies once and installs silently',async()=>{
+test('update lifecycle reaches ready, notifies once and hands off to visible native installer',async()=>{
  const {updates,updater,notified}=harness();
  assert.deepEqual(updates.start(),{ok:true});
  assert.equal(updater.autoDownload,false);assert.equal(updater.autoInstallOnAppQuit,false);
@@ -42,7 +42,7 @@ test('update lifecycle reaches ready, notifies once and installs silently',async
  await new Promise(r=>setImmediate(r));
  state=updates.snapshot();assert.equal(state.status,'ready');assert.equal(notified.length,1);assert.equal(notified[0].version,'0.3.0');
  await new Promise(r=>setImmediate(r));
- assert.equal(updater.installs,1);assert.deepEqual(updater.quit,{isSilent:true,isForceRunAfter:true});
+ assert.equal(updater.installs,1);assert.deepEqual(updater.quit,{isSilent:false,isForceRunAfter:true});
 });
 test('busy desktop defers install but stays ready',async()=>{
  const {updates,updater,notified}=harness({gate:{ok:false,reason:'WORKSPACE_OPERATIONS_IN_FLIGHT'}});
