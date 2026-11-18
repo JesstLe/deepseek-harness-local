@@ -30,6 +30,7 @@ export function productCopy(namespace,key,template,locale,version){
  return template.replace(/DeepSeek Harness/g,'Naumi').replace(/深度求索中/g,'Naumi 正在处理').replace(/\bDSH\b/g,'Naumi');
 }
 export function installProductIdentity(ctx,{version='0.3.2'}={}){
+ const native=globalThis.naumiDesktop?.appVersion;if(typeof native==='string'&&/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(native))version=native;
  const locale=ctx.locale,original=locale.translate,own=Object.getOwnPropertyDescriptor(locale,'translate');
  function translate(namespace,key,params){
   const template=original.call(this,namespace,key);

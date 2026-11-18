@@ -7,6 +7,8 @@ const browser={
   onOpenRequested:(lease,listener)=>subscribe('naumi:browser-open',value=>{if(value?.lease===lease)listener(value.url);})
 };
 contextBridge.exposeInMainWorld('naumiDesktop',{
+  appVersion:process.argv.find(v=>v.startsWith('--naumi-desktop-version='))?.slice('--naumi-desktop-version='.length)??'',
+  runtimeInfo:()=>ipcRenderer.invoke('naumi:runtime-info'),
   version:1,protocolVersion:1,browser,engine:'chromium',
   bindBrowser:value=>ipcRenderer.invoke('naumi:browser-bind',value),
   onBrowserIssue:listener=>subscribe('naumi:browser-issue',listener),

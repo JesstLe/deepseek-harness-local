@@ -70,8 +70,9 @@ async function stopBackend(backend,{timeoutMs=10000}={}){
  let timer;const done=await Promise.race([closed,new Promise(resolve=>{timer=setTimeout(()=>resolve(false),timeoutMs);})]);clearTimeout(timer);if(!done)throw Error('BACKEND_STOP_UNKNOWN');
 }
 function createQuitGate({shutdown,onReady,onError}){
- let phase='idle',flight;
- return {beforeQuit(event){if(phase==='ready')return;event.preventDefault();if(flight)return;phase='stopping';flight=Promise.resolve().then(shutdown).then(()=>{phase='ready';onReady();},error=>{phase='failed';onError(error);});},settled:()=>flight??Promise.resolve(),get phase(){return phase;}};
+ let phase='idle',flight,quitting=false;
+ const prepare=()=>{if(!flight){phase='stopping';flight=Promise.resolve().then(shutdown).then(()=>{phase='ready';},error=>{phase='failed';throw error;});}return flight;};
+ return {prepare,reset(){if(phase==='stopping')throw Error('QUIT_PREPARATION_ACTIVE');phase='idle';flight=null;quitting=false;},beforeQuit(event){if(phase==='ready')return;event.preventDefault();if(quitting)return;quitting=true;prepare().then(onReady,onError);},settled:()=>flight??Promise.resolve(),get phase(){return phase;}};
 }
 async function ensureBackend(settings,{fetcher=fetch,startTimeoutMs=90000,pollMs=350,portRetries=2}={}){
  if(settings.isolated){
