@@ -53,7 +53,12 @@ test('preexisting enterprise front-end remains byte-equivalent apart from declar
  const identityHelper=source.slice(source.indexOf('    function IdentityAccount(){'),source.indexOf('    function DesignGrid()'));
  assert(identityHelper.includes('if(!identity)return null;'));assert(identityHelper.includes('value.available'));assert.equal(source.split(',h(IdentityAccount)').length,2);
  const restored=source.slice(start).replace(identityHelper,'').replace(',h(IdentityAccount)','').replace(desktopAction,'').replace(lazy,'').replace(privatePanel,'').replace("const known=new Set([...PANELS.map(x=>x[0]),'naumi-conversation','naumi-bot-overview','naumi-session-import']);","const known=new Set(PANELS.map(x=>x[0]));").replace(migration,"      const saved=sessionStorage.getItem('naumi.activePanel');").split('\n').filter(line=>!line.includes("void import('/naumi/assets/browser-client.js')")).join('\n').replace("    installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);\n",'');
- assert.equal(restored.replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'));
+ // The delivery page is an explicitly authorized UI-only replacement. Every
+ // other original business page must still pass the byte-equivalence contract.
+ const deliveryComponent=source.slice(source.indexOf('    function DeliveryCenter('),source.indexOf('    function Page('));
+ const oldDelivery=original.split('\n').find(line=>line.includes("page==='naumi-delivery'"));
+ const deliveryRestored=restored.replace(deliveryComponent,'').replace("        page==='naumi-delivery'&&h(DeliveryCenter,{state,tasks}),",oldDelivery);
+ assert.equal(deliveryRestored.replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'));
 });
 test('team presentation has no direct credential, model, permission or persistence writes',()=>{
  const added=panelSource;
