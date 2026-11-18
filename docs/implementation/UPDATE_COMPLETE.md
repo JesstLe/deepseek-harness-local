@@ -31,3 +31,5 @@
 - 首轮真实loopback完整下载及原生点击已执行，旧候选GUI退出，但HKCU/HKLM并存时stock静默分支仅凭hasPerMachineInstallation就转机器安装，新GUI未重开。首轮保留HANDOFF_FIRST，不混记通过。
 - 最小扩展：native updater公共installDirectory绑定process.execPath目录；NSIS现有customInit仅针对--updated且显式/D匹配已注册安装目录，选择对应现有安装范围，未知目录exit43；未修改stock引擎/卸载事务/依赖版本。
 - 追加修复后定向100/100通过，exit0。需从包含修订的固定main重建0.3.9并复跑真实交接。
+
+- 额外真实NSIS无安装参数观察器确认：Node spawn会将含空格/D参数整项包引号，pinned GetDParameter保留尾引号。customInit仅去除末尾包装引号、仍以canonical+注册目录精确匹配，并将INSTDIR设为检查后的路径，支持中文/空格。原始观察输出归档ARGV。

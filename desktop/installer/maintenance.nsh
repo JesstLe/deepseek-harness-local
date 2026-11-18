@@ -12,6 +12,13 @@
   ${If} ${isUpdated}
     !insertmacro GetDParameter $R0
     ${If} $R0 != ""
+      ; Node's native spawn quotes a /D argument containing spaces as one token.
+      ; The pinned GetDParameter returns the wrapper's closing quote. Strip only
+      ; that terminal wrapper before canonical matching; embedded quotes reject.
+      StrCpy $R4 $R0 1 -1
+      ${If} $R4 == '$\"'
+        StrCpy $R0 $R0 -1
+      ${EndIf}
       Push $R0
       Call NaumiCanonicalPath
       Pop $R1
@@ -30,6 +37,7 @@
         StrCpy $hasPerMachineInstallation "0"
         StrCpy $hasPerUserInstallation "1"
         !insertmacro setInstallModePerUser
+        StrCpy $INSTDIR $R1
       ${Else}
         ReadRegStr $R2 HKLM "${INSTALL_REGISTRY_KEY}" InstallLocation
         StrCpy $R3 ""
@@ -42,6 +50,7 @@
           StrCpy $hasPerMachineInstallation "1"
           StrCpy $hasPerUserInstallation "0"
           !insertmacro setInstallModePerAllUsers
+          StrCpy $INSTDIR $R1
         ${Else}
           SetErrorLevel 43
           Quit
