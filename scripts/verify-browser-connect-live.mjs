@@ -48,6 +48,9 @@ try{
  const login=await router.perform('session-a',{action:'login',accountId:account.id,usernameSelector:'#username',passwordSelector:'#password'});
  assert.equal(login.filled,true);assert.equal(login.submitted,false);assert(!JSON.stringify(login).includes('fixture-secret'));assert.equal(await page.locator('#username').inputValue(),'fixture-user');assert.equal(await page.locator('#password').inputValue(),'fixture-secret-not-logged');assert.equal(requests,0);checks++;
  assert.equal(await page.evaluate(()=>document.cookie.includes('fixture-session')),false);checks++; // HttpOnly stays HttpOnly.
+ await connect(page,'session-transfer');assert.equal((await router.perform('session-transfer',{action:'state'})).title,'Already signed in');checks++;
+ await assert.rejects(router.perform('session-a',{action:'click',selector:'#change'}),/DISCONNECTED/);checks++;
+ router.disconnect('session-transfer');
  router.disconnect('session-a');await assert.rejects(router.external.perform('session-a',{action:'click',selector:'#change'}),/DISCONNECTED/);assert.equal(await page.title(),'Already signed in');checks++;
  await context.close();context=null;await launch();const restored=await context.newPage();await restored.goto(origin+'/app');assert.equal(await restored.title(),'Already signed in');assert.equal(await restored.evaluate(()=>localStorage.getItem('fixture-workspace')),'kept-in-original-browser');checks++;
  await connect(restored,'session-after-restart');assert.equal((await router.perform('session-after-restart',{action:'state'})).title,'Already signed in');checks++;

@@ -6,7 +6,10 @@ async function request(connection,path,body){
  const response=await fetch(connection.base+path,{method:'POST',headers:{Authorization:'Bearer '+connection.token,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(25000)});
  if(!response.ok)throw Error('BROWSER_CONNECTION_ENDED');return response.json();
 }
-async function detachAll(connection){await chrome.storage.session.remove('connection');for(const tabId of connection?.tabs||[]){await request(connection,'/detach',{tabId}).catch(()=>{});try{await chrome.debugger.detach({tabId});}catch{}}}
+async function detachAll(connection){
+ if((await state())?.token===connection?.token)await chrome.storage.session.remove('connection');
+ for(const tabId of connection?.tabs||[]){await request(connection,'/detach',{tabId}).catch(()=>{});const current=await state();if(current?.token!==connection.token&&current?.tabs.includes(tabId))continue;try{await chrome.debugger.detach({tabId});}catch{}}
+}
 async function evaluate(tabId,expression){
  const r=await chrome.debugger.sendCommand({tabId},'Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true,timeout:10000});
  if(r.exceptionDetails)throw Error('BROWSER_PAGE_OPERATION_FAILED');return r.result.value;
@@ -41,15 +44,15 @@ async function operate(job,connection){
 }
 async function poll(){
  if(polling)return;polling=true;
- try{while(true){
+ try{connectionLoop:while(true){
   const connection=await state();if(!connection?.tabs.length)break;
-  let response;try{response=await request(connection,'/poll',{});}catch{await detachAll(connection);break;}
+  let response;try{response=await request(connection,'/poll',{});}catch{if((await state())?.token!==connection.token)continue;await detachAll(connection);break;}
   for(const job of response.jobs){
-   if((await state())?.token!==connection.token)return;
-   try{await request(connection,'/permit',{id:job.id});}catch{await detachAll(connection);return;}
+   if((await state())?.token!==connection.token)continue connectionLoop;
+   try{await request(connection,'/permit',{id:job.id});}catch{if((await state())?.token!==connection.token)continue connectionLoop;await detachAll(connection);return;}
    let result;try{result={id:job.id,ok:true,data:await operate(job,connection)};}catch{result={id:job.id,ok:false};}
    // Result loss is never repaired by executing the action again.
-   try{await request(connection,'/result',result);}catch{await detachAll(connection);return;}
+   try{await request(connection,'/result',result);}catch{if((await state())?.token!==connection.token)continue connectionLoop;await detachAll(connection);return;}
   }
  }}finally{polling=false;}
 }

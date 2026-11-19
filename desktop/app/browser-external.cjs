@@ -55,7 +55,7 @@ class ExternalBrowserHub{
     this.onAttach?.(pair.sessionId);send(200,{ok:true,sessionId:pair.sessionId});return;
    }
    if(req.url==='/detach'){
-    const id=origin+':'+pair.instanceId+':'+body.tabId,tab=this.tabs.get(id);if(tab?.pair===pair){this.tabs.delete(id);this.rejectTab(id,'EXTERNAL_BROWSER_TAB_CLOSED_NO_REPLAY');}send(200,{ok:true});return;
+    const id=origin+':'+pair.instanceId+':'+body.tabId,tab=this.tabs.get(id);if(tab?.pair===pair){this.tabs.delete(id);this.rejectTab(id,'EXTERNAL_BROWSER_TAB_CLOSED_NO_REPLAY');pair.waiter?.();}send(200,{ok:true});return;
    }
    if(req.url==='/permit'){
     const job=this.pending.get(body.id);if(!job||job.pair!==pair||!job.dispatched||job.permitted){send(409,{error:'EXTERNAL_BROWSER_OPERATION_REVOKED'});return;}job.permitted=true;send(200,{ok:true});return;
