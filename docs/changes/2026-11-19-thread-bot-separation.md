@@ -24,3 +24,8 @@
 ## 源码交付状态
 - 已完成源码/917全仓/54模块/17原生框架UI。13任务文件原件与修改件SHA256、ZIP/差异与标记源码副本rollback31/31均通过，恢复混合列表旧契约，活动源码保持分离；运行态以独立DEPLOYMENT.json为准，不把Git合入当实际加载。
 - 只加载Bot两资产和workspace native一个文件；由于原生模块批次缓存，需空闲门下一次服务重启。0.4.1固定包/EXE/native Electron当前进程不改，客户端刷新后获取新的服务资产。
+
+## 首次实际加载保护门
+- 开始读取source main2681b6e（前期功能合入dce0902），并发main随后563ca3d，均保留本任务产品字节。3文件写入和服务启动后，protected整hash门发现一份native Session变化，加载器自动恢复3原件并重启，exit1不记成功。
+- 只读压缩frame逐界核对旧SHA1bb776...：原81541字节完整保留，当前81622字节，只追加一个session/end-seed空data帧。使用同项目既有cold-session restoration保护口径，新增专用只读验证与拒绝正文/配置/旧前缀改动测试，改为显式单列生命周期追加，不回写Session。
+- 接续已整合0.4.2统一更新563ca3d；不改其host/native/版本/服务接管逻辑，新managed-service状态若存在则在任何stop前拒绝本加载器，防止使用旧Start脚本接管由桌面管理的服务。
