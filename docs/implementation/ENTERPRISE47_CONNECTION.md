@@ -21,6 +21,10 @@
 - 首轮原生验收暴露三项集成缺口：首次linked candidate未初始化企业桥、原生桥先拦截HTML404、中央interaction继续跳到统一登录首页。已分别补齐并集中复验；runner环境删除配置的问题也已修正，初次日志保留，不把失败覆盖成通过。
 - 固定main `2e32726ede8a828231c02c08779af608966cbbe9`；33个asar顶层可执行/UI文件对固定main核验（CRLF→LF规范化）；45,658个backend运行文件逐SHA一致，closure PASS、私有路径0。最初NSIS压缩在原生发现问题后主动中止；最终使用上述已复核unpacked经原stock NSIS管线重新封装，不发布初始候选。
 - 副本回滚恢复10个原文件、删除5个新增文件，原60项基线通过；活动源码保留修改。四件套原件哈希、补丁检查与ZIP CRC均核验。
-- 实际安装与发布状态随后补充。真实员工SSO由本人正常登录；不借部署会话、不伪造用户、角色或任务。数字员工登记/绑定/自动交稿待企业侧合入并发布对应模块，保持独立状态。
+- 正式安装已完成：固定0.4.3包SHA256 `4f76cafb48cb74298171b94c8d866db89db6ef0756039eaef5112d0aaa9b9b6c`，495,464,596字节，原stock NSIS封装exit0、完整NSIS归档检查通过。以`/allusers /S --updated /D=C:\Program Files\Naumi`更新，原生维护闸门正常退出旧GUI/worker，安装器exit0并自动重开。
+- 正式exe与实际HTTP服务均0.4.3、managed；原home不变、签名worker的enterpriseOrigin及bridge descriptor均为正式协作地址。114会话ID保持、121受保护文件哈希不变；Bot/任务/群/模型API投影哈希不变；官方服务代码差异0。实际命令 `node scripts/verify-enterprise47-installed.mjs`，exit0。
+- 当前本人的企业工作区HTTP401，原生桥已接线上，等待本人在“企业登录”完成企业SSO；不将401当本人已登录。数字员工接口原始404经有限桥转换为503/EMP_SERVICE_NOT_DEPLOYED；registered=false、syncEnabled=false，业务写0、模型调用0。数字员工登记/绑定/自动交稿待企业侧合入并发布对应模块。
+- stable v0.4.3：<https://github.com/JesstLe/naumi-desktop/releases/tag/v0.4.3>；固定tag仍为上述2e32726，后续文档和验收脚本不重建包。GitHub完整上传digest与稳定本地副本一致；匿名manifest与HTTP206前缀单独核验，不冒称本轮做过整包匿名下载。
+- 真实员工完整SSO回调/企业任务读取及设备登记的业务验收仍独立保留；不借部署会话、不伪造用户或任务，不自动上传私人数据。本次不发布企业服务端。
 
 功能模块计数1；后续更新本记录。
