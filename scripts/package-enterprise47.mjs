@@ -51,7 +51,7 @@ BASELINE LITERAL RESULT=ℹ tests 60; ℹ pass 60; ℹ fail 0
 BASELINE EXIT_STATUS=0
 MODIFIED COMMAND=${modifiedCommand}
 MODIFIED INPUT=integrated source; isolated fixtures; no inference
-MODIFIED LITERAL RESULT=ℹ tests 937; ℹ pass 937; ℹ fail 0
+MODIFIED LITERAL RESULT=ℹ tests 938; ℹ pass 938; ℹ fail 0
 MODIFIED EXIT_STATUS=0
 UI COMMAND=$env:ENTERPRISE47_EXPECTED_VERSION="0.4.3"; $env:ENTERPRISE47_BUNDLE_ROOT="D:/NaumiBuild/enterprise47-connect-20261119/runtime/naumi-desktop-release/win-unpacked/resources/backend"; $env:ENTERPRISE47_PACKAGE_EXE="D:/NaumiBuild/enterprise47-connect-20261119/runtime/naumi-desktop-release/win-unpacked/Naumi.exe"; node scripts/verify-enterprise47-native.mjs
 UI INPUT=fresh isolated genuine Harness + packaged Electron/native IPC; old linked 0.3.9 service, original home and extra plugin
