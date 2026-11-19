@@ -28,7 +28,7 @@ export function installNativeBrowserUI(ctx,React,Icon){
     undo=ctx.slots.register({...entry.options,name:slot,priority:-1000,inject:entry.inject,locale:entry.locale,...(entry.store?{store:entry.store}:{})},NativeBody);
   }
   disposers.push(ctx.slots.inject(slot,()=>{wrap();const off=ctx.slots.subscribe(slot,wrap);return()=>{off();undo?.();};}));
-  function OpenButton(){return h('button',{className:'naumi-browser-open','aria-label':'打开内置浏览器',title:'浏览器',onClick:()=>ctx.sidebarRight.openTab('browser')},h(Icon,{name:'link',size:16}),'浏览器');}
+  function OpenButton(){return h(React.Fragment,null,h('button',{className:'naumi-browser-open','aria-label':'打开内置浏览器',title:'浏览器',onClick:()=>ctx.sidebarRight.openTab('browser')},h(Icon,{name:'link',size:16}),'浏览器'),bridge.browser?.manage&&h('button',{className:'naumi-browser-open','aria-label':'浏览器连接与账号',title:'连接现有浏览器和网站账号',onClick:()=>{const sessionId=ctx.sidebarRight.mounted.getSnapshot();if(sessionId)void bridge.browser.manage({sessionId}).catch(console.error);}},'连接'));}
   disposers.push(ctx.slots.inject('conversation.session.header.actions',()=>ctx.slots.register({name:'conversation.session.header.actions',id:'naumi-browser-open',order:79},OpenButton)));
   disposers.push(bridge.onToolRequest(request=>{
     if(ctx.sidebarRight.mounted.getSnapshot()!==request.sessionId)return;

@@ -1,11 +1,12 @@
 'use strict';
 const path=require('node:path');
 const fs=require('node:fs');
-const {app,BrowserWindow,ipcMain,Menu,nativeTheme,shell,session,dialog,safeStorage}=require('electron');
+const {app,BrowserWindow,ipcMain,Menu,nativeTheme,shell,session,dialog,safeStorage,clipboard}=require('electron');
 const {EnterpriseSession}=require('./enterprise.cjs');
 const {workspaceSummary,selectWorkspace,verifyConnection,assertWorkspaceIdle}=require('./workspaces.cjs');
 const {Guests}=require('./guests.cjs');
 const {startBridge}=require('./tools.cjs');
+const {BrowserConnections}=require('./browser-connect.cjs');
 const {localSettings,ensureBackend,stopBackend,createQuitGate,maintenanceRequest}=require('./backend.cjs');
 const installerState=require('./installer-state.cjs');
 const {createDesktopUpdates}=require('./updates.cjs');
@@ -27,6 +28,7 @@ const creation=new CreationVault({identity:()=>identityRuntime,safeStorage});
 const DEFAULT_IDENTITY_ORIGIN='https://47.105.59.142';
 const {enterpriseConnection,allowedEnterpriseNavigation}=require('./enterprise-defaults.cjs');
 let cloudBusy=0;
+let browserManager=null,browserManagerConnection=null,browserManagerSession=null;
 let window,primarySession,guests,bridge,backend,settings,enterprise,login,loginAfterBoot=false,booting=false,closing=false,connecting=false,editingConnection=false,connectionFlight,maintenanceTicket=null,maintenanceUntil=0,updates=null,quitGate;
 if(!locked){app.quit();}else{
 app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.show();window.focus();}});
@@ -63,6 +65,28 @@ app.whenReady().then(async()=>{
  const localPage=(event,names)=>{ownFrame(event);const u=new URL(event.senderFrame.url);return u.protocol==='file:'&&names.some(name=>u.pathname===require('node:url').pathToFileURL(path.join(__dirname,name)).pathname);};
  const accountPage=event=>localPage(event,['identity.html']);
  const trusted=event=>{ownFrame(event);if(!settings||new URL(event.senderFrame.url).origin!==settings.url||connecting||maintenanceBlocked())throw Error('INVALID_DESKTOP_ORIGIN');};
+ ipcMain.handle('naumi:browser-manager',async(e,input)=>{
+  trusted(e);if(typeof input?.sessionId!=='string'||!input.sessionId||input.sessionId.length>200||!bridge?.runtime.external)throw Error('BROWSER_SESSION_REQUIRED');
+  browserManager?.close();browserManagerConnection=bridge.runtime;browserManagerSession=input.sessionId;
+  const manager=new BrowserWindow({parent:window,width:720,height:820,minWidth:480,minHeight:540,title:'浏览器连接 · Naumi',backgroundColor:'#f6f8fc',webPreferences:{preload:path.join(__dirname,'browser-manager-preload.cjs'),sandbox:true,contextIsolation:true,nodeIntegration:false}});browserManager=manager;
+  manager.webContents.setWindowOpenHandler(()=>({action:'deny'}));manager.webContents.on('will-navigate',event=>event.preventDefault());manager.on('closed',()=>{if(browserManager===manager){browserManager=null;browserManagerConnection=null;browserManagerSession=null;}});
+  await manager.loadFile(path.join(__dirname,'browser-manager.html'));return {opened:true};
+ });
+ ipcMain.handle('naumi:browser-control',async(e,input)=>{
+  const conn=browserManagerConnection,id=browserManagerSession;
+  if(!browserManager||e.sender!==browserManager.webContents||e.senderFrame!==browserManager.webContents.mainFrame||e.senderFrame.url!==require('node:url').pathToFileURL(path.join(__dirname,'browser-manager.html')).href||bridge?.runtime!==conn||closing||connecting||maintenanceBlocked())throw Error('BROWSER_MANAGER_INACTIVE');
+  try{
+   let data;
+   if(input?.action==='status')data=conn.status(id);
+   else if(input?.action==='extension'){const error=await shell.openPath(conn.exportExtension());if(error)throw Error('BROWSER_EXTENSION_OPEN_FAILED');data={opened:true};}
+   else if(input?.action==='pair'){clipboard.writeText(conn.external.pair(id));data={copied:true};}
+   else if(input?.action==='disconnect')data=conn.disconnect(id);
+   else if(input?.action==='save')data=conn.vault.save(input);
+   else if(input?.action==='remove')data=conn.vault.remove(input.id);
+   else throw Error('BROWSER_MANAGER_ACTION_INVALID');
+   return {ok:true,data};
+  }catch{return {ok:false,error:'操作未完成，请检查网站地址、系统加密存储或连接状态。'};}
+ });
  ipcMain.handle('naumi:browser-acquire',(e,workspace)=>{trusted(e);return guests.acquire(e.sender,workspace);});
  ipcMain.handle('naumi:browser-release',(e,lease)=>{trusted(e);return guests.release(e.sender,lease);});
  ipcMain.handle('naumi:browser-bind',(e,value)=>{trusted(e);return guests.bind(e.sender,value);});
@@ -203,7 +227,7 @@ async function boot(){
   const account=identityRuntime?.active?'identity-'+identityRuntime.active.profileId+'-'+settings.workspaceId:!settings.isolated||settings.workspaceId==='default'?'local':'enterprise-'+settings.workspaceId;
   if(!guests){guests=new Guests({hostURL:settings.url,account,timeout:process.env.NAUMI_TEST==='1'?Number(process.env.NAUMI_TEST_TIMEOUT??30000):30000});guests.attach(window);}
   else if(guests.hostURL!==settings.url||guests.account!==account)await guests.reset({hostURL:settings.url,account});
-  if(!bridge)bridge=await startBridge({home:settings.home,guests,window,enterprise,market,maintenance:{blocked:maintenanceBlocked,perform:performMaintenance,quit:ticket=>{if(maintenanceBlocked()&&ticket===maintenanceTicket)app.quit();}}});
+  if(!bridge)bridge=await startBridge({home:settings.home,guests,window,enterprise,market,browserConnections:new BrowserConnections({root:path.join(identityRuntime?.active?.root??identityUserData??app.getPath('userData'),'browser-private'),hostURL:settings.url,safeStorage}),maintenance:{blocked:maintenanceBlocked,perform:performMaintenance,quit:ticket=>{if(maintenanceBlocked()&&ticket===maintenanceTicket)app.quit();}}});
   editingConnection=false;await window.loadURL(backend.launchURL);
   const serviceVersion=await verifyServiceVersion();
   require('./profile.cjs').atomic(path.join(app.getPath('userData'),'desktop-runtime.json'),{version:1,pid:process.pid,clientVersion:app.getVersion(),executable:process.execPath,backendMode:settings.isolated||settings.linkedService?'managed':'external',backendURL:settings.url,serviceVersion,serviceBundleId:settings.runtime?.bundleId??null,readyAt:new Date().toISOString()});
