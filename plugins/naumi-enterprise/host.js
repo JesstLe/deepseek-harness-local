@@ -7,7 +7,7 @@ import {installModelConnections} from './model-connections.js';
 import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {businessCookie,projectWorkspace,validateOrigin} from './domain.js';
-import {installAgentDesktop} from './agent-desktop.js';
+import {installCua} from './cua.js';
 import {installEgoBrowser} from './browser.js';
 import {installTeamProfile} from './team-profile.js';
 import {installBots} from './bots.js';
@@ -21,7 +21,7 @@ export function apply(ctx,config) {
   installSessionImport(ctx);
   installModelConnections(ctx);
   installPluginMarket(ctx);
-  installAgentDesktop(ctx);
+  installCua(ctx);
   installBlender(ctx);
   installCreation(ctx);
   installEgoBrowser(ctx);

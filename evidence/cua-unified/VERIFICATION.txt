@@ -1,0 +1,45 @@
+CUA UNIFIED / 0.4.4
+BRANCH=codex/cua-unified-20261119
+BASELINE_SHA=301c4423715f8f5fe4988131f67bb136078cefe3
+CHANGED_FIELD=host.installAgentDesktop → installCua; default desktop tool naumi_cua; agent-desktop dependency removed
+MODIFIED_FILE=E:/Workspace/naumi-desktop/evidence/cua-unified/MODIFIED_FILE.js
+DIFF_FILE=E:/Workspace/naumi-desktop/evidence/cua-unified/DIFF_FILE.patch
+VERIFICATION=E:/Workspace/naumi-desktop/evidence/cua-unified/VERIFICATION.txt
+ROLLBACK=E:/Workspace/naumi-desktop/evidence/cua-unified/ROLLBACK.sh
+
+BASELINE COMMAND=node --test tests/agent-desktop.test.mjs
+BASELINE INPUT=origin/main baseline 301c442; original agent-desktop integration
+BASELINE LITERAL RESULT=ℹ tests 10; ℹ pass 10; ℹ fail 0
+BASELINE EXIT_STATUS=0
+MODIFIED COMMAND=node --test tests/cua.test.mjs tests/naumi-runtime-gate.test.mjs tests/naumi-enterprise.test.mjs tests/naumi-employee-activity.test.mjs tests/naumi-browser-default.test.mjs
+MODIFIED INPUT=CUA replacement plus real native Harness/enterprise admission fixtures
+MODIFIED LITERAL RESULT=ℹ tests 67; ℹ pass 67; ℹ fail 0
+MODIFIED EXIT_STATUS=0
+DESKTOP COMMAND=node --test desktop/tests/*.test.cjs
+DESKTOP INPUT=desktop lifecycle/identity/installer/enterprise regression suite
+DESKTOP LITERAL RESULT=ℹ tests 178; ℹ pass 178; ℹ fail 0
+DESKTOP EXIT_STATUS=0
+NATIVE COMMAND=node scripts/verify-cua.mjs full
+NATIVE INPUT=isolated real WinForms app; exact pid/HWND; screenshot-bound input; fixture explicitly implements Ctrl+A KeyDown SelectAll
+NATIVE LITERAL RESULT=CUA_NATIVE click=1 type=1 hotkey_replace=1 key=1 scroll=1 drag=1 screenshot_before_after=1 second_session_busy=1 release=1 dispose=1
+NATIVE EXIT_STATUS=0
+NATIVE BOUNDARY=background hotkey/scroll returned background_unavailable; explicit re-observe+foreground in fixture test. Earlier test showed WinForms default Ctrl+A was not implemented; fixture now defines intended handler and records real Ctrl+A KeyDown. Not a universal app/hotkey pass. Native PNGs opened and visually checked.
+STAGE COMMAND=node desktop/scripts/prepare-runtime.mjs
+STAGE INPUT=Windows x64 Node24.19 + pinned build dependency cache, no employee home
+STAGE LITERAL RESULT=DESKTOP_RUNTIME_READY {"node":"24.19.0","harness":"0.2.2-rc.1","dingtalk":"1.0.68","files":45636,"closure":"PASS","forbiddenPaths":0,"previous":null}
+STAGE EXIT_STATUS=0
+PACKAGE RESULT=CUA_PACKAGE offline_binary=1 old_engine_absent=1 native_stdio=1 version=0.54.0
+ROLLBACK COMMAND=D:/DEV/Git/bin/bash.exe evidence/cua-unified/ROLLBACK.sh
+ROLLBACK INPUT=default rollback-test; newly created independent copy; no employee data
+ROLLBACK LITERAL RESULT=ROLLBACK baseline_tests=10/10 restored_sha256=all active_cua_changed=1 exit=0
+ROLLBACK EXIT_STATUS=0
+RESTORED BEHAVIOR=all original source SHA256 restored in independent copy, new CUA files removed there, original agent-desktop mount/dependency restored and original 10 tests pass; active source remains changed to CUA.
+ORIGINAL HASHES=evidence/cua-unified/TRANSACTION.json + originals/
+CUA DRIVER VERSION=0.54.0
+CUA ARCHIVE SHA256=c0b92cb56ec7863ca177a2813bf5e22bdea5772a56f5bc4e8be064eed34498d7
+CUA EXE SHA256=99a4b7a04fb3a25a450cc64ed4b806406c18aa08f27ec83a8364a0c601b1865e
+AUTHENTICODE=Valid; Cua AI, Inc.; fixed archive SHA256 verified; Sigstore not claimed
+LIVE_BEFORE=CUA_LIVE_BASELINE client=0.4.3 service=0.4.3 sessions=114 protected=121 active=0 engine=1.3.1
+RELEASE STATUS=source/native/runtime stage passed; fixed-main NSIS and installed0.4.4 acceptance pending later evidence
+PRESERVED=shared checkout branch/history, Naumi/Blender/native browser integrations, personal sessions/Bots/models/keys; no model inference or business writes in task tests
+REOPENED=MODIFIED_FILE.js compared to active runtime; DIFF_FILE.patch nonempty and git diff --check; VERIFICATION.txt read back; ROLLBACK.sh actually executed with exit0
