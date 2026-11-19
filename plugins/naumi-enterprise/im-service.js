@@ -5,6 +5,7 @@ import {IMDelivery} from './im-delivery.js';
 import {IM_PLATFORMS,platformEnvironment} from './im-platforms.js';
 import {validateFiles} from './bot-deliverables.js';
 import {IMInteractions} from './im-interactions.js';
+import {WeixinLogin} from './weixin-login.js';
 
 const id=z.string().min(1).max(200).refine(v=>!/[\u0000-\u001f\u007f]/.test(v));
 const target=z.object({kind:z.enum(['bot','group']),id}).strict();
@@ -26,11 +27,12 @@ export class IMService{
     this.connections=new Map();this.status=new Map();this.waiters=new Map();this.serial=Promise.resolve();this.closed=false;this.store.recover();
     this.delivery=new IMDelivery({store,getHandle:id=>this.connections.get(id)?.handle,sendFile:row=>this.sendFile(row)});
     this.interactions=new IMInteractions(this);
+    this.weixinLogin=new WeixinLogin(this);
   }
-  async read(){return {revision:this.store.revision(),connections:await Promise.all(this.store.connections().map(async c=>({id:c.id,name:c.name,platform:c.platform,appId:c.appId,domain:c.domain,enabled:c.enabled,configured:!!(await this.credentials.describe(c.secretRef))?.configured,state:this.status.get(c.id)??'disabled'}))),
+  async read(){return {revision:this.store.revision(),primaryBotId:this.directory.primary?.()?.id??null,connections:await Promise.all(this.store.connections().map(async c=>({id:c.id,name:c.name,platform:c.platform,appId:c.appId,domain:c.domain,enabled:c.enabled,configured:!!(await this.credentials.describe(c.secretRef))?.configured,state:c.platform==='weixin'&&c.primaryId!==this.directory.primary?.()?.id?'error':this.status.get(c.id)??'disabled'}))),
     bindings:this.store.bindings(),outbox:this.store.outputs().filter(v=>['unknown','failed'].includes(v.state)).map(v=>({id:v.id,bindingId:v.bindingId,state:v.state,error:v.error})),
     bots:this.directory.list().bots.filter(b=>b.status==='active').map(({id,name})=>({id,name})),groups:this.getGroups()?.store.rooms().map(({id,name})=>({id,name}))??[]};}
-  execute(input){const run=this.serial.then(()=>this.command(schema.parse(input)));this.serial=run.catch(()=>{});return run;}
+  execute(input){if(typeof input?.action==='string'&&input.action.startsWith('weixin-'))return this.weixinLogin.execute(input);const run=this.serial.then(()=>this.command(schema.parse(input)));this.serial=run.catch(()=>{});return run;}
   assertTarget(value,kind){
     if(kind==='direct'&&value.kind!=='bot'||kind==='group'&&value.kind!=='group')fail('IM_TARGET_KIND');
     if(value.kind==='bot'&&!this.directory.list().bots.some(b=>b.id===value.id&&b.status==='active'))fail('IM_BOT_NOT_FOUND');
@@ -59,7 +61,7 @@ export class IMService{
       try{await this.platforms[c.platform].check(fields,env);}catch{fail('IM_CHECK_FAILED');}
       return {...await this.read(),checked:p.id};
     }else if(p.action==='pair'){
-      const c=this.store.connection(p.connectionId);if(!c?.enabled)fail('IM_CONNECTION_DISABLED');this.assertTarget(p.target,p.chatKind);
+      const c=this.store.connection(p.connectionId);if(c?.platform==='weixin')fail('IM_WEIXIN_OWNER_ONLY');if(!c?.enabled)fail('IM_CONNECTION_DISABLED');this.assertTarget(p.target,p.chatKind);
       const code=randomBytes(12).toString('hex').toUpperCase(),expires=Date.now()+600000;
       this.store.configure(p.expectedRevision,()=>this.store.issuePair({connectionId:p.connectionId,chatKind:p.chatKind,target:p.target,expires},code));
       return {...await this.read(),pair:{code,expires}};
@@ -67,6 +69,7 @@ export class IMService{
       const b=this.store.binding(p.id);if(!b)fail('IM_NOT_FOUND');
       // Re-enabling requires a new external pairing, not resurrecting a revoked authority.
       if(p.active&&!b.active)fail('IM_PAIR_REQUIRED');
+      const c=this.store.connection(b.connectionId);if(c?.platform==='weixin'&&JSON.stringify(p.users)!==JSON.stringify([c.ownerUserId]))fail('IM_WEIXIN_OWNER_ONLY');
       this.store.configure(p.expectedRevision,()=>this.store.saveBinding({...b,active:p.active,users:[...new Set(p.users)],revision:b.revision+1}));this.expireInvalid();
     }else if(p.action==='resolve'){
       const row=this.store.output(p.id);if(!row||!['unknown','failed'].includes(row.state))fail('IM_NOT_FOUND');
@@ -74,7 +77,7 @@ export class IMService{
     }
     void this.kick();return this.read();
   }
-  async material(c){const secret=(await this.credentials.resolve(c.secretRef))?.value;if(!secret)fail('IM_SECRET_REQUIRED');return {fields:c.platform==='dingtalk'?{clientId:c.appId,clientSecret:secret}:{appId:c.appId,appSecret:secret,domain:c.domain},env:this.environment(c.platform)};}
+  async material(c){const secret=(await this.credentials.resolve(c.secretRef))?.value;if(!secret)fail('IM_SECRET_REQUIRED');const env=this.environment(c.platform);if(c.platform==='weixin'){env.loadState=key=>this.store.transportState(c.id,key);env.saveState=(key,value)=>this.store.saveTransportState(c.id,key,value);return{fields:{botId:c.appId,token:secret,baseURL:c.baseURL,ownerUserId:c.ownerUserId},env};}return {fields:c.platform==='dingtalk'?{clientId:c.appId,clientSecret:secret}:{appId:c.appId,appSecret:secret,domain:c.domain},env};}
   async sync(){
     for(const [id,live] of this.connections){const c=this.store.connection(id);if(!c?.enabled||JSON.stringify(c)!==live.signature){live.handle.stop();this.connections.delete(id);this.status.set(id,'disabled');}}
     for(const c of this.store.connections().filter(c=>c.enabled)){
@@ -95,6 +98,11 @@ export class IMService{
   async receive(connectionId,raw){
     if(this.closed||!this.store.connection(connectionId)?.enabled)return;
     const parsed=incoming.safeParse(raw);if(!parsed.success)return;const event=parsed.data;
+    const c=this.store.connection(connectionId);
+    if(c.platform==='weixin'){
+      if(event.chat.kind!=='direct'||event.sender.id!==c.ownerUserId||event.chat.key!==c.ownerUserId||this.directory.primary?.()?.id!==c.primaryId||/^\/pair\b/i.test(event.text.trim()))return;
+      if(event.unsupported){const b=this.store.findBinding(connectionId,event.chat);if(b?.active){const input=this.store.admit(b,event);if(input.state==='queued'){this.store.write(()=>{this.delivery.text(input,'unsupported:'+input.id,'当前支持文字指令，请将内容以文字发送。');this.store.updateInput(input.id,{state:'settled'});});void this.kick();}}return;}
+    }
     if(event.chat.kind==='group'&&!event.mentioned)return;
     // Upstream protocols now expose thread/type metadata. Unsupported inputs are never silently sent as text.
     if(event.threadId||event.unsupported||!event.text.trim()&&!event.images.length)return;
@@ -132,14 +140,14 @@ export class IMService{
         }
         if(input.target.kind==='bot'){
           const state=await runtime.inspect(input.sessionId,input.messageId);
-          if(state?.end){const files=await runtime.delivery(input.sessionId,input.messageId);this.store.write(()=>{this.delivery.text(input,'reply:'+input.id,state.text||'回复已结束：'+state.end.kind);this.delivery.files(input,'reply:'+input.id,files.files);this.store.updateInput(input.id,{state:'settled',turn:state.turn});});}
+          if(state?.end){const files=await runtime.delivery(input.sessionId,input.messageId);this.store.write(()=>{this.delivery.text(input,'reply:'+input.id,state.text||'回复已结束：'+state.end.kind);this.deliverFiles(input,'reply:'+input.id,files.files);this.store.updateInput(input.id,{state:'settled',turn:state.turn});});}
         }else{
           const post=this.getGroups()?.readPost(input.target.id,input.messageId);
           if(post){
             for(const reply of post.replies)if(['completed','failed','cancelled','interrupted'].includes(reply.state)){
               const bot=this.directory.list().bots.find(b=>b.id===reply.botId);
               this.delivery.text(input,'group:'+reply.id,`${bot?.name??'Bot'}\n\n${reply.text||reply.state}`);
-              if(reply.state==='completed'){const files=await runtime.delivery(reply.sessionId,reply.id);this.delivery.files(input,'group:'+reply.id,files.files);}
+              if(reply.state==='completed'){const files=await runtime.delivery(reply.sessionId,reply.id);this.deliverFiles(input,'group:'+reply.id,files.files);}
             }
             if(post.replies.every(r=>['completed','failed','cancelled','interrupted'].includes(r.state)))this.store.updateInput(input.id,{state:'settled'});
           }
@@ -171,12 +179,13 @@ export class IMService{
       for(const m of doc.outbox.filter(m=>m.taskId===task.id&&m.fromSessionId===task.targetSessionId&&m.toSessionId===task.sourceSessionId)){
         if(m.kind==='result'&&!m.key.startsWith('finish:'))continue;
         this.delivery.text(input,'task:'+m.id,`${this.directory.list().bots.find(b=>b.id===task.targetBotId)?.name??'Bot'} · ${m.kind}\n\n${m.text}`);
-        this.delivery.files(input,'task:'+m.id,m.files);
+        this.deliverFiles(input,'task:'+m.id,m.files);
       }
     }
   }
   inputForSource(source){return this.store.inputs().find(v=>v.target.kind==='bot'?v.messageId===source.messageId&&v.sessionId===source.sessionId:(this.getGroups()?.readPost(v.target.id,v.messageId)?.replies??[]).some(r=>r.id===source.messageId&&r.sessionId===source.sessionId));}
   action(connectionId,event){return this.interactions.action(connectionId,event);}
+  deliverFiles(input,key,files){if(this.store.connection(input.connectionId)?.platform==='weixin'){if(files?.length)this.delivery.text(input,key+':file-notice','文件已生成，请在 Naumi 交付区查看：'+files.map(f=>basename(f.path)).join('、'));}else this.delivery.files(input,key,files);}
   async sendFile(row){
     const ref=row.payload.ref,live=this.connections.get(row.connectionId),runtime=this.getTasks().runtime;
     if(!live||!this.store.valid(row))throw Object.assign(Error('IM_REVOKED'),{permanent:true});
@@ -209,5 +218,5 @@ export class IMService{
     return input&&this.store.valid(input)?input:null;
   }
   expireInvalid(){for(const v of this.store.interactions().filter(v=>v.state==='open'))if(v.expires<Date.now()||!this.store.valid(v)){this.store.saveInteraction({...v,state:'expired'});this.waiters.get(v.id)?.cancel();}}
-  async close(){this.closed=true;for(const v of this.connections.values())v.handle.stop();this.connections.clear();for(const w of this.waiters.values())w.cancel();await this.serial;await this.running;this.store.close();}
+  async close(){this.closed=true;this.weixinLogin.close();for(const v of this.connections.values())v.handle.stop();this.connections.clear();for(const w of this.waiters.values())w.cancel();await this.serial;await this.running;this.store.close();}
 }

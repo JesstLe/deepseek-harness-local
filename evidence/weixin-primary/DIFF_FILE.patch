@@ -1,0 +1,2912 @@
+diff --git a/modified/docs/implementation/WEIXIN_PRIMARY.md b/modified/docs/implementation/WEIXIN_PRIMARY.md
+new file mode 100644
+index 0000000..2d9c4d8
+--- /dev/null
++++ b/modified/docs/implementation/WEIXIN_PRIMARY.md
+@@ -0,0 +1,27 @@
++# 微信私聊遥控主 Bot
++
++模块与职责：本线程，codex/weixin-primary-20261119，开工origin074cc24，实际worktree创建时origin前进8a6c352，基线以git首父为准。只改现有IM网关扩展、侧栏微信入口、package追加files及测试/文档；host/client仅追加资产注册。浏览器/CUA/安装包与Bot任务引擎不改。
++
++调研：腾讯MIT项目Tencent/openclaw-weixin的npm包2.4.10（2026-10-11），下载tarball按registry SHA512校验。使用其iLink get_bot_qrcode/get_qrcode_status/getupdates/sendmessage协议结构，不安装OpenClaw、不借用其Agent执行链。来源pin/LICENSE/NOTICE在third-party/weixin。QR生成库qrcode-generator1.4.4按SHA512验证并保留MIT版权。
++
++公共接口、依赖方向、数据/状态/事务归属：通过原owner同源/CSRF保护的/naumi/im新增weixin-start/poll/cancel/code，扫码返回的ilink_user_id作为唯一允许发送者，绑定当时账号primaryBotId，自动创建IM独立Session，后续仍归主Bot。非本人、群聊、非当前primary与手工/pair都不进入执行。UI从原sidebar.footer.action挂载，不放回已隐藏设置。token只进原credentials服务，QR会话仅内存5分钟，context/cursor进入既有im-gateway.sqlite的新增transport_state表，接口不投影token或context。
++
++生命周期：cursor只在所有消息已完成过滤或持久化准入后提交；重收沿原inbox去重。取消/过期/primary变更/配置revision漂移拒绝旧二维码提交，credential失败清理。停用中止长轮询；旧回调不作用新连接；过期token停止轮询并要求重连。outboxUNKNOWN继续沿原人工核对规则，不盲重发、不重跑模型。
++
++能力：本人文字私聊、原生任务/问题/单次审批回执、/stop只停当前聊天不取消独立后台任务。首切片不接群聊、代回联系人、微信附件/语音解析或文件二进制发送；非文字明确提示，文件产出发交付区提示而非把未发出的文件标成已发送。后台执行需Naumi服务保持运行。
++
++实现与迁移状态：默认无连接不主动访问微信。扫码由用户手动确认，不复制密码/已有微信客户端数据；扫描的是微信机器人接入二维码，不是在后台读取用户全部聊天。已有钉钉/飞书原生命周期保持。加载只从固定main、空闲维护窗口最小增量，不动原模型/任务/员工数据；若存在后台任务则不重启。
++
++验证命令、结果及证据层级：原IM网关/平台21/21基线通过；模块/隔离HTTP/真实微信扫码/收发分别记在evidence/weixin-primary/VERIFICATION.txt，不以受控协议替代真实账号。复用IMStore、IMService、IMDelivery、原Bot runtime以及原approval/question waterfall，不新建Agent或输入器。
++
++未完成项与下一步：集中验证、固定main加载、用户扫码与本人真实私聊收发核验、四工件。真实微信授权需要用户在微信确认，未扫码前不称已连接。功能模块计数1，文档0。
++
++## 本轮收口（2026-11-19）
++
++同步记录：微信实现381aaa9，边界修正9981c92，已普通整合浏览器主线a654a42126ab7737bd85b6ee5a66272f1ab6fcfa为317052d；浏览器main/preload/tools及CUA安装升级实现原样保留。功能模块计数1，文档0。
++
++验证：基线原IM21/21；微信+原IM定向最终32/32；整合全仓并发2为1006/1006，exit0；实际隔离Harness/Chrome12项通过，0 page errors、0模型调用、真实腾讯QR接口与本地二维码渲染通过，未扫码。增补二维码TTL、主身份变化、超长文字准入；已连接弹窗自动刷新真实状态，配对码提交错误在原弹窗反馈。
++
++回滚：四工件及逐文件原/改SHA256在evidence/weixin-primary。ROLLBACK.sh仅在新建副本上恢复原6文件并移除新增文件，原IM21项通过；新增transport_state表和原cursor留存，user_version仍为1。此为源码副本回滚，不是已安装包回退，也不降级真实数据库。
++
++交付接续：0.4.4是managed bundled runtime，禁止向已安装目录或运行profile随意热补。浏览器和微信均合入后，从固定main构建下一完整版本（拟0.4.5），核对原生代码同步计划并在空闲维护窗口升级；未正式加载、未扫码、未真实微信收发前继续记pending。扫描/确认由用户在自己的微信完成。不开公共Release、不复制用户模型凭据进标准安装包。
+diff --git a/modified/plugins/naumi-enterprise/assets/weixin-qrcode.js b/modified/plugins/naumi-enterprise/assets/weixin-qrcode.js
+new file mode 100644
+index 0000000..d13e169
+--- /dev/null
++++ b/modified/plugins/naumi-enterprise/assets/weixin-qrcode.js
+@@ -0,0 +1,2299 @@
++//---------------------------------------------------------------------
++//
++// QR Code Generator for JavaScript
++//
++// Copyright (c) 2009 Kazuhiko Arase
++//
++// URL: http://www.d-project.com/
++//
++// Licensed under the MIT license:
++//  http://www.opensource.org/licenses/mit-license.php
++//
++// The word 'QR Code' is registered trademark of
++// DENSO WAVE INCORPORATED
++//  http://www.denso-wave.com/qrcode/faqpatent-e.html
++//
++//---------------------------------------------------------------------
++
++var qrcode = function() {
++
++  //---------------------------------------------------------------------
++  // qrcode
++  //---------------------------------------------------------------------
++
++  /**
++   * qrcode
++   * @param typeNumber 1 to 40
++   * @param errorCorrectionLevel 'L','M','Q','H'
++   */
++  var qrcode = function(typeNumber, errorCorrectionLevel) {
++
++    var PAD0 = 0xEC;
++    var PAD1 = 0x11;
++
++    var _typeNumber = typeNumber;
++    var _errorCorrectionLevel = QRErrorCorrectionLevel[errorCorrectionLevel];
++    var _modules = null;
++    var _moduleCount = 0;
++    var _dataCache = null;
++    var _dataList = [];
++
++    var _this = {};
++
++    var makeImpl = function(test, maskPattern) {
++
++      _moduleCount = _typeNumber * 4 + 17;
++      _modules = function(moduleCount) {
++        var modules = new Array(moduleCount);
++        for (var row = 0; row < moduleCount; row += 1) {
++          modules[row] = new Array(moduleCount);
++          for (var col = 0; col < moduleCount; col += 1) {
++            modules[row][col] = null;
++          }
++        }
++        return modules;
++      }(_moduleCount);
++
++      setupPositionProbePattern(0, 0);
++      setupPositionProbePattern(_moduleCount - 7, 0);
++      setupPositionProbePattern(0, _moduleCount - 7);
++      setupPositionAdjustPattern();
++      setupTimingPattern();
++      setupTypeInfo(test, maskPattern);
++
++      if (_typeNumber >= 7) {
++        setupTypeNumber(test);
++      }
++
++      if (_dataCache == null) {
++        _dataCache = createData(_typeNumber, _errorCorrectionLevel, _dataList);
++      }
++
++      mapData(_dataCache, maskPattern);
++    };
++
++    var setupPositionProbePattern = function(row, col) {
++
++      for (var r = -1; r <= 7; r += 1) {
++
++        if (row + r <= -1 || _moduleCount <= row + r) continue;
++
++        for (var c = -1; c <= 7; c += 1) {
++
++          if (col + c <= -1 || _moduleCount <= col + c) continue;
++
++          if ( (0 <= r && r <= 6 && (c == 0 || c == 6) )
++              || (0 <= c && c <= 6 && (r == 0 || r == 6) )
++              || (2 <= r && r <= 4 && 2 <= c && c <= 4) ) {
++            _modules[row + r][col + c] = true;
++          } else {
++            _modules[row + r][col + c] = false;
++          }
++        }
++      }
++    };
++
++    var getBestMaskPattern = function() {
++
++      var minLostPoint = 0;
++      var pattern = 0;
++
++      for (var i = 0; i < 8; i += 1) {
++
++        makeImpl(true, i);
++
++        var lostPoint = QRUtil.getLostPoint(_this);
++
++        if (i == 0 || minLostPoint > lostPoint) {
++          minLostPoint = lostPoint;
++          pattern = i;
++        }
++      }
++
++      return pattern;
++    };
++
++    var setupTimingPattern = function() {
++
++      for (var r = 8; r < _moduleCount - 8; r += 1) {
++        if (_modules[r][6] != null) {
++          continue;
++        }
++        _modules[r][6] = (r % 2 == 0);
++      }
++
++      for (var c = 8; c < _moduleCount - 8; c += 1) {
++        if (_modules[6][c] != null) {
++          continue;
++        }
++        _modules[6][c] = (c % 2 == 0);
++      }
++    };
++
++    var setupPositionAdjustPattern = function() {
++
++      var pos = QRUtil.getPatternPosition(_typeNumber);
++
++      for (var i = 0; i < pos.length; i += 1) {
++
++        for (var j = 0; j < pos.length; j += 1) {
++
++          var row = pos[i];
++          var col = pos[j];
++
++          if (_modules[row][col] != null) {
++            continue;
++          }
++
++          for (var r = -2; r <= 2; r += 1) {
++
++            for (var c = -2; c <= 2; c += 1) {
++
++              if (r == -2 || r == 2 || c == -2 || c == 2
++                  || (r == 0 && c == 0) ) {
++                _modules[row + r][col + c] = true;
++              } else {
++                _modules[row + r][col + c] = false;
++              }
++            }
++          }
++        }
++      }
++    };
++
++    var setupTypeNumber = function(test) {
++
++      var bits = QRUtil.getBCHTypeNumber(_typeNumber);
++
++      for (var i = 0; i < 18; i += 1) {
++        var mod = (!test && ( (bits >> i) & 1) == 1);
++        _modules[Math.floor(i / 3)][i % 3 + _moduleCount - 8 - 3] = mod;
++      }
++
++      for (var i = 0; i < 18; i += 1) {
++        var mod = (!test && ( (bits >> i) & 1) == 1);
++        _modules[i % 3 + _moduleCount - 8 - 3][Math.floor(i / 3)] = mod;
++      }
++    };
++
++    var setupTypeInfo = function(test, maskPattern) {
++
++      var data = (_errorCorrectionLevel << 3) | maskPattern;
++      var bits = QRUtil.getBCHTypeInfo(data);
++
++      // vertical
++      for (var i = 0; i < 15; i += 1) {
++
++        var mod = (!test && ( (bits >> i) & 1) == 1);
++
++        if (i < 6) {
++          _modules[i][8] = mod;
++        } else if (i < 8) {
++          _modules[i + 1][8] = mod;
++        } else {
++          _modules[_moduleCount - 15 + i][8] = mod;
++        }
++      }
++
++      // horizontal
++      for (var i = 0; i < 15; i += 1) {
++
++        var mod = (!test && ( (bits >> i) & 1) == 1);
++
++        if (i < 8) {
++          _modules[8][_moduleCount - i - 1] = mod;
++        } else if (i < 9) {
++          _modules[8][15 - i - 1 + 1] = mod;
++        } else {
++          _modules[8][15 - i - 1] = mod;
++        }
++      }
++
++      // fixed module
++      _modules[_moduleCount - 8][8] = (!test);
++    };
++
++    var mapData = function(data, maskPattern) {
++
++      var inc = -1;
++      var row = _moduleCount - 1;
++      var bitIndex = 7;
++      var byteIndex = 0;
++      var maskFunc = QRUtil.getMaskFunction(maskPattern);
++
++      for (var col = _moduleCount - 1; col > 0; col -= 2) {
++
++        if (col == 6) col -= 1;
++
++        while (true) {
++
++          for (var c = 0; c < 2; c += 1) {
++
++            if (_modules[row][col - c] == null) {
++
++              var dark = false;
++
++              if (byteIndex < data.length) {
++                dark = ( ( (data[byteIndex] >>> bitIndex) & 1) == 1);
++              }
++
++              var mask = maskFunc(row, col - c);
++
++              if (mask) {
++                dark = !dark;
++              }
++
++              _modules[row][col - c] = dark;
++              bitIndex -= 1;
++
++              if (bitIndex == -1) {
++                byteIndex += 1;
++                bitIndex = 7;
++              }
++            }
++          }
++
++          row += inc;
++
++          if (row < 0 || _moduleCount <= row) {
++            row -= inc;
++            inc = -inc;
++            break;
++          }
++        }
++      }
++    };
++
++    var createBytes = function(buffer, rsBlocks) {
++
++      var offset = 0;
++
++      var maxDcCount = 0;
++      var maxEcCount = 0;
++
++      var dcdata = new Array(rsBlocks.length);
++      var ecdata = new Array(rsBlocks.length);
++
++      for (var r = 0; r < rsBlocks.length; r += 1) {
++
++        var dcCount = rsBlocks[r].dataCount;
++        var ecCount = rsBlocks[r].totalCount - dcCount;
++
++        maxDcCount = Math.max(maxDcCount, dcCount);
++        maxEcCount = Math.max(maxEcCount, ecCount);
++
++        dcdata[r] = new Array(dcCount);
++
++        for (var i = 0; i < dcdata[r].length; i += 1) {
++          dcdata[r][i] = 0xff & buffer.getBuffer()[i + offset];
++        }
++        offset += dcCount;
++
++        var rsPoly = QRUtil.getErrorCorrectPolynomial(ecCount);
++        var rawPoly = qrPolynomial(dcdata[r], rsPoly.getLength() - 1);
++
++        var modPoly = rawPoly.mod(rsPoly);
++        ecdata[r] = new Array(rsPoly.getLength() - 1);
++        for (var i = 0; i < ecdata[r].length; i += 1) {
++          var modIndex = i + modPoly.getLength() - ecdata[r].length;
++          ecdata[r][i] = (modIndex >= 0)? modPoly.getAt(modIndex) : 0;
++        }
++      }
++
++      var totalCodeCount = 0;
++      for (var i = 0; i < rsBlocks.length; i += 1) {
++        totalCodeCount += rsBlocks[i].totalCount;
++      }
++
++      var data = new Array(totalCodeCount);
++      var index = 0;
++
++      for (var i = 0; i < maxDcCount; i += 1) {
++        for (var r = 0; r < rsBlocks.length; r += 1) {
++          if (i < dcdata[r].length) {
++            data[index] = dcdata[r][i];
++            index += 1;
++          }
++        }
++      }
++
++      for (var i = 0; i < maxEcCount; i += 1) {
++        for (var r = 0; r < rsBlocks.length; r += 1) {
++          if (i < ecdata[r].length) {
++            data[index] = ecdata[r][i];
++            index += 1;
++          }
++        }
++      }
++
++      return data;
++    };
++
++    var createData = function(typeNumber, errorCorrectionLevel, dataList) {
++
++      var rsBlocks = QRRSBlock.getRSBlocks(typeNumber, errorCorrectionLevel);
++
++      var buffer = qrBitBuffer();
++
++      for (var i = 0; i < dataList.length; i += 1) {
++        var data = dataList[i];
++        buffer.put(data.getMode(), 4);
++        buffer.put(data.getLength(), QRUtil.getLengthInBits(data.getMode(), typeNumber) );
++        data.write(buffer);
++      }
++
++      // calc num max data.
++      var totalDataCount = 0;
++      for (var i = 0; i < rsBlocks.length; i += 1) {
++        totalDataCount += rsBlocks[i].dataCount;
++      }
++
++      if (buffer.getLengthInBits() > totalDataCount * 8) {
++        throw 'code length overflow. ('
++          + buffer.getLengthInBits()
++          + '>'
++          + totalDataCount * 8
++          + ')';
++      }
++
++      // end code
++      if (buffer.getLengthInBits() + 4 <= totalDataCount * 8) {
++        buffer.put(0, 4);
++      }
++
++      // padding
++      while (buffer.getLengthInBits() % 8 != 0) {
++        buffer.putBit(false);
++      }
++
++      // padding
++      while (true) {
++
++        if (buffer.getLengthInBits() >= totalDataCount * 8) {
++          break;
++        }
++        buffer.put(PAD0, 8);
++
++        if (buffer.getLengthInBits() >= totalDataCount * 8) {
++          break;
++        }
++        buffer.put(PAD1, 8);
++      }
++
++      return createBytes(buffer, rsBlocks);
++    };
++
++    _this.addData = function(data, mode) {
++
++      mode = mode || 'Byte';
++
++      var newData = null;
++
++      switch(mode) {
++      case 'Numeric' :
++        newData = qrNumber(data);
++        break;
++      case 'Alphanumeric' :
++        newData = qrAlphaNum(data);
++        break;
++      case 'Byte' :
++        newData = qr8BitByte(data);
++        break;
++      case 'Kanji' :
++        newData = qrKanji(data);
++        break;
++      default :
++        throw 'mode:' + mode;
++      }
++
++      _dataList.push(newData);
++      _dataCache = null;
++    };
++
++    _this.isDark = function(row, col) {
++      if (row < 0 || _moduleCount <= row || col < 0 || _moduleCount <= col) {
++        throw row + ',' + col;
++      }
++      return _modules[row][col];
++    };
++
++    _this.getModuleCount = function() {
++      return _moduleCount;
++    };
++
++    _this.make = function() {
++      if (_typeNumber < 1) {
++        var typeNumber = 1;
++
++        for (; typeNumber < 40; typeNumber++) {
++          var rsBlocks = QRRSBlock.getRSBlocks(typeNumber, _errorCorrectionLevel);
++          var buffer = qrBitBuffer();
++
++          for (var i = 0; i < _dataList.length; i++) {
++            var data = _dataList[i];
++            buffer.put(data.getMode(), 4);
++            buffer.put(data.getLength(), QRUtil.getLengthInBits(data.getMode(), typeNumber) );
++            data.write(buffer);
++          }
++
++          var totalDataCount = 0;
++          for (var i = 0; i < rsBlocks.length; i++) {
++            totalDataCount += rsBlocks[i].dataCount;
++          }
++
++          if (buffer.getLengthInBits() <= totalDataCount * 8) {
++            break;
++          }
++        }
++
++        _typeNumber = typeNumber;
++      }
++
++      makeImpl(false, getBestMaskPattern() );
++    };
++
++    _this.createTableTag = function(cellSize, margin) {
++
++      cellSize = cellSize || 2;
++      margin = (typeof margin == 'undefined')? cellSize * 4 : margin;
++
++      var qrHtml = '';
++
++      qrHtml += '<table style="';
++      qrHtml += ' border-width: 0px; border-style: none;';
++      qrHtml += ' border-collapse: collapse;';
++      qrHtml += ' padding: 0px; margin: ' + margin + 'px;';
++      qrHtml += '">';
++      qrHtml += '<tbody>';
++
++      for (var r = 0; r < _this.getModuleCount(); r += 1) {
++
++        qrHtml += '<tr>';
++
++        for (var c = 0; c < _this.getModuleCount(); c += 1) {
++          qrHtml += '<td style="';
++          qrHtml += ' border-width: 0px; border-style: none;';
++          qrHtml += ' border-collapse: collapse;';
++          qrHtml += ' padding: 0px; margin: 0px;';
++          qrHtml += ' width: ' + cellSize + 'px;';
++          qrHtml += ' height: ' + cellSize + 'px;';
++          qrHtml += ' background-color: ';
++          qrHtml += _this.isDark(r, c)? '#000000' : '#ffffff';
++          qrHtml += ';';
++          qrHtml += '"/>';
++        }
++
++        qrHtml += '</tr>';
++      }
++
++      qrHtml += '</tbody>';
++      qrHtml += '</table>';
++
++      return qrHtml;
++    };
++
++    _this.createSvgTag = function(cellSize, margin, alt, title) {
++
++      var opts = {};
++      if (typeof arguments[0] == 'object') {
++        // Called by options.
++        opts = arguments[0];
++        // overwrite cellSize and margin.
++        cellSize = opts.cellSize;
++        margin = opts.margin;
++        alt = opts.alt;
++        title = opts.title;
++      }
++
++      cellSize = cellSize || 2;
++      margin = (typeof margin == 'undefined')? cellSize * 4 : margin;
++
++      // Compose alt property surrogate
++      alt = (typeof alt === 'string') ? {text: alt} : alt || {};
++      alt.text = alt.text || null;
++      alt.id = (alt.text) ? alt.id || 'qrcode-description' : null;
++
++      // Compose title property surrogate
++      title = (typeof title === 'string') ? {text: title} : title || {};
++      title.text = title.text || null;
++      title.id = (title.text) ? title.id || 'qrcode-title' : null;
++
++      var size = _this.getModuleCount() * cellSize + margin * 2;
++      var c, mc, r, mr, qrSvg='', rect;
++
++      rect = 'l' + cellSize + ',0 0,' + cellSize +
++        ' -' + cellSize + ',0 0,-' + cellSize + 'z ';
++
++      qrSvg += '<svg version="1.1" xmlns="http://www.w3.org/2000/svg"';
++      qrSvg += !opts.scalable ? ' width="' + size + 'px" height="' + size + 'px"' : '';
++      qrSvg += ' viewBox="0 0 ' + size + ' ' + size + '" ';
++      qrSvg += ' preserveAspectRatio="xMinYMin meet"';
++      qrSvg += (title.text || alt.text) ? ' role="img" aria-labelledby="' +
++          escapeXml([title.id, alt.id].join(' ').trim() ) + '"' : '';
++      qrSvg += '>';
++      qrSvg += (title.text) ? '<title id="' + escapeXml(title.id) + '">' +
++          escapeXml(title.text) + '</title>' : '';
++      qrSvg += (alt.text) ? '<description id="' + escapeXml(alt.id) + '">' +
++          escapeXml(alt.text) + '</description>' : '';
++      qrSvg += '<rect width="100%" height="100%" fill="white" cx="0" cy="0"/>';
++      qrSvg += '<path d="';
++
++      for (r = 0; r < _this.getModuleCount(); r += 1) {
++        mr = r * cellSize + margin;
++        for (c = 0; c < _this.getModuleCount(); c += 1) {
++          if (_this.isDark(r, c) ) {
++            mc = c*cellSize+margin;
++            qrSvg += 'M' + mc + ',' + mr + rect;
++          }
++        }
++      }
++
++      qrSvg += '" stroke="transparent" fill="black"/>';
++      qrSvg += '</svg>';
++
++      return qrSvg;
++    };
++
++    _this.createDataURL = function(cellSize, margin) {
++
++      cellSize = cellSize || 2;
++      margin = (typeof margin == 'undefined')? cellSize * 4 : margin;
++
++      var size = _this.getModuleCount() * cellSize + margin * 2;
++      var min = margin;
++      var max = size - margin;
++
++      return createDataURL(size, size, function(x, y) {
++        if (min <= x && x < max && min <= y && y < max) {
++          var c = Math.floor( (x - min) / cellSize);
++          var r = Math.floor( (y - min) / cellSize);
++          return _this.isDark(r, c)? 0 : 1;
++        } else {
++          return 1;
++        }
++      } );
++    };
++
++    _this.createImgTag = function(cellSize, margin, alt) {
++
++      cellSize = cellSize || 2;
++      margin = (typeof margin == 'undefined')? cellSize * 4 : margin;
++
++      var size = _this.getModuleCount() * cellSize + margin * 2;
++
++      var img = '';
++      img += '<img';
++      img += '\u0020src="';
++      img += _this.createDataURL(cellSize, margin);
++      img += '"';
++      img += '\u0020width="';
++      img += size;
++      img += '"';
++      img += '\u0020height="';
++      img += size;
++      img += '"';
++      if (alt) {
++        img += '\u0020alt="';
++        img += escapeXml(alt);
++        img += '"';
++      }
++      img += '/>';
++
++      return img;
++    };
++
++    var escapeXml = function(s) {
++      var escaped = '';
++      for (var i = 0; i < s.length; i += 1) {
++        var c = s.charAt(i);
++        switch(c) {
++        case '<': escaped += '&lt;'; break;
++        case '>': escaped += '&gt;'; break;
++        case '&': escaped += '&amp;'; break;
++        case '"': escaped += '&quot;'; break;
++        default : escaped += c; break;
++        }
++      }
++      return escaped;
++    };
++
++    var _createHalfASCII = function(margin) {
++      var cellSize = 1;
++      margin = (typeof margin == 'undefined')? cellSize * 2 : margin;
++
++      var size = _this.getModuleCount() * cellSize + margin * 2;
++      var min = margin;
++      var max = size - margin;
++
++      var y, x, r1, r2, p;
++
++      var blocks = {
++        '██': '█',
++        '█ ': '▀',
++        ' █': '▄',
++        '  ': ' '
++      };
++
++      var blocksLastLineNoMargin = {
++        '██': '▀',
++        '█ ': '▀',
++        ' █': ' ',
++        '  ': ' '
++      };
++
++      var ascii = '';
++      for (y = 0; y < size; y += 2) {
++        r1 = Math.floor((y - min) / cellSize);
++        r2 = Math.floor((y + 1 - min) / cellSize);
++        for (x = 0; x < size; x += 1) {
++          p = '█';
++
++          if (min <= x && x < max && min <= y && y < max && _this.isDark(r1, Math.floor((x - min) / cellSize))) {
++            p = ' ';
++          }
++
++          if (min <= x && x < max && min <= y+1 && y+1 < max && _this.isDark(r2, Math.floor((x - min) / cellSize))) {
++            p += ' ';
++          }
++          else {
++            p += '█';
++          }
++
++          // Output 2 characters per pixel, to create full square. 1 character per pixels gives only half width of square.
++          ascii += (margin < 1 && y+1 >= max) ? blocksLastLineNoMargin[p] : blocks[p];
++        }
++
++        ascii += '\n';
++      }
++
++      if (size % 2 && margin > 0) {
++        return ascii.substring(0, ascii.length - size - 1) + Array(size+1).join('▀');
++      }
++
++      return ascii.substring(0, ascii.length-1);
++    };
++
++    _this.createASCII = function(cellSize, margin) {
++      cellSize = cellSize || 1;
++
++      if (cellSize < 2) {
++        return _createHalfASCII(margin);
++      }
++
++      cellSize -= 1;
++      margin = (typeof margin == 'undefined')? cellSize * 2 : margin;
++
++      var size = _this.getModuleCount() * cellSize + margin * 2;
++      var min = margin;
++      var max = size - margin;
++
++      var y, x, r, p;
++
++      var white = Array(cellSize+1).join('██');
++      var black = Array(cellSize+1).join('  ');
++
++      var ascii = '';
++      var line = '';
++      for (y = 0; y < size; y += 1) {
++        r = Math.floor( (y - min) / cellSize);
++        line = '';
++        for (x = 0; x < size; x += 1) {
++          p = 1;
++
++          if (min <= x && x < max && min <= y && y < max && _this.isDark(r, Math.floor((x - min) / cellSize))) {
++            p = 0;
++          }
++
++          // Output 2 characters per pixel, to create full square. 1 character per pixels gives only half width of square.
++          line += p ? white : black;
++        }
++
++        for (r = 0; r < cellSize; r += 1) {
++          ascii += line + '\n';
++        }
++      }
++
++      return ascii.substring(0, ascii.length-1);
++    };
++
++    _this.renderTo2dContext = function(context, cellSize) {
++      cellSize = cellSize || 2;
++      var length = _this.getModuleCount();
++      for (var row = 0; row < length; row++) {
++        for (var col = 0; col < length; col++) {
++          context.fillStyle = _this.isDark(row, col) ? 'black' : 'white';
++          context.fillRect(row * cellSize, col * cellSize, cellSize, cellSize);
++        }
++      }
++    }
++
++    return _this;
++  };
++
++  //---------------------------------------------------------------------
++  // qrcode.stringToBytes
++  //---------------------------------------------------------------------
++
++  qrcode.stringToBytesFuncs = {
++    'default' : function(s) {
++      var bytes = [];
++      for (var i = 0; i < s.length; i += 1) {
++        var c = s.charCodeAt(i);
++        bytes.push(c & 0xff);
++      }
++      return bytes;
++    }
++  };
++
++  qrcode.stringToBytes = qrcode.stringToBytesFuncs['default'];
++
++  //---------------------------------------------------------------------
++  // qrcode.createStringToBytes
++  //---------------------------------------------------------------------
++
++  /**
++   * @param unicodeData base64 string of byte array.
++   * [16bit Unicode],[16bit Bytes], ...
++   * @param numChars
++   */
++  qrcode.createStringToBytes = function(unicodeData, numChars) {
++
++    // create conversion map.
++
++    var unicodeMap = function() {
++
++      var bin = base64DecodeInputStream(unicodeData);
++      var read = function() {
++        var b = bin.read();
++        if (b == -1) throw 'eof';
++        return b;
++      };
++
++      var count = 0;
++      var unicodeMap = {};
++      while (true) {
++        var b0 = bin.read();
++        if (b0 == -1) break;
++        var b1 = read();
++        var b2 = read();
++        var b3 = read();
++        var k = String.fromCharCode( (b0 << 8) | b1);
++        var v = (b2 << 8) | b3;
++        unicodeMap[k] = v;
++        count += 1;
++      }
++      if (count != numChars) {
++        throw count + ' != ' + numChars;
++      }
++
++      return unicodeMap;
++    }();
++
++    var unknownChar = '?'.charCodeAt(0);
++
++    return function(s) {
++      var bytes = [];
++      for (var i = 0; i < s.length; i += 1) {
++        var c = s.charCodeAt(i);
++        if (c < 128) {
++          bytes.push(c);
++        } else {
++          var b = unicodeMap[s.charAt(i)];
++          if (typeof b == 'number') {
++            if ( (b & 0xff) == b) {
++              // 1byte
++              bytes.push(b);
++            } else {
++              // 2bytes
++              bytes.push(b >>> 8);
++              bytes.push(b & 0xff);
++            }
++          } else {
++            bytes.push(unknownChar);
++          }
++        }
++      }
++      return bytes;
++    };
++  };
++
++  //---------------------------------------------------------------------
++  // QRMode
++  //---------------------------------------------------------------------
++
++  var QRMode = {
++    MODE_NUMBER :    1 << 0,
++    MODE_ALPHA_NUM : 1 << 1,
++    MODE_8BIT_BYTE : 1 << 2,
++    MODE_KANJI :     1 << 3
++  };
++
++  //---------------------------------------------------------------------
++  // QRErrorCorrectionLevel
++  //---------------------------------------------------------------------
++
++  var QRErrorCorrectionLevel = {
++    L : 1,
++    M : 0,
++    Q : 3,
++    H : 2
++  };
++
++  //---------------------------------------------------------------------
++  // QRMaskPattern
++  //---------------------------------------------------------------------
++
++  var QRMaskPattern = {
++    PATTERN000 : 0,
++    PATTERN001 : 1,
++    PATTERN010 : 2,
++    PATTERN011 : 3,
++    PATTERN100 : 4,
++    PATTERN101 : 5,
++    PATTERN110 : 6,
++    PATTERN111 : 7
++  };
++
++  //---------------------------------------------------------------------
++  // QRUtil
++  //---------------------------------------------------------------------
++
++  var QRUtil = function() {
++
++    var PATTERN_POSITION_TABLE = [
++      [],
++      [6, 18],
++      [6, 22],
++      [6, 26],
++      [6, 30],
++      [6, 34],
++      [6, 22, 38],
++      [6, 24, 42],
++      [6, 26, 46],
++      [6, 28, 50],
++      [6, 30, 54],
++      [6, 32, 58],
++      [6, 34, 62],
++      [6, 26, 46, 66],
++      [6, 26, 48, 70],
++      [6, 26, 50, 74],
++      [6, 30, 54, 78],
++      [6, 30, 56, 82],
++      [6, 30, 58, 86],
++      [6, 34, 62, 90],
++      [6, 28, 50, 72, 94],
++      [6, 26, 50, 74, 98],
++      [6, 30, 54, 78, 102],
++      [6, 28, 54, 80, 106],
++      [6, 32, 58, 84, 110],
++      [6, 30, 58, 86, 114],
++      [6, 34, 62, 90, 118],
++      [6, 26, 50, 74, 98, 122],
++      [6, 30, 54, 78, 102, 126],
++      [6, 26, 52, 78, 104, 130],
++      [6, 30, 56, 82, 108, 134],
++      [6, 34, 60, 86, 112, 138],
++      [6, 30, 58, 86, 114, 142],
++      [6, 34, 62, 90, 118, 146],
++      [6, 30, 54, 78, 102, 126, 150],
++      [6, 24, 50, 76, 102, 128, 154],
++      [6, 28, 54, 80, 106, 132, 158],
++      [6, 32, 58, 84, 110, 136, 162],
++      [6, 26, 54, 82, 110, 138, 166],
++      [6, 30, 58, 86, 114, 142, 170]
++    ];
++    var G15 = (1 << 10) | (1 << 8) | (1 << 5) | (1 << 4) | (1 << 2) | (1 << 1) | (1 << 0);
++    var G18 = (1 << 12) | (1 << 11) | (1 << 10) | (1 << 9) | (1 << 8) | (1 << 5) | (1 << 2) | (1 << 0);
++    var G15_MASK = (1 << 14) | (1 << 12) | (1 << 10) | (1 << 4) | (1 << 1);
++
++    var _this = {};
++
++    var getBCHDigit = function(data) {
++      var digit = 0;
++      while (data != 0) {
++        digit += 1;
++        data >>>= 1;
++      }
++      return digit;
++    };
++
++    _this.getBCHTypeInfo = function(data) {
++      var d = data << 10;
++      while (getBCHDigit(d) - getBCHDigit(G15) >= 0) {
++        d ^= (G15 << (getBCHDigit(d) - getBCHDigit(G15) ) );
++      }
++      return ( (data << 10) | d) ^ G15_MASK;
++    };
++
++    _this.getBCHTypeNumber = function(data) {
++      var d = data << 12;
++      while (getBCHDigit(d) - getBCHDigit(G18) >= 0) {
++        d ^= (G18 << (getBCHDigit(d) - getBCHDigit(G18) ) );
++      }
++      return (data << 12) | d;
++    };
++
++    _this.getPatternPosition = function(typeNumber) {
++      return PATTERN_POSITION_TABLE[typeNumber - 1];
++    };
++
++    _this.getMaskFunction = function(maskPattern) {
++
++      switch (maskPattern) {
++
++      case QRMaskPattern.PATTERN000 :
++        return function(i, j) { return (i + j) % 2 == 0; };
++      case QRMaskPattern.PATTERN001 :
++        return function(i, j) { return i % 2 == 0; };
++      case QRMaskPattern.PATTERN010 :
++        return function(i, j) { return j % 3 == 0; };
++      case QRMaskPattern.PATTERN011 :
++        return function(i, j) { return (i + j) % 3 == 0; };
++      case QRMaskPattern.PATTERN100 :
++        return function(i, j) { return (Math.floor(i / 2) + Math.floor(j / 3) ) % 2 == 0; };
++      case QRMaskPattern.PATTERN101 :
++        return function(i, j) { return (i * j) % 2 + (i * j) % 3 == 0; };
++      case QRMaskPattern.PATTERN110 :
++        return function(i, j) { return ( (i * j) % 2 + (i * j) % 3) % 2 == 0; };
++      case QRMaskPattern.PATTERN111 :
++        return function(i, j) { return ( (i * j) % 3 + (i + j) % 2) % 2 == 0; };
++
++      default :
++        throw 'bad maskPattern:' + maskPattern;
++      }
++    };
++
++    _this.getErrorCorrectPolynomial = function(errorCorrectLength) {
++      var a = qrPolynomial([1], 0);
++      for (var i = 0; i < errorCorrectLength; i += 1) {
++        a = a.multiply(qrPolynomial([1, QRMath.gexp(i)], 0) );
++      }
++      return a;
++    };
++
++    _this.getLengthInBits = function(mode, type) {
++
++      if (1 <= type && type < 10) {
++
++        // 1 - 9
++
++        switch(mode) {
++        case QRMode.MODE_NUMBER    : return 10;
++        case QRMode.MODE_ALPHA_NUM : return 9;
++        case QRMode.MODE_8BIT_BYTE : return 8;
++        case QRMode.MODE_KANJI     : return 8;
++        default :
++          throw 'mode:' + mode;
++        }
++
++      } else if (type < 27) {
++
++        // 10 - 26
++
++        switch(mode) {
++        case QRMode.MODE_NUMBER    : return 12;
++        case QRMode.MODE_ALPHA_NUM : return 11;
++        case QRMode.MODE_8BIT_BYTE : return 16;
++        case QRMode.MODE_KANJI     : return 10;
++        default :
++          throw 'mode:' + mode;
++        }
++
++      } else if (type < 41) {
++
++        // 27 - 40
++
++        switch(mode) {
++        case QRMode.MODE_NUMBER    : return 14;
++        case QRMode.MODE_ALPHA_NUM : return 13;
++        case QRMode.MODE_8BIT_BYTE : return 16;
++        case QRMode.MODE_KANJI     : return 12;
++        default :
++          throw 'mode:' + mode;
++        }
++
++      } else {
++        throw 'type:' + type;
++      }
++    };
++
++    _this.getLostPoint = function(qrcode) {
++
++      var moduleCount = qrcode.getModuleCount();
++
++      var lostPoint = 0;
++
++      // LEVEL1
++
++      for (var row = 0; row < moduleCount; row += 1) {
++        for (var col = 0; col < moduleCount; col += 1) {
++
++          var sameCount = 0;
++          var dark = qrcode.isDark(row, col);
++
++          for (var r = -1; r <= 1; r += 1) {
++
++            if (row + r < 0 || moduleCount <= row + r) {
++              continue;
++            }
++
++            for (var c = -1; c <= 1; c += 1) {
++
++              if (col + c < 0 || moduleCount <= col + c) {
++                continue;
++              }
++
++              if (r == 0 && c == 0) {
++                continue;
++              }
++
++              if (dark == qrcode.isDark(row + r, col + c) ) {
++                sameCount += 1;
++              }
++            }
++          }
++
++          if (sameCount > 5) {
++            lostPoint += (3 + sameCount - 5);
++          }
++        }
++      };
++
++      // LEVEL2
++
++      for (var row = 0; row < moduleCount - 1; row += 1) {
++        for (var col = 0; col < moduleCount - 1; col += 1) {
++          var count = 0;
++          if (qrcode.isDark(row, col) ) count += 1;
++          if (qrcode.isDark(row + 1, col) ) count += 1;
++          if (qrcode.isDark(row, col + 1) ) count += 1;
++          if (qrcode.isDark(row + 1, col + 1) ) count += 1;
++          if (count == 0 || count == 4) {
++            lostPoint += 3;
++          }
++        }
++      }
++
++      // LEVEL3
++
++      for (var row = 0; row < moduleCount; row += 1) {
++        for (var col = 0; col < moduleCount - 6; col += 1) {
++          if (qrcode.isDark(row, col)
++              && !qrcode.isDark(row, col + 1)
++              &&  qrcode.isDark(row, col + 2)
++              &&  qrcode.isDark(row, col + 3)
++              &&  qrcode.isDark(row, col + 4)
++              && !qrcode.isDark(row, col + 5)
++              &&  qrcode.isDark(row, col + 6) ) {
++            lostPoint += 40;
++          }
++        }
++      }
++
++      for (var col = 0; col < moduleCount; col += 1) {
++        for (var row = 0; row < moduleCount - 6; row += 1) {
++          if (qrcode.isDark(row, col)
++              && !qrcode.isDark(row + 1, col)
++              &&  qrcode.isDark(row + 2, col)
++              &&  qrcode.isDark(row + 3, col)
++              &&  qrcode.isDark(row + 4, col)
++              && !qrcode.isDark(row + 5, col)
++              &&  qrcode.isDark(row + 6, col) ) {
++            lostPoint += 40;
++          }
++        }
++      }
++
++      // LEVEL4
++
++      var darkCount = 0;
++
++      for (var col = 0; col < moduleCount; col += 1) {
++        for (var row = 0; row < moduleCount; row += 1) {
++          if (qrcode.isDark(row, col) ) {
++            darkCount += 1;
++          }
++        }
++      }
++
++      var ratio = Math.abs(100 * darkCount / moduleCount / moduleCount - 50) / 5;
++      lostPoint += ratio * 10;
++
++      return lostPoint;
++    };
++
++    return _this;
++  }();
++
++  //---------------------------------------------------------------------
++  // QRMath
++  //---------------------------------------------------------------------
++
++  var QRMath = function() {
++
++    var EXP_TABLE = new Array(256);
++    var LOG_TABLE = new Array(256);
++
++    // initialize tables
++    for (var i = 0; i < 8; i += 1) {
++      EXP_TABLE[i] = 1 << i;
++    }
++    for (var i = 8; i < 256; i += 1) {
++      EXP_TABLE[i] = EXP_TABLE[i - 4]
++        ^ EXP_TABLE[i - 5]
++        ^ EXP_TABLE[i - 6]
++        ^ EXP_TABLE[i - 8];
++    }
++    for (var i = 0; i < 255; i += 1) {
++      LOG_TABLE[EXP_TABLE[i] ] = i;
++    }
++
++    var _this = {};
++
++    _this.glog = function(n) {
++
++      if (n < 1) {
++        throw 'glog(' + n + ')';
++      }
++
++      return LOG_TABLE[n];
++    };
++
++    _this.gexp = function(n) {
++
++      while (n < 0) {
++        n += 255;
++      }
++
++      while (n >= 256) {
++        n -= 255;
++      }
++
++      return EXP_TABLE[n];
++    };
++
++    return _this;
++  }();
++
++  //---------------------------------------------------------------------
++  // qrPolynomial
++  //---------------------------------------------------------------------
++
++  function qrPolynomial(num, shift) {
++
++    if (typeof num.length == 'undefined') {
++      throw num.length + '/' + shift;
++    }
++
++    var _num = function() {
++      var offset = 0;
++      while (offset < num.length && num[offset] == 0) {
++        offset += 1;
++      }
++      var _num = new Array(num.length - offset + shift);
++      for (var i = 0; i < num.length - offset; i += 1) {
++        _num[i] = num[i + offset];
++      }
++      return _num;
++    }();
++
++    var _this = {};
++
++    _this.getAt = function(index) {
++      return _num[index];
++    };
++
++    _this.getLength = function() {
++      return _num.length;
++    };
++
++    _this.multiply = function(e) {
++
++      var num = new Array(_this.getLength() + e.getLength() - 1);
++
++      for (var i = 0; i < _this.getLength(); i += 1) {
++        for (var j = 0; j < e.getLength(); j += 1) {
++          num[i + j] ^= QRMath.gexp(QRMath.glog(_this.getAt(i) ) + QRMath.glog(e.getAt(j) ) );
++        }
++      }
++
++      return qrPolynomial(num, 0);
++    };
++
++    _this.mod = function(e) {
++
++      if (_this.getLength() - e.getLength() < 0) {
++        return _this;
++      }
++
++      var ratio = QRMath.glog(_this.getAt(0) ) - QRMath.glog(e.getAt(0) );
++
++      var num = new Array(_this.getLength() );
++      for (var i = 0; i < _this.getLength(); i += 1) {
++        num[i] = _this.getAt(i);
++      }
++
++      for (var i = 0; i < e.getLength(); i += 1) {
++        num[i] ^= QRMath.gexp(QRMath.glog(e.getAt(i) ) + ratio);
++      }
++
++      // recursive call
++      return qrPolynomial(num, 0).mod(e);
++    };
++
++    return _this;
++  };
++
++  //---------------------------------------------------------------------
++  // QRRSBlock
++  //---------------------------------------------------------------------
++
++  var QRRSBlock = function() {
++
++    var RS_BLOCK_TABLE = [
++
++      // L
++      // M
++      // Q
++      // H
++
++      // 1
++      [1, 26, 19],
++      [1, 26, 16],
++      [1, 26, 13],
++      [1, 26, 9],
++
++      // 2
++      [1, 44, 34],
++      [1, 44, 28],
++      [1, 44, 22],
++      [1, 44, 16],
++
++      // 3
++      [1, 70, 55],
++      [1, 70, 44],
++      [2, 35, 17],
++      [2, 35, 13],
++
++      // 4
++      [1, 100, 80],
++      [2, 50, 32],
++      [2, 50, 24],
++      [4, 25, 9],
++
++      // 5
++      [1, 134, 108],
++      [2, 67, 43],
++      [2, 33, 15, 2, 34, 16],
++      [2, 33, 11, 2, 34, 12],
++
++      // 6
++      [2, 86, 68],
++      [4, 43, 27],
++      [4, 43, 19],
++      [4, 43, 15],
++
++      // 7
++      [2, 98, 78],
++      [4, 49, 31],
++      [2, 32, 14, 4, 33, 15],
++      [4, 39, 13, 1, 40, 14],
++
++      // 8
++      [2, 121, 97],
++      [2, 60, 38, 2, 61, 39],
++      [4, 40, 18, 2, 41, 19],
++      [4, 40, 14, 2, 41, 15],
++
++      // 9
++      [2, 146, 116],
++      [3, 58, 36, 2, 59, 37],
++      [4, 36, 16, 4, 37, 17],
++      [4, 36, 12, 4, 37, 13],
++
++      // 10
++      [2, 86, 68, 2, 87, 69],
++      [4, 69, 43, 1, 70, 44],
++      [6, 43, 19, 2, 44, 20],
++      [6, 43, 15, 2, 44, 16],
++
++      // 11
++      [4, 101, 81],
++      [1, 80, 50, 4, 81, 51],
++      [4, 50, 22, 4, 51, 23],
++      [3, 36, 12, 8, 37, 13],
++
++      // 12
++      [2, 116, 92, 2, 117, 93],
++      [6, 58, 36, 2, 59, 37],
++      [4, 46, 20, 6, 47, 21],
++      [7, 42, 14, 4, 43, 15],
++
++      // 13
++      [4, 133, 107],
++      [8, 59, 37, 1, 60, 38],
++      [8, 44, 20, 4, 45, 21],
++      [12, 33, 11, 4, 34, 12],
++
++      // 14
++      [3, 145, 115, 1, 146, 116],
++      [4, 64, 40, 5, 65, 41],
++      [11, 36, 16, 5, 37, 17],
++      [11, 36, 12, 5, 37, 13],
++
++      // 15
++      [5, 109, 87, 1, 110, 88],
++      [5, 65, 41, 5, 66, 42],
++      [5, 54, 24, 7, 55, 25],
++      [11, 36, 12, 7, 37, 13],
++
++      // 16
++      [5, 122, 98, 1, 123, 99],
++      [7, 73, 45, 3, 74, 46],
++      [15, 43, 19, 2, 44, 20],
++      [3, 45, 15, 13, 46, 16],
++
++      // 17
++      [1, 135, 107, 5, 136, 108],
++      [10, 74, 46, 1, 75, 47],
++      [1, 50, 22, 15, 51, 23],
++      [2, 42, 14, 17, 43, 15],
++
++      // 18
++      [5, 150, 120, 1, 151, 121],
++      [9, 69, 43, 4, 70, 44],
++      [17, 50, 22, 1, 51, 23],
++      [2, 42, 14, 19, 43, 15],
++
++      // 19
++      [3, 141, 113, 4, 142, 114],
++      [3, 70, 44, 11, 71, 45],
++      [17, 47, 21, 4, 48, 22],
++      [9, 39, 13, 16, 40, 14],
++
++      // 20
++      [3, 135, 107, 5, 136, 108],
++      [3, 67, 41, 13, 68, 42],
++      [15, 54, 24, 5, 55, 25],
++      [15, 43, 15, 10, 44, 16],
++
++      // 21
++      [4, 144, 116, 4, 145, 117],
++      [17, 68, 42],
++      [17, 50, 22, 6, 51, 23],
++      [19, 46, 16, 6, 47, 17],
++
++      // 22
++      [2, 139, 111, 7, 140, 112],
++      [17, 74, 46],
++      [7, 54, 24, 16, 55, 25],
++      [34, 37, 13],
++
++      // 23
++      [4, 151, 121, 5, 152, 122],
++      [4, 75, 47, 14, 76, 48],
++      [11, 54, 24, 14, 55, 25],
++      [16, 45, 15, 14, 46, 16],
++
++      // 24
++      [6, 147, 117, 4, 148, 118],
++      [6, 73, 45, 14, 74, 46],
++      [11, 54, 24, 16, 55, 25],
++      [30, 46, 16, 2, 47, 17],
++
++      // 25
++      [8, 132, 106, 4, 133, 107],
++      [8, 75, 47, 13, 76, 48],
++      [7, 54, 24, 22, 55, 25],
++      [22, 45, 15, 13, 46, 16],
++
++      // 26
++      [10, 142, 114, 2, 143, 115],
++      [19, 74, 46, 4, 75, 47],
++      [28, 50, 22, 6, 51, 23],
++      [33, 46, 16, 4, 47, 17],
++
++      // 27
++      [8, 152, 122, 4, 153, 123],
++      [22, 73, 45, 3, 74, 46],
++      [8, 53, 23, 26, 54, 24],
++      [12, 45, 15, 28, 46, 16],
++
++      // 28
++      [3, 147, 117, 10, 148, 118],
++      [3, 73, 45, 23, 74, 46],
++      [4, 54, 24, 31, 55, 25],
++      [11, 45, 15, 31, 46, 16],
++
++      // 29
++      [7, 146, 116, 7, 147, 117],
++      [21, 73, 45, 7, 74, 46],
++      [1, 53, 23, 37, 54, 24],
++      [19, 45, 15, 26, 46, 16],
++
++      // 30
++      [5, 145, 115, 10, 146, 116],
++      [19, 75, 47, 10, 76, 48],
++      [15, 54, 24, 25, 55, 25],
++      [23, 45, 15, 25, 46, 16],
++
++      // 31
++      [13, 145, 115, 3, 146, 116],
++      [2, 74, 46, 29, 75, 47],
++      [42, 54, 24, 1, 55, 25],
++      [23, 45, 15, 28, 46, 16],
++
++      // 32
++      [17, 145, 115],
++      [10, 74, 46, 23, 75, 47],
++      [10, 54, 24, 35, 55, 25],
++      [19, 45, 15, 35, 46, 16],
++
++      // 33
++      [17, 145, 115, 1, 146, 116],
++      [14, 74, 46, 21, 75, 47],
++      [29, 54, 24, 19, 55, 25],
++      [11, 45, 15, 46, 46, 16],
++
++      // 34
++      [13, 145, 115, 6, 146, 116],
++      [14, 74, 46, 23, 75, 47],
++      [44, 54, 24, 7, 55, 25],
++      [59, 46, 16, 1, 47, 17],
++
++      // 35
++      [12, 151, 121, 7, 152, 122],
++      [12, 75, 47, 26, 76, 48],
++      [39, 54, 24, 14, 55, 25],
++      [22, 45, 15, 41, 46, 16],
++
++      // 36
++      [6, 151, 121, 14, 152, 122],
++      [6, 75, 47, 34, 76, 48],
++      [46, 54, 24, 10, 55, 25],
++      [2, 45, 15, 64, 46, 16],
++
++      // 37
++      [17, 152, 122, 4, 153, 123],
++      [29, 74, 46, 14, 75, 47],
++      [49, 54, 24, 10, 55, 25],
++      [24, 45, 15, 46, 46, 16],
++
++      // 38
++      [4, 152, 122, 18, 153, 123],
++      [13, 74, 46, 32, 75, 47],
++      [48, 54, 24, 14, 55, 25],
++      [42, 45, 15, 32, 46, 16],
++
++      // 39
++      [20, 147, 117, 4, 148, 118],
++      [40, 75, 47, 7, 76, 48],
++      [43, 54, 24, 22, 55, 25],
++      [10, 45, 15, 67, 46, 16],
++
++      // 40
++      [19, 148, 118, 6, 149, 119],
++      [18, 75, 47, 31, 76, 48],
++      [34, 54, 24, 34, 55, 25],
++      [20, 45, 15, 61, 46, 16]
++    ];
++
++    var qrRSBlock = function(totalCount, dataCount) {
++      var _this = {};
++      _this.totalCount = totalCount;
++      _this.dataCount = dataCount;
++      return _this;
++    };
++
++    var _this = {};
++
++    var getRsBlockTable = function(typeNumber, errorCorrectionLevel) {
++
++      switch(errorCorrectionLevel) {
++      case QRErrorCorrectionLevel.L :
++        return RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 0];
++      case QRErrorCorrectionLevel.M :
++        return RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 1];
++      case QRErrorCorrectionLevel.Q :
++        return RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 2];
++      case QRErrorCorrectionLevel.H :
++        return RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 3];
++      default :
++        return undefined;
++      }
++    };
++
++    _this.getRSBlocks = function(typeNumber, errorCorrectionLevel) {
++
++      var rsBlock = getRsBlockTable(typeNumber, errorCorrectionLevel);
++
++      if (typeof rsBlock == 'undefined') {
++        throw 'bad rs block @ typeNumber:' + typeNumber +
++            '/errorCorrectionLevel:' + errorCorrectionLevel;
++      }
++
++      var length = rsBlock.length / 3;
++
++      var list = [];
++
++      for (var i = 0; i < length; i += 1) {
++
++        var count = rsBlock[i * 3 + 0];
++        var totalCount = rsBlock[i * 3 + 1];
++        var dataCount = rsBlock[i * 3 + 2];
++
++        for (var j = 0; j < count; j += 1) {
++          list.push(qrRSBlock(totalCount, dataCount) );
++        }
++      }
++
++      return list;
++    };
++
++    return _this;
++  }();
++
++  //---------------------------------------------------------------------
++  // qrBitBuffer
++  //---------------------------------------------------------------------
++
++  var qrBitBuffer = function() {
++
++    var _buffer = [];
++    var _length = 0;
++
++    var _this = {};
++
++    _this.getBuffer = function() {
++      return _buffer;
++    };
++
++    _this.getAt = function(index) {
++      var bufIndex = Math.floor(index / 8);
++      return ( (_buffer[bufIndex] >>> (7 - index % 8) ) & 1) == 1;
++    };
++
++    _this.put = function(num, length) {
++      for (var i = 0; i < length; i += 1) {
++        _this.putBit( ( (num >>> (length - i - 1) ) & 1) == 1);
++      }
++    };
++
++    _this.getLengthInBits = function() {
++      return _length;
++    };
++
++    _this.putBit = function(bit) {
++
++      var bufIndex = Math.floor(_length / 8);
++      if (_buffer.length <= bufIndex) {
++        _buffer.push(0);
++      }
++
++      if (bit) {
++        _buffer[bufIndex] |= (0x80 >>> (_length % 8) );
++      }
++
++      _length += 1;
++    };
++
++    return _this;
++  };
++
++  //---------------------------------------------------------------------
++  // qrNumber
++  //---------------------------------------------------------------------
++
++  var qrNumber = function(data) {
++
++    var _mode = QRMode.MODE_NUMBER;
++    var _data = data;
++
++    var _this = {};
++
++    _this.getMode = function() {
++      return _mode;
++    };
++
++    _this.getLength = function(buffer) {
++      return _data.length;
++    };
++
++    _this.write = function(buffer) {
++
++      var data = _data;
++
++      var i = 0;
++
++      while (i + 2 < data.length) {
++        buffer.put(strToNum(data.substring(i, i + 3) ), 10);
++        i += 3;
++      }
++
++      if (i < data.length) {
++        if (data.length - i == 1) {
++          buffer.put(strToNum(data.substring(i, i + 1) ), 4);
++        } else if (data.length - i == 2) {
++          buffer.put(strToNum(data.substring(i, i + 2) ), 7);
++        }
++      }
++    };
++
++    var strToNum = function(s) {
++      var num = 0;
++      for (var i = 0; i < s.length; i += 1) {
++        num = num * 10 + chatToNum(s.charAt(i) );
++      }
++      return num;
++    };
++
++    var chatToNum = function(c) {
++      if ('0' <= c && c <= '9') {
++        return c.charCodeAt(0) - '0'.charCodeAt(0);
++      }
++      throw 'illegal char :' + c;
++    };
++
++    return _this;
++  };
++
++  //---------------------------------------------------------------------
++  // qrAlphaNum
++  //---------------------------------------------------------------------
++
++  var qrAlphaNum = function(data) {
++
++    var _mode = QRMode.MODE_ALPHA_NUM;
++    var _data = data;
++
++    var _this = {};
++
++    _this.getMode = function() {
++      return _mode;
++    };
++
++    _this.getLength = function(buffer) {
++      return _data.length;
++    };
++
++    _this.write = function(buffer) {
++
++      var s = _data;
++
++      var i = 0;
++
++      while (i + 1 < s.length) {
++        buffer.put(
++          getCode(s.charAt(i) ) * 45 +
++          getCode(s.charAt(i + 1) ), 11);
++        i += 2;
++      }
++
++      if (i < s.length) {
++        buffer.put(getCode(s.charAt(i) ), 6);
++      }
++    };
++
++    var getCode = function(c) {
++
++      if ('0' <= c && c <= '9') {
++        return c.charCodeAt(0) - '0'.charCodeAt(0);
++      } else if ('A' <= c && c <= 'Z') {
++        return c.charCodeAt(0) - 'A'.charCodeAt(0) + 10;
++      } else {
++        switch (c) {
++        case ' ' : return 36;
++        case '$' : return 37;
++        case '%' : return 38;
++        case '*' : return 39;
++        case '+' : return 40;
++        case '-' : return 41;
++        case '.' : return 42;
++        case '/' : return 43;
++        case ':' : return 44;
++        default :
++          throw 'illegal char :' + c;
++        }
++      }
++    };
++
++    return _this;
++  };
++
++  //---------------------------------------------------------------------
++  // qr8BitByte
++  //---------------------------------------------------------------------
++
++  var qr8BitByte = function(data) {
++
++    var _mode = QRMode.MODE_8BIT_BYTE;
++    var _data = data;
++    var _bytes = qrcode.stringToBytes(data);
++
++    var _this = {};
++
++    _this.getMode = function() {
++      return _mode;
++    };
++
++    _this.getLength = function(buffer) {
++      return _bytes.length;
++    };
++
++    _this.write = function(buffer) {
++      for (var i = 0; i < _bytes.length; i += 1) {
++        buffer.put(_bytes[i], 8);
++      }
++    };
++
++    return _this;
++  };
++
++  //---------------------------------------------------------------------
++  // qrKanji
++  //---------------------------------------------------------------------
++
++  var qrKanji = function(data) {
++
++    var _mode = QRMode.MODE_KANJI;
++    var _data = data;
++
++    var stringToBytes = qrcode.stringToBytesFuncs['SJIS'];
++    if (!stringToBytes) {
++      throw 'sjis not supported.';
++    }
++    !function(c, code) {
++      // self test for sjis support.
++      var test = stringToBytes(c);
++      if (test.length != 2 || ( (test[0] << 8) | test[1]) != code) {
++        throw 'sjis not supported.';
++      }
++    }('\u53cb', 0x9746);
++
++    var _bytes = stringToBytes(data);
++
++    var _this = {};
++
++    _this.getMode = function() {
++      return _mode;
++    };
++
++    _this.getLength = function(buffer) {
++      return ~~(_bytes.length / 2);
++    };
++
++    _this.write = function(buffer) {
++
++      var data = _bytes;
++
++      var i = 0;
++
++      while (i + 1 < data.length) {
++
++        var c = ( (0xff & data[i]) << 8) | (0xff & data[i + 1]);
++
++        if (0x8140 <= c && c <= 0x9FFC) {
++          c -= 0x8140;
++        } else if (0xE040 <= c && c <= 0xEBBF) {
++          c -= 0xC140;
++        } else {
++          throw 'illegal char at ' + (i + 1) + '/' + c;
++        }
++
++        c = ( (c >>> 8) & 0xff) * 0xC0 + (c & 0xff);
++
++        buffer.put(c, 13);
++
++        i += 2;
++      }
++
++      if (i < data.length) {
++        throw 'illegal char at ' + (i + 1);
++      }
++    };
++
++    return _this;
++  };
++
++  //=====================================================================
++  // GIF Support etc.
++  //
++
++  //---------------------------------------------------------------------
++  // byteArrayOutputStream
++  //---------------------------------------------------------------------
++
++  var byteArrayOutputStream = function() {
++
++    var _bytes = [];
++
++    var _this = {};
++
++    _this.writeByte = function(b) {
++      _bytes.push(b & 0xff);
++    };
++
++    _this.writeShort = function(i) {
++      _this.writeByte(i);
++      _this.writeByte(i >>> 8);
++    };
++
++    _this.writeBytes = function(b, off, len) {
++      off = off || 0;
++      len = len || b.length;
++      for (var i = 0; i < len; i += 1) {
++        _this.writeByte(b[i + off]);
++      }
++    };
++
++    _this.writeString = function(s) {
++      for (var i = 0; i < s.length; i += 1) {
++        _this.writeByte(s.charCodeAt(i) );
++      }
++    };
++
++    _this.toByteArray = function() {
++      return _bytes;
++    };
++
++    _this.toString = function() {
++      var s = '';
++      s += '[';
++      for (var i = 0; i < _bytes.length; i += 1) {
++        if (i > 0) {
++          s += ',';
++        }
++        s += _bytes[i];
++      }
++      s += ']';
++      return s;
++    };
++
++    return _this;
++  };
++
++  //---------------------------------------------------------------------
++  // base64EncodeOutputStream
++  //---------------------------------------------------------------------
++
++  var base64EncodeOutputStream = function() {
++
++    var _buffer = 0;
++    var _buflen = 0;
++    var _length = 0;
++    var _base64 = '';
++
++    var _this = {};
++
++    var writeEncoded = function(b) {
++      _base64 += String.fromCharCode(encode(b & 0x3f) );
++    };
++
++    var encode = function(n) {
++      if (n < 0) {
++        // error.
++      } else if (n < 26) {
++        return 0x41 + n;
++      } else if (n < 52) {
++        return 0x61 + (n - 26);
++      } else if (n < 62) {
++        return 0x30 + (n - 52);
++      } else if (n == 62) {
++        return 0x2b;
++      } else if (n == 63) {
++        return 0x2f;
++      }
++      throw 'n:' + n;
++    };
++
++    _this.writeByte = function(n) {
++
++      _buffer = (_buffer << 8) | (n & 0xff);
++      _buflen += 8;
++      _length += 1;
++
++      while (_buflen >= 6) {
++        writeEncoded(_buffer >>> (_buflen - 6) );
++        _buflen -= 6;
++      }
++    };
++
++    _this.flush = function() {
++
++      if (_buflen > 0) {
++        writeEncoded(_buffer << (6 - _buflen) );
++        _buffer = 0;
++        _buflen = 0;
++      }
++
++      if (_length % 3 != 0) {
++        // padding
++        var padlen = 3 - _length % 3;
++        for (var i = 0; i < padlen; i += 1) {
++          _base64 += '=';
++        }
++      }
++    };
++
++    _this.toString = function() {
++      return _base64;
++    };
++
++    return _this;
++  };
++
++  //---------------------------------------------------------------------
++  // base64DecodeInputStream
++  //---------------------------------------------------------------------
++
++  var base64DecodeInputStream = function(str) {
++
++    var _str = str;
++    var _pos = 0;
++    var _buffer = 0;
++    var _buflen = 0;
++
++    var _this = {};
++
++    _this.read = function() {
++
++      while (_buflen < 8) {
++
++        if (_pos >= _str.length) {
++          if (_buflen == 0) {
++            return -1;
++          }
++          throw 'unexpected end of file./' + _buflen;
++        }
++
++        var c = _str.charAt(_pos);
++        _pos += 1;
++
++        if (c == '=') {
++          _buflen = 0;
++          return -1;
++        } else if (c.match(/^\s$/) ) {
++          // ignore if whitespace.
++          continue;
++        }
++
++        _buffer = (_buffer << 6) | decode(c.charCodeAt(0) );
++        _buflen += 6;
++      }
++
++      var n = (_buffer >>> (_buflen - 8) ) & 0xff;
++      _buflen -= 8;
++      return n;
++    };
++
++    var decode = function(c) {
++      if (0x41 <= c && c <= 0x5a) {
++        return c - 0x41;
++      } else if (0x61 <= c && c <= 0x7a) {
++        return c - 0x61 + 26;
++      } else if (0x30 <= c && c <= 0x39) {
++        return c - 0x30 + 52;
++      } else if (c == 0x2b) {
++        return 62;
++      } else if (c == 0x2f) {
++        return 63;
++      } else {
++        throw 'c:' + c;
++      }
++    };
++
++    return _this;
++  };
++
++  //---------------------------------------------------------------------
++  // gifImage (B/W)
++  //---------------------------------------------------------------------
++
++  var gifImage = function(width, height) {
++
++    var _width = width;
++    var _height = height;
++    var _data = new Array(width * height);
++
++    var _this = {};
++
++    _this.setPixel = function(x, y, pixel) {
++      _data[y * _width + x] = pixel;
++    };
++
++    _this.write = function(out) {
++
++      //---------------------------------
++      // GIF Signature
++
++      out.writeString('GIF87a');
++
++      //---------------------------------
++      // Screen Descriptor
++
++      out.writeShort(_width);
++      out.writeShort(_height);
++
++      out.writeByte(0x80); // 2bit
++      out.writeByte(0);
++      out.writeByte(0);
++
++      //---------------------------------
++      // Global Color Map
++
++      // black
++      out.writeByte(0x00);
++      out.writeByte(0x00);
++      out.writeByte(0x00);
++
++      // white
++      out.writeByte(0xff);
++      out.writeByte(0xff);
++      out.writeByte(0xff);
++
++      //---------------------------------
++      // Image Descriptor
++
++      out.writeString(',');
++      out.writeShort(0);
++      out.writeShort(0);
++      out.writeShort(_width);
++      out.writeShort(_height);
++      out.writeByte(0);
++
++      //---------------------------------
++      // Local Color Map
++
++      //---------------------------------
++      // Raster Data
++
++      var lzwMinCodeSize = 2;
++      var raster = getLZWRaster(lzwMinCodeSize);
++
++      out.writeByte(lzwMinCodeSize);
++
++      var offset = 0;
++
++      while (raster.length - offset > 255) {
++        out.writeByte(255);
++        out.writeBytes(raster, offset, 255);
++        offset += 255;
++      }
++
++      out.writeByte(raster.length - offset);
++      out.writeBytes(raster, offset, raster.length - offset);
++      out.writeByte(0x00);
++
++      //---------------------------------
++      // GIF Terminator
++      out.writeString(';');
++    };
++
++    var bitOutputStream = function(out) {
++
++      var _out = out;
++      var _bitLength = 0;
++      var _bitBuffer = 0;
++
++      var _this = {};
++
++      _this.write = function(data, length) {
++
++        if ( (data >>> length) != 0) {
++          throw 'length over';
++        }
++
++        while (_bitLength + length >= 8) {
++          _out.writeByte(0xff & ( (data << _bitLength) | _bitBuffer) );
++          length -= (8 - _bitLength);
++          data >>>= (8 - _bitLength);
++          _bitBuffer = 0;
++          _bitLength = 0;
++        }
++
++        _bitBuffer = (data << _bitLength) | _bitBuffer;
++        _bitLength = _bitLength + length;
++      };
++
++      _this.flush = function() {
++        if (_bitLength > 0) {
++          _out.writeByte(_bitBuffer);
++        }
++      };
++
++      return _this;
++    };
++
++    var getLZWRaster = function(lzwMinCodeSize) {
++
++      var clearCode = 1 << lzwMinCodeSize;
++      var endCode = (1 << lzwMinCodeSize) + 1;
++      var bitLength = lzwMinCodeSize + 1;
++
++      // Setup LZWTable
++      var table = lzwTable();
++
++      for (var i = 0; i < clearCode; i += 1) {
++        table.add(String.fromCharCode(i) );
++      }
++      table.add(String.fromCharCode(clearCode) );
++      table.add(String.fromCharCode(endCode) );
++
++      var byteOut = byteArrayOutputStream();
++      var bitOut = bitOutputStream(byteOut);
++
++      // clear code
++      bitOut.write(clearCode, bitLength);
++
++      var dataIndex = 0;
++
++      var s = String.fromCharCode(_data[dataIndex]);
++      dataIndex += 1;
++
++      while (dataIndex < _data.length) {
++
++        var c = String.fromCharCode(_data[dataIndex]);
++        dataIndex += 1;
++
++        if (table.contains(s + c) ) {
++
++          s = s + c;
++
++        } else {
++
++          bitOut.write(table.indexOf(s), bitLength);
++
++          if (table.size() < 0xfff) {
++
++            if (table.size() == (1 << bitLength) ) {
++              bitLength += 1;
++            }
++
++            table.add(s + c);
++          }
++
++          s = c;
++        }
++      }
++
++      bitOut.write(table.indexOf(s), bitLength);
++
++      // end code
++      bitOut.write(endCode, bitLength);
++
++      bitOut.flush();
++
++      return byteOut.toByteArray();
++    };
++
++    var lzwTable = function() {
++
++      var _map = {};
++      var _size = 0;
++
++      var _this = {};
++
++      _this.add = function(key) {
++        if (_this.contains(key) ) {
++          throw 'dup key:' + key;
++        }
++        _map[key] = _size;
++        _size += 1;
++      };
++
++      _this.size = function() {
++        return _size;
++      };
++
++      _this.indexOf = function(key) {
++        return _map[key];
++      };
++
++      _this.contains = function(key) {
++        return typeof _map[key] != 'undefined';
++      };
++
++      return _this;
++    };
++
++    return _this;
++  };
++
++  var createDataURL = function(width, height, getPixel) {
++    var gif = gifImage(width, height);
++    for (var y = 0; y < height; y += 1) {
++      for (var x = 0; x < width; x += 1) {
++        gif.setPixel(x, y, getPixel(x, y) );
++      }
++    }
++
++    var b = byteArrayOutputStream();
++    gif.write(b);
++
++    var base64 = base64EncodeOutputStream();
++    var bytes = b.toByteArray();
++    for (var i = 0; i < bytes.length; i += 1) {
++      base64.writeByte(bytes[i]);
++    }
++    base64.flush();
++
++    return 'data:image/gif;base64,' + base64;
++  };
++
++  //---------------------------------------------------------------------
++  // returns qrcode function.
++
++  return qrcode;
++}();
++
++// multibyte support
++!function() {
++
++  qrcode.stringToBytesFuncs['UTF-8'] = function(s) {
++    // http://stackoverflow.com/questions/18729405/how-to-convert-utf8-string-to-byte-array
++    function toUTF8Array(str) {
++      var utf8 = [];
++      for (var i=0; i < str.length; i++) {
++        var charcode = str.charCodeAt(i);
++        if (charcode < 0x80) utf8.push(charcode);
++        else if (charcode < 0x800) {
++          utf8.push(0xc0 | (charcode >> 6),
++              0x80 | (charcode & 0x3f));
++        }
++        else if (charcode < 0xd800 || charcode >= 0xe000) {
++          utf8.push(0xe0 | (charcode >> 12),
++              0x80 | ((charcode>>6) & 0x3f),
++              0x80 | (charcode & 0x3f));
++        }
++        // surrogate pair
++        else {
++          i++;
++          // UTF-16 encodes 0x10000-0x10FFFF by
++          // subtracting 0x10000 and splitting the
++          // 20 bits of 0x0-0xFFFFF into two halves
++          charcode = 0x10000 + (((charcode & 0x3ff)<<10)
++            | (str.charCodeAt(i) & 0x3ff));
++          utf8.push(0xf0 | (charcode >>18),
++              0x80 | ((charcode>>12) & 0x3f),
++              0x80 | ((charcode>>6) & 0x3f),
++              0x80 | (charcode & 0x3f));
++        }
++      }
++      return utf8;
++    }
++    return toUTF8Array(s);
++  };
++
++}();
++
++(function (factory) {
++  if (typeof define === 'function' && define.amd) {
++      define([], factory);
++  } else if (typeof exports === 'object') {
++      module.exports = factory();
++  }
++}(function () {
++    return qrcode;
++}));
++
++export default qrcode;
+diff --git a/modified/plugins/naumi-enterprise/assets/weixin.css b/modified/plugins/naumi-enterprise/assets/weixin.css
+new file mode 100644
+index 0000000..6cf3a65
+--- /dev/null
++++ b/modified/plugins/naumi-enterprise/assets/weixin.css
+@@ -0,0 +1 @@
++.nwx-trigger{display:flex;align-items:center;gap:9px;background:none;border:0;color:#52605c;border-radius:9px;min-height:34px;padding:8px 10px;cursor:pointer;font:inherit}.nwx-trigger:hover{background:#e8f2ec;color:#149447}.nwx-backdrop{position:fixed;inset:0;z-index:2300;background:#182b2438;display:grid;place-items:center;padding:18px;backdrop-filter:blur(5px)}.nwx-dialog{box-sizing:border-box;width:min(390px,100%);background:#fff;border:1px solid #e5eee8;border-radius:22px;padding:24px;box-shadow:0 24px 90px #16362624;animation:nwx-enter .2s ease-out}.nwx-dialog header{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px;font-size:20px;color:#183029}.nwx-dialog header button{width:30px;height:30px;border:0;border-radius:50%;background:#f0f5f2;color:#5d7067;cursor:pointer;font-size:23px}.nwx-primary{display:flex;align-items:center;justify-content:space-between;background:#f5f8f6;border:1px solid #eaf0ec;border-radius:12px;padding:12px 14px;font-size:13px;margin-bottom:18px}.nwx-primary span{color:#718176}.nwx-primary strong{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nwx-qr{display:block;width:246px;max-width:100%;height:auto;margin:16px auto;border-radius:12px}.nwx-status{text-align:center;color:#3b5d49;font-size:14px;margin:14px 0 20px}.nwx-dialog footer{display:flex;justify-content:center;margin-top:18px}.nwx-dialog footer button,.nwx-dialog form button{height:42px;border:0;border-radius:11px;padding:0 24px;font-size:14px;cursor:pointer}.nwx-connect{background:#149947;color:#fff;min-width:170px}.nwx-connect:hover{background:#0b833a}.nwx-connect:disabled{opacity:.5;cursor:default}.nwx-secondary{background:#f1f5f2;color:#465f50}.nwx-error{background:#fff1ed;color:#a54a35;border-radius:10px;padding:10px;font-size:13px;margin-bottom:12px}.nwx-dialog form{display:flex;gap:8px}.nwx-dialog input{min-width:0;flex:1;border:1px solid #cedbd3;border-radius:8px;padding:9px}.nwx-dialog button:focus-visible,.nwx-dialog input:focus-visible{outline:2px solid #239b55;outline-offset:3px}@keyframes nwx-enter{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}@media(prefers-reduced-motion:reduce){.nwx-dialog{animation:none}}
+diff --git a/modified/plugins/naumi-enterprise/assets/weixin.js b/modified/plugins/naumi-enterprise/assets/weixin.js
+new file mode 100644
+index 0000000..cba9596
+--- /dev/null
++++ b/modified/plugins/naumi-enterprise/assets/weixin.js
+@@ -0,0 +1,25 @@
++import qrcode from './weixin-qrcode.js';
++const labels={IM_PRIMARY_REQUIRED:'请先创建主 Bot',IM_PRIMARY_CHANGED:'主 Bot 已变化，请重新连接',IM_WEIXIN_LOGIN_EXPIRED:'二维码已失效，请重新生成',IM_WEIXIN_QR_INVALID:'微信返回的二维码异常，请重试',IM_WEIXIN_ALREADY_CONNECTED:'已有微信连接，请先断开',IM_CONFLICT:'配置已更新，请重新打开',IM_WEIXIN_ORIGIN:'微信接入地址校验失败',IM_WEIXIN_CANCELLED:'连接已取消'};
++async function request(body,signal){const r=await fetch('/naumi/im',{credentials:'same-origin',cache:'no-store',signal,...body?{method:'POST',headers:{'Content-Type':'application/json','x-naumi-im':'1'},body:JSON.stringify(body)}:{}});const v=await r.json();if(!r.ok)throw Error(labels[v.error]??'微信连接暂不可用，请重试');return v;}
++export function installWeixinUI(ctx,React,createPortal){
++ const h=React.createElement;
++ function Weixin({wide}){
++  const [open,setOpen]=React.useState(false),[data,setData]=React.useState(null),[login,setLogin]=React.useState(null),[error,setError]=React.useState(''),[busy,setBusy]=React.useState(false),[code,setCode]=React.useState('');
++  const trigger=React.useRef(null),panel=React.useRef(null),current=React.useRef(null),generation=React.useRef(0);
++  const close=()=>{generation.current++;const old=current.current;current.current=null;setBusy(false);setLogin(null);setOpen(false);if(old)void request({action:'weixin-cancel',loginId:old}).catch(()=>{});trigger.current?.focus();};
++  React.useEffect(()=>{if(!open)return;const ac=new AbortController();let alive=true;request(null,ac.signal).then(v=>{if(alive)setData(v);}).catch(e=>{if(alive)setError(e.message);});const key=e=>{if(e.key==='Escape'){e.preventDefault();close();}if(e.key==='Tab'){const rows=[...panel.current.querySelectorAll('button,input')].filter(e=>!e.disabled),a=rows[0],b=rows.at(-1);if(e.shiftKey&&document.activeElement===a){e.preventDefault();b?.focus();}else if(!e.shiftKey&&document.activeElement===b){e.preventDefault();a?.focus();}}};document.addEventListener('keydown',key);panel.current?.querySelector('button')?.focus();return()=>{alive=false;ac.abort();document.removeEventListener('keydown',key);};},[open]);
++  React.useEffect(()=>{const id=login?.loginId;if(!open||!id||!['wait','scaned','need_verifycode'].includes(login.status))return;const ac=new AbortController(),g=generation.current;let timer;
++   const poll=async()=>{try{const v=await request({action:'weixin-poll',loginId:id},ac.signal);if(ac.signal.aborted||g!==generation.current)return;setLogin(v.login);if(v.login?.status==='connected'){current.current=null;setData(v);}else if(v.login?.status===login.status)timer=setTimeout(poll,1000);}catch(e){if(!ac.signal.aborted){setError(e.message);timer=setTimeout(poll,3000);}}};void poll();return()=>{ac.abort();clearTimeout(timer);};
++  },[open,login?.loginId,login?.status]);
++  React.useEffect(()=>()=>{generation.current++;if(current.current)void request({action:'weixin-cancel',loginId:current.current}).catch(()=>{});},[]);
++  React.useEffect(()=>{if(!open||!data?.connections.some(c=>c.platform==='weixin'&&c.enabled))return;const ac=new AbortController();let timer;const refresh=async()=>{try{const v=await request(null,ac.signal);if(!ac.signal.aborted)setData(v);}catch{}if(!ac.signal.aborted)timer=setTimeout(refresh,3000);};timer=setTimeout(refresh,1000);return()=>{ac.abort();clearTimeout(timer);};},[open,!!data?.connections.some(c=>c.platform==='weixin'&&c.enabled)]);
++  const connect=async()=>{if(busy)return;setBusy(true);setError('');const g=++generation.current;try{const v=await request({action:'weixin-start',expectedRevision:data.revision});if(g===generation.current){current.current=v.login.loginId;setLogin(v.login);}else if(v.login?.loginId)void request({action:'weixin-cancel',loginId:v.login.loginId}).catch(()=>{});}catch(e){if(g===generation.current)setError(e.message);}finally{if(g===generation.current)setBusy(false);}};
++  const disconnect=async c=>{setBusy(true);try{setData(await request({action:'enable',id:c.id,enabled:false,expectedRevision:data.revision}));setLogin(null);}catch(e){setError(e.message);}finally{setBusy(false);}};
++  const submitCode=async e=>{e.preventDefault();setError('');try{await request({action:'weixin-code',loginId:login.loginId,code});setCode('');setLogin({...login,status:'scaned'});}catch(e){setError(e.message);}};
++  const active=data?.connections.find(c=>c.platform==='weixin'&&c.enabled),primary=data?.bots.find(b=>b.id===data.primaryBotId),status=active?active.state==='ready'?'已连接':active.state==='error'?'连接已失效':'连接中':login?.status==='scaned'?'请在微信中确认':login?.status==='connected'?'已连接':login?.status==='need_verifycode'?'输入微信配对码':login?.status==='expired'?'二维码已过期':login?.status==='already-bound'?'该微信已绑定其他实例':login?.status==='verify_code_blocked'?'配对码尝试过多，请重新连接':login?'微信扫一扫':'';
++  let image;if(login?.qr&&['wait','scaned','need_verifycode'].includes(login.status)){const qr=qrcode(0,'M');qr.addData(login.qr,'Byte');qr.make();image='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(qr.createSvgTag({cellSize:5,margin:16}));}
++  const icon=h('svg',{viewBox:'0 0 24 24',width:18,height:18,fill:'currentColor','aria-hidden':true},h('path',{d:'M9.3 3C4.7 3 1 6 1 9.6c0 2 1.1 3.8 2.9 5L3.2 17l2.9-1.5 1.6.4a6.5 6.5 0 0 1-.3-1.9c0-3.8 3.4-6.9 7.7-6.9l1.9.2C15.8 4.8 12.8 3 9.3 3zm-3 4a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm5 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm4 1.5c-3.8 0-6.8 2.5-6.8 5.5s3 5.5 6.8 5.5l2.2-.3 2.4 1.3-.5-2.1C21 17.4 22 15.8 22 14c0-3-3-5.5-6.7-5.5zm-2.3 3a.8.8 0 1 1 0 1.6.8.8 0 0 1 0-1.6zm4.4 0a.8.8 0 1 1 0 1.6.8.8 0 0 1 0-1.6z'}));
++  return h(React.Fragment,null,h('button',{ref:trigger,type:'button',className:'nwx-trigger','aria-label':'连接微信',title:'连接微信',onClick:()=>{setError('');setOpen(true);}},icon,wide&&h('span',null,'微信')),open&&createPortal(h('div',{className:'nwx-backdrop',onPointerDown:e=>{if(e.target===e.currentTarget)close();}},h('section',{ref:panel,className:'nwx-dialog',role:'dialog','aria-modal':true,'aria-label':'微信连接'},h('header',null,h('strong',null,'微信'),h('button',{type:'button','aria-label':'关闭微信连接',onClick:close},'×')),primary&&h('div',{className:'nwx-primary'},h('span',null,'主 Bot'),h('strong',null,primary.name)),error&&h('div',{role:'alert',className:'nwx-error'},error),image&&h('img',{className:'nwx-qr',src:image,alt:'使用自己的微信扫码连接主 Bot'}),status&&h('p',{className:'nwx-status',role:'status'},status),login?.status==='need_verifycode'&&h('form',{onSubmit:submitCode},h('input',{value:code,onChange:e=>setCode(e.target.value),inputMode:'numeric','aria-label':'微信配对码',autoComplete:'one-time-code'}),h('button',{type:'submit'},'确认')),h('footer',null,active?h('button',{type:'button',className:'nwx-secondary',disabled:busy,onClick:()=>void disconnect(active)},'断开连接'):h('button',{type:'button',className:'nwx-connect',disabled:busy||!primary,onClick:()=>void connect()},busy?'生成中…':image?'刷新二维码':'连接主 Bot')))),document.body));
++ }
++ const off=ctx.slots.inject('sidebar.footer.action',()=>ctx.slots.register({name:'sidebar.footer.action',id:'naumi-weixin',order:90},Weixin));return()=>off?.();
++}
+diff --git a/original/plugins/naumi-enterprise/client.js b/modified/plugins/naumi-enterprise/client.js
+index 3a89442..9d6ea2b 100644
+--- a/original/plugins/naumi-enterprise/client.js
++++ b/modified/plugins/naumi-enterprise/client.js
+@@ -1,5 +1,6 @@
+ /** Async presentation-only module; the original enterprise app below stays intact. */
+ function installNaumiContextUI(ctx,React,createPortal,Icon){
++  ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/weixin.js').then(m=>{if(!closed)dispose=m.installWeixinUI(ctx,React,createPortal);}).catch(()=>console.error('Naumi Weixin UI unavailable'));return()=>{closed=true;dispose?.();};});
+   ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/session-import.js').then(m=>{if(!closed)dispose=m.installSessionImportUI(ctx,React);}).catch(e=>console.error('Naumi session import:',e));return()=>{closed=true;dispose?.();};});
+   ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/creation-settings.js').then(m=>{if(!closed)dispose=m.installCreationUI(ctx,React);}).catch(e=>console.error('Naumi creation:',e));return()=>{closed=true;dispose?.();};});
+   ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/bot-overview.js').then(module=>{if(!closed)dispose=module.installBotOverviewUI(ctx,React);});return()=>{closed=true;dispose?.();};});
+diff --git a/original/plugins/naumi-enterprise/host.js b/modified/plugins/naumi-enterprise/host.js
+index 18b2c64..9d8dc9d 100644
+--- a/original/plugins/naumi-enterprise/host.js
++++ b/modified/plugins/naumi-enterprise/host.js
+@@ -33,6 +33,8 @@ export function apply(ctx,config) {
+   const designOrigin=validateOrigin(config.designOrigin);
+   const assets=new Map([['employee-enterprise-work.js','text/javascript; charset=utf-8'],['employee-memory-maintenance.js','text/javascript; charset=utf-8'],['employee-sync-panel.js','text/javascript; charset=utf-8'],['employee-center.js','text/javascript; charset=utf-8'],['employee-center-model.js','text/javascript; charset=utf-8'],['employee-center.css','text/css; charset=utf-8'],['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml'],['browser-client.js','text/javascript; charset=utf-8'],['browser-native-client.js','text/javascript; charset=utf-8'],['browser-native.css','text/css; charset=utf-8'],['browser-scheduler.js','text/javascript; charset=utf-8'],['browser.css','text/css; charset=utf-8'],['team-panel.css','text/css; charset=utf-8'],['team-panel.js','text/javascript; charset=utf-8'],['team-panel-model.js','text/javascript; charset=utf-8'],['bot-sidebar.js','text/javascript; charset=utf-8'],['bot-sidebar-model.js','text/javascript; charset=utf-8'],['bot-sidebar.css','text/css; charset=utf-8']]);
+   assets.set('session-import.js','text/javascript; charset=utf-8');
++  for(const name of ['weixin.js','weixin-qrcode.js'])assets.set(name,'text/javascript; charset=utf-8');
++  assets.set('weixin.css','text/css; charset=utf-8');
+   assets.set('session-import.css','text/css; charset=utf-8');
+   assets.set('bot-overview.js','text/javascript; charset=utf-8');
+   assets.set('bot-overview.css','text/css; charset=utf-8');
+@@ -97,7 +99,7 @@ export function apply(ctx,config) {
+   ctx.on('webserver/index-inject',table=>{
+     table.push({kind:'global',name:'__NAUMI__',value:{collaborationOrigin,designOrigin,version:'0.3.0',product:'Naumi',productVersion:PRODUCT_VERSION}});
+     table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/bot-groups.css"><link rel="stylesheet" href="/naumi/assets/primary-bot.css"><link rel="stylesheet" href="/naumi/assets/bot-overview.css"><link rel="stylesheet" href="/naumi/assets/session-import.css"><link rel="stylesheet" href="/naumi/assets/plugin-market.css"><link rel="stylesheet" href="/naumi/assets/desktop-updates.css"><link rel="stylesheet" href="/naumi/assets/delivery-center.css">'});
+-    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/product-identity.css"><link rel="stylesheet" href="/naumi/assets/model-connections.css"><link rel="stylesheet" href="/naumi/assets/im-settings.css"><link rel="stylesheet" href="/naumi/assets/blender-settings.css"><link rel="stylesheet" href="/naumi/assets/employee-center.css"><link rel="stylesheet" href="/naumi/assets/employee-experience.css"><link rel="stylesheet" href="/naumi/assets/browser.css"><link rel="stylesheet" href="/naumi/assets/browser-native.css"><link rel="stylesheet" href="/naumi/assets/team-panel.css"><link rel="stylesheet" href="/naumi/assets/bot-sidebar.css"><link rel="stylesheet" href="/naumi/assets/bot-task.css"><link rel="stylesheet" href="/naumi/assets/bot-avatar.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
++    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/weixin.css"><link rel="stylesheet" href="/naumi/assets/product-identity.css"><link rel="stylesheet" href="/naumi/assets/model-connections.css"><link rel="stylesheet" href="/naumi/assets/im-settings.css"><link rel="stylesheet" href="/naumi/assets/blender-settings.css"><link rel="stylesheet" href="/naumi/assets/employee-center.css"><link rel="stylesheet" href="/naumi/assets/employee-experience.css"><link rel="stylesheet" href="/naumi/assets/browser.css"><link rel="stylesheet" href="/naumi/assets/browser-native.css"><link rel="stylesheet" href="/naumi/assets/team-panel.css"><link rel="stylesheet" href="/naumi/assets/bot-sidebar.css"><link rel="stylesheet" href="/naumi/assets/bot-task.css"><link rel="stylesheet" href="/naumi/assets/bot-avatar.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
+   });
+   ctx.effect(()=>ctx.webServer.tapIndex(html=>html.replace(/<title>[^<]*<\/title>/i,'<title>Naumi</title>').replace(/<link[^>]+rel="(?:shortcut )?icon"[^>]*href="(?!\/naumi\/)[^"]*"[^>]*>/g,'')));
+ }
+diff --git a/modified/plugins/naumi-enterprise/im-adapters/platforms/weixin.js b/modified/plugins/naumi-enterprise/im-adapters/platforms/weixin.js
+new file mode 100644
+index 0000000..d0bffd4
+--- /dev/null
++++ b/modified/plugins/naumi-enterprise/im-adapters/platforms/weixin.js
+@@ -0,0 +1,30 @@
++import {randomUUID} from 'node:crypto';
++import {weixinBase,weixinRequest} from '../../weixin-api.js';
++const sleep=(ms,signal)=>new Promise(resolve=>{const done=()=>{clearTimeout(t);signal.removeEventListener('abort',done);resolve();},t=setTimeout(done,ms);signal.addEventListener('abort',done,{once:true});if(signal.aborted)done();});
++export default {
++ id:'weixin',capabilities:{files:false},async check(fields){weixinBase(fields.baseURL);if(!fields.token||!fields.ownerUserId)throw Error('IM_WEIXIN_CREDENTIAL');},
++ connect(fields,env,{onMessage,onStatus}){
++  const ac=new AbortController(),request=options=>weixinRequest({baseURL:fields.baseURL,token:fields.token,request:env.fetch,signal:ac.signal,...options});let failures=0;
++  const handle={stop:()=>ac.abort(),async send(chat,payload){
++   if(ac.signal.aborted||chat.kind!=='direct'||chat.key!==fields.ownerUserId)throw Object.assign(Error('IM_WEIXIN_OWNER'),{permanent:true});
++   const context=env.loadState('context');if(!context?.token||context.userId!==fields.ownerUserId)throw Object.assign(Error('IM_WEIXIN_CONTEXT_REQUIRED'),{permanent:true});
++   const id='naumi-'+randomUUID(),v=await request({path:'ilink/bot/sendmessage',timeoutMs:15000,body:{msg:{from_user_id:'',to_user_id:fields.ownerUserId,client_id:id,message_type:2,message_state:2,context_token:context.token,item_list:[{type:1,text_item:{text:payload.text}}]}}});
++   return{messageId:String(v.message_id??id)};
++  }};
++  void(async()=>{onStatus({state:'connecting'});while(!ac.signal.aborted){try{
++   const v=await request({path:'ilink/bot/getupdates',body:{get_updates_buf:env.loadState('cursor')??''},timeoutMs:40000});failures=0;onStatus({state:'ready'});
++   if(!Array.isArray(v.msgs??[])||(v.msgs??[]).length>500)throw Error('IM_WEIXIN_RESPONSE');
++   for(const m of v.msgs??[]){if(ac.signal.aborted)break;
++    if(m.message_type!==1||m.group_id||m.from_user_id!==fields.ownerUserId||m.to_user_id&&m.to_user_id!==fields.botId)continue;
++    const msgid=m.message_id??m.client_id;if(typeof msgid!=='string'||!msgid||msgid.length>200||typeof m.context_token!=='string'||m.context_token.length>16384)continue;
++    const items=m.item_list??[],supported=items.length>0&&items.every(i=>i.type===1&&typeof i.text_item?.text==='string');const text=items.map(i=>i.text_item?.text??'').join('\n');
++    // Persist context before durable admission; commit cursor only after every callback succeeded.
++    env.saveState('context',{token:m.context_token,userId:m.from_user_id});
++    await onMessage({chat:{key:m.from_user_id,kind:'direct'},sender:{id:m.from_user_id},messageId:msgid,text:supported&&text.length<=8000?text:'[微信非文字或超长消息]',unsupported:!supported||text.length>8000,images:[]});
++   }
++   if(!ac.signal.aborted&&typeof v.get_updates_buf==='string'&&v.get_updates_buf.length<65536)env.saveState('cursor',v.get_updates_buf);
++   if(!(v.msgs??[]).length)await sleep(500,ac.signal);
++  }catch(e){if(ac.signal.aborted)break;if(e.message==='IM_WEIXIN_LOGIN_EXPIRED'){onStatus({state:'error'});break;}onStatus({state:'retrying'});await sleep(Math.min(30000,1000*2**Math.min(++failures,5)),ac.signal);}}})();
++  return handle;
++ }
++};
+diff --git a/original/plugins/naumi-enterprise/im-platforms.js b/modified/plugins/naumi-enterprise/im-platforms.js
+index 9b9ad54..6b293d6 100644
+--- a/original/plugins/naumi-enterprise/im-platforms.js
++++ b/modified/plugins/naumi-enterprise/im-platforms.js
+@@ -1,5 +1,6 @@
+ import dingtalk from './im-adapters/platforms/dingtalk.js';
+ import feishu from './im-adapters/platforms/feishu.js';
++import weixin from './im-adapters/platforms/weixin.js';
+ 
+ const fail=(code,permanent=true)=>{throw Object.assign(Error(code),{permanent});};
+ async function json(response){const body=await response.json();if(!response.ok||body.code&&body.code!==0||body.errcode&&body.errcode!==0)throw Object.assign(Error('IM_PLATFORM_REJECTED'),{status:response.status,permanent:response.status!==429&&response.status<500});return body;}
+@@ -9,8 +10,9 @@ export function platformEnvironment(platform,{request=fetch,WebSocket:Socket=Web
+   const allowed=platform==='dingtalk'?['api.dingtalk.com','oapi.dingtalk.com']:['open.feishu.cn','open.larksuite.com'];
+   return {WebSocket:Socket,config,log:{warn(){}},fetch:async(url,options={})=>{
+     const parsed=new URL(url);
+-    if(!config&&(parsed.protocol!=='https:'||parsed.username||parsed.password||!allowed.includes(parsed.hostname)))fail('IM_PLATFORM_ORIGIN');
+-    const response=await request(url,{...options,redirect:'error',signal:options.signal?AbortSignal.any([options.signal,AbortSignal.timeout(15000)]):AbortSignal.timeout(15000)});
++    if(!config&&(parsed.protocol!=='https:'||parsed.username||parsed.password||!(platform==='weixin'?(parsed.hostname==='weixin.qq.com'||parsed.hostname.endsWith('.weixin.qq.com')):allowed.includes(parsed.hostname))))fail('IM_PLATFORM_ORIGIN');
++    const timeout=platform==='weixin'?45000:15000;
++    const response=await request(url,{...options,redirect:'error',signal:options.signal?AbortSignal.any([options.signal,AbortSignal.timeout(timeout)]):AbortSignal.timeout(timeout)});
+     // Adapter image reads must not allocate an unbounded response body.
+     if(parsed.pathname.includes('/resources/')){
+       const reader=response.body?.getReader();if(!reader)fail('IM_RESOURCE_MISSING');const chunks=[];let size=0;
+@@ -43,4 +45,4 @@ function withFiles(adapter){return {...adapter,async sendFile(fields,env,chat,{n
+   const sent=await json(await env.fetch('https://api.dingtalk.com/v1.0/robot/'+(direct?'oToMessages/batchSend':'groupMessages/send'),{method:'POST',headers:{'x-acs-dingtalk-access-token':token,'content-type':'application/json'},body:JSON.stringify(body)}));
+   return {messageId:sent.processQueryKey};
+ }};}
+-export const IM_PLATFORMS={dingtalk:withFiles(dingtalk),feishu:withFiles(feishu)};
++export const IM_PLATFORMS={dingtalk:withFiles(dingtalk),feishu:withFiles(feishu),weixin};
+diff --git a/original/plugins/naumi-enterprise/im-service.js b/modified/plugins/naumi-enterprise/im-service.js
+index 6cf70b5..dca1797 100644
+--- a/original/plugins/naumi-enterprise/im-service.js
++++ b/modified/plugins/naumi-enterprise/im-service.js
+@@ -5,6 +5,7 @@ import {IMDelivery} from './im-delivery.js';
+ import {IM_PLATFORMS,platformEnvironment} from './im-platforms.js';
+ import {validateFiles} from './bot-deliverables.js';
+ import {IMInteractions} from './im-interactions.js';
++import {WeixinLogin} from './weixin-login.js';
+ 
+ const id=z.string().min(1).max(200).refine(v=>!/[\u0000-\u001f\u007f]/.test(v));
+ const target=z.object({kind:z.enum(['bot','group']),id}).strict();
+@@ -26,11 +27,12 @@ export class IMService{
+     this.connections=new Map();this.status=new Map();this.waiters=new Map();this.serial=Promise.resolve();this.closed=false;this.store.recover();
+     this.delivery=new IMDelivery({store,getHandle:id=>this.connections.get(id)?.handle,sendFile:row=>this.sendFile(row)});
+     this.interactions=new IMInteractions(this);
++    this.weixinLogin=new WeixinLogin(this);
+   }
+-  async read(){return {revision:this.store.revision(),connections:await Promise.all(this.store.connections().map(async c=>({id:c.id,name:c.name,platform:c.platform,appId:c.appId,domain:c.domain,enabled:c.enabled,configured:!!(await this.credentials.describe(c.secretRef))?.configured,state:this.status.get(c.id)??'disabled'}))),
++  async read(){return {revision:this.store.revision(),primaryBotId:this.directory.primary?.()?.id??null,connections:await Promise.all(this.store.connections().map(async c=>({id:c.id,name:c.name,platform:c.platform,appId:c.appId,domain:c.domain,enabled:c.enabled,configured:!!(await this.credentials.describe(c.secretRef))?.configured,state:c.platform==='weixin'&&c.primaryId!==this.directory.primary?.()?.id?'error':this.status.get(c.id)??'disabled'}))),
+     bindings:this.store.bindings(),outbox:this.store.outputs().filter(v=>['unknown','failed'].includes(v.state)).map(v=>({id:v.id,bindingId:v.bindingId,state:v.state,error:v.error})),
+     bots:this.directory.list().bots.filter(b=>b.status==='active').map(({id,name})=>({id,name})),groups:this.getGroups()?.store.rooms().map(({id,name})=>({id,name}))??[]};}
+-  execute(input){const run=this.serial.then(()=>this.command(schema.parse(input)));this.serial=run.catch(()=>{});return run;}
++  execute(input){if(typeof input?.action==='string'&&input.action.startsWith('weixin-'))return this.weixinLogin.execute(input);const run=this.serial.then(()=>this.command(schema.parse(input)));this.serial=run.catch(()=>{});return run;}
+   assertTarget(value,kind){
+     if(kind==='direct'&&value.kind!=='bot'||kind==='group'&&value.kind!=='group')fail('IM_TARGET_KIND');
+     if(value.kind==='bot'&&!this.directory.list().bots.some(b=>b.id===value.id&&b.status==='active'))fail('IM_BOT_NOT_FOUND');
+@@ -59,7 +61,7 @@ export class IMService{
+       try{await this.platforms[c.platform].check(fields,env);}catch{fail('IM_CHECK_FAILED');}
+       return {...await this.read(),checked:p.id};
+     }else if(p.action==='pair'){
+-      const c=this.store.connection(p.connectionId);if(!c?.enabled)fail('IM_CONNECTION_DISABLED');this.assertTarget(p.target,p.chatKind);
++      const c=this.store.connection(p.connectionId);if(c?.platform==='weixin')fail('IM_WEIXIN_OWNER_ONLY');if(!c?.enabled)fail('IM_CONNECTION_DISABLED');this.assertTarget(p.target,p.chatKind);
+       const code=randomBytes(12).toString('hex').toUpperCase(),expires=Date.now()+600000;
+       this.store.configure(p.expectedRevision,()=>this.store.issuePair({connectionId:p.connectionId,chatKind:p.chatKind,target:p.target,expires},code));
+       return {...await this.read(),pair:{code,expires}};
+@@ -67,6 +69,7 @@ export class IMService{
+       const b=this.store.binding(p.id);if(!b)fail('IM_NOT_FOUND');
+       // Re-enabling requires a new external pairing, not resurrecting a revoked authority.
+       if(p.active&&!b.active)fail('IM_PAIR_REQUIRED');
++      const c=this.store.connection(b.connectionId);if(c?.platform==='weixin'&&JSON.stringify(p.users)!==JSON.stringify([c.ownerUserId]))fail('IM_WEIXIN_OWNER_ONLY');
+       this.store.configure(p.expectedRevision,()=>this.store.saveBinding({...b,active:p.active,users:[...new Set(p.users)],revision:b.revision+1}));this.expireInvalid();
+     }else if(p.action==='resolve'){
+       const row=this.store.output(p.id);if(!row||!['unknown','failed'].includes(row.state))fail('IM_NOT_FOUND');
+@@ -74,7 +77,7 @@ export class IMService{
+     }
+     void this.kick();return this.read();
+   }
+-  async material(c){const secret=(await this.credentials.resolve(c.secretRef))?.value;if(!secret)fail('IM_SECRET_REQUIRED');return {fields:c.platform==='dingtalk'?{clientId:c.appId,clientSecret:secret}:{appId:c.appId,appSecret:secret,domain:c.domain},env:this.environment(c.platform)};}
++  async material(c){const secret=(await this.credentials.resolve(c.secretRef))?.value;if(!secret)fail('IM_SECRET_REQUIRED');const env=this.environment(c.platform);if(c.platform==='weixin'){env.loadState=key=>this.store.transportState(c.id,key);env.saveState=(key,value)=>this.store.saveTransportState(c.id,key,value);return{fields:{botId:c.appId,token:secret,baseURL:c.baseURL,ownerUserId:c.ownerUserId},env};}return {fields:c.platform==='dingtalk'?{clientId:c.appId,clientSecret:secret}:{appId:c.appId,appSecret:secret,domain:c.domain},env};}
+   async sync(){
+     for(const [id,live] of this.connections){const c=this.store.connection(id);if(!c?.enabled||JSON.stringify(c)!==live.signature){live.handle.stop();this.connections.delete(id);this.status.set(id,'disabled');}}
+     for(const c of this.store.connections().filter(c=>c.enabled)){
+@@ -95,6 +98,11 @@ export class IMService{
+   async receive(connectionId,raw){
+     if(this.closed||!this.store.connection(connectionId)?.enabled)return;
+     const parsed=incoming.safeParse(raw);if(!parsed.success)return;const event=parsed.data;
++    const c=this.store.connection(connectionId);
++    if(c.platform==='weixin'){
++      if(event.chat.kind!=='direct'||event.sender.id!==c.ownerUserId||event.chat.key!==c.ownerUserId||this.directory.primary?.()?.id!==c.primaryId||/^\/pair\b/i.test(event.text.trim()))return;
++      if(event.unsupported){const b=this.store.findBinding(connectionId,event.chat);if(b?.active){const input=this.store.admit(b,event);if(input.state==='queued'){this.store.write(()=>{this.delivery.text(input,'unsupported:'+input.id,'当前支持文字指令，请将内容以文字发送。');this.store.updateInput(input.id,{state:'settled'});});void this.kick();}}return;}
++    }
+     if(event.chat.kind==='group'&&!event.mentioned)return;
+     // Upstream protocols now expose thread/type metadata. Unsupported inputs are never silently sent as text.
+     if(event.threadId||event.unsupported||!event.text.trim()&&!event.images.length)return;
+@@ -132,14 +140,14 @@ export class IMService{
+         }
+         if(input.target.kind==='bot'){
+           const state=await runtime.inspect(input.sessionId,input.messageId);
+-          if(state?.end){const files=await runtime.delivery(input.sessionId,input.messageId);this.store.write(()=>{this.delivery.text(input,'reply:'+input.id,state.text||'回复已结束：'+state.end.kind);this.delivery.files(input,'reply:'+input.id,files.files);this.store.updateInput(input.id,{state:'settled',turn:state.turn});});}
++          if(state?.end){const files=await runtime.delivery(input.sessionId,input.messageId);this.store.write(()=>{this.delivery.text(input,'reply:'+input.id,state.text||'回复已结束：'+state.end.kind);this.deliverFiles(input,'reply:'+input.id,files.files);this.store.updateInput(input.id,{state:'settled',turn:state.turn});});}
+         }else{
+           const post=this.getGroups()?.readPost(input.target.id,input.messageId);
+           if(post){
+             for(const reply of post.replies)if(['completed','failed','cancelled','interrupted'].includes(reply.state)){
+               const bot=this.directory.list().bots.find(b=>b.id===reply.botId);
+               this.delivery.text(input,'group:'+reply.id,`${bot?.name??'Bot'}\n\n${reply.text||reply.state}`);
+-              if(reply.state==='completed'){const files=await runtime.delivery(reply.sessionId,reply.id);this.delivery.files(input,'group:'+reply.id,files.files);}
++              if(reply.state==='completed'){const files=await runtime.delivery(reply.sessionId,reply.id);this.deliverFiles(input,'group:'+reply.id,files.files);}
+             }
+             if(post.replies.every(r=>['completed','failed','cancelled','interrupted'].includes(r.state)))this.store.updateInput(input.id,{state:'settled'});
+           }
+@@ -171,12 +179,13 @@ export class IMService{
+       for(const m of doc.outbox.filter(m=>m.taskId===task.id&&m.fromSessionId===task.targetSessionId&&m.toSessionId===task.sourceSessionId)){
+         if(m.kind==='result'&&!m.key.startsWith('finish:'))continue;
+         this.delivery.text(input,'task:'+m.id,`${this.directory.list().bots.find(b=>b.id===task.targetBotId)?.name??'Bot'} · ${m.kind}\n\n${m.text}`);
+-        this.delivery.files(input,'task:'+m.id,m.files);
++        this.deliverFiles(input,'task:'+m.id,m.files);
+       }
+     }
+   }
+   inputForSource(source){return this.store.inputs().find(v=>v.target.kind==='bot'?v.messageId===source.messageId&&v.sessionId===source.sessionId:(this.getGroups()?.readPost(v.target.id,v.messageId)?.replies??[]).some(r=>r.id===source.messageId&&r.sessionId===source.sessionId));}
+   action(connectionId,event){return this.interactions.action(connectionId,event);}
++  deliverFiles(input,key,files){if(this.store.connection(input.connectionId)?.platform==='weixin'){if(files?.length)this.delivery.text(input,key+':file-notice','文件已生成，请在 Naumi 交付区查看：'+files.map(f=>basename(f.path)).join('、'));}else this.delivery.files(input,key,files);}
+   async sendFile(row){
+     const ref=row.payload.ref,live=this.connections.get(row.connectionId),runtime=this.getTasks().runtime;
+     if(!live||!this.store.valid(row))throw Object.assign(Error('IM_REVOKED'),{permanent:true});
+@@ -209,5 +218,5 @@ export class IMService{
+     return input&&this.store.valid(input)?input:null;
+   }
+   expireInvalid(){for(const v of this.store.interactions().filter(v=>v.state==='open'))if(v.expires<Date.now()||!this.store.valid(v)){this.store.saveInteraction({...v,state:'expired'});this.waiters.get(v.id)?.cancel();}}
+-  async close(){this.closed=true;for(const v of this.connections.values())v.handle.stop();this.connections.clear();for(const w of this.waiters.values())w.cancel();await this.serial;await this.running;this.store.close();}
++  async close(){this.closed=true;this.weixinLogin.close();for(const v of this.connections.values())v.handle.stop();this.connections.clear();for(const w of this.waiters.values())w.cancel();await this.serial;await this.running;this.store.close();}
+ }
+diff --git a/original/plugins/naumi-enterprise/im-store.js b/modified/plugins/naumi-enterprise/im-store.js
+index 8c9090e..c455a03 100644
+--- a/original/plugins/naumi-enterprise/im-store.js
++++ b/modified/plugins/naumi-enterprise/im-store.js
+@@ -26,6 +26,7 @@ export class IMStore{
+         CREATE INDEX IF NOT EXISTS outbox_state ON outbox(state);
+         CREATE TABLE IF NOT EXISTS interactions(id TEXT PRIMARY KEY,binding_id TEXT NOT NULL,state TEXT NOT NULL,value TEXT NOT NULL);
+         CREATE TABLE IF NOT EXISTS binding_sessions(session_id TEXT PRIMARY KEY,bot_id TEXT NOT NULL);
++        CREATE TABLE IF NOT EXISTS transport_state(connection_id TEXT NOT NULL,key TEXT NOT NULL,value TEXT NOT NULL,PRIMARY KEY(connection_id,key));
+         PRAGMA user_version=1;`);
+     }catch(error){this.db.close();throw error;}
+   }
+@@ -35,6 +36,8 @@ export class IMStore{
+   connection(id){return parse(this.db.prepare('SELECT value FROM connections WHERE id=?').get(id));}
+   connections(){return this.db.prepare('SELECT value FROM connections ORDER BY id').all().map(parse);}
+   saveConnection(value){this.db.prepare('INSERT INTO connections VALUES(?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value').run(value.id,JSON.stringify(value));}
++  transportState(connectionId,key){return parse(this.db.prepare('SELECT value FROM transport_state WHERE connection_id=? AND key=?').get(connectionId,key));}
++  saveTransportState(connectionId,key,value){this.db.prepare('INSERT INTO transport_state VALUES(?,?,?) ON CONFLICT(connection_id,key) DO UPDATE SET value=excluded.value').run(connectionId,key,JSON.stringify(value));}
+   binding(id){return parse(this.db.prepare('SELECT value FROM bindings WHERE id=?').get(id));}
+   bindings(){return this.db.prepare('SELECT value FROM bindings ORDER BY id').all().map(parse);}
+   findBinding(connectionId,chat){return parse(this.db.prepare('SELECT value FROM bindings WHERE connection_id=? AND chat_key=? AND kind=?').get(connectionId,chat.key,chat.kind));}
+diff --git a/original/plugins/naumi-enterprise/package.json b/modified/plugins/naumi-enterprise/package.json
+index f234608..660d8fe 100644
+--- a/original/plugins/naumi-enterprise/package.json
++++ b/modified/plugins/naumi-enterprise/package.json
+@@ -97,7 +97,9 @@
+     "creation-runtime.js",
+     "creation-bundle.js",
+     "cua.js",
+-    "cua-runtime.js"
++    "cua-runtime.js",
++    "weixin-api.js",
++    "weixin-login.js"
+   ],
+   "dsh": {
+     "bundle": {
+diff --git a/modified/plugins/naumi-enterprise/third-party/weixin/LICENSE b/modified/plugins/naumi-enterprise/third-party/weixin/LICENSE
+new file mode 100644
+index 0000000..b963c3c
+--- /dev/null
++++ b/modified/plugins/naumi-enterprise/third-party/weixin/LICENSE
+@@ -0,0 +1,27 @@
++Tencent is pleased to support the open source community by making openclaw-weixin available. 
++
++Copyright (C) 2026 Tencent.  All rights reserved. 
++
++openclaw-weixin is licensed under the MIT.
++
++
++Terms of the MIT:
++--------------------------------------------------------------------
++Permission is hereby granted, free of charge, to any person obtaining
++a copy of this software and associated documentation files (the
++"Software"), to deal in the Software without restriction, including
++without limitation the rights to use, copy, modify, merge, publish,
++distribute, sublicense, and/or sell copies of the Software, and to
++permit persons to whom the Software is furnished to do so, subject to
++the following conditions:
++
++The above copyright notice and this permission notice shall be
++included in all copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
++IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
++CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
++TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
++SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+\ No newline at end of file
+diff --git a/modified/plugins/naumi-enterprise/third-party/weixin/NOTICE.md b/modified/plugins/naumi-enterprise/third-party/weixin/NOTICE.md
+new file mode 100644
+index 0000000..86dad20
+--- /dev/null
++++ b/modified/plugins/naumi-enterprise/third-party/weixin/NOTICE.md
+@@ -0,0 +1,4 @@
++# Protocol attribution
++
++Protocol structures adapted from Tencent openclaw-weixin 2.4.10 (MIT). Upstream: https://github.com/Tencent/openclaw-weixin
++Only HTTP/QR/poll/text structures are adapted; no OpenClaw runtime is bundled. Native Naumi IM owns sessions, authorization and persistence. QR generator 1.4.4 by Kazuhiko Arase (MIT), unchanged source plus ESM default export.
+diff --git a/modified/plugins/naumi-enterprise/third-party/weixin/PIN.json b/modified/plugins/naumi-enterprise/third-party/weixin/PIN.json
+new file mode 100644
+index 0000000..b58c803
+--- /dev/null
++++ b/modified/plugins/naumi-enterprise/third-party/weixin/PIN.json
+@@ -0,0 +1,31 @@
++{
++  "weixin": {
++    "name": "@tencent-weixin/openclaw-weixin",
++    "version": "2.4.10",
++    "integrity": "sha512-qCN7rFtBK5BO/i5YGEJLdpC/8WQrm0dtPlQ0xNxku4RSyzGaRsiBoLVheU5hgpoOIBvfc5pUwKTktMbROLcIVg==",
++    "tarball": "https://registry.npmjs.org/@tencent-weixin/openclaw-weixin/-/openclaw-weixin-2.4.10.tgz"
++  },
++  "files": [
++    {
++      "file": "src/api/api.ts",
++      "sha256": "7a808846a33c70423b4a4a5fcf3c1a45f885d005994218ef5f4db663d4e6e935"
++    },
++    {
++      "file": "src/api/types.ts",
++      "sha256": "9e321e1a79bd7ec385b8e2b9695f1d87507282ff33f9cfdafbe4e33aea5387ac"
++    },
++    {
++      "file": "src/auth/login-qr.ts",
++      "sha256": "1347ceff3da2fc0df82aefff684be2c12870778d026b1cbe063226dfa9bea0c4"
++    },
++    {
++      "file": "src/messaging/send.ts",
++      "sha256": "2f33e3e9cccb18ef03620669deb1c415749f6ac3835f4ff24f25847ecb753f4d"
++    }
++  ],
++  "qr": {
++    "name": "qrcode-generator",
++    "version": "1.4.4",
++    "integrity": "sha512-HM7yY8O2ilqhmULxGMpcHSF1EhJJ9yBj8gvDEuZ6M+KGJ0YY2hKpnXvRD+hZPLrDVck3ExIGhmPtSdcjC+guuw=="
++  }
++}
+\ No newline at end of file
+diff --git a/modified/plugins/naumi-enterprise/third-party/weixin/QR-LICENSE b/modified/plugins/naumi-enterprise/third-party/weixin/QR-LICENSE
+new file mode 100644
+index 0000000..962d9d7
+--- /dev/null
++++ b/modified/plugins/naumi-enterprise/third-party/weixin/QR-LICENSE
+@@ -0,0 +1,20 @@
++Copyright (c) 2009 Kazuhiko Arase
++
++Permission is hereby granted, free of charge, to any person obtaining
++a copy of this software and associated documentation files (the
++"Software"), to deal in the Software without restriction, including
++without limitation the rights to use, copy, modify, merge, publish,
++distribute, sublicense, and/or sell copies of the Software, and to
++permit persons to whom the Software is furnished to do so, subject to
++the following conditions:
++
++The above copyright notice and this permission notice shall be
++included in all copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
++IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
++CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
++TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
++SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+\ No newline at end of file
+diff --git a/modified/plugins/naumi-enterprise/weixin-api.js b/modified/plugins/naumi-enterprise/weixin-api.js
+new file mode 100644
+index 0000000..4672333
+--- /dev/null
++++ b/modified/plugins/naumi-enterprise/weixin-api.js
+@@ -0,0 +1,19 @@
++// Protocol adapted from Tencent openclaw-weixin 2.4.10 (MIT); see third-party/weixin/.
++import {randomBytes} from 'node:crypto';
++import {PRODUCT_VERSION} from './product-version.js';
++export const WEIXIN_BASE='https://ilinkai.weixin.qq.com';
++export function weixinBase(value=WEIXIN_BASE){const u=new URL(value);if(u.protocol!=='https:'||u.username||u.password||u.port||u.search||u.hash||u.pathname!=='/'||!(u.hostname==='weixin.qq.com'||u.hostname.endsWith('.weixin.qq.com')))throw Error('IM_WEIXIN_ORIGIN');return u.origin;}
++const fail=(code,status)=>{throw Object.assign(Error(code),{status,permanent:status>=400&&status<500&&status!==429});};
++export async function weixinRequest({baseURL=WEIXIN_BASE,path,token,body,signal,timeoutMs=40000,request=fetch}){
++ const base=weixinBase(baseURL),headers={'iLink-App-Id':'bot','iLink-App-ClientVersion':'132106'};
++ if(body!==undefined)Object.assign(headers,{'Content-Type':'application/json',AuthorizationType:'ilink_bot_token','X-WECHAT-UIN':Buffer.from(String(randomBytes(4).readUInt32BE())).toString('base64')});
++ if(token)headers.Authorization='Bearer '+token;
++ const res=await request(base+'/'+path,{method:body===undefined?'GET':'POST',headers,...body===undefined?{}:{body:JSON.stringify({...body,base_info:{channel_version:'2.4.10',bot_agent:'Naumi/'+PRODUCT_VERSION}})},redirect:'error',signal:AbortSignal.any([AbortSignal.timeout(timeoutMs),...signal?[signal]:[]])});
++ if(!res.ok){await res.body?.cancel();fail('IM_WEIXIN_HTTP',res.status);}
++ const chunks=[];let bytes=0;const reader=res.body?.getReader();if(!reader)fail('IM_WEIXIN_RESPONSE',502);
++ try{for(;;){const r=await reader.read();if(r.done)break;bytes+=r.value.length;if(bytes>2*1024*1024)fail('IM_WEIXIN_RESPONSE_LIMIT',502);chunks.push(r.value);}}finally{await reader.cancel().catch(()=>{});}
++ // Weixin message identifiers are uint64. Quote only unquoted ID fields, never round them.
++ const raw=Buffer.concat(chunks).toString('utf8').replace(/("(?:message_id|seq)"\s*:\s*)(\d+)(?=\s*[,}])/g,'$1"$2"');let data;try{data=JSON.parse(raw);}catch{fail('IM_WEIXIN_RESPONSE',502);}
++ if(data.ret&&data.ret!==0||data.errcode&&data.errcode!==0)fail(data.errcode===-14?'IM_WEIXIN_LOGIN_EXPIRED':'IM_WEIXIN_REJECTED',data.errcode===-14?401:400);
++ return data;
++}
+diff --git a/modified/plugins/naumi-enterprise/weixin-login.js b/modified/plugins/naumi-enterprise/weixin-login.js
+new file mode 100644
+index 0000000..654facd
+--- /dev/null
++++ b/modified/plugins/naumi-enterprise/weixin-login.js
+@@ -0,0 +1,52 @@
++import {randomUUID} from 'node:crypto';
++import {z} from 'zod';
++import {WEIXIN_BASE,weixinBase,weixinRequest} from './weixin-api.js';
++const command=z.discriminatedUnion('action',[
++ z.object({action:z.literal('weixin-start'),expectedRevision:z.number().int().nonnegative()}).strict(),
++ z.object({action:z.enum(['weixin-poll','weixin-cancel']),loginId:z.uuid()}).strict(),
++ z.object({action:z.literal('weixin-code'),loginId:z.uuid(),code:z.string().regex(/^\d{4,12}$/)}).strict(),
++]);
++const validId=v=>typeof v==='string'&&v.length>0&&v.length<=200&&!/[\x00-\x20\x7f]/.test(v);
++export class WeixinLogin{
++ constructor(service,{request=weixinRequest,now=Date.now}={}){this.s=service;this.request=request;this.now=now;this.current=null;}
++ serial(fn){const run=this.s.serial.then(fn);this.s.serial=run.catch(()=>{});return run;}
++ view(v){return v?{loginId:v.id,status:v.status,expires:v.expires,...v.qr?{qr:v.qr}:{}}:null;}
++ async execute(input){const p=command.parse(input);
++  if(p.action==='weixin-start')return this.serial(async()=>{
++   if(this.s.closed)throw Error('IM_CLOSED');if(this.s.store.revision()!==p.expectedRevision)throw Error('IM_CONFLICT');
++   const primary=this.s.directory.primary?.();if(!primary)throw Error('IM_PRIMARY_REQUIRED');
++   this.close();const ac=new AbortController(),v={id:randomUUID(),status:'starting',expires:this.now()+300000,revision:p.expectedRevision,primaryId:primary.id,baseURL:WEIXIN_BASE,ac};this.current=v;
++   try{const r=await this.request({path:'ilink/bot/get_bot_qrcode?bot_type=3',body:{local_token_list:[]},signal:ac.signal,timeoutMs:15000});
++    if(this.current!==v||this.s.closed)throw Error('IM_WEIXIN_CANCELLED');if(typeof r.qrcode!=='string'||r.qrcode.length>4096||typeof r.qrcode_img_content!=='string'||r.qrcode_img_content.length>4096)throw Error('IM_WEIXIN_QR_INVALID');
++    const u=new URL(r.qrcode_img_content);if(u.protocol!=='https:'||u.username||u.password||!(u.hostname==='weixin.qq.com'||u.hostname.endsWith('.weixin.qq.com')))throw Error('IM_WEIXIN_QR_INVALID');
++    Object.assign(v,{qrcode:r.qrcode,qr:r.qrcode_img_content,status:'wait'});return{login:this.view(v)};
++   }catch(e){if(this.current===v)this.close();throw e;}
++  });
++  const v=this.current;if(!v||v.id!==p.loginId||v.expires<=this.now())throw Error('IM_WEIXIN_LOGIN_EXPIRED');
++  if(p.action==='weixin-cancel'){this.close();return{login:null};}
++  if(p.action==='weixin-code'){v.code=p.code;return{login:this.view(v)};}
++  if(v.flight)return v.flight;
++  v.flight=this.poll(v).finally(()=>{v.flight=null;});return v.flight;
++ }
++ async poll(v){
++  const r=await this.request({baseURL:v.baseURL,path:'ilink/bot/get_qrcode_status?qrcode='+encodeURIComponent(v.qrcode)+(v.code?'&verify_code='+encodeURIComponent(v.code):''),signal:v.ac.signal,timeoutMs:38000});
++  if(this.current!==v||this.s.closed)throw Error('IM_WEIXIN_CANCELLED');
++  if(r.status==='scaned_but_redirect'){v.baseURL=weixinBase('https://'+r.redirect_host);v.status='scaned';return{login:this.view(v)};}
++  if(['wait','scaned','need_verifycode','verify_code_blocked'].includes(r.status)){v.status=r.status;if(r.status==='scaned')delete v.code;return{login:this.view(v)};}
++  if(r.status!=='confirmed'){v.status=r.status==='binded_redirect'?'already-bound':'expired';return{login:this.view(v)};}
++  if(!validId(r.ilink_bot_id)||!validId(r.ilink_user_id)||typeof r.bot_token!=='string'||!r.bot_token||r.bot_token.length>16000)throw Error('IM_WEIXIN_IDENTITY_REQUIRED');
++  const baseURL=weixinBase(r.baseurl??v.baseURL);
++  return this.serial(async()=>{
++   if(this.current!==v||v.ac.signal.aborted||this.s.closed)throw Error('IM_WEIXIN_CANCELLED');
++   if(this.s.store.revision()!==v.revision)throw Error('IM_CONFLICT');if(this.s.directory.primary?.()?.id!==v.primaryId)throw Error('IM_PRIMARY_CHANGED');
++   if(this.s.store.connections().some(c=>c.platform==='weixin'&&c.enabled))throw Error('IM_WEIXIN_ALREADY_CONNECTED');
++   const ref='NAUMI_WEIXIN_'+randomUUID().replaceAll('-','').toUpperCase(),id=randomUUID();await this.s.credentials.set(ref,r.bot_token);
++   try{if(this.current!==v||v.ac.signal.aborted||v.expires<=this.now()||this.s.closed)throw Error('IM_WEIXIN_CANCELLED');if(this.s.directory.primary?.()?.id!==v.primaryId)throw Error('IM_PRIMARY_CHANGED');this.s.store.configure(v.revision,()=>{
++    this.s.store.saveConnection({id,platform:'weixin',name:'我的微信',appId:r.ilink_bot_id,domain:'weixin',baseURL,ownerUserId:r.ilink_user_id,primaryId:v.primaryId,secretRef:ref,enabled:true});
++    this.s.store.saveBinding({id:randomUUID(),connectionId:id,chat:{key:r.ilink_user_id,kind:'direct',title:'我的微信'},target:{kind:'bot',id:v.primaryId},users:[r.ilink_user_id],active:true,revision:1,sessionId:'session-'+randomUUID(),createdAt:new Date().toISOString()});
++   });}catch(e){await this.s.credentials.unset(ref);throw e;}
++   this.close();await this.s.sync();return{login:{status:'connected'},...await this.s.read()};
++  });
++ }
++ close(){this.current?.ac.abort();this.current=null;}
++}
+diff --git a/modified/scripts/package-weixin-primary.mjs b/modified/scripts/package-weixin-primary.mjs
+new file mode 100644
+index 0000000..fc84a25
+--- /dev/null
++++ b/modified/scripts/package-weixin-primary.mjs
+@@ -0,0 +1,28 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import {createHash} from 'node:crypto';
++import {execFileSync,spawnSync} from 'node:child_process';
++const root=process.cwd(),e=path.resolve('evidence/weixin-primary');
++const baseline=process.argv[2];if(!/^[a-f0-9]{40}$/.test(baseline??''))throw Error('EXPLICIT_BASELINE_SHA_REQUIRED');
++const sha=b=>createHash('sha256').update(b).digest('hex');
++const git=(args,encoding)=>execFileSync('git',args,{cwd:root,...encoding?{encoding}:{},maxBuffer:20e6});
++const files=[...new Set(git(['diff','--name-only','8a6c352433fcb3a30448f2477dcd73f9ab9f4c18','381aaa9'],'utf8').trim().split(/\r?\n/).concat(['scripts/package-weixin-primary.mjs','scripts/rollback-weixin-primary.mjs']))];
++const manifest=[];
++for(const file of files){
++ const before=spawnSync('git',['show',baseline+':'+file],{cwd:root,maxBuffer:20e6});
++ const original=before.status===0?before.stdout:null,modified=fs.readFileSync(path.join(root,file));
++ for(const [dir,bytes]of [['original',original],['modified',modified]])if(bytes){const p=path.join(e,dir,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);}
++ manifest.push({path:file,originalSHA256:original?sha(original):null,modifiedSHA256:sha(modified)});
++}
++fs.writeFileSync(path.join(e,'hashes.json'),JSON.stringify({baseline,branch:'codex/weixin-primary-20261119',changedFields:['owner-only Weixin iLink transport','primaryBotId binding','transport_state context/cursor','local QR sidebar entry'],files:manifest},null,2)+'\n');
++const diff=spawnSync('git',['-c','core.autocrlf=false','diff','--binary','--no-index','--','original','modified'],{cwd:e,maxBuffer:20e6});if(![0,1].includes(diff.status))throw Error(String(diff.stderr));fs.writeFileSync(path.join(e,'DIFF_FILE.patch'),diff.stdout);
++fs.copyFileSync('scripts/rollback-weixin-primary.mjs',path.join(e,'rollback-weixin-primary.mjs'));
++fs.writeFileSync(path.join(e,'ROLLBACK.sh'),'#!/usr/bin/env bash\nset -euo pipefail\nHERE="$(cd -- "$(dirname -- "$0")" && pwd)"\nexec "${NAUMI_NODE:-node}" "$HERE/rollback-weixin-primary.mjs" --test "${1:?repository root required}"\n',{mode:0o755});
++const q=s=>"'"+s.replaceAll("'","''")+"'";
++execFileSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-Command',`Compress-Archive -LiteralPath ${['original','modified','hashes.json'].map(p=>q(path.join(e,p))).join(',')} -DestinationPath ${q(path.join(e,'MODIFIED_FILE.zip'))} -Force`]);
++// Reopen the ZIP and each member rather than treating Compress-Archive exit 0 as evidence.
++const inspect=`Add-Type -AssemblyName System.IO.Compression.FileSystem; $z=[IO.Compression.ZipFile]::OpenRead(${q(path.join(e,'MODIFIED_FILE.zip'))}); try { $z.Entries | ForEach-Object { if ($_.Name) { $s=$_.Open(); try { $m=[IO.MemoryStream]::new(); $s.CopyTo($m); if($m.Length -ne $_.Length){throw 'ZIP_MEMBER_LENGTH'} } finally {$s.Dispose()} } }; 'ZIP_REOPEN PASS entries='+$z.Entries.Count } finally {$z.Dispose()}`;
++console.log(execFileSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-Command',inspect],{encoding:'utf8'}).trim());
++for(const f of manifest){if(sha(fs.readFileSync(path.join(e,'modified',f.path)))!==f.modifiedSHA256)throw Error('MODIFIED_HASH');if(f.originalSHA256&&sha(fs.readFileSync(path.join(e,'original',f.path)))!==f.originalSHA256)throw Error('ORIGINAL_HASH');}
++fs.readFileSync(path.join(e,'DIFF_FILE.patch'));fs.readFileSync(path.join(e,'ROLLBACK.sh'));
++console.log('WEIXIN_PACKAGE files='+manifest.length+' original='+manifest.filter(f=>f.originalSHA256).length+' hashes=PASS');
+diff --git a/modified/scripts/rollback-weixin-primary.mjs b/modified/scripts/rollback-weixin-primary.mjs
+new file mode 100644
+index 0000000..adcc819
+--- /dev/null
++++ b/modified/scripts/rollback-weixin-primary.mjs
+@@ -0,0 +1,25 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import assert from 'node:assert/strict';
++import {createHash,randomUUID} from 'node:crypto';
++import {fileURLToPath} from 'node:url';
++import {spawnSync} from 'node:child_process';
++assert.equal(process.argv[2],'--test','COPY_ONLY_ROLLBACK');
++const root=path.resolve(process.argv[3]??''),here=path.dirname(fileURLToPath(import.meta.url));
++const e=path.basename(here)==='weixin-primary'?here:path.join(root,'evidence/weixin-primary');
++const manifest=JSON.parse(fs.readFileSync(path.join(e,'hashes.json'))),sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
++const copy=path.join(e,'rollback-copy-'+randomUUID());fs.mkdirSync(copy);
++fs.writeFileSync(path.join(copy,'.weixin-source-fixture'),'weixin-source-copy-only\n');
++for(const dir of ['plugins','tests'])fs.cpSync(path.join(root,dir),path.join(copy,dir),{recursive:true});
++fs.copyFileSync(path.join(root,'package.json'),path.join(copy,'package.json'));fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');
++for(const f of manifest.files){assert.equal(sha(path.join(root,f.path)),f.modifiedSHA256);const to=path.join(copy,f.path);fs.mkdirSync(path.dirname(to),{recursive:true});fs.copyFileSync(path.join(e,'modified',f.path),to);}
++const run=(name,args)=>{const r=spawnSync(process.execPath,args,{cwd:copy,encoding:'utf8',maxBuffer:10e6});fs.writeFileSync(path.join(e,name+'.log'),r.stdout+r.stderr);assert.equal(r.status,0,name+' '+r.stdout+r.stderr);return r.stdout;};
++run('ROLLBACK_SEED',['--input-type=module','-e',`import{IMStore}from'./plugins/naumi-enterprise/im-store.js';const s=new IMStore('retained.sqlite');s.saveTransportState('fixture','cursor','retained-cursor');s.close();console.log('WEIXIN_SEED additive_transport_state=retained schema=1');`]);
++let restored=0,removed=0;
++for(const f of manifest.files){const to=path.resolve(copy,f.path);assert(to.startsWith(copy+path.sep));assert.equal(sha(to),f.modifiedSHA256);if(f.originalSHA256){const from=path.join(e,'original',f.path);assert.equal(sha(from),f.originalSHA256);fs.copyFileSync(from,to);restored++;}else{fs.unlinkSync(to);removed++;}}
++const tests=run('ROLLBACK_TESTS',['--test','tests/naumi-im-gateway.test.mjs','tests/naumi-im-platforms.test.mjs']);assert.match(tests,/pass 21/);
++const behavior=run('ROLLBACK_BEHAVIOR',['--input-type=module','-e',`import assert from'node:assert/strict';import{IMStore}from'./plugins/naumi-enterprise/im-store.js';import{IM_PLATFORMS}from'./plugins/naumi-enterprise/im-platforms.js';const s=new IMStore('retained.sqlite');assert.deepEqual(Object.keys(IM_PLATFORMS).sort(),['dingtalk','feishu']);assert.equal(s.db.prepare('SELECT value FROM transport_state WHERE connection_id=? AND key=?').get('fixture','cursor').value,JSON.stringify('retained-cursor'));assert.equal(s.db.prepare('PRAGMA user_version').get().user_version,1);s.close();console.log('WEIXIN_ROLLBACK original_platforms=dingtalk,feishu cursor=retained schema=1 live_data=untouched');`]);
++for(const f of manifest.files){assert.equal(sha(path.join(root,f.path)),f.modifiedSHA256);const to=path.join(copy,f.path);if(f.originalSHA256)assert.equal(sha(to),f.originalSHA256);else assert(!fs.existsSync(to));}
++const result={status:'PASS',copy,baseline:manifest.baseline,restored,removed,tests:21,modifiedSource:'retained',liveDataTouched:false,installedRollback:false,behavior:behavior.trim()};
++fs.writeFileSync(path.join(e,'ROLLBACK_RESULT.json'),JSON.stringify(result,null,2)+'\n');
++console.log('WEIXIN_ROLLBACK_COPY restored='+restored+' removed='+removed+' tests=21 hashes=PASS');process.stdout.write(behavior);console.log('WEIXIN_ROLLBACK modified_source=retained installed_profile=untouched');
+diff --git a/modified/scripts/verify-weixin-native.mjs b/modified/scripts/verify-weixin-native.mjs
+new file mode 100644
+index 0000000..b0f3221
+--- /dev/null
++++ b/modified/scripts/verify-weixin-native.mjs
+@@ -0,0 +1,14 @@
++import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';import {spawn} from 'node:child_process';import {chromium} from '../desktop/node_modules/playwright/index.mjs';import {BotDirectory} from '../plugins/naumi-enterprise/bots.js';
++const root=process.cwd(),out=path.resolve('evidence/weixin-primary'),temp=path.join(root,'runtime/weixin-native-'+randomUUID()),home=path.join(temp,'home'),profile=path.join(home,'profiles/web');fs.mkdirSync(path.join(profile,'node_modules/@naumi'),{recursive:true});
++for(const[name,folder]of [['dsh-enterprise','naumi-enterprise'],['dsh-ui-layout','naumi-ui-layout'],['dsh-sidebar-browser','naumi-sidebar-browser']])fs.symlinkSync(path.join(root,'plugins',folder),path.join(profile,'node_modules/@naumi',name),'junction');fs.symlinkSync(path.join(root,'node_modules/@deepseek-ai'),path.join(profile,'node_modules/@deepseek-ai'),'junction');
++fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'weixin-native-test',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}}));fs.writeFileSync(path.join(home,'cordis.patch.yml'),'[]');fs.writeFileSync(path.join(profile,'cordis.patch.yml'),JSON.stringify([{id:'ui-settings-general',disabled:true}]));
++const dir=new BotDirectory(path.join(home,'naumi/bots.json'));await dir.create({sessionId:'weixin-fixture-primary',cwd:temp},{name:'主助手',kind:'agent',purpose:'微信接入验收'});await dir.choosePrimary(dir.list().bots[0].id,dir.list().revision);await dir.close();
++const sock=http.createServer();await new Promise(r=>sock.listen(0,'127.0.0.1',r));const port=sock.address().port;await new Promise(r=>sock.close(r));const base='http://127.0.0.1:'+port,checks=[],errors=[],prompts=[];let output='',browser;
++const child=spawn(process.execPath,[path.join(root,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'web','--host','127.0.0.1','--port',String(port),'--no-open'],{cwd:root,env:{...process.env,DSH_HOME:home,DSH_TELEMETRY_MODE:'DISABLED'},windowsHide:true});child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);const check=(name,ok)=>{assert(ok,name);checks.push(name);console.log('WEIXIN_NATIVE_PASS '+name);};
++try{let launch;for(let i=0;i<200;i++){launch=output.match(new RegExp(base.replaceAll('.','\\.')+'/?\\?token=[A-Za-z0-9_~.%-]+'))?.[0];if(launch)break;assert.equal(child.exitCode,null);await new Promise(r=>setTimeout(r,200));}assert(launch,'NATIVE_BOOT_TIMEOUT');const auth=await fetch(launch,{redirect:'manual'}),cookie=auth.headers.getSetCookie().map(s=>s.split(';')[0]).join('; '),headers={cookie,'Content-Type':'application/json','x-naumi-im':'1'};
++ const read=()=>fetch(base+'/naumi/im',{headers}).then(r=>r.json());check('owner_reads_primary_binding_target',!!(await read()).primaryBotId);check('unauthenticated_denied',(await fetch(base+'/naumi/im')).status===401);check('missing_intent_header_denied',(await fetch(base+'/naumi/im',{method:'POST',headers:{cookie,'Content-Type':'application/json'},body:JSON.stringify({action:'weixin-start',expectedRevision:0})})).status===403);
++ browser=await chromium.launch({headless:true,channel:'chrome'});const context=await browser.newContext({viewport:{width:1240,height:900},colorScheme:'light'}),page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(r.url().includes('/api/session/prompt'))prompts.push(r.url());});await page.goto(launch);await page.getByRole('button',{name:'连接微信',exact:true}).waitFor();check('independent_entry_when_settings_hidden',await page.getByRole('button',{name:'设置',exact:true}).count()===0);await page.getByRole('button',{name:'连接微信',exact:true}).click();const dialog=page.getByRole('dialog',{name:'微信连接',exact:true});await dialog.getByText('主助手',{exact:true}).waitFor();await dialog.screenshot({path:path.join(out,'weixin-entry.png')});check('primary_name_and_single_connect_action',await dialog.getByRole('button',{name:'连接主 Bot',exact:true}).isEnabled());
++ await dialog.getByRole('button',{name:'连接主 Bot',exact:true}).click();await dialog.getByRole('img',{name:'使用自己的微信扫码连接主 Bot'}).waitFor({timeout:25000});check('real_tencent_qr_rendered_locally',await dialog.locator('img').evaluate(el=>el.complete&&el.naturalWidth>100&&el.src.startsWith('data:image/svg+xml')));check('QR_not_loaded_from_external_image_host',await dialog.locator('img').getAttribute('src').then(s=>s.startsWith('data:')));await page.setViewportSize({width:360,height:760});check('mobile_dialog_fits',await dialog.evaluate(el=>el.getBoundingClientRect().width<=324));await page.keyboard.press('Escape');await dialog.waitFor({state:'detached'});check('escape_cancels_login_without_configuration_write',(await read()).connections.length===0);
++ await page.setViewportSize({width:1240,height:900});await page.getByRole('button',{name:'连接微信',exact:true}).click();await dialog.getByRole('button',{name:'连接主 Bot',exact:true}).waitFor();check('reopen_ready_to_connect',true);await page.keyboard.press('Escape');check('zero_page_errors',errors.length===0);check('zero_model_prompts',prompts.length===0);
++ fs.writeFileSync(path.join(out,'NATIVE_UI.json'),JSON.stringify({status:'PASS',checks,pageErrors:errors,modelCalls:0,actualTencentQRRequest:true,scanned:false,realWechatMessages:0,productionTouched:false},null,2));console.log('WEIXIN_NATIVE_COMPLETE checks='+checks.length+' page_errors=0 models=0 real_qr=1 scanned=0');
++}finally{await browser?.close();child.kill();if(child.exitCode===null)await new Promise(r=>child.once('close',r));fs.writeFileSync(path.join(out,'NATIVE_HOST.log'),output.replace(/token=[A-Za-z0-9_~.%-]+/g,'token=REDACTED'));}
+diff --git a/modified/tests/naumi-weixin.test.mjs b/modified/tests/naumi-weixin.test.mjs
+new file mode 100644
+index 0000000..e919006
+--- /dev/null
++++ b/modified/tests/naumi-weixin.test.mjs
+@@ -0,0 +1,15 @@
++import test from 'node:test';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';
++import {imFixture} from './helpers/im-gateway.mjs';import {weixinBase,weixinRequest} from '../plugins/naumi-enterprise/weixin-api.js';import weixin from '../plugins/naumi-enterprise/im-adapters/platforms/weixin.js';
++function fixture(t){const f=imFixture(t);f.directory.primary=()=>f.bots[0];f.service.platforms.weixin={connect:(_fields,_env,h)=>{f.handlers.set('weixin',h);h.onStatus({state:'ready'});return{stop(){},send:async(chat,payload)=>{f.sends.push({chat,payload});return{messageId:'wx-sent'};}}}};f.service.weixinLogin.request=async o=>o.path.includes('get_bot_qrcode')?{qrcode:'fixture-qr',qrcode_img_content:'https://ilinkai.weixin.qq.com/fixture'}:{status:'confirmed',ilink_bot_id:'bot-wx',ilink_user_id:'owner-wx',bot_token:'WX_PRIVATE',baseurl:'https://ilinkai.weixin.qq.com'};return f;}
++async function connect(f){const start=await f.command({action:'weixin-start'});await f.service.execute({action:'weixin-poll',loginId:start.login.loginId});return f.store.connections().find(c=>c.platform==='weixin');}
++test('QR confirmation stores only credential ref and binds scanned owner to actual primary, not named supervisor',async t=>{const f=fixture(t);f.bots[0].name='任意名字';const c=await connect(f),b=f.store.bindings()[0],view=await f.service.read();assert.equal(b.target.id,f.bots[0].id);assert.deepEqual(b.users,['owner-wx']);assert.equal(c.enabled,true);assert.equal(view.primaryBotId,f.bots[0].id);assert(!JSON.stringify(view).includes('WX_PRIVATE'));assert(!JSON.stringify(c).includes('WX_PRIVATE'));assert.equal(f.vault.get(c.secretRef),'WX_PRIVATE');});
++test('only scanning owner private messages reach original native runtime; outsiders/groups/pair attempts do not',async t=>{const f=fixture(t),c=await connect(f),base=f.event({chat:{key:'owner-wx',kind:'direct'},sender:{id:'owner-wx'}});for(const e of [{...base,sender:{id:'stranger'}},{...base,chat:{key:'group',kind:'group'},mentioned:true},{...base,text:'/pair ABCDEF123456ABCDEF123456'}])await f.service.receive(c.id,e);await f.service.kick();assert.equal(f.deliveries.length,0);await Promise.all(Array.from({length:5},()=>f.service.receive(c.id,base)));await f.service.kick();assert.equal(f.deliveries.length,1);assert.equal(f.deliveries[0].fromUser,true);assert.equal(f.deliveries[0].profile.model.model,'bot-a');assert.notEqual(f.deliveries[0].sessionId,'home-a');await assert.rejects(f.command({action:'binding',id:f.store.bindings()[0].id,active:true,users:['owner-wx','stranger']}),/OWNER_ONLY/);await assert.rejects(f.command({action:'pair',connectionId:c.id,chatKind:'direct',target:{kind:'bot',id:'bot-a'}}),/OWNER_ONLY/);});
++test('primary identity change or disabled connection rejects subsequent external commands',async t=>{const f=fixture(t),c=await connect(f);f.directory.primary=()=>f.bots[1];await f.service.receive(c.id,f.event({chat:{key:'owner-wx',kind:'direct'},sender:{id:'owner-wx'}}));await f.service.kick();assert.equal(f.deliveries.length,0);f.directory.primary=()=>f.bots[0];await f.command({action:'enable',id:c.id,enabled:false});await f.service.receive(c.id,f.event({chat:{key:'owner-wx',kind:'direct'},sender:{id:'owner-wx'}}));assert.equal(f.store.inputs().length,0);});
++test('QR cancellation, missing scanned identity and arbitrary redirect cannot persist credentials',async t=>{const f=fixture(t);let start=await f.command({action:'weixin-start'});await f.service.execute({action:'weixin-cancel',loginId:start.login.loginId});await assert.rejects(f.service.execute({action:'weixin-poll',loginId:start.login.loginId}),/EXPIRED/);start=await f.command({action:'weixin-start'});f.service.weixinLogin.request=async()=>({status:'confirmed',ilink_bot_id:'x',bot_token:'MISSING_OWNER'});await assert.rejects(f.service.execute({action:'weixin-poll',loginId:start.login.loginId}),/IDENTITY_REQUIRED/);f.service.weixinLogin.request=async()=>({status:'scaned_but_redirect',redirect_host:'127.0.0.1:1234'});await assert.rejects(f.service.execute({action:'weixin-poll',loginId:start.login.loginId}),/ORIGIN/);assert.equal(f.vault.size,0);assert.equal(f.store.connections().length,0);});
++test('concurrent QR polls share request and configuration CAS prevents stale login commit',async t=>{const f=fixture(t);const s=await f.command({action:'weixin-start'});let release,n=0;f.service.weixinLogin.request=async()=>{n++;await new Promise(r=>release=r);return{status:'confirmed',ilink_bot_id:'bot-wx',ilink_user_id:'owner-wx',bot_token:'WX_PRIVATE'};};const a=f.service.execute({action:'weixin-poll',loginId:s.login.loginId}),b=f.service.execute({action:'weixin-poll',loginId:s.login.loginId});await new Promise(r=>setImmediate(r));f.store.configure(f.store.revision(),()=>{});release();await assert.rejects(a,/CONFLICT/);await assert.rejects(b,/CONFLICT/);assert.equal(n,1);assert.equal(f.vault.size,0);});
++test('cancel while credential write awaits cleans secret and creates no connection/binding',async t=>{const f=fixture(t),s=await f.command({action:'weixin-start'});let release;f.credentials.set=async(k,v)=>{f.vault.set(k,v);await new Promise(r=>release=r);};const p=f.service.execute({action:'weixin-poll',loginId:s.login.loginId});await new Promise(r=>setImmediate(r));await f.service.execute({action:'weixin-cancel',loginId:s.login.loginId});release();await assert.rejects(p,/CANCELLED/);assert.equal(f.vault.size,0);assert.equal(f.store.bindings().length,0);});
++test('unsupported media gets explicit response and file notification never pretends file bytes were sent',async t=>{const f=fixture(t),c=await connect(f);const event=f.event({chat:{key:'owner-wx',kind:'direct'},sender:{id:'owner-wx'},unsupported:true});await f.service.receive(c.id,event);await f.service.kick();assert.equal(f.deliveries.length,0);assert(f.sends.some(s=>s.payload.text.includes('文字指令')));f.service.deliverFiles(f.store.inputs()[0],'fixture-file',[{path:'report.txt'}]);await f.service.kick();assert(f.sends.some(s=>s.payload.text.includes('Naumi 交付区')));assert(!f.store.outputs().some(o=>o.payload.type==='file'));});
++test('API preserves uint64 IDs, validates origin, bounds body and classifies expired token',async()=>{const r=await weixinRequest({path:'ilink/bot/getupdates',body:{},request:async(url,o)=>{assert.equal(new URL(url).hostname,'ilinkai.weixin.qq.com');assert.equal(o.headers['iLink-App-Id'],'bot');return new Response('{"ret":0,"message_id":18446744073709551615}');}});assert.equal(r.message_id,'18446744073709551615');for(const url of ['http://ilinkai.weixin.qq.com','https://weixin.qq.com.evil.test','https://127.0.0.1','https://ilinkai.weixin.qq.com:44'])assert.throws(()=>weixinBase(url),/ORIGIN/);await assert.rejects(weixinRequest({path:'x',body:{},request:async()=>new Response(JSON.stringify({ret:1,errcode:-14}))}),/LOGIN_EXPIRED/);await assert.rejects(weixinRequest({path:'x',request:async()=>new Response('x'.repeat(2*1024*1024+1))}),/LIMIT/);});
++test('adapter cursor commits after durable admission, filters other senders, and replies with persisted context',async()=>{const state=new Map(),requests=[],events=[];let polls=0,releasePoll;const env={loadState:k=>state.get(k),saveState:(k,v)=>state.set(k,v),fetch:async(url,opts)=>{const body=JSON.parse(opts.body);requests.push({url,body});if(url.endsWith('/sendmessage'))return new Response('{"ret":0,"message_id":999999999999999999}');if(polls++)return new Promise((resolve,reject)=>{releasePoll=()=>resolve(new Response('{"msgs":[]}'));opts.signal.addEventListener('abort',()=>reject(Error('aborted')),{once:true});});return new Response(JSON.stringify({msgs:[{message_id:'1',message_type:1,from_user_id:'stranger',context_token:'no',item_list:[{type:1,text_item:{text:'foreign'}}]},{message_id:'2',message_type:1,from_user_id:'owner',to_user_id:'bot',context_token:'context-secret',item_list:[{type:1,text_item:{text:'hello'}}]}],get_updates_buf:'next'}));}};let handle;handle=weixin.connect({baseURL:'https://ilinkai.weixin.qq.com',token:'private',ownerUserId:'owner',botId:'bot'},env,{onStatus(){},onMessage:async e=>{events.push(e);assert.equal(state.get('cursor'),undefined);}});for(let i=0;i<100&&state.get('cursor')!=='next';i++)await new Promise(r=>setTimeout(r,10));assert.equal(events.length,1);assert.equal(state.get('cursor'),'next');const sent=await handle.send({key:'owner',kind:'direct'},{text:'reply'});assert.equal(sent.messageId,'999999999999999999');assert.equal(requests.find(r=>r.url.endsWith('/sendmessage')).body.msg.context_token,'context-secret');await assert.rejects(handle.send({key:'stranger',kind:'direct'},{text:'bad'}),/OWNER/);handle.stop();});
++test('QR expiry and primary identity change reject a late confirmation without credentials',async t=>{const f=fixture(t);let clock=1000;f.service.weixinLogin.now=()=>clock;let s=await f.command({action:'weixin-start'});clock+=300001;await assert.rejects(f.service.execute({action:'weixin-poll',loginId:s.login.loginId}),/EXPIRED/);assert.equal(f.vault.size,0);s=await f.command({action:'weixin-start'});f.directory.primary=()=>f.bots[1];await assert.rejects(f.service.execute({action:'weixin-poll',loginId:s.login.loginId}),/PRIMARY_CHANGED/);assert.equal(f.vault.size,0);assert.equal(f.store.connections().length,0);});
++test('oversize owner text is classified unsupported before cursor admission, not retried forever',async()=>{const state=new Map(),events=[];let count=0;const env={loadState:k=>state.get(k),saveState:(k,v)=>state.set(k,v),fetch:async(_url,o)=>{if(count++)return new Promise((resolve,reject)=>o.signal.addEventListener('abort',()=>reject(Error('aborted')),{once:true}));return new Response(JSON.stringify({msgs:[{message_id:'oversize',message_type:1,from_user_id:'owner',context_token:'ctx',item_list:[{type:1,text_item:{text:'x'.repeat(8001)}}]}],get_updates_buf:'done'}));}};const handle=weixin.connect({baseURL:'https://ilinkai.weixin.qq.com',token:'fixture',ownerUserId:'owner',botId:'bot'},env,{onStatus(){},onMessage:async e=>events.push(e)});try{for(let i=0;i<100&&state.get('cursor')!=='done';i++)await new Promise(r=>setTimeout(r,10));assert.equal(events.length,1);assert.equal(events[0].unsupported,true);assert(events[0].text.length<8000);assert.equal(state.get('cursor'),'done');}finally{handle.stop();}});

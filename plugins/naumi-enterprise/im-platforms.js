@@ -1,5 +1,6 @@
 import dingtalk from './im-adapters/platforms/dingtalk.js';
 import feishu from './im-adapters/platforms/feishu.js';
+import weixin from './im-adapters/platforms/weixin.js';
 
 const fail=(code,permanent=true)=>{throw Object.assign(Error(code),{permanent});};
 async function json(response){const body=await response.json();if(!response.ok||body.code&&body.code!==0||body.errcode&&body.errcode!==0)throw Object.assign(Error('IM_PLATFORM_REJECTED'),{status:response.status,permanent:response.status!==429&&response.status<500});return body;}
@@ -9,8 +10,9 @@ export function platformEnvironment(platform,{request=fetch,WebSocket:Socket=Web
   const allowed=platform==='dingtalk'?['api.dingtalk.com','oapi.dingtalk.com']:['open.feishu.cn','open.larksuite.com'];
   return {WebSocket:Socket,config,log:{warn(){}},fetch:async(url,options={})=>{
     const parsed=new URL(url);
-    if(!config&&(parsed.protocol!=='https:'||parsed.username||parsed.password||!allowed.includes(parsed.hostname)))fail('IM_PLATFORM_ORIGIN');
-    const response=await request(url,{...options,redirect:'error',signal:options.signal?AbortSignal.any([options.signal,AbortSignal.timeout(15000)]):AbortSignal.timeout(15000)});
+    if(!config&&(parsed.protocol!=='https:'||parsed.username||parsed.password||!(platform==='weixin'?(parsed.hostname==='weixin.qq.com'||parsed.hostname.endsWith('.weixin.qq.com')):allowed.includes(parsed.hostname))))fail('IM_PLATFORM_ORIGIN');
+    const timeout=platform==='weixin'?45000:15000;
+    const response=await request(url,{...options,redirect:'error',signal:options.signal?AbortSignal.any([options.signal,AbortSignal.timeout(timeout)]):AbortSignal.timeout(timeout)});
     // Adapter image reads must not allocate an unbounded response body.
     if(parsed.pathname.includes('/resources/')){
       const reader=response.body?.getReader();if(!reader)fail('IM_RESOURCE_MISSING');const chunks=[];let size=0;
@@ -43,4 +45,4 @@ function withFiles(adapter){return {...adapter,async sendFile(fields,env,chat,{n
   const sent=await json(await env.fetch('https://api.dingtalk.com/v1.0/robot/'+(direct?'oToMessages/batchSend':'groupMessages/send'),{method:'POST',headers:{'x-acs-dingtalk-access-token':token,'content-type':'application/json'},body:JSON.stringify(body)}));
   return {messageId:sent.processQueryKey};
 }};}
-export const IM_PLATFORMS={dingtalk:withFiles(dingtalk),feishu:withFiles(feishu)};
+export const IM_PLATFORMS={dingtalk:withFiles(dingtalk),feishu:withFiles(feishu),weixin};

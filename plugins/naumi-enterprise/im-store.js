@@ -26,6 +26,7 @@ export class IMStore{
         CREATE INDEX IF NOT EXISTS outbox_state ON outbox(state);
         CREATE TABLE IF NOT EXISTS interactions(id TEXT PRIMARY KEY,binding_id TEXT NOT NULL,state TEXT NOT NULL,value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS binding_sessions(session_id TEXT PRIMARY KEY,bot_id TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS transport_state(connection_id TEXT NOT NULL,key TEXT NOT NULL,value TEXT NOT NULL,PRIMARY KEY(connection_id,key));
         PRAGMA user_version=1;`);
     }catch(error){this.db.close();throw error;}
   }
@@ -35,6 +36,8 @@ export class IMStore{
   connection(id){return parse(this.db.prepare('SELECT value FROM connections WHERE id=?').get(id));}
   connections(){return this.db.prepare('SELECT value FROM connections ORDER BY id').all().map(parse);}
   saveConnection(value){this.db.prepare('INSERT INTO connections VALUES(?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value').run(value.id,JSON.stringify(value));}
+  transportState(connectionId,key){return parse(this.db.prepare('SELECT value FROM transport_state WHERE connection_id=? AND key=?').get(connectionId,key));}
+  saveTransportState(connectionId,key,value){this.db.prepare('INSERT INTO transport_state VALUES(?,?,?) ON CONFLICT(connection_id,key) DO UPDATE SET value=excluded.value').run(connectionId,key,JSON.stringify(value));}
   binding(id){return parse(this.db.prepare('SELECT value FROM bindings WHERE id=?').get(id));}
   bindings(){return this.db.prepare('SELECT value FROM bindings ORDER BY id').all().map(parse);}
   findBinding(connectionId,chat){return parse(this.db.prepare('SELECT value FROM bindings WHERE connection_id=? AND chat_key=? AND kind=?').get(connectionId,chat.key,chat.kind));}
