@@ -38,6 +38,7 @@ class EnterpriseSession{
   const request=validateRequest(input,this.origin);if(this.running>=4)throw Error('ENTERPRISE_BUSY_NO_REPLAY');this.running++;
   try{
    const response=await this.session.fetch(this.origin+request.endpoint,{method:request.method,body:request.body,credentials:'include',redirect:'error',headers:{Accept:'application/json',...(request.method==='POST'?{'Content-Type':'application/json',Origin:this.origin}:{})},signal:AbortSignal.any([...(signal?[signal]:[]),AbortSignal.timeout(15000)])});
+   if(request.endpoint==='/api/digital-employees'&&request.method==='GET'&&response.status===404){await response.body?.cancel();return {status:503,body:JSON.stringify({code:'EMP_SERVICE_NOT_DEPLOYED'})};}
    if(!response.headers.get('content-type')?.toLowerCase().includes('application/json'))throw Error('ENTERPRISE_RESPONSE_INVALID');
    const reader=response.body?.getReader();if(!reader)throw Error('ENTERPRISE_RESPONSE_INVALID');let bytes=0;const chunks=[];
    try{for(;;){const {done,value}=await reader.read();if(done)break;bytes+=value.length;if(bytes>MAX_RESPONSE)throw Error('ENTERPRISE_RESPONSE_TOO_LARGE');chunks.push(Buffer.from(value));}}finally{await reader.cancel().catch(()=>{});}
