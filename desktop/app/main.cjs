@@ -67,7 +67,7 @@ app.whenReady().then(async()=>{
  ipcMain.handle('naumi:browser-bind',(e,value)=>{trusted(e);return guests.bind(e.sender,value);});
  ipcMain.handle('naumi:retry',e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');void boot();});
  ipcMain.handle('naumi:update-state',e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');return updates?updates.snapshot():{enabled:false,status:'disabled',currentVersion:app.getVersion(),version:null,notes:'',progress:null,error:null};});
- ipcMain.handle('naumi:runtime-info',e=>{ownFrame(e);return {clientVersion:app.getVersion(),backendMode:settings?.isolated?'managed':'external',backendURL:settings?.url??null};});
+ ipcMain.handle('naumi:runtime-info',e=>{ownFrame(e);return {clientVersion:app.getVersion(),backendMode:settings?.isolated||settings?.linkedService?'managed':'external',backendURL:settings?.url??null};});
  ipcMain.handle('naumi:update-check',async e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');return updates?updates.check():{ok:false,error:'UPDATE_FEED_UNCONFIGURED'};});
  ipcMain.handle('naumi:update-install',async e=>{if(e.sender!==window.webContents||e.senderFrame!==window.webContents.mainFrame)throw Error('INVALID_DESKTOP_SENDER');return updates?updates.install():{ok:false,error:'UPDATE_FEED_UNCONFIGURED'};});
  ipcMain.handle('naumi:connection-state',e=>{if(!localPage(e,['connect.html','startup.html']))trusted(e);if(!settings?.isolated)return {available:false};return {available:true,...workspaceSummary(identityUserData??app.getPath('userData'))};});
@@ -196,17 +196,25 @@ async function boot(){
    if(connection)enterprise??=new EnterpriseSession({origin:connection.origin,session:session.fromPartition('persist:naumi-enterprise-'+(identityRuntime?.active?.profileId??'legacy')+'-'+require('node:crypto').createHash('sha256').update(connection.origin).digest('hex'))});
   }
   if(identityRuntime?.active&&settings.isolated)await creation.activate(settings.home);
-  const nextBackend=await ensureBackend(settings);
+  if(settings.linkedService)installerState.registerProfile(path.resolve(process.resourcesPath,'..'),app.getPath('userData'));
+  const nextBackend=settings.linkedServiceCandidate?await require('./linked-service-migration.cjs').adopt(settings,{ensureBackend,stopBackend,launchFromLog:require('./backend.cjs').launchFromLog}):await ensureBackend(settings);
+  if(settings.linkedService)installerState.registerProfile(path.resolve(process.resourcesPath,'..'),app.getPath('userData'));
   backend=backend?.owned&&!nextBackend.owned&&backend.child.exitCode===null&&backend.child.signalCode===null?{...nextBackend,owned:true,child:backend.child}:nextBackend;
   const account=identityRuntime?.active?'identity-'+identityRuntime.active.profileId+'-'+settings.workspaceId:!settings.isolated||settings.workspaceId==='default'?'local':'enterprise-'+settings.workspaceId;
   if(!guests){guests=new Guests({hostURL:settings.url,account,timeout:process.env.NAUMI_TEST==='1'?Number(process.env.NAUMI_TEST_TIMEOUT??30000):30000});guests.attach(window);}
   else if(guests.hostURL!==settings.url||guests.account!==account)await guests.reset({hostURL:settings.url,account});
   if(!bridge)bridge=await startBridge({home:settings.home,guests,window,enterprise,market,maintenance:{blocked:maintenanceBlocked,perform:performMaintenance,quit:ticket=>{if(maintenanceBlocked()&&ticket===maintenanceTicket)app.quit();}}});
   editingConnection=false;await window.loadURL(backend.launchURL);
-  require('./profile.cjs').atomic(path.join(app.getPath('userData'),'desktop-runtime.json'),{version:1,pid:process.pid,clientVersion:app.getVersion(),executable:process.execPath,backendMode:settings.isolated?'managed':'external',backendURL:settings.url,readyAt:new Date().toISOString()});
+  const serviceVersion=await verifyServiceVersion();
+  require('./profile.cjs').atomic(path.join(app.getPath('userData'),'desktop-runtime.json'),{version:1,pid:process.pid,clientVersion:app.getVersion(),executable:process.execPath,backendMode:settings.isolated||settings.linkedService?'managed':'external',backendURL:settings.url,serviceVersion,serviceBundleId:settings.runtime?.bundleId??null,readyAt:new Date().toISOString()});
   if(loginAfterBoot){loginAfterBoot=false;openEnterpriseLogin();}
  }catch(error){await showStartup(error.message);}
  finally{booting=false;if(process.env.NAUMI_TEST==='1')globalThis.__naumiTest={window,guests,bridge,settings,backend,enterprise,get login(){return login;}};}
+}
+async function verifyServiceVersion(){
+ const response=await primarySession.fetch(settings.url+'/',{cache:'no-store',redirect:'error',signal:AbortSignal.timeout(5000)});if(!response.ok)throw Error('SERVICE_VERSION_UNKNOWN');
+ const html=await response.text(),version=html.match(/"productVersion"\s*:\s*"(\d+\.\d+\.\d+)"/)?.[1];if(!version)throw Error('SERVICE_VERSION_UNKNOWN');
+ if((settings.isolated||settings.linkedService)&&version!==app.getVersion())throw Error('SERVICE_VERSION_MISMATCH');return version;
 }
 function accountApp(){return {isPackaged:app.isPackaged,getPath:name=>name==='userData'&&identityUserData?identityUserData:app.getPath(name)};}
 async function assertAccountIdle(){
@@ -229,7 +237,7 @@ async function showUpdateNotice(snapshot){
 async function performMaintenance(action,ticket,{accountTransition=false}={}){
  if(maintenanceBlocked()&&maintenanceTicket!==ticket)throw Error('INSTALL_MAINTENANCE_BUSY');
  if(action==='resume'){if(backend&&settings)await maintenanceRequest(settings,'resume',ticket);maintenanceTicket=null;return;}
- if(booting||(connecting&&!accountTransition)||closing||!settings?.isolated||!backend?.owned)throw Error('INSTALL_ACTIVITY_UNKNOWN');
+ if(booting||(connecting&&!accountTransition)||closing||!(settings?.isolated||settings?.linkedService)||!backend?.owned)throw Error('INSTALL_ACTIVITY_UNKNOWN');
  maintenanceTicket=ticket;maintenanceUntil=Date.now()+30000;
  try{if((bridge?.runtime.queues.size??0)>0||(enterprise?.running??0)>0||market.running>0||cloud.running>0||cloudBusy>0)throw Error('INSTALL_OPERATIONS_IN_FLIGHT');await maintenanceRequest(settings,'quiesce',ticket);}
  catch(error){maintenanceTicket=null;throw error;}

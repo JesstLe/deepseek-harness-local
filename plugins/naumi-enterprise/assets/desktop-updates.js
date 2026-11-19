@@ -15,7 +15,7 @@ export function createUpdateStore(api) {
 
 export function updateView(state) {
   const status=state.status;
- let title=state.installPhase==='preparing'?'正在保存并准备更新':state.installPhase==='restarting'?'正在重启客户端':status==='loading'?'正在读取版本':!state.enabled?'安装版支持更新':status==='checking'?'正在检查更新':status==='downloading'?'正在下载更新':status==='ready'?'更新已就绪':state.lastChecked?'客户端已是最新版本':'检查更新';
+ let title=state.installPhase==='preparing'?'正在保存并准备更新':state.installPhase==='restarting'?'正在重启客户端':status==='loading'?'正在读取版本':!state.enabled?'安装版支持更新':status==='checking'?'正在检查更新':status==='downloading'?'正在下载更新':status==='ready'?'更新已就绪':state.lastChecked?(state.serviceVersion&&state.currentVersion!==state.serviceVersion?'本地服务待同步':state.serviceVersion?'已是最新版本':'客户端已是最新版本'):'检查更新';
  if(state.error)title=state.error==='UPDATE_ACTIVITY_UNKNOWN'?'未确认连接状态，请重试':state.error==='UPDATE_INSTALL_BUSY'?'当前操作未结束，稍后更新':state.error==='UPDATE_FEED_UNCONFIGURED'?'安装版支持更新':state.error==='UPDATE_INSTALL_FAILED'?'安装未完成，请重试':state.error==='UPDATE_DOWNLOAD_FAILED'?'下载失败，请重试':'检查失败，请重试';
  return {title,busy:!!state.installPhase||['loading','checking','downloading'].includes(status),percent:Math.round(Math.max(0,Math.min(100,Number(state.progress?.percent)||0))),ready:status==='ready'};
 }
@@ -24,7 +24,7 @@ export function installDesktopUpdatesUI(ctx,React,createPortal,api=globalThis.na
   if(!api?.updateState||!api?.checkUpdates||!api?.onUpdateState)return()=>{};
  const h=React.createElement,store=createUpdateStore(api),backendVersion=globalThis.__NAUMI__?.productVersion;
   function Updates({wide}) {
-    const state=React.useSyncExternalStore(store.subscribe,store.getSnapshot),view=updateView(state),[open,setOpen]=React.useState(false),[position,setPosition]=React.useState({left:16,bottom:60});
+    const state=React.useSyncExternalStore(store.subscribe,store.getSnapshot),view=updateView({...state,serviceVersion:backendVersion}),[open,setOpen]=React.useState(false),[position,setPosition]=React.useState({left:16,bottom:60});
     const trigger=React.useRef(null),panel=React.useRef(null),id=React.useId();
     const close=()=>{setOpen(false);trigger.current?.focus();};
     React.useEffect(()=>{
