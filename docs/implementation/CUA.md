@@ -36,3 +36,6 @@
 - 真实 WinForms 隔离窗口点击、输入、Ctrl+A KeyDown（fixture 明确定义选全）、End、滚动和拖拽均产生 native 事件及前后 PNG；背景快捷键/滚轮得到 background_unavailable 后，测试显式重新观察并前台执行。不是通用所有应用验收。
 - 实测暴露并修复：原生 schema 子集拒绝 min/max 关键字，改为 zod 执行期约束；原生 Cordis route 服务需显式 inject；PowerShell 5.1 继承 PS7 ModulePath 导致签名检查加载失败，构建 probe 已按系统模块根修正。
 - CUA 截图准入失败将撤销 observation 并返回错误，不留下仅文本提示下可继续操作的 token。
+
+## 真实旧服务升级补充
+旧服务的代码同步器拒绝任意多余文件。CUA 删除了旧 agent-desktop.js 与两份旧 skill reference，实际旧服务升级 plan 因此需要显式退役，不能仅测干净安装。service-code.cjs 新增仅针对 Naumi enterprise + CUA 源文件 + 0.4.4 及以上版本的三文件 SHA256 白名单；改动过的旧代码、其他插件与未知文件继续拒绝。删除参与原代码事务、备份、崩溃恢复与回滚，版本标签最后写入。新测试覆盖成功退役、部分删除失败恢复、手改文件保护和不同插件拒绝；桌面集中回归 181/181 exit0。对真实原 0.4.3 服务仅只读计算升级计划：14 项变更、3 项精确退役、2 项既有无效备份保留。
