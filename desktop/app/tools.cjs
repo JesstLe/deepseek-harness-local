@@ -54,8 +54,8 @@ class BrowserTools {
   return info(entry);
  }
 }
-async function startBridge({home,guests,window,enterprise,market,maintenance}){
- const token=randomBytes(32).toString('hex'),runtime=new BrowserTools(guests,window);
+async function startBridge({home,guests,window,enterprise,market,maintenance,browserConnections}){
+ const token=randomBytes(32).toString('hex'),native=new BrowserTools(guests,window),runtime=browserConnections?await browserConnections.start(native):native;
  const file=path.join(home,'naumi-desktop-bridge.json');
  const server=http.createServer(async(req,res)=>{
   res.setHeader('Content-Type','application/json');res.setHeader('Cache-Control','no-store');
@@ -87,6 +87,6 @@ async function startBridge({home,guests,window,enterprise,market,maintenance}){
  });
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
  fs.mkdirSync(home,{recursive:true});fs.writeFileSync(file,JSON.stringify({version:1,port:server.address().port,token,pid:process.pid,...(enterprise?{enterprise:enterprise.descriptor()}:{}),...(market?.descriptor()?{market:market.descriptor()}:{})}),{mode:0o600});
- return {runtime,close:async()=>{server.closeAllConnections();await new Promise(r=>server.close(r));try{if(JSON.parse(fs.readFileSync(file,'utf8')).token===token)fs.unlinkSync(file);}catch{}}};
+ return {runtime,close:async()=>{await browserConnections?.close();server.closeAllConnections();await new Promise(r=>server.close(r));try{if(JSON.parse(fs.readFileSync(file,'utf8')).token===token)fs.unlinkSync(file);}catch{}}};
 }
 module.exports={BrowserTools,startBridge,snapshotScript};
