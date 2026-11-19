@@ -83,6 +83,6 @@ test('native update result is client-only and service version stays visible when
   const api={onUpdateState:()=>()=>{},checkUpdates:async()=>({ok:true}),updateState:async()=>({enabled:true,status:'idle',currentVersion:'0.3.9',lastChecked:1})};
   const off=installDesktopUpdatesUI({slots:{inject:(_name,fn)=>fn(),register:(_options,fn)=>{component=fn;return()=>{};}}},React,v=>v,api);await tick();
   const tree=component({wide:true}),strings=[];function visit(v){if(typeof v==='string')strings.push(v);else if(Array.isArray(v))v.forEach(visit);else if(v?.children)visit(v.children);}visit(tree);
-  assert(strings.includes('客户端已是最新版本'));assert(strings.includes('客户端 v0.3.9'));assert(strings.includes('服务 v'+serviceVersion));off();
+  assert(strings.includes(serviceVersion==='0.3.9'?'已是最新版本':'本地服务待同步'));assert(strings.includes('客户端 v0.3.9'));assert(strings.includes('服务 v'+serviceVersion));off();
  }}finally{if(prior===undefined)delete globalThis.__NAUMI__;else globalThis.__NAUMI__=prior;if(document===undefined)delete globalThis.document;else globalThis.document=document;}
 });

@@ -14,7 +14,15 @@ function localSettings(app,{resourcesPath=process.resourcesPath,environment=proc
   root=path.resolve(root);const c=JSON.parse(fs.readFileSync(path.join(root,'config/local.json'),'utf8'));
   if(!['127.0.0.1','localhost'].includes(c.host)||!Number.isInteger(c.port)||c.port<1||c.port>65535)throw Error('INVALID_LOCAL_BACKEND');
   if(environment.NAUMI_ROOT&&environment.NAUMI_TEST!=='1'){fs.mkdirSync(path.dirname(link),{recursive:true});fs.writeFileSync(link,JSON.stringify({root},null,2)+'\n');}
-  return {root,home:environment.NAUMI_DSH_HOME??c.home,url:environment.NAUMI_HOST_URL??`http://${c.host}:${c.port}`,node:environment.NAUMI_NODE??'node.exe',logDir:path.join(root,'logs'),isolated:false};
+  const settings={root,home:environment.NAUMI_DSH_HOME??c.home,url:environment.NAUMI_HOST_URL??`http://${c.host}:${c.port}`,node:environment.NAUMI_NODE??'node.exe',logDir:path.join(root,'logs'),isolated:false};
+  if(app.isPackaged&&!environment.NAUMI_ROOT){const selected=require('./linked-service.cjs').readLink(userData);
+   const releaseRoot=path.join(resourcesPath,'backend'),runtime=profile.runtimeReference(releaseRoot);if(runtime.version!==app.getVersion())throw Error('SERVICE_CLIENT_RELEASE_MISMATCH');
+   if(selected?.serviceUpdates==='bundled'){
+    if(!profile.samePath(settings.home,selected.home))throw Error('SERVICE_LINK_HOME_CHANGED');
+    Object.assign(settings,{linkedService:true,releaseRoot,runtime,identity:profile.identity(settings.home),node:path.join(releaseRoot,'node.exe'),workspace:settings.root});
+   }else Object.assign(settings,{linkedServiceCandidate:true,releaseRoot,runtime,linkFile:link});
+  }
+  return settings;
  }
  root=path.join(resourcesPath,'backend');const runtime=profile.runtimeReference(root),selected=currentWorkspace(userData),home=selected.home;
  const legacyAdoption=fs.existsSync(path.join(home,'profiles/web/package.json'))&&!profile.exists(path.join(home,'desktop-profile.json'));
@@ -75,23 +83,32 @@ function createQuitGate({shutdown,onReady,onError}){
  return {prepare,reset(){if(phase==='stopping')throw Error('QUIT_PREPARATION_ACTIVE');phase='idle';flight=null;quitting=false;},beforeQuit(event){if(phase==='ready')return;event.preventDefault();if(quitting)return;quitting=true;prepare().then(onReady,onError);},settled:()=>flight??Promise.resolve(),get phase(){return phase;}};
 }
 async function ensureBackend(settings,{fetcher=fetch,startTimeoutMs=90000,pollMs=350,portRetries=2}={}){
- if(settings.isolated){
+ if(settings.linkedService&&!settings.serviceLease){const release=require('./linked-service.cjs').acquire(settings.root,'desktop-linked-update');settings.serviceLease=true;try{return await ensureBackend(settings,{fetcher,startTimeoutMs,pollMs,portRetries});}finally{delete settings.serviceLease;release();}}
+ if(settings.isolated||settings.linkedService){
   settings.url=localURL(settings.url);profile.profileState(settings.home,settings.identity.id);const receipt=profile.runtimeReceipt(settings.home,settings.identity.id);
   const candidate={...settings,url:receipt?`http://127.0.0.1:${receipt.port}`:settings.url},remote=await probeIdentity(candidate,{fetcher});
   if(remote){
-   if(remote.bundleId!==settings.runtime.bundleId)throw Error('BACKEND_UPGRADE_REQUIRES_STOP');
+   if(remote.bundleId!==settings.runtime.bundleId){
+    if(!settings.linkedService)throw Error('BACKEND_UPGRADE_REQUIRES_STOP');
+    // Reuse the signed admission latch. Running/unknown work is deferred, never cancelled.
+    const ticket=randomBytes(32).toString('hex');await maintenanceRequest(candidate,'quiesce',ticket);
+    try{await stopInstance(candidate,remote.pid,remote.bundleId);}catch(e){await maintenanceRequest(candidate,'resume',ticket).catch(()=>{});throw e;}
+    return ensureBackend(settings,{fetcher,startTimeoutMs,pollMs,portRetries});
+   }
+   if(settings.linkedService){const p=require('./linked-service.cjs').plan({root:settings.root,home:settings.home,releaseRoot:settings.releaseRoot,version:settings.runtime.version});if(p.changed)throw Error('SERVICE_ACTIVE_CODE_DRIFT');}
    settings.url=candidate.url;const launchURL=await waitBootstrap(settings,remote.pid,{timeoutMs:startTimeoutMs,pollMs});saveReceipt(settings,{pid:remote.pid,port:Number(new URL(settings.url).port),bundleId:remote.bundleId,phase:'ready',runId:receipt?.runId??randomUUID()});
    return {launchURL,owned:true,reattached:true,instanceVerified:true,stop:options=>stopInstance(settings,remote.pid,remote.bundleId,options)};
   }
   if(receipt&&(receipt.pid===null||alive(receipt.pid)))throw Error(receipt.pid===null?'PROFILE_BACKEND_START_UNKNOWN':'PROFILE_BACKEND_UNREACHABLE');
   if(await portTaken(settings.url)){
+   if(settings.linkedService)throw Error('LINKED_SERVICE_REQUIRES_STOP');
    if(settings.legacyAdoption&&!receipt&&await logoProbe(settings,{fetcher}))throw Error('LEGACY_BACKEND_REQUIRES_STOP');
    settings.url='http://127.0.0.1:'+await freePort();
   }
-  profile.prepareProfile(settings);
+  if(settings.linkedService)require('./linked-service.cjs').synchronize(settings);else profile.prepareProfile(settings);
   settings.workspace??=path.join(settings.home,'workspace');
   if(profile.exists(settings.workspace)&&(!fs.lstatSync(settings.workspace).isDirectory()||fs.lstatSync(settings.workspace).isSymbolicLink()))throw Error('PROFILE_WORKSPACE_UNMANAGED');
-  await require(path.join(settings.root,'plugins/naumi-enterprise/managed-workspace.cjs')).createManagedWorkspace(settings.workspace,{parent:settings.home});
+  if(!settings.linkedService)await require(path.join(settings.root,'plugins/naumi-enterprise/managed-workspace.cjs')).createManagedWorkspace(settings.workspace,{parent:settings.home});
  }else{
   if(await logoProbe(settings,{fetcher}))return {launchURL:launchFromLog(settings),owned:false};
   if(await portTaken(settings.url))throw Error('LOCAL_PORT_OCCUPIED');
@@ -101,32 +118,32 @@ async function ensureBackend(settings,{fetcher=fetch,startTimeoutMs=90000,pollMs
  const target=new URL(settings.url),runId=randomUUID(),env={...process.env,PATH:path.join(settings.root,'bin')+path.delimiter+settings.root+path.delimiter+(process.env.PATH??''),DSH_HOME:settings.home,DSH_TELEMETRY_MODE:'DISABLED'};
  delete env.ELECTRON_RUN_AS_NODE;delete env.NAUMI_DESKTOP_INSTANCE_ID;delete env.NAUMI_DESKTOP_BUNDLE_ID;delete env.NAUMI_ENTERPRISE_ORIGIN;
  const base={pid:null,port:Number(target.port),bundleId:settings.runtime?.bundleId,phase:'starting',runId};
- if(settings.isolated){env.NAUMI_DESKTOP_MAINTENANCE='1';env.NAUMI_DESKTOP_INSTANCE_ID=settings.identity.id;env.NAUMI_DESKTOP_BUNDLE_ID=settings.runtime.bundleId;if(settings.enterpriseOrigin)env.NAUMI_ENTERPRISE_ORIGIN=settings.enterpriseOrigin;}
+ if(settings.isolated||settings.linkedService){env.NAUMI_DESKTOP_MAINTENANCE='1';env.NAUMI_DESKTOP_INSTANCE_ID=settings.identity.id;env.NAUMI_DESKTOP_BUNDLE_ID=settings.runtime.bundleId;if(settings.enterpriseOrigin)env.NAUMI_ENTERPRISE_ORIGIN=settings.enterpriseOrigin;}
  let out,err;try{out=fs.openSync(path.join(settings.logDir,'server.out.log'),'w');err=fs.openSync(path.join(settings.logDir,'server.err.log'),'w');}catch(e){if(out!==undefined)fs.closeSync(out);throw e;}
  let child;
  // Windows libuv's non-detached child job dies with the GUI. Standalone workers have an
  // independent lifetime, and are stopped only through their proven instance on normal quit.
- try{if(settings.isolated)saveReceipt(settings,base);child=spawn(settings.node,[entry,'web','--host','127.0.0.1','--port',target.port,'--no-open'],{cwd:settings.isolated?settings.workspace:settings.root,env,detached:!!settings.isolated,windowsHide:true,stdio:['ignore',out,err]});}
- catch(e){if(settings.isolated)clearReceipt(settings,runId);throw e;}
+ try{if(settings.isolated||settings.linkedService)saveReceipt(settings,base);child=spawn(settings.node,[entry,'web','--host','127.0.0.1','--port',target.port,'--no-open'],{cwd:settings.isolated?settings.workspace:settings.root,env,detached:!!(settings.isolated||settings.linkedService),windowsHide:true,stdio:['ignore',out,err]});}
+ catch(e){if(settings.isolated||settings.linkedService)clearReceipt(settings,runId);throw e;}
  finally{fs.closeSync(out);fs.closeSync(err);}
- let error;child.on('error',e=>error=e);const backend={owned:true,child,instanceVerified:!!settings.isolated};
+ let error;child.on('error',e=>error=e);const backend={owned:true,child,instanceVerified:!!(settings.isolated||settings.linkedService)};
  try{
-  if(settings.isolated&&child.pid)saveReceipt(settings,{...base,pid:child.pid});
+  if((settings.isolated||settings.linkedService)&&child.pid)saveReceipt(settings,{...base,pid:child.pid});
   const deadline=Date.now()+startTimeoutMs;
   while(Date.now()<deadline){
    if(error||child.exitCode!==null||child.signalCode!==null)throw Error('BACKEND_START_FAILED');
-   const remote=settings.isolated?await probeIdentity(settings,{fetcher}):await logoProbe(settings,{fetcher});
+   const remote=settings.isolated||settings.linkedService?await probeIdentity(settings,{fetcher}):await logoProbe(settings,{fetcher});
    if(remote){
-    if(settings.isolated&&(remote.pid!==child.pid||remote.bundleId!==settings.runtime.bundleId))throw Error('BACKEND_IDENTITY_CONFLICT');
-    const launchURL=settings.isolated?await waitBootstrap(settings,child.pid,{timeoutMs:Math.max(1,deadline-Date.now()),pollMs}):launchFromLog(settings);
-    if(settings.isolated)saveReceipt(settings,{...base,pid:child.pid,phase:'ready'});
-    return {...backend,launchURL,...(settings.isolated?{stop:options=>stopInstance(settings,child.pid,settings.runtime.bundleId,options)}:{})};
+    if((settings.isolated||settings.linkedService)&&(remote.pid!==child.pid||remote.bundleId!==settings.runtime.bundleId))throw Error('BACKEND_IDENTITY_CONFLICT');
+    const launchURL=settings.isolated||settings.linkedService?await waitBootstrap(settings,child.pid,{timeoutMs:Math.max(1,deadline-Date.now()),pollMs}):launchFromLog(settings);
+    if(settings.isolated||settings.linkedService)saveReceipt(settings,{...base,pid:child.pid,phase:'ready'});
+    return {...backend,launchURL,...((settings.isolated||settings.linkedService)?{stop:options=>stopInstance(settings,child.pid,settings.runtime.bundleId,options)}:{})};
    }
    await delay(pollMs);
   }
   throw Error('BACKEND_START_TIMEOUT');
  }catch(e){
-  if(child.pid)await stopBackend(backend);if(settings.isolated)clearReceipt(settings,runId);
+  if(child.pid)await stopBackend(backend);if(settings.isolated||settings.linkedService)clearReceipt(settings,runId);
   let occupied=false;try{occupied=/EADDRINUSE/.test(fs.readFileSync(path.join(settings.logDir,'server.err.log'),'utf8'));}catch{}
   if(settings.isolated&&e.message==='BACKEND_START_FAILED'&&occupied&&portRetries>0){settings.url='http://127.0.0.1:'+await freePort();return ensureBackend(settings,{fetcher,startTimeoutMs,pollMs,portRetries:portRetries-1});}
   throw e;

@@ -8,6 +8,11 @@ try {
 try { $ownsMutex = $startupMutex.WaitOne(120000) } catch [Threading.AbandonedMutexException] { $ownsMutex = $true }
 if (!$ownsMutex) { throw 'Another local Harness start operation is still active.' }
 $config = Get-Content -Raw (Join-Path $root 'config/local.json') | ConvertFrom-Json
+$managed = Join-Path $config.home 'desktop-linked-service.json'
+if (Test-Path -LiteralPath $managed) {
+    Write-Output 'DESKTOP_MANAGED_SERVICE: Open Naumi to start or update this local service.'
+    exit 0
+}
 $entry = Join-Path $root 'node_modules/@deepseek-ai/dsh/lib/bin.js'
 $pidFile = Join-Path $root 'runtime/server.pid'
 $url = "http://$($config.host):$($config.port)"

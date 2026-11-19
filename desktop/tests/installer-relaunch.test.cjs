@@ -1,10 +1,10 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os');
 const {begin,check}=require('../app/installer-relaunch.cjs');
-const read=file=>fs.readFileSync(path.join(__dirname,'..',file),'utf8');
+const read=file=>fs.readFileSync(path.join(__dirname,'..',file),'utf8').replaceAll('\r\n','\n');
 function fixture(){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-launch-proof-')),root=path.join(dir,'Naumi'),userData=path.join(dir,'profile'),file=path.join(dir,'proof.json');fs.mkdirSync(root);fs.mkdirSync(userData);
- const time=Date.now()-5000,receipt={version:1,pid:123,clientVersion:'0.4.1',executable:path.join(root,'Naumi.exe'),readyAt:new Date(time+2000).toISOString()},process={pid:123,exe:receipt.executable,created:new Date(time+1000).toISOString()};
+ const time=Date.now()-5000,receipt={version:1,pid:123,clientVersion:'0.4.1',serviceVersion:'0.4.1',executable:path.join(root,'Naumi.exe'),readyAt:new Date(time+2000).toISOString()},process={pid:123,exe:receipt.executable,created:new Date(time+1000).toISOString()};
  begin(file,root,'0.4.1',{now:time,userData});
  return {dir,root,userData,file,time,receipt,process,write(r=receipt){fs.writeFileSync(path.join(userData,'desktop-runtime.json'),JSON.stringify(r));},close(){fs.rmSync(dir,{recursive:true,force:true});}};
 }
@@ -34,3 +34,5 @@ test('maintenance probes are hidden at process creation and never route through 
  assert(!inventory.includes('shell:true'));assert(ui.includes('nsExec::ExecToStack'));assert(hook.includes('nsExec::ExecToStack'));
  const qa=read('scripts/verify-update-friendly.mjs');assert.match(qa,/ExecShell "open" "\$appExe".+SW_HIDE/);
 });
+
+test("a new client with a stale or unknown service never proves update complete",()=>{const f=fixture();try{for(const serviceVersion of [undefined,'0.3.9']){f.write({...f.receipt,serviceVersion});assert.equal(check(f.file,{inspect:()=>[f.process]}),false);}}finally{f.close();}});

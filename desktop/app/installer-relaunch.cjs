@@ -12,7 +12,7 @@ function check(file,{inspect=state.inventory,now=Date.now()}={}){
  const proof=state.plain(file);
  if(!proof||proof.version!==1||!path.isAbsolute(proof.root)||!path.isAbsolute(proof.userData)||!Number.isFinite(proof.startedAt)||proof.startedAt>now)throw Error('UPDATE_PROOF_INVALID');
  const r=state.plain(path.join(proof.userData,'desktop-runtime.json'));
- if(!r||r.version!==1||r.clientVersion!==proof.targetVersion||!Number.isInteger(r.pid)||r.pid<=0||typeof r.executable!=='string'||!Number.isFinite(Date.parse(r.readyAt))||Date.parse(r.readyAt)<proof.startedAt)return false;
+ if(!r||r.version!==1||r.clientVersion!==proof.targetVersion||r.serviceVersion!==proof.targetVersion||!Number.isInteger(r.pid)||r.pid<=0||typeof r.executable!=='string'||!Number.isFinite(Date.parse(r.readyAt))||Date.parse(r.readyAt)<proof.startedAt)return false;
  const expected=state.canonical(path.join(proof.root,'Naumi.exe'));
  if(state.canonical(r.executable)!==expected)return false;
  const p=inspect().find(p=>p.pid===r.pid);

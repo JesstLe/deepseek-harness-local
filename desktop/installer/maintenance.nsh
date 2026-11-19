@@ -84,6 +84,9 @@
   File /oname=installer-relaunch.cjs "${NAUMI_HELPER_DIR}\installer-relaunch.cjs"
   File /oname=profile.cjs "${NAUMI_HELPER_DIR}\profile.cjs"
   File /oname=backend.cjs "${NAUMI_HELPER_DIR}\backend.cjs"
+  File /oname=linked-service-migration.cjs "${NAUMI_HELPER_DIR}\linked-service-migration.cjs"
+  File /oname=linked-service.cjs "${NAUMI_HELPER_DIR}\linked-service.cjs"
+  File /oname=service-code.cjs "${NAUMI_HELPER_DIR}\service-code.cjs"
   File /oname=workspaces.cjs "${NAUMI_HELPER_DIR}\workspaces.cjs"
   File /oname=enterprise.cjs "${NAUMI_HELPER_DIR}\enterprise.cjs"
 !macroend
