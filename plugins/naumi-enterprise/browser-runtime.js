@@ -23,7 +23,7 @@ export function resolveBrowserRuntime({root,platform=process.platform,arch=proce
   return {root,app,command:path.join(app,BROWSER_LOCK.browserVersion,'ego-browser.exe'),version:BROWSER_LOCK.browserVersion};
 }
 
-export const BROWSER_ACTIONS=['state','navigate','back','forward','reload','resize','click','fill','press','text','wheel','snapshot','tabs','select','dialog','finish'];
+export const BROWSER_ACTIONS=['state','navigate','back','forward','reload','resize','click','fill','press','text','wheel','snapshot','tabs','select','dialog','finish','accounts','login'];
 export function browserURL(value){
   if(typeof value!=='string'||value.length>8192)throw Error('INVALID_BROWSER_URL');
   const input=value.trim();if(input==='about:blank')return input;
@@ -34,14 +34,15 @@ export function browserURL(value){
 export function validateBrowserInput(input){
   if(!input||typeof input!=='object'||!BROWSER_ACTIONS.includes(input.action))throw Error('INVALID_BROWSER_ACTION');
   const out={action:input.action};
-  for(const key of ['selector','text','key','label'])if(input[key]!==undefined){if(typeof input[key]!=='string'||input[key].length>(key==='text'?16384:4096))throw Error('INVALID_BROWSER_'+key.toUpperCase());out[key]=input[key];}
+  for(const key of ['selector','text','key','label','accountId','usernameSelector','passwordSelector'])if(input[key]!==undefined){if(typeof input[key]!=='string'||input[key].length>(key==='text'?16384:4096))throw Error('INVALID_BROWSER_'+key.toUpperCase());out[key]=input[key];}
   for(const key of ['x','y','deltaX','deltaY','width','height','modifiers'])if(input[key]!==undefined){if(!Number.isFinite(input[key]))throw Error('INVALID_BROWSER_NUMBER');out[key]=input[key];}
   if(input.action==='navigate')out.url=browserURL(input.url);
   if(input.action==='resize'&&(!Number.isInteger(out.width)||out.width<200||out.width>2560||!Number.isInteger(out.height)||out.height<120||out.height>1600))throw Error('INVALID_BROWSER_VIEWPORT');
   if(input.action==='click'&&!out.selector&&(!(out.x>=0&&out.x<=2560)||!(out.y>=0&&out.y<=1600)))throw Error('INVALID_BROWSER_POINT');
   if(input.action==='fill'&&(!out.selector||out.text===undefined))throw Error('INVALID_BROWSER_FILL');
   if(input.action==='press'&&(!out.key||out.key.length>64))throw Error('INVALID_BROWSER_KEY');
-  if(input.action==='select'&&!/^p\d+$/.test(out.label??''))throw Error('INVALID_BROWSER_PAGE');
+  if(input.action==='select'&&!/^p(?:\d+|e\d+)$/.test(out.label??''))throw Error('INVALID_BROWSER_PAGE');
+  if(input.action==='login'&&(!/^[a-f0-9-]{36}$/i.test(out.accountId??'')||!out.usernameSelector||!out.passwordSelector))throw Error('INVALID_BROWSER_LOGIN');
   if(input.action==='dialog'){if(!['accept','dismiss'].includes(input.text))throw Error('INVALID_BROWSER_DIALOG');}
   out.frame=input.frame===true;return out;
 }

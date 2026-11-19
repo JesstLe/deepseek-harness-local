@@ -1,0 +1,1374 @@
+diff --git a/.gitignore b/.gitignore
+index f1644b9..ac9bb8c 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -23,3 +23,9 @@ evidence/desktop-lifecycle/pack-*/
+ /evidence/employee-experience/rollback-copy-*/
+ /evidence/employee-experience/pack-*/
+ /evidence/employee-experience/runtime-prepare-*/
++
++# CUA pinned build cache and rollback fixtures
++/plugins/naumi-enterprise/third-party/cua-driver/win32-x64/
++/evidence/cua-unified/upstream/
++/evidence/cua-unified/rollback-copy*/
++/.cua-*
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 18e1e60..9c8afe6 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,12 @@
+ # Naumi 桌面端更新日志
+ 
++## 0.4.4 - 2026-11-19
++
++- 桌面操作统一使用 CUA，移除旧 agent-desktop 默认工具。
++- 多 Bot 共用桌面占用锁，按截图坐标执行并返回操作后截图。
++- 过期截图、操作取消或回执不确定时先重新观察，不自动重放操作。
++- 保留原会话、Bot、模型及企业配置，专用浏览器、Blender 和 Naumi 创作接口不变。
++
+ ## 0.4.3
+ 
+ - 接入47企业协作正式地址，保留原工作台会话、Bot与模型配置。
+diff --git a/desktop/app/service-code.cjs b/desktop/app/service-code.cjs
+index 1f723c5..824104d 100644
+--- a/desktop/app/service-code.cjs
++++ b/desktop/app/service-code.cjs
+@@ -4,18 +4,27 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
+ function inventory(root){const result={};function visit(dir){for(const e of fs.readdirSync(dir,{withFileTypes:true})){const file=path.join(dir,e.name);assert(!e.isSymbolicLink(),'LINKED_PLUGIN_REJECTED');if(e.isDirectory())visit(file);else if(e.isFile())result[path.relative(root,file).replaceAll('\\','/')]=hash(fs.readFileSync(file));}}visit(root);return result;}
+ const hash=b=>createHash('sha256').update(b).digest('hex');
+ const INERT_EXTRAS=['assets/bot-chat-model.js.queue-stop-before','assets/bot-groups.js.queue-stop-before'];
++// Exact files retired by the 0.4.4 CUA migration. Never classify user/unknown code as removable.
++const CUA_RETIRED={
++ 'agent-desktop.js':'2cb1839c9ae5350bc48aa8da5d7fbfa3156a0a512bcf239f7e0cf50da2a339d3',
++ 'skills/naumi-desktop/references/desktop-1.3.1.md':'abd913be10552c028e461e0a45c20e3734a7a1e5251fc2f9ef6fd63fdd606a6e',
++ 'skills/naumi-desktop/references/platform-1.3.1.md':'babc8d3f0583afc3f41b3b84cc775d3be24010043b57966755fcf9bda8880073'
++};
++const hashAt=file=>fs.existsSync(file)?hash(fs.readFileSync(file)):null;
+ function versionAt(root){if(!fs.existsSync(path.join(root,'product-version.js')))return null;const text=fs.readFileSync(path.join(root,'product-version.js'),'utf8'),m=text.match(/^export const PRODUCT_VERSION\s*=\s*(["'])(\d+\.\d+\.\d+)\1;\s*$/);assert(m,'SERVICE_VERSION_INVALID');return m[2];}
+ function planAlignment({source,target,allowedExtras=INERT_EXTRAS}){
+  source=fs.realpathSync(source);target=fs.realpathSync(target);assert.notEqual(source.toLowerCase(),target.toLowerCase(),'SERVICE_SOURCE_EQUALS_TARGET');
+- const expected=inventory(source),before=inventory(target),extras=Object.keys(before).filter(f=>!(f in expected));for(const f of extras)assert(allowedExtras.includes(f),'SERVICE_UNKNOWN_EXTRA '+f);
+- const files=Object.keys(expected).sort().map(file=>({file,original:before[file]??null,modified:expected[file]})),changes=files.filter(r=>r.original!==r.modified);
+- return {schemaVersion:1,source,target,version:versionAt(source),previousVersion:versionAt(target),sourceFiles:files.length,targetFiles:Object.keys(before).length,files,changes,extras:Object.fromEntries(extras.map(f=>[f,before[f]]))};
++ const expected=inventory(source),before=inventory(target),allExtras=Object.keys(before).filter(f=>!(f in expected)),pkg=path.join(source,'package.json'),version=versionAt(source),parts=version?.split('.').map(Number);
++ const cua=expected['cua.js']&&expected['cua-runtime.js']&&fs.existsSync(pkg)&&JSON.parse(fs.readFileSync(pkg)).name==='@naumi/dsh-enterprise'&&parts&&(parts[0]>0||parts[1]>4||parts[1]===4&&parts[2]>=4);
++ const retired=allExtras.filter(f=>cua&&CUA_RETIRED[f]===before[f]),extras=allExtras.filter(f=>!retired.includes(f));for(const f of extras)assert(allowedExtras.includes(f),'SERVICE_UNKNOWN_EXTRA '+f);
++ const files=[...Object.keys(expected).sort().map(file=>({file,original:before[file]??null,modified:expected[file]})),...retired.map(file=>({file,original:before[file],modified:null}))],changes=files.filter(r=>r.original!==r.modified);
++ return {schemaVersion:1,source,target,version,previousVersion:versionAt(target),sourceFiles:Object.keys(expected).length,targetFiles:Object.keys(before).length,files,changes,extras:Object.fromEntries(extras.map(f=>[f,before[f]]))};
+ }
+-function assertBefore(plan){const current=inventory(plan.target),expected=Object.fromEntries([...plan.files.filter(r=>r.original).map(r=>[r.file,r.original]),...Object.entries(plan.extras)]);assert.deepEqual(current,expected,'SERVICE_TARGET_DRIFT');assert.deepEqual(inventory(plan.source),Object.fromEntries(plan.files.map(r=>[r.file,r.modified])),'SERVICE_SOURCE_DRIFT');}
+-function verifyAligned(plan){const current=inventory(plan.target),expected=Object.fromEntries([...plan.files.map(r=>[r.file,r.modified]),...Object.entries(plan.extras)]);assert.deepEqual(current,expected,'SERVICE_CODE_NOT_ALIGNED');assert.equal(versionAt(plan.target),plan.version);return {version:plan.version,sourceFiles:plan.files.length,extrasPreserved:Object.keys(plan.extras).length};}
++function assertBefore(plan){const current=inventory(plan.target),expected=Object.fromEntries([...plan.files.filter(r=>r.original).map(r=>[r.file,r.original]),...Object.entries(plan.extras)]);assert.deepEqual(current,expected,'SERVICE_TARGET_DRIFT');assert.deepEqual(inventory(plan.source),Object.fromEntries(plan.files.filter(r=>r.modified).map(r=>[r.file,r.modified])),'SERVICE_SOURCE_DRIFT');}
++function verifyAligned(plan){const current=inventory(plan.target),expected=Object.fromEntries([...plan.files.filter(r=>r.modified).map(r=>[r.file,r.modified]),...Object.entries(plan.extras)]);assert.deepEqual(current,expected,'SERVICE_CODE_NOT_ALIGNED');assert.equal(versionAt(plan.target),plan.version);return {version:plan.version,sourceFiles:plan.sourceFiles,extrasPreserved:Object.keys(plan.extras).length};}
+ function atomic(file,bytes){const temp=file+'.service-'+randomUUID()+'.tmp';fs.mkdirSync(path.dirname(file),{recursive:true});try{fs.writeFileSync(temp,bytes,{flag:'wx'});fs.renameSync(temp,file);}finally{if(fs.existsSync(temp))fs.unlinkSync(temp);}}
+ function restoreAlignment(plan,backup,{verifyCurrent=true}={}){
+- if(verifyCurrent)for(const r of plan.changes)assert.equal(hash(fs.readFileSync(path.join(plan.target,r.file))),r.modified,'SERVICE_ROLLBACK_DRIFT '+r.file);
++ if(verifyCurrent)for(const r of plan.changes)assert.equal(hashAt(path.join(plan.target,r.file)),r.modified,'SERVICE_ROLLBACK_DRIFT '+r.file);
+  for(const r of plan.changes){const file=path.join(plan.target,r.file);if(r.original){const bytes=fs.readFileSync(path.join(backup,'original',r.file));assert.equal(hash(bytes),r.original);atomic(file,bytes);}else if(fs.existsSync(file))fs.unlinkSync(file);}
+  const expected=Object.fromEntries([...plan.files.filter(r=>r.original).map(r=>[r.file,r.original]),...Object.entries(plan.extras)]);assert.deepEqual(inventory(plan.target),expected,'SERVICE_RESTORE_FAILED');
+ }
+@@ -25,7 +34,7 @@ function applyAlignment(plan,backup,{beforeWrite=()=>{}}={}){
+  fs.writeFileSync(path.join(backup,'PLAN.json'),JSON.stringify(plan,null,2));
+  // Never publish the release label before every required code file has landed.
+  const ordered=[...plan.changes.filter(r=>r.file!=='product-version.js'),...plan.changes.filter(r=>r.file==='product-version.js')];
+- try{for(const r of ordered){beforeWrite(r);atomic(path.join(plan.target,r.file),fs.readFileSync(path.join(backup,'modified',r.file)));}return verifyAligned(plan);}catch(error){restoreAlignment(plan,backup,{verifyCurrent:false});throw error;}
++ try{for(const r of ordered){beforeWrite(r);if(r.modified)atomic(path.join(plan.target,r.file),fs.readFileSync(path.join(backup,'modified',r.file)));else fs.unlinkSync(path.join(plan.target,r.file));}return verifyAligned(plan);}catch(error){restoreAlignment(plan,backup,{verifyCurrent:false});throw error;}
+ }
+ 
+ module.exports={hash,INERT_EXTRAS,inventory,versionAt,planAlignment,assertBefore,applyAlignment,restoreAlignment,verifyAligned,atomic};
+diff --git a/desktop/package-lock.json b/desktop/package-lock.json
+index 100b8ea..4cb01d5 100644
+--- a/desktop/package-lock.json
++++ b/desktop/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "naumi-desktop",
+-  "version": "0.4.3",
++  "version": "0.4.4",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "naumi-desktop",
+-      "version": "0.4.3",
++      "version": "0.4.4",
+       "license": "UNLICENSED",
+       "dependencies": {
+         "electron-updater": "^6.6.2"
+diff --git a/desktop/package.json b/desktop/package.json
+index 762edb9..f848c2c 100644
+--- a/desktop/package.json
++++ b/desktop/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "naumi-desktop",
+-  "version": "0.4.3",
++  "version": "0.4.4",
+   "private": true,
+   "description": "Naumi 企业协作桌面端",
+   "author": "Naumi",
+diff --git a/desktop/scripts/prepare-runtime.mjs b/desktop/scripts/prepare-runtime.mjs
+index fcfee23..25ca663 100644
+--- a/desktop/scripts/prepare-runtime.mjs
++++ b/desktop/scripts/prepare-runtime.mjs
+@@ -1,3 +1,4 @@
++import {stageCuaDriver} from './stage-cua.mjs';
+ import {stageTrialModels} from './internal-trial-models.mjs';
+ import {installSidebarVisibility} from '../../scripts/native-sidebar-visibility-extension.mjs';
+ import fs from 'node:fs';
+@@ -43,7 +44,7 @@ export async function prepareRuntime({root=project,target=path.join(root,'runtim
+   fs.mkdirSync(runtime,{recursive:true});const staged=path.join(runtime,'desktop-stage-'+randomUUID());fs.mkdirSync(staged);
+   try{
+     // Only runtime dependencies and source plugins are input. No user home/profile/config is copied.
+-    fs.cpSync(path.join(root,'node_modules'),path.join(staged,'node_modules'),{recursive:true,dereference:true,filter:source=>!source.split(path.sep).some(x=>['.cache','.bin','dingtalk-workspace-cli'].includes(x))&&!isRuntimeDevelopmentArtifact(source)});
++    fs.cpSync(path.join(root,'node_modules'),path.join(staged,'node_modules'),{recursive:true,dereference:true,filter:source=>!source.split(path.sep).some(x=>['.cache','.bin','dingtalk-workspace-cli','agent-desktop'].includes(x))&&!isRuntimeDevelopmentArtifact(source)});
+     installReasoningDefaults(path.join(staged,'node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js'));
+     installNativeDeliveryExtensions(path.join(staged,'node_modules'));
+     installNativeComposer(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'));
+@@ -52,6 +53,8 @@ export async function prepareRuntime({root=project,target=path.join(root,'runtim
+     installSidebarVisibility(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js'));
+     fs.cpSync(path.join(root,'plugins'),path.join(staged,'plugins'),{recursive:true});
+     for(const [source,name]of [['naumi-enterprise','dsh-enterprise'],['naumi-ui-layout','dsh-ui-layout'],['naumi-sidebar-browser','dsh-sidebar-browser']])fs.cpSync(path.join(root,'plugins',source),path.join(staged,'node_modules/@naumi',name),{recursive:true});
++    await stageCuaDriver(path.join(staged,'node_modules/@naumi/dsh-enterprise'));
++    await stageCuaDriver(path.join(staged,'plugins/naumi-enterprise'));
+     fs.copyFileSync(process.execPath,path.join(staged,'node.exe'));
+     const defaults=path.join(staged,'defaults');fs.mkdirSync(defaults);
+     fs.writeFileSync(path.join(defaults,'profile.json'),JSON.stringify({name:'naumi-profile-web',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}},null,2));
+@@ -64,7 +67,7 @@ export async function prepareRuntime({root=project,target=path.join(root,'runtim
+     const trial=trialInput?stageTrialModels(staged,trialInput):null;
+     const inventory=runtimeInventory(staged),scan=scanRuntimeInventory(inventory);
+     fs.writeFileSync(path.join(staged,'runtime-files.json'),JSON.stringify(inventory,null,2)+'\n');
+-    const manifest={product:'Naumi',...trial?{edition:'internal-trial',trial}:{},schemaVersion:2,desktop:{profileVersion:1,identityProtocol:2,maintenanceProtocol:1,workspaceProtocol:1},version:JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json'))).version,node:process.versions.node,harness:'0.2.2-rc.1',agentDesktop:'1.3.1',dingtalk,personalCredentials:!!trial,browserProfiles:false,bootstrap:'offline',nodeSHA256:sha(path.join(staged,'node.exe')),inventorySHA256:sha(path.join(staged,'runtime-files.json')),closure,scan};
++    const manifest={product:'Naumi',...trial?{edition:'internal-trial',trial}:{},schemaVersion:2,desktop:{profileVersion:1,identityProtocol:2,maintenanceProtocol:1,workspaceProtocol:1},version:JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json'))).version,node:process.versions.node,harness:'0.2.2-rc.1',desktopEngine:'cua',cuaDriver:'0.54.0',dingtalk,personalCredentials:!!trial,browserProfiles:false,bootstrap:'offline',nodeSHA256:sha(path.join(staged,'node.exe')),inventorySHA256:sha(path.join(staged,'runtime-files.json')),closure,scan};
+     fs.writeFileSync(path.join(staged,'runtime-manifest.json'),JSON.stringify(manifest,null,2)+'\n');
+     // Publish only after import/closure/content checks. Preserve the preceding bundle for rollback.
+     let previous=null;if(fs.existsSync(target)){previous=target+'.previous-'+randomUUID();fs.renameSync(target,previous);}
+diff --git a/desktop/scripts/stage-cua.mjs b/desktop/scripts/stage-cua.mjs
+new file mode 100644
+index 0000000..bf8906f
+--- /dev/null
++++ b/desktop/scripts/stage-cua.mjs
+@@ -0,0 +1,26 @@
++import fs from 'node:fs';
++import os from 'node:os';
++import path from 'node:path';
++import {createHash} from 'node:crypto';
++import {execFileSync} from 'node:child_process';
++import {fileURLToPath,pathToFileURL} from 'node:url';
++import {CUA_ARCHIVE_URL,CUA_ARCHIVE_SHA256,resolveDesktopRuntime} from '../../plugins/naumi-enterprise/desktop-runtime.js';
++const hash=b=>createHash('sha256').update(b).digest('hex');
++/** Build-time only. Do not run upstream's global installer or optional extensions. */
++export async function stageCuaDriver(plugin=fileURLToPath(new URL('../../plugins/naumi-enterprise',import.meta.url)),{archive}={}){
++ const directory=path.join(plugin,'third-party/cua-driver/win32-x64'),command=path.join(directory,'cua-driver.exe');
++ if(fs.existsSync(command))return resolveDesktopRuntime({command});
++ if(process.platform!=='win32'||process.arch!=='x64')throw Error('CUA_BUILD_PLATFORM_NOT_PACKAGED');
++ const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-cua-build-'));
++ try{
++  let bytes;if(archive)bytes=fs.readFileSync(archive);else{const r=await fetch(CUA_ARCHIVE_URL,{signal:AbortSignal.timeout(120000)});if(!r.ok)throw Error('CUA_ARCHIVE_HTTP_'+r.status);bytes=Buffer.from(await r.arrayBuffer());}
++  if(hash(bytes)!==CUA_ARCHIVE_SHA256)throw Error('CUA_ARCHIVE_HASH_MISMATCH');
++  fs.writeFileSync(path.join(tmp,'driver.zip'),bytes);
++  const quote=s=>"'"+s.replaceAll("'","''")+"'";
++  execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',`$ErrorActionPreference='Stop'; $env:PSModulePath=Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\Modules'; Expand-Archive -LiteralPath ${quote(path.join(tmp,'driver.zip'))} -DestinationPath ${quote(path.join(tmp,'unpack'))}; $f=Get-ChildItem -LiteralPath ${quote(path.join(tmp,'unpack'))} -Filter cua-driver.exe -Recurse; if(@($f).Count -ne 1){throw 'CUA_ARCHIVE_LAYOUT'}; $s=Get-AuthenticodeSignature -LiteralPath $f.FullName; if($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch 'CN="?Cua AI, Inc\\.'){throw 'CUA_SIGNATURE_INVALID'}`],{windowsHide:true,stdio:'pipe'});
++  const find=dir=>fs.readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?find(path.join(dir,e.name)):e.name==='cua-driver.exe'?[path.join(dir,e.name)]:[]);
++  const source=find(path.join(tmp,'unpack'))[0];resolveDesktopRuntime({command:source});fs.mkdirSync(directory,{recursive:true});fs.copyFileSync(source,command);
++  return resolveDesktopRuntime({command});
++ }finally{if(path.resolve(tmp).startsWith(path.resolve(os.tmpdir())+path.sep))fs.rmSync(tmp,{recursive:true,force:true});}
++}
++if(process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url){const r=await stageCuaDriver();console.log('CUA_STAGED version='+r.version+' sha256='+r.checks[0].sha256);}
+diff --git a/desktop/tests/cua-retirement.test.cjs b/desktop/tests/cua-retirement.test.cjs
+new file mode 100644
+index 0000000..b2f5636
+--- /dev/null
++++ b/desktop/tests/cua-retirement.test.cjs
+@@ -0,0 +1,7 @@
++'use strict';
++const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os'),code=require('../app/service-code.cjs');
++const root=path.resolve(__dirname,'../..'),old=path.join(root,'evidence/cua-unified/originals/plugins/naumi-enterprise'),retired=['agent-desktop.js','skills/naumi-desktop/references/desktop-1.3.1.md','skills/naumi-desktop/references/platform-1.3.1.md'];
++function fixture(){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'cua-retire-')),source=path.join(dir,'source'),target=path.join(dir,'target'),backup=path.join(dir,'backup');fs.mkdirSync(source);fs.mkdirSync(target);const write=(r,f,b)=>{fs.mkdirSync(path.dirname(path.join(r,f)),{recursive:true});fs.writeFileSync(path.join(r,f),b);};for(const r of[source,target]){write(r,'package.json',JSON.stringify({name:'@naumi/dsh-enterprise'}));write(r,'product-version.js','export const PRODUCT_VERSION="'+(r===source?'0.4.4':'0.4.3')+'";\n');write(r,'host.js',r===source?'new CUA host':'old desktop host');}for(const f of['cua.js','cua-runtime.js'])write(source,f,'CUA fixture');for(const f of retired)write(target,f,fs.readFileSync(path.join(old,f)));return{dir,source,target,backup,write,close:()=>fs.rmSync(dir,{recursive:true,force:true})};}
++test('fixed legacy files retire transactionally before version publication; original backup restores exact bytes',()=>{const f=fixture();try{const before=code.inventory(f.target),plan=code.planAlignment(f);assert.equal(plan.changes.filter(r=>r.modified===null).length,3);const order=[];code.applyAlignment(plan,f.backup,{beforeWrite:r=>order.push(r.file)});assert.equal(order.at(-1),'product-version.js');for(const file of retired)assert(!fs.existsSync(path.join(f.target,file)));assert.equal(code.planAlignment(f).changes.length,0);code.restoreAlignment(plan,f.backup);assert.deepEqual(code.inventory(f.target),before);}finally{f.close();}});
++test('partial deletion failure restores all legacy files, old host/version and removes new CUA files',()=>{const f=fixture();try{const before=code.inventory(f.target),plan=code.planAlignment(f);assert.throws(()=>code.applyAlignment(plan,f.backup,{beforeWrite:r=>{if(r.file===retired[1])throw Error('fixture interrupted');}}),/interrupted/);assert.deepEqual(code.inventory(f.target),before);}finally{f.close();}});
++test('modified old code, unrelated files and a different source plugin are not deleted',()=>{for(const scenario of['drift','unknown','plugin']){const f=fixture();try{if(scenario==='drift')f.write(f.target,retired[0],'user edit');if(scenario==='unknown')f.write(f.target,'custom.js','user code');if(scenario==='plugin')f.write(f.source,'package.json',JSON.stringify({name:'custom-plugin'}));const before=code.inventory(f.target);assert.throws(()=>code.planAlignment(f),/SERVICE_UNKNOWN_EXTRA/);assert.deepEqual(code.inventory(f.target),before);}finally{f.close();}}});
+diff --git a/docs/implementation/AGENT_DESKTOP.md b/docs/implementation/AGENT_DESKTOP.md
+index cf9bd66..cf8475f 100644
+--- a/docs/implementation/AGENT_DESKTOP.md
++++ b/docs/implementation/AGENT_DESKTOP.md
+@@ -1,3 +1,7 @@
++# 历史记录：agent-desktop（已被 CUA 取代）
++
++当前实现见 [CUA](CUA.md)。以下保留旧集成验收，不代表当前默认工具。
++
+ # agent-desktop 集成记录
+ 
+ ## 目标
+diff --git a/docs/implementation/CUA.md b/docs/implementation/CUA.md
+new file mode 100644
+index 0000000..b24a93b
+--- /dev/null
++++ b/docs/implementation/CUA.md
+@@ -0,0 +1,46 @@
++# CUA 统一桌面引擎
++
++## 模块与职责
++桌面 UI 执行统一为 `naumi_cua`：固定 Cua Driver 0.54.0，Windows x64。本模块不创建第二个模型服务。原 agent-desktop 默认挂载、依赖、CLI 及技能正文已移除。浏览器、Blender、Naumi 创作仍使用自己的领域接口，不充当桌面输入兜底。
++
++## 公共接口、依赖方向、状态归属
++- `host.js → cua.js → cua-runtime.js → Cua Driver stdio`；直接模式随 stdin EOF 关闭，不注册计划任务，不改 PATH，不连接云 relay。
++- 一个原生 Harness 工具 `naumi_cua`；实际复用 `createMcpToolDefinition` 的截图附件准入、持久化及模型投影。执行继续受原 NativeToolExecutor 和 EmployeeRuntimeGate 管理。
++- Session 来自 `exec.agent.id`，模型不可传入 session、AX token、脚本或 DOM。Driver session 为真实 ID 的哈希标签。
++- 输入锁为本机 LocalAppData/Naumi/cua/input.lock；同进程 Session 租约 120 秒，另一后端也必须拿同一文件锁。活 PID/不完整锁不抢占。死 PID 恢复使用单独原子 recovery guard。异常 recovery guard 保留为人工排查状态，不推测清理。
++- 每次观察返回 PNG 原生附件、尺寸、30 秒 observationId；绑定目标窗口和租约随机号。所有输入在 native dispatch 前消耗观察号；点击额外传上游 capture_id。双击/右键统一映射为同一 click 原语（count/button），保留 capture_id。
++- 每次输入后自动重新截图；结果标记 verificationRequired，模型必须观察图像判断效果。原生 dispatch 不是业务成功。
++- 丢回执、取消、native isError 或后截图失败进入 UNKNOWN，无自动重放；不确定输入关闭原 transport 并等待退出，原 Session 重新观察后才可继续/释放。UNKNOWN 锁不因 idle TTL 转交给另一 Bot。
++- `agent/disposed` 取消、等待当前操作、释放锁；重建同 ID 时重新 attach，历史 observation 不复用。插件 dispose 关闭自有 Driver，不停止别的进程。
++- `/naumi/desktop` 只读 owner 接口：installed 与 connected/ready 分开，不因工具注册冒称完成桌面操作。
++
++## 固定产物与发行
++上游 MIT，`https://github.com/trycua/cua/releases/tag/cua-driver-rs-v0.54.0`。
++- ZIP SHA256 `c0b92cb56ec7863ca177a2813bf5e22bdea5772a56f5bc4e8be064eed34498d7`
++- cua-driver.exe SHA256 `99a4b7a04fb3a25a450cc64ed4b806406c18aa08f27ec83a8364a0c601b1865e`
++- 下载产物实际 Authenticode = Valid，签发对象 Cua AI, Inc.；未声称验证 Sigstore。
++- `desktop/scripts/stage-cua.mjs` 只在构建阶段下载，校验 ZIP pin、exe pin、Authenticode 后复制进插件。员工运行时只离线 hash 验证。runtime packaging 排除旧 agent-desktop，即使开发 node_modules 仍残留旧缓存。
++- telemetry 用实测环境变量 CUA_DRIVER_RS_TELEMETRY_ENABLED=false 关闭。未装可选 perception/OmniParser、SDK DLL、全局技能链接或更新器。
++- 本次 Windows x64；其他平台明确缺少打包，不回落旧引擎。
++
++## 本次实现与迁移状态
++负责人：本任务线程。基线 origin/main `301c4423715f8f5fe4988131f67bb136078cefe3`，分支 `codex/cua-unified-20261119`，独立 worktree `E:/Workspace/naumi-desktop-cua`。共享本地 main `0b9822cbf1c84574d127b3d5d4fff2608cd2e0ae` 比远端多 3 个其他任务提交，保持不变；不通过本任务顺带发布。
++模块迭代 1。明确文件范围：CUA runtime/host 接线、desktop capability probe、默认技能、固定构建 stage、相关测试、依赖及本文档；不改会话、模型配置、企业密钥、UI。
++
++## 验证与下一步
++基线旧集成测试 10/10 exit0。集中测试、真实 native fixture、回滚副本及整合证据随验收更新至 evidence/cua-unified/VERIFICATION.txt。
++0.4.4 的固定 runtime stage 已完成，45,636 个文件通过离线依赖闭合与隐私路径扫描，真实打包路径的 CUA stdio probe 通过，旧引擎程序不在包中。完整 NSIS、实际已安装 Desktop 更新与跨平台验收状态见交付证据后续更新；Git 或本地 native fixture 不等于产品已安装上线。
++
++## 集中验收更新
++- 新增工具经过真实 Cordis Tools/NativeToolExecutor/企业运行门：未授权调用 dispatch=0，显式 allowlist 后 dispatch=1；未触发模型请求。
++- 真实 WinForms 隔离窗口点击、输入、Ctrl+A KeyDown（fixture 明确定义选全）、End、滚动和拖拽均产生 native 事件及前后 PNG；背景快捷键/滚轮得到 background_unavailable 后，测试显式重新观察并前台执行。不是通用所有应用验收。
++- 实测暴露并修复：原生 schema 子集拒绝 min/max 关键字，改为 zod 执行期约束；原生 Cordis route 服务需显式 inject；PowerShell 5.1 继承 PS7 ModulePath 导致签名检查加载失败，构建 probe 已按系统模块根修正。
++- CUA 截图准入失败将撤销 observation 并返回错误，不留下仅文本提示下可继续操作的 token。
++
++## 真实旧服务升级补充
++旧服务的代码同步器拒绝任意多余文件。CUA 删除了旧 agent-desktop.js 与两份旧 skill reference，实际旧服务升级 plan 因此需要显式退役，不能仅测干净安装。service-code.cjs 新增仅针对 Naumi enterprise + CUA 源文件 + 0.4.4 及以上版本的三文件 SHA256 白名单；改动过的旧代码、其他插件与未知文件继续拒绝。删除参与原代码事务、备份、崩溃恢复与回滚，版本标签最后写入。新测试覆盖成功退役、部分删除失败恢复、手改文件保护和不同插件拒绝；桌面集中回归 181/181 exit0。对真实原 0.4.3 服务仅只读计算升级计划：14 项变更、3 项精确退役、2 项既有无效备份保留。
++
++## 正式安装与发布验收
++0.4.4 从固定 main `10cf4595ac40ba7e8c6931b11a6ca7873932dbd1` 构建，安装器 SHA256 `5d0c6277c1a723d60f6699a78d6e2c5e3e22e500562f3f260041e0dbfee95514`。真实覆盖安装 exit0，实际客户端/本机服务均0.4.4；原生签名实例握手、CUA工具注册、旧默认引擎移除、完整代码对齐delta0通过。114个会话保留，121份受保护文件中120份字节相同；1份会话原有786189B全部作为原始前缀保留，原生退出/启动追加224B：取消遗留user-approval队列项、session/end-seed。原记录序号连续，未自动重放审批；没有把该会话误记为逐字节未变。Bot/任务/群组/模型API摘要未变。公开v0.4.4的manifest HTTP200与本地逐字节一致，GitHub完整安装包上传digest匹配。
++浏览器连接、微信增量由各自线程负责，未装入这个冻结包；managed profile不热补新文件，后续应从含这些切片的新固定main构建完整递增版本再正常升级。
++回滚默认使用本任务冻结modified快照创建独立副本，验证原始22份文件与旧10项测试；实际恢复入口仍对目标副本逐文件检查，遇到后续改动拒绝覆盖。后续并行主线不被rollback-test覆盖。
+diff --git a/package-lock.json b/package-lock.json
+index 9dfedec..cb5848e 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -9,8 +9,8 @@
+       "version": "1.0.0",
+       "dependencies": {
+         "@deepseek-ai/dsh": "0.2.2-rc.1",
+-        "agent-desktop": "1.3.1",
+-        "@modelcontextprotocol/server": "2.2.0"
++        "@modelcontextprotocol/server": "2.2.0",
++        "@modelcontextprotocol/client": "2.2.0"
+       },
+       "devDependencies": {
+         "acorn": "8.19.0"
+@@ -8049,28 +8049,6 @@
+         "node": ">= 20"
+       }
+     },
+-    "node_modules/agent-desktop": {
+-      "version": "1.3.1",
+-      "resolved": "https://registry.npmjs.org/agent-desktop/-/agent-desktop-1.3.1.tgz",
+-      "integrity": "sha512-5pBKkFkdB/VIAWRfqoA8lYp5/fenfxUHI15Pc4k8Nn2LmLxxo1PkAb0WLypknyOCczuIwuzFp/rZHGGawEV+hw==",
+-      "cpu": [
+-        "arm64",
+-        "x64"
+-      ],
+-      "hasInstallScript": true,
+-      "license": "Apache-2.0",
+-      "os": [
+-        "darwin",
+-        "win32",
+-        "linux"
+-      ],
+-      "bin": {
+-        "agent-desktop": "bin/agent-desktop"
+-      },
+-      "engines": {
+-        "node": ">=18"
+-      }
+-    },
+     "node_modules/ajv": {
+       "version": "8.20.0",
+       "resolved": "https://registry.npmjs.org/ajv/-/ajv-8.20.0.tgz",
+diff --git a/package.json b/package.json
+index 81999de..e0ccb86 100644
+--- a/package.json
++++ b/package.json
+@@ -11,20 +11,21 @@
+     "naumi:sync": "node scripts/sync-naumi.mjs",
+     "naumi:test": "node --test tests/naumi-enterprise.test.mjs",
+     "naumi:install": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/setup-naumi.ps1",
+-    "desktop:status": "node scripts/agent-desktop.mjs status",
+-    "desktop:verify": "node scripts/verify-agent-desktop.mjs",
++    "desktop:status": "node scripts/cua.mjs status",
++    "desktop:verify": "node scripts/verify-cua.mjs",
+     "browser:status": "node scripts/ego-browser.mjs status",
+     "browser:verify": "node scripts/verify-ego-browser.mjs",
+     "browser:install": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/setup-ego-browser.ps1",
+     "app:start": "pwsh -NoProfile -ExecutionPolicy Bypass -File Start-NaumiDesktop.ps1",
+     "app:stage": "node scripts/build-naumi-browser.mjs && node desktop/scripts/prepare-runtime.mjs",
+     "app:build": "npm --prefix desktop run build",
+-    "app:test": "node --test tests/*.test.mjs desktop/tests/*.test.cjs"
++    "app:test": "node --test tests/*.test.mjs desktop/tests/*.test.cjs",
++    "desktop:prepare": "node desktop/scripts/stage-cua.mjs"
+   },
+   "dependencies": {
+     "@deepseek-ai/dsh": "0.2.2-rc.1",
+-    "agent-desktop": "1.3.1",
+-    "@modelcontextprotocol/server": "2.2.0"
++    "@modelcontextprotocol/server": "2.2.0",
++    "@modelcontextprotocol/client": "2.2.0"
+   },
+   "allowScripts": {
+     "@deepseek-ai/dsh-subprocess-local@0.2.2-rc.1": true,
+diff --git a/plugins/naumi-enterprise/agent-desktop.js b/plugins/naumi-enterprise/agent-desktop.js
+deleted file mode 100644
+index c672215..0000000
+--- a/plugins/naumi-enterprise/agent-desktop.js
++++ /dev/null
+@@ -1,25 +0,0 @@
+-import * as mcpClient from '@deepseek-ai/dsh-mcp-client';
+-import * as filesystemSkills from '@deepseek-ai/dsh-skill-filesystem';
+-import {desktopMcpConfig,desktopSkillConfig} from './desktop-runtime.js';
+-
+-/** Add desktop tools through existing Harness bridges; do not change execution/permission policy. */
+-export function installAgentDesktop(ctx) {
+-  let mcp;
+-  try{mcp=desktopMcpConfig();}
+-  catch(error){ctx.logger?.warn('Naumi desktop integration not ready: '+error.message);return()=>{};}
+-  return ctx.inject(['tools','skills'],scope=>{
+-    scope.plugin(mcpClient,mcp);
+-    scope.plugin(filesystemSkills,desktopSkillConfig());
+-    scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/desktop',handler:async(req,res)=>{
+-      res.setHeader('Cache-Control','private, no-store');res.setHeader('Content-Type','application/json; charset=utf-8');
+-      const send=(status,body)=>{res.writeHead(status);res.end(JSON.stringify(body));};
+-      const admission=scope.connection.admit(req);
+-      if('rejection'in admission){send(admission.rejection,{error:'HARNESS_AUTH_REQUIRED'});return;}
+-      if(admission.peer.principal.kind!=='owner'){send(403,{error:'HARNESS_OWNER_REQUIRED'});return;}
+-      if(req.method!=='GET'){res.setHeader('Allow','GET');send(405,{error:'READ_ONLY'});return;}
+-      const tools=scope.tools.definitions().filter(t=>t.name.startsWith('mcp__naumi_desktop__'));
+-      const ready=tools.some(t=>t.name==='mcp__naumi_desktop__desktop_status');
+-      send(ready?200:503,{status:ready?'ready':'connecting',version:'1.3.1',transport:'stdio',namespace:'naumi_desktop',toolCount:tools.length,physicalInputDefault:false});
+-    }}));
+-  });
+-}
+diff --git a/plugins/naumi-enterprise/cua-runtime.js b/plugins/naumi-enterprise/cua-runtime.js
+new file mode 100644
+index 0000000..7d3bc42
+--- /dev/null
++++ b/plugins/naumi-enterprise/cua-runtime.js
+@@ -0,0 +1,105 @@
++import {z} from 'zod';
++import fs from 'node:fs';
++import os from 'node:os';
++import path from 'node:path';
++import {randomUUID,createHash} from 'node:crypto';
++import {Client} from '@modelcontextprotocol/client';
++import {StdioClientTransport} from '@modelcontextprotocol/client/stdio';
++import {resolveDesktopRuntime,CUA_VERSION} from './desktop-runtime.js';
++
++const actions=['click','double_click','right_click','type_text','press_key','hotkey','scroll','drag'];
++const allowed=new Set(['check_permissions','list_windows','get_window_state','get_desktop_state','end_session',...actions]);
++const argsSchema=z.object({action:z.enum(['status','list_windows','observe','release',...actions]),pid:z.number().int().positive().optional(),window_id:z.number().int().positive().optional(),app:z.string().max(300).optional(),observationId:z.string().max(100).optional(),x:z.number().finite().optional(),y:z.number().finite().optional(),from_x:z.number().finite().optional(),from_y:z.number().finite().optional(),to_x:z.number().finite().optional(),to_y:z.number().finite().optional(),text:z.string().max(20000).optional(),key:z.string().min(1).max(60).optional(),keys:z.array(z.string().min(1).max(60)).min(2).max(8).optional(),direction:z.enum(['up','down','left','right']).optional(),amount:z.number().int().min(1).max(50).optional(),button:z.enum(['left','right','middle']).optional(),count:z.number().int().min(1).max(3).optional(),duration_ms:z.number().int().min(0).max(10000).optional(),delivery_mode:z.enum(['background','foreground']).optional()}).strict();
++const text=value=>({content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value});
++const fail=code=>{throw Error(code);};
++/** OS-wide lock. A live or partially written owner is never stolen. */
++export class DesktopLease{
++ constructor({directory=path.join(process.env.LOCALAPPDATA??os.tmpdir(),'Naumi','cua'),clock=Date.now,ttl=120000}={}){Object.assign(this,{directory,clock,ttl});this.file=path.join(directory,'input.lock');this.owner=null;this.inFlight=false;}
++ acquire(owner){
++  if(this.owner===owner){this.until=this.clock()+this.ttl;return;}
++  if(this.owner){if(this.inFlight||this.blocked||this.until>this.clock())fail('CUA_DESKTOP_BUSY');this.release(this.owner);}
++  fs.mkdirSync(this.directory,{recursive:true});
++  const nonce=randomUUID(),record={pid:process.pid,nonce};
++  const open=()=>{const fd=fs.openSync(this.file,'wx',0o600);try{fs.writeFileSync(fd,JSON.stringify(record));}finally{fs.closeSync(fd);}};
++  try{open();}catch(e){
++   if(e.code!=='EEXIST')throw e;
++   let guard;try{guard=fs.openSync(this.file+'.recovery','wx',0o600);}catch{fail('CUA_DESKTOP_BUSY');}
++   try{
++   let old,raw;try{raw=fs.readFileSync(this.file,'utf8');old=JSON.parse(raw);}catch{fail('CUA_DESKTOP_BUSY');}
++   if(!Number.isInteger(old.pid)||old.pid<=0)fail('CUA_DESKTOP_BUSY');
++   try{process.kill(old.pid,0);fail('CUA_DESKTOP_BUSY');}catch(err){if(err.code!=='ESRCH')throw err;}
++   if(fs.readFileSync(this.file,'utf8')!==raw)fail('CUA_DESKTOP_BUSY');
++   fs.unlinkSync(this.file);try{open();}catch{fail('CUA_DESKTOP_BUSY');}
++   }finally{fs.closeSync(guard);fs.unlinkSync(this.file+'.recovery');}
++  }
++  this.nonce=nonce;this.owner=owner;this.until=this.clock()+this.ttl;
++ }
++ release(owner){if(this.owner!==owner)return;if(this.inFlight)fail('CUA_ACTION_IN_FLIGHT');try{const v=JSON.parse(fs.readFileSync(this.file,'utf8'));if(v.nonce===this.nonce&&v.pid===process.pid)fs.unlinkSync(this.file);}catch(e){if(e.code!=='ENOENT')throw e;}this.owner=null;this.nonce=null;}
++}
++export async function openCuaClient(runtime=resolveDesktopRuntime()){
++ const client=new Client({name:'naumi-cua',version:'1.0.0'});
++ const env=Object.fromEntries(['SystemRoot','WINDIR','PATH','TEMP','TMP','USERPROFILE','LOCALAPPDATA','APPDATA'].filter(k=>process.env[k]).map(k=>[k,process.env[k]]));
++ const transport=new StdioClientTransport({command:runtime.command,args:runtime.args,cwd:path.dirname(runtime.command),env:{...env,...runtime.env},stderr:'pipe',maxBufferSize:32*1024*1024});
++ transport.stderr?.on('data',()=>{}); // Do not copy window content into shared logs.
++ try{await client.connect(transport);const list=await client.listTools();for(const name of allowed)if(!list.tools.some(t=>t.name===name))fail('CUA_DRIVER_SCHEMA_MISMATCH');}
++ catch(e){await client.close();throw e;}
++ return {call:async(name,args,signal)=>{if(!allowed.has(name))fail('CUA_TOOL_NOT_ALLOWED');return client.callTool({name,arguments:args},undefined,{signal,timeout:30000});},close:()=>client.close(),pid:transport.pid};
++}
++/** A single CUA engine; real Session identity, one-use observations, no write replay. */
++export class CuaRuntime{
++ constructor({open=openCuaClient,lease=new DesktopLease(),clock=Date.now}={}){Object.assign(this,{open,lease,clock});this.observations=new Map();this.unknown=new Set();this.removed=new Set();this.closed=false;this.connected=false;}
++ async client(){if(this.closed)fail('CUA_CLOSED');if(!this.flight)this.flight=this.open().then(c=>{this.connected=true;return c;}).catch(e=>{this.flight=null;throw e;});return this.flight;}
++ session(id){return 'naumi-'+createHash('sha256').update(id).digest('hex').slice(0,32);}
++ async call(id,name,args,signal){signal?.throwIfAborted();const c=await this.client();signal?.throwIfAborted();if(this.closed||this.removed.has(id))fail('CUA_SESSION_DISPOSED');return c.call(name,{...args,session:this.session(id)},signal);}
++ async observe(id,args,signal){
++  const target=Number.isInteger(args.pid)&&Number.isInteger(args.window_id)?{pid:args.pid,window_id:args.window_id}:{};
++  if((args.pid!==undefined||args.window_id!==undefined)&&!target.pid)fail('CUA_EXACT_WINDOW_REQUIRED');
++  this.observations.delete(id);
++  const r=await this.call(id,target.pid?'get_window_state':'get_desktop_state',{...target,max_image_dimension:1600,...target.pid?{include_accessibility_tree:false,include_screenshot:true}:{}},signal);
++  this.observations.delete(id);if(r.isError)return r;
++  const img=r.content?.find(x=>x.type==='image'&&x.mimeType==='image/png'),data=img&&Buffer.from(img.data,'base64');
++  if(!data||data.length<24||data.subarray(1,4).toString()!=='PNG')fail('CUA_SCREENSHOT_REQUIRED');
++  if(this.closed||this.removed.has(id))fail('CUA_SESSION_DISPOSED');
++  const observationId=randomUUID(),row={observationId,target,leaseNonce:this.lease.nonce,width:data.readUInt32BE(16),height:data.readUInt32BE(20),at:this.clock(),captureId:r.structuredContent?.capture_id};
++  this.observations.set(id,row);this.unknown.delete(id);this.lease.blocked=false;
++  const info={observationId,width:row.width,height:row.height,target:target.pid?target:{scope:'desktop'},expiresInMs:30000};
++  return {...r,content:[...r.content,{type:'text',text:JSON.stringify(info)}],structuredContent:{...r.structuredContent,...info}};
++ }
++ async perform(id,args,{signal}={}){
++  if(typeof id!=='string'||!id)fail('CUA_SESSION_REQUIRED');if(this.closed||this.removed.has(id))fail('CUA_SESSION_DISPOSED');signal?.throwIfAborted();
++  const action=args.action;
++  if(args.session!==undefined||args.element_token!==undefined||args.target!==undefined)fail('CUA_HOST_SCOPE_REQUIRED');
++  if(!['status','list_windows','observe','release',...actions].includes(action))fail('CUA_ACTION_INVALID');
++  if(!argsSchema.safeParse(args).success)fail('CUA_INPUT_INVALID');
++  if(action==='type_text'&&args.text===undefined||action==='press_key'&&!args.key||action==='hotkey'&&!args.keys||action==='scroll'&&!args.direction)fail('CUA_INPUT_INVALID');
++  if(action==='status'){const r=await this.call(id,'check_permissions',{},signal);return {...r,structuredContent:{...r.structuredContent,engine:'cua',version:CUA_VERSION,connected:true,unknown:this.unknown.has(id)}};}
++  if(action==='list_windows')return this.call(id,'list_windows',{...args.pid!==undefined?{pid:args.pid}:{},...args.app?{app:args.app}:{}},signal);
++  if(!['observe','release',...actions].includes(action))fail('CUA_ACTION_INVALID');
++  if(this.busy)fail('CUA_ACTION_IN_FLIGHT');
++  if(action==='release'){if(this.unknown.has(id))fail('CUA_OBSERVE_REQUIRED_AFTER_UNKNOWN');this.busy=true;try{this.observations.delete(id);if(this.lease.owner===id){await this.call(id,'end_session',{},signal);this.lease.release(id);}return text({released:true});}finally{this.busy=false;}}
++  this.lease.acquire(id);this.busy=true;this.lease.inFlight=true;this.abort=new AbortController();signal=signal?AbortSignal.any([signal,this.abort.signal]):this.abort.signal;this.active=new Promise(resolve=>{this.settle=resolve;});
++  try{
++   if(action==='observe')return await this.observe(id,args,signal);
++   if(this.unknown.has(id))fail('CUA_OBSERVE_REQUIRED_AFTER_UNKNOWN');
++   const o=this.observations.get(id);if(!o||o.leaseNonce!==this.lease.nonce||o.observationId!==args.observationId||this.clock()-o.at>30000)fail('CUA_FRESH_OBSERVATION_REQUIRED');
++   const pairs=action==='drag'?[['from_x','from_y'],['to_x','to_y']]:(['click','double_click','right_click','scroll'].includes(action)||args.x!==undefined||args.y!==undefined)?[['x','y']]:[];
++   for(const [x,y]of pairs)if(!Number.isFinite(args[x])||!Number.isFinite(args[y])||args[x]<0||args[y]<0||args[x]>=o.width||args[y]>=o.height)fail('CUA_COORDINATES_OUT_OF_CAPTURE');
++   const input={...o.target,...o.target.pid?{}:{scope:'desktop'}};
++   const keys={click:['x','y','button','count'],double_click:['x','y'],right_click:['x','y'],scroll:['x','y','direction','amount'],drag:['from_x','from_y','to_x','to_y','duration_ms'],type_text:['text','x','y'],press_key:['key','x','y'],hotkey:['keys','x','y']}[action];
++   for(const key of keys)if(args[key]!==undefined)input[key]=args[key];
++   if(['click','double_click','right_click'].includes(action)){if(o.captureId)input.capture_id=o.captureId;if(action==='double_click')input.count=2;if(action==='right_click')input.button='right';}
++   if(o.target.pid)input.delivery_mode=args.delivery_mode??'background';
++   this.observations.delete(id);signal?.throwIfAborted();
++   let result;
++   try{result=await this.call(id,['double_click','right_click'].includes(action)?'click':action,input,signal);}catch{this.unknown.add(id);this.lease.blocked=true;await this.dropClient();fail('CUA_ACTION_UNKNOWN_OBSERVE_BEFORE_RETRY');}
++   if(result.isError){this.unknown.add(id);this.lease.blocked=true;return result;}
++   let after;try{after=await this.observe(id,o.target,signal);}catch{this.unknown.add(id);this.lease.blocked=true;await this.dropClient();fail('CUA_ACTION_UNKNOWN_POST_OBSERVATION_FAILED');}
++   if(after.isError){this.unknown.add(id);this.lease.blocked=true;return after;}
++   return {...after,content:[...result.content,...after.content],structuredContent:{...after.structuredContent,actionResult:result.structuredContent??null,verificationRequired:true}};
++  }finally{this.busy=false;this.lease.inFlight=false;if(this.removed.has(id)){this.observations.delete(id);this.lease.blocked=false;this.lease.release(id);}this.settle?.();this.active=null;this.abort=null;}
++ }
++ async dropClient(){const old=this.flight;this.flight=null;this.connected=false;const c=await old?.catch(()=>null);await c?.close();}
++ async attach(id){if(this.removed.has(id)&&this.lease.owner===id)await this.active;this.removed.delete(id);}
++ async remove(id){this.removed.add(id);if(this.lease.owner===id&&this.busy){this.abort?.abort();await this.active;}this.observations.delete(id);this.unknown.delete(id);if(this.lease.owner===id){try{const c=this.flight&&await this.flight;await c?.call('end_session',{session:this.session(id)},AbortSignal.timeout(3000));}catch{await this.dropClient();}finally{this.lease.blocked=false;this.lease.release(id);}}}
++ async close(){this.closed=true;this.abort?.abort();await this.active;await this.dropClient();this.observations.clear();this.unknown.clear();this.lease.inFlight=false;this.lease.blocked=false;if(this.lease.owner)this.lease.release(this.lease.owner);}
++}
+diff --git a/plugins/naumi-enterprise/cua.js b/plugins/naumi-enterprise/cua.js
+new file mode 100644
+index 0000000..a7bb800
+--- /dev/null
++++ b/plugins/naumi-enterprise/cua.js
+@@ -0,0 +1,39 @@
++import {createMcpToolDefinition} from '@deepseek-ai/dsh-mcp-client';
++import {isDeepStrictEqual} from 'node:util';
++import * as filesystemSkills from '@deepseek-ai/dsh-skill-filesystem';
++import {CuaRuntime} from './cua-runtime.js';
++import {resolveDesktopRuntime,desktopSkillConfig,CUA_VERSION} from './desktop-runtime.js';
++
++const number={type:'number'},integer={type:'integer'};
++export const cuaSchema={type:'object',additionalProperties:false,required:['action'],properties:{action:{type:'string',enum:['status','list_windows','observe','click','double_click','right_click','type_text','press_key','hotkey','scroll','drag','release']},pid:integer,window_id:integer,app:{type:'string'},observationId:{type:'string'},x:number,y:number,from_x:number,from_y:number,to_x:number,to_y:number,text:{type:'string'},key:{type:'string'},keys:{type:'array',items:{type:'string'}},direction:{type:'string',enum:['up','down','left','right']},amount:{type:'integer'},button:{type:'string',enum:['left','right','middle']},count:{type:'integer'},duration_ms:{type:'integer'},delivery_mode:{type:'string',enum:['background','foreground']}}};
++export function installCua(ctx,{runtime=new CuaRuntime(),resolve=resolveDesktopRuntime}={}){
++ return ctx.inject(['tools','skills','agents','webServer','connection'],scope=>{
++  scope.plugin(filesystemSkills,desktopSkillConfig());
++  const definition=createMcpToolDefinition(scope,{name:'naumi_cua',rawName:'naumi_cua',description:'Operate the desktop with screenshot-grounded CUA. status, list_windows, then observe. Use the returned one-use observationId and screenshot coordinates; every action returns a fresh screenshot which must be inspected. One Session owns the desktop until release/expiry. Do not replay an uncertain action. No shell, DOM or accessibility actions in this tool.',inputSchema:cuaSchema,call:async(args,exec)=>{
++   const id=exec.agent?.id;if(!id)throw Error('CUA_SESSION_REQUIRED');
++   if(!['status','list_windows','release'].includes(args.action)){
++    const config=exec.agent.session?.requestHeader?.()?.config??{};
++    const provider=config.provider??exec.agent.options?.provider,model=config.model??exec.agent.options?.model;
++    const info=provider&&model&&await scope.get('llm')?.resolveModelInfo(provider,model,exec.signal);
++    if(!info?.inputModalities?.includes('image')||!scope.get('attachments'))throw Error('CUA_VISION_AND_ATTACHMENTS_REQUIRED');
++   }
++   return runtime.perform(id,args,{signal:exec.signal});
++  }});
++  // Keep the original bridge projection, but do not leave an actionable observation when image admission fails.
++  const execute=definition.execute,project=definition.projectContent,projections=new WeakMap();
++  definition.execute=async(args,exec)=>{const value=await execute(args,exec);if(value.content.some(c=>c.type==='image')){const content=definition.output.render(args,value),p=project(exec,{value,content});if(!p?.some(c=>c.type==='image')){runtime.observations?.delete(exec.agent?.id);throw Error('CUA_IMAGE_ADMISSION_FAILED');}projections.set(exec,{value,content,projection:p});}return value;};
++  definition.projectContent=(exec,result)=>{const p=projections.get(exec);projections.delete(exec);if(result.isError||!p||!isDeepStrictEqual(result.value,p.value)||!isDeepStrictEqual(result.content,p.content))return undefined;return p.projection;};
++  scope.effect(()=>scope.tools.register(definition));
++  scope.on('agent/created',({agent})=>runtime.attach(agent.id));
++  scope.on('agent/disposed',({agent})=>runtime.remove(agent.id));
++  scope.effect(()=>()=>runtime.close());
++  scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/desktop',handler:async(req,res)=>{
++   res.setHeader('Cache-Control','private, no-store');const send=(s,v)=>res.writeHead(s,{'Content-Type':'application/json; charset=utf-8'}).end(JSON.stringify(v));
++   const a=scope.connection.admit(req);if('rejection'in a){send(a.rejection,{error:'HARNESS_AUTH_REQUIRED'});return;}if(a.peer.principal.kind!=='owner'){send(403,{error:'HARNESS_OWNER_REQUIRED'});return;}
++   if(req.method!=='GET'){res.setHeader('Allow','GET');send(405,{error:'READ_ONLY'});return;}
++   let installed=false;try{resolve();installed=true;}catch{}
++   const registered=scope.tools.definitions().some(t=>t.name==='naumi_cua');
++   send(installed&&registered?200:503,{engine:'cua',version:CUA_VERSION,transport:'stdio',tool:'naumi_cua',status:!installed?'bundle_missing':runtime.connected?'connected':'installed',ready:installed&&registered&&runtime.connected,toolRegistered:registered,physicalInput:true,legacyDesktop:false});
++  }}));
++ });
++}
+diff --git a/plugins/naumi-enterprise/desktop-runtime.js b/plugins/naumi-enterprise/desktop-runtime.js
+index 862db3d..0208287 100644
+--- a/plugins/naumi-enterprise/desktop-runtime.js
++++ b/plugins/naumi-enterprise/desktop-runtime.js
+@@ -1,40 +1,16 @@
+ import fs from 'node:fs';
+ import path from 'node:path';
+-import {createRequire} from 'node:module';
+ import {fileURLToPath} from 'node:url';
+ import {createHash} from 'node:crypto';
+-
+-export const AGENT_DESKTOP_VERSION='1.3.1';
+-export const DESKTOP_SERVER_NAME='naumi_desktop';
+-const require=createRequire(import.meta.url);
+-/** Resolve packaged native artifacts, never npx/PATH or a network download. */
+-export function resolveDesktopRuntime({manifestPath=require.resolve('agent-desktop/package.json'),platform=process.platform,arch=process.arch,readFile=fs.readFileSync,exists=fs.existsSync}={}) {
+-  const manifest=JSON.parse(readFile(manifestPath,'utf8'));
+-  if(manifest.version!==AGENT_DESKTOP_VERSION)throw Error(`agent-desktop version mismatch: expected ${AGENT_DESKTOP_VERSION}`);
+-  if(!['win32','darwin','linux'].includes(platform)||!['x64','arm64'].includes(arch))throw Error('Unsupported agent-desktop platform: '+platform+'-'+arch);
+-  const bin=path.join(path.dirname(manifestPath),'bin');
+-  const command=path.join(bin,`agent-desktop-${platform}-${arch}${platform==='win32'?'.exe':''}`);
+-  const checks=[];
+-  const verify=file=>{
+-    if(!exists(file)||!exists(file+'.sha256'))throw Error('Missing packaged agent-desktop artifact: '+path.basename(file));
+-    const actual=createHash('sha256').update(readFile(file)).digest('hex');
+-    const expected=readFile(file+'.sha256','utf8').trim();
+-    if(!/^[a-f0-9]{64}$/.test(expected)||expected!==actual)throw Error('agent-desktop checksum mismatch: '+path.basename(file));
+-    checks.push({file:path.basename(file),sha256:actual});
+-  };
+-  verify(command);
+-  const env={};
+-  if(platform==='darwin'){
+-    const helper=path.join(bin,`agent-desktop-macos-helper-${platform}-${arch}`);verify(helper);env.AGENT_DESKTOP_MACOS_HELPER_PATH=helper;
+-  }
+-  if(platform==='linux')verify(path.join(bin,`agent-desktop-linux-clipboard-owner-${platform}-${arch}`));
+-  return {version:manifest.version,platform,arch,command,env,checks};
+-}
+-
+-export function desktopMcpConfig(runtime=resolveDesktopRuntime()) {
+-  return {serverName:DESKTOP_SERVER_NAME,transport:'stdio',command:runtime.command,args:['mcp','--session','naumi'],env:runtime.env,cwd:path.dirname(runtime.command),toolCallTimeoutMs:60000,failOnStartupError:false,maxInstructionBytes:32768,reconnect:{enabled:true,initialDelayMs:500,maxDelayMs:30000,maxAttempts:10}};
+-}
+-
+-export function desktopSkillConfig() {
+-  return {providerName:'naumi-desktop',includeDefaultRoots:false,customSkillDirs:[fileURLToPath(new URL('./skills',import.meta.url))],watch:false};
++export const CUA_VERSION='0.54.0';
++export const CUA_SHA256='99a4b7a04fb3a25a450cc64ed4b806406c18aa08f27ec83a8364a0c601b1865e';
++export const CUA_ARCHIVE_SHA256='c0b92cb56ec7863ca177a2813bf5e22bdea5772a56f5bc4e8be064eed34498d7';
++export const CUA_ARCHIVE_URL=`https://github.com/trycua/cua/releases/download/cua-driver-rs-v${CUA_VERSION}/cua-driver-rs-${CUA_VERSION}-windows-x86_64.zip`;
++// Offline pinned artifact only; no PATH, global installation, updates or runtime downloads.
++export function resolveDesktopRuntime({platform=process.platform,arch=process.arch,command=fileURLToPath(new URL('./third-party/cua-driver/win32-x64/cua-driver.exe',import.meta.url)),readFile=fs.readFileSync}={}){
++ if(platform!=='win32'||arch!=='x64')throw Error('CUA_PLATFORM_NOT_PACKAGED');
++ let bytes;try{bytes=readFile(command);}catch{throw Error('CUA_BUNDLE_MISSING');}
++ if(createHash('sha256').update(bytes).digest('hex')!==CUA_SHA256)throw Error('CUA_BUNDLE_HASH_MISMATCH');
++ return {engine:'cua',version:CUA_VERSION,platform,arch,command,args:['mcp','--direct','--embedded'],env:{CUA_DRIVER_RS_TELEMETRY_ENABLED:'false',CUA_TELEMETRY_ENABLED:'false'},checks:[{file:path.basename(command),sha256:CUA_SHA256}]};
+ }
++export function desktopSkillConfig(){return {providerName:'naumi-desktop',includeDefaultRoots:false,customSkillDirs:[fileURLToPath(new URL('./skills',import.meta.url))],watch:false};}
+diff --git a/plugins/naumi-enterprise/employee-capabilities.js b/plugins/naumi-enterprise/employee-capabilities.js
+index bd172c2..1d1a19c 100644
+--- a/plugins/naumi-enterprise/employee-capabilities.js
++++ b/plugins/naumi-enterprise/employee-capabilities.js
+@@ -16,7 +16,7 @@ export class EmployeeCapabilities{
+     const save=(id,value)=>this.values.set(id,{id,...base,...value});
+     let desktop;try{desktop=this.desktop();}catch{}
+     let names=[];try{names=(this.ctx.tools.definitions?.()??[]).map(t=>t.name);}catch{}
+-    const registered=names.includes('mcp__naumi_desktop__desktop_status');
++    const registered=names.includes('naumi_cua');
+     save('desktop',{installed:!!desktop,version:desktop?.version??null,toolRegistered:registered,reasonCode:!desktop?'DESKTOP_BUNDLE_INVALID':registered?'DESKTOP_HEALTH_NOT_PROBED':'DESKTOP_TOOL_NOT_REGISTERED'});
+     const health=await this.browser.health();
+     save('browser',{installed:health.installed,connected:health.connected,healthy:health.healthy,toolRegistered:names.includes('naumi_browser'),engine:health.engine,reasonCode:health.reasonCode});
+diff --git a/plugins/naumi-enterprise/host.js b/plugins/naumi-enterprise/host.js
+index 09dbed8..18b2c64 100644
+--- a/plugins/naumi-enterprise/host.js
++++ b/plugins/naumi-enterprise/host.js
+@@ -7,7 +7,7 @@ import {installModelConnections} from './model-connections.js';
+ import {readFile} from 'node:fs/promises';
+ import {fileURLToPath} from 'node:url';
+ import {businessCookie,projectWorkspace,validateOrigin} from './domain.js';
+-import {installAgentDesktop} from './agent-desktop.js';
++import {installCua} from './cua.js';
+ import {installEgoBrowser} from './browser.js';
+ import {installTeamProfile} from './team-profile.js';
+ import {installBots} from './bots.js';
+@@ -21,7 +21,7 @@ export function apply(ctx,config) {
+   installSessionImport(ctx);
+   installModelConnections(ctx);
+   installPluginMarket(ctx);
+-  installAgentDesktop(ctx);
++  installCua(ctx);
+   installBlender(ctx);
+   installCreation(ctx);
+   installEgoBrowser(ctx);
+diff --git a/plugins/naumi-enterprise/package.json b/plugins/naumi-enterprise/package.json
+index 563e192..f234608 100644
+--- a/plugins/naumi-enterprise/package.json
++++ b/plugins/naumi-enterprise/package.json
+@@ -20,7 +20,6 @@
+     "client.js",
+     "assets",
+     "cordis.patch.yml",
+-    "agent-desktop.js",
+     "desktop-runtime.js",
+     "skills",
+     "third-party",
+@@ -96,7 +95,9 @@
+     "blender-skills",
+     "creation.js",
+     "creation-runtime.js",
+-    "creation-bundle.js"
++    "creation-bundle.js",
++    "cua.js",
++    "cua-runtime.js"
+   ],
+   "dsh": {
+     "bundle": {
+@@ -118,7 +119,7 @@
+     "dsh": "0.2.2-rc.1"
+   },
+   "dependencies": {
+-    "agent-desktop": "1.3.1"
++    "@modelcontextprotocol/client": "2.2.0"
+   },
+   "peerDependencies": {
+     "@deepseek-ai/dsh-compaction-basic": "0.2.2-rc.1",
+diff --git a/plugins/naumi-enterprise/product-version.js b/plugins/naumi-enterprise/product-version.js
+index 69819ba..90d584c 100644
+--- a/plugins/naumi-enterprise/product-version.js
++++ b/plugins/naumi-enterprise/product-version.js
+@@ -1 +1 @@
+-export const PRODUCT_VERSION="0.4.3";
++export const PRODUCT_VERSION="0.4.4";
+diff --git a/plugins/naumi-enterprise/skills/naumi-desktop/SKILL.md b/plugins/naumi-enterprise/skills/naumi-desktop/SKILL.md
+index c11a5a1..5414809 100644
+--- a/plugins/naumi-enterprise/skills/naumi-desktop/SKILL.md
++++ b/plugins/naumi-enterprise/skills/naumi-desktop/SKILL.md
+@@ -1,27 +1,20 @@
+ ---
+ name: naumi-desktop
+-description: Operate the employee's desktop apps with Naumi's bundled agent-desktop MCP tools. Use for explicit desktop UI observation and interaction requests, including windows, controls, forms, files and application workflows.
++description: Use Naumi CUA to operate desktop apps from screenshots. One Session owns the desktop. Observe before every action and inspect the returned image.
+ ---
++# Naumi CUA
+ 
+-# Naumi 桌面操作
++Use only `naumi_cua` for desktop UI actions. The previous agent-desktop tools are removed. Naumi creation, Blender and the native browser remain dedicated integrations, not alternate desktop input engines.
+ 
+-本能力随 Naumi 提供，不需要员工安装全局 CLI 或配置 MCP。工具命名空间为 `mcp__naumi_desktop__desktop_*`。
++1. `{"action":"status"}` checks the local Driver connection. A vision-capable model and native attachments are required to operate.
++2. `{"action":"list_windows","app":"..."}` discovers exact pid/window_id. Never guess them.
++3. `{"action":"observe","pid":PID,"window_id":WINDOW_ID}` returns a real screenshot, dimensions and observationId. Omit both IDs for the visible primary desktop. Window captures contain no accessibility tree.
++4. Inspect that image. Call click/double_click/right_click/type_text/press_key/hotkey/scroll/drag with its observationId. Coordinates refer to the returned PNG, not original desktop size. Do not pass another target: the host binds the observed target and Session. Scroll requires x/y. Each ID expires in 30 seconds and is consumed before dispatch.
++5. Every action returns a fresh screenshot. Inspect it to verify the requested effect; a native dispatch receipt is not proof of success. Use the NEW observationId for the next action.
++6. `{"action":"release"}` ends the visible session and frees the desktop. A different Bot sees CUA_DESKTOP_BUSY, not a fallback engine. Normal idle leases expire after 120 seconds; unknown actions must be reconciled by fresh observation first.
+ 
+-## 首次使用
++Exact-window actions default to background delivery. Only after the driver reports background_unavailable or a fresh screenshot verifies a no-op, explicitly request foreground delivery using a NEW observationId. Never automatically repeat an uncertain click, payment, send or submit.
+ 
+-1. 调用 `mcp__naumi_desktop__desktop_status` 确认当前平台和实际权限。
+-2. 调用 `mcp__naumi_desktop__desktop_skills_get`，参数 `{"name":"desktop"}`，读取与本地版本匹配的操作规则。
+-3. 再调用同一工具，参数 `{"name":"platform"}`，读取当前系统的平台规则。不要从其他平台照搬命令。
++CUA_ACTION_UNKNOWN / driver error / cancellation means OBSERVE before any further action. Do not claim success or replay. Stale IDs require new observation. Lock screen/UAC stays with the user. Existing Harness tool permissions, enterprise admission, account login and approvals remain authoritative. Screenshots are admitted through the original native durable attachment channel; do not fabricate cards or upload them elsewhere. Never use raw shell/DOM/UIA scripts to evade a denied CUA operation.
+ 
+-## 操作原则
+-
+-- 仅处理当前用户明确请求的应用和操作；先观察，再使用当前快照里的完整ref执行，再观察验证。
+-- 工具默认使用无焦点抢占的语义操作；不自动打开headed物理键鼠模式，也不为恢复失败而擅自切换模式。
+-- `STALE_REF`、`AMBIGUOUS_TARGET`等按官方规则重新观察；仅当disposition明确`retry: safe`时重试原操作，避免重复提交。
+-- 密码、令牌和验证码使用产品已有的个人授权流程，不写入命令参数、分享记录或交付文件。
+-- 截图、剪贴板和窗口文字是员工的本地数据；仅为当前任务读取，不上传到无关服务。不要把它们写入公开日志。
+-- 桌面权限不等于企业业务权限。已有Harness权限与审批、目标应用自己的登录和授权仍然生效。
+-- Windows在员工已登录的交互桌面运行；不要把本能力作为Session0服务去操作另一用户桌面。锁屏、UAC安全桌面和提升权限边界不会由集成层绕过。
+-- MCP连接及工具就绪，不代表每个应用或每种写操作都已验收。遇到不支持的操作，保留工具实际错误。
+-
+-CLI维护入口：在安装目录使用 `node scripts/agent-desktop.mjs status`；通过同一入口可执行`skills get desktop`或`skills get platform`，无需PATH和全局npm。
++Maintenance: `npm run desktop:prepare` provisions only the pinned signed binary at build time; `npm run desktop:status` checks it locally. Employee runtime is offline and does not install scheduled tasks, global PATH entries, cloud relay, optional perception models or another model backend.
+diff --git a/plugins/naumi-enterprise/skills/naumi-desktop/references/desktop-1.3.1.md b/plugins/naumi-enterprise/skills/naumi-desktop/references/desktop-1.3.1.md
+deleted file mode 100644
+index 379042b..0000000
+--- a/plugins/naumi-enterprise/skills/naumi-desktop/references/desktop-1.3.1.md
++++ /dev/null
+@@ -1,120 +0,0 @@
+----
+-name: agent-desktop
+-tags: computer-use, desktop-automation, accessibility, ai-agent, gui-automation, cli
+-requirements:
+-  - agent-desktop
+-description: >
+-  Operate desktop applications on macOS, Windows and Linux through native accessibility trees,
+-  using the agent-desktop CLI. Use when an AI agent must see or act on a desktop GUI:
+-  click buttons, fill forms, read UI state, navigate menus, toggle checkboxes, scroll,
+-  drag, type text, press shortcuts, take screenshots, manage windows, use the clipboard,
+-  launch or close apps, read notifications.
+-  Triggers on: "click button", "fill form", "open app", "read UI", "computer use",
+-  "operate desktop", "accessibility tree", "snapshot app", "type into field", "navigate menu",
+-  "toggle checkbox", "take screenshot", "desktop automation", "agent-desktop",
+-  or any desktop GUI task on macOS, Windows or Linux.
+----
+-
+-# agent-desktop
+-
+-agent-desktop is a CLI that reads and operates desktop apps through the OS accessibility tree. Every command prints one JSON envelope (`ok`, `data` or `error`). It is a tool, not an agent: the observe, act and verify loop runs in you.
+-
+-## Shell syntax
+-
+-Examples use a POSIX shell. In PowerShell, quote every ref (`'@s8f3k2p9:e1'`), because a bare `@token` is the splatting operator. Use `$env:NAME = 'value'` instead of `export`, and `| ConvertFrom-Json` instead of `$(...)` and `jq`. The Windows skill has the PowerShell forms.
+-
+-## First run
+-
+-1. Run `agent-desktop status`. It reports the platform, permissions and `supported_surfaces`.
+-2. Run `agent-desktop skills get platform`. It loads the skill for the OS the binary runs on (macOS, Windows or Linux).
+-3. For flags and syntax, run `agent-desktop <command> --help`. This skill does not repeat flag lists.
+-
+-## The loop
+-
+-Use `find` when you know the role or exact name. Otherwise map the app first and drill into one region.
+-
+-```
+-agent-desktop snapshot --skeleton --app "Notes" -i --compact   # shallow map, children_count on cut branches
+-agent-desktop snapshot --root @s8f3k2p9:e3 -i --compact        # drill into one region
+-agent-desktop click @s8f3k2p9:e12                              # act on a qualified ref
+-agent-desktop snapshot --root @s8f3k2p9:e3 -i --compact        # verify: re-read the same region
+-```
+-
+-- A small app needs no skeleton. Take a full `snapshot -i`.
+-- `-i` keeps interactive nodes only, so a row's static-text label is dropped. To tell which row a repeated button belongs to, drill that row's container with `--root` and leave out `-i`. On Windows and Linux that reads the row but does not make its button actionable: a button repeated in other rows is a twin in the window and its ref is refused (see Refs).
+-- A `--root` drill adds its refs to the same snapshot id. Refs outside the drilled subtree, and the drilled root itself, stay valid; refs that were already inside it are replaced, so an old ref there returns `STALE_REF`.
+-- Never skeleton a surface (`--surface menu`, `sheet`, `alert`). A surface is already focused.
+-- An action that opens a menu, sheet or alert lists it in `data.surfaces`. Target that overlay next.
+-- After an async step, use `wait` (see `commands-system.md`). A fixed sleep is a race.
+-
+-## Refs
+-
+-- Output refs are qualified: `@<snapshot_id>:e<N>`, for example `@s8f3k2p9:e1`. Pass them to later commands as they are.
+-- Refs are valid for one snapshot. After any UI change, re-drill the affected region or take a new snapshot.
+-- Only addressable elements get refs. Static text and inert containers do not.
+-- A command re-identifies the element before it acts. On macOS the ref carries the element's own address, so identical twins each keep their ref. On Windows and Linux a ref resolves only when it was the only element in the window its snapshot captured with its role, native id, name and description, counted even below a skeleton or depth cut, and exactly one live element still matches. Identical twins there have no ref path: only `--headed mouse-click --xy X,Y` can choose one, it takes the foreground, and a Linux Wayland session refuses it.
+-- `STALE_REF`: the element is gone or no longer matches. `details.kind` is `saved_ref_absent`, or `retained_object_stale` on macOS. Take a fresh snapshot and use the new ref.
+-- `AMBIGUOUS_TARGET`: an identical element appeared (`saved_ref_ambiguous`), or the ref was not proven unique at capture (`identity_not_unique`). Repeating the ref or re-snapshotting identical twins gives the same refusal; act on a control that is unique in the window. `identity_not_unique` also follows a snapshot that could not read the whole window in time: retake it with a larger `--timeout-ms`.
+-- `TIMEOUT` with `details.kind: resolution_identity_unknown`: a live read did not answer, so identity is unproven. Nothing was sent; retry.
+-- `SNAPSHOT_NOT_FOUND`: the snapshot id expired. Snapshot again.
+-
+-## Delivery and retry
+-
+-Action results carry `data.disposition` and errors carry `error.disposition`, each with `delivery` and `retry`. Observation commands such as `snapshot` have none on success; their errors, and every `INVALID_ARGS` refusal, carry `not_delivered` and `retry: safe`.
+-
+-- Retry or substitute an action only when `disposition.retry` is `safe`. Only `not_delivered` is safe.
+-- Any other delivery value means the action may have landed. A repeat can click, type or submit twice, and `toggle` can undo itself.
+-- On a result that is not safe, read the live state (`get`, `is`, or a fresh snapshot) and decide from that. `details.post_state` helps when present.
+-- Branch on `error.code` and `error.disposition`. Message and suggestion text can change.
+-- `details.retryable: false` means waiting cannot change the outcome. Try a different approach.
+-
+-## Headless and headed
+-
+-Ref actions are headless by default. They use semantic accessibility calls and do not take focus, move the cursor, synthesize keys or use the clipboard. If no semantic path exists, the action fails closed. Use the global `--headed` flag only when the user explicitly permits physical input, such as double-click, hover, drag, or focus. Never switch to headed mode to recover from a headless failure. Raw coordinates (`--xy`) never imply focus. Which actions need `--headed` differs by OS: read the platform skill.
+-
+-## Sandboxes
+-
+-A sandbox is a desktop a provider manages on your machine. The provider is `macos`: a macOS VM on an Apple Silicon Mac running macOS 13 or later. Linux and Windows have no provider; to run agent-desktop in a container you manage yourself there, follow `agent-browser.dev/desktop/guides/docker-container`.
+-
+-```sh
+-agent-desktop sandbox install                          # report the provider's state
+-agent-desktop sandbox install macos                    # compile and sign the VM host, then report ready
+-```
+-
+-```sh
+-agent-desktop sandbox create demo --provider macos --set from=base   # clone a set-up sandbox; or --set ipsw=latest to install
+-agent-desktop sandbox start demo                       # start it headless; add --window to show its desktop
+-agent-desktop sandbox status demo                      # state, message and next command
+-agent-desktop sandbox list                             # every sandbox and its state
+-agent-desktop sandbox exec demo -- status              # run a command in the guest
+-agent-desktop sandbox stop demo                        # stop the sandbox
+-agent-desktop sandbox rm demo                          # remove it
+-```
+-
+-Names are 1–32 lowercase letters, digits or hyphens, starting with a letter or digit. `exec` returns the guest's envelope and exit status; a provider failure returns a host error. `rm` refuses a sandbox reported as `running`; stop it first. `create` needs exactly one source: `--set from=<sandbox>`, `--set ipsw=latest` or `--set ipsw=<path>`. `start` answers `working` until the guest answers; wait for `status` to report `running` before `exec`.
+-
+-Read `state`, `message` and optional `next`; `ok: true` alone does not mean the sandbox is ready.
+-
+-- `unavailable`: satisfy the host requirements in `message` and `next`.
+-- `missing`: install the provider.
+-- `ready`: create a sandbox.
+-- `working`: repeat the command in `next` until the work finishes.
+-- `needs_setup`: have a person complete guest setup, then check status.
+-- `running`: run guest commands, or stop before removal.
+-- `stopped`: start the sandbox to use it, or remove it.
+-- `broken`: follow `next`; a broken sandbox may need removal.
+-
+-A sandbox separates the desktop, not the network or the host. Sandboxes on one host share a virtual network, and a guest can reach the host's network services; keep one trust level per host. Each sandbox has its own pinned SSH host key, so a guest cannot answer for another sandbox. The SSH key under `<state root>/sandboxes/<name>/` is the guest credential, and in the guest Accessibility belongs to `sshd-keygen-wrapper` for the whole user session.
+-
+-Cloning a configured macOS VM has been tested end to end. Installing the first VM from a macOS image is experimental and has not been verified end to end. Provider setup steps and limits are in the docs: `agent-browser.dev/desktop/sandboxes/macos`.
+-
+-## References
+-
+-Load one only when you need it: `agent-desktop skills get desktop <reference>`.
+-
+-| Reference | Open it when |
+-|-----------|--------------|
+-| `commands-observation` | You need `snapshot`, `find`, `get`, `is`, `screenshot`, `list-surfaces` semantics, partial trees, or the `--root` rules |
+-| `commands-interaction` | You choose between click, type, set-value, select, toggle, scroll, press and mouse commands, or you debug an action error |
+-| `commands-system` | You launch or close apps, manage windows, use the clipboard, `wait`, `batch`, sessions, multi-agent cursors, tracing, or load skills |
+-| `workflows` | You want worked patterns (forms, menus, dialogs, waiting for a new window, scroll-find, drag) and the anti-patterns list |
+diff --git a/plugins/naumi-enterprise/skills/naumi-desktop/references/platform-1.3.1.md b/plugins/naumi-enterprise/skills/naumi-desktop/references/platform-1.3.1.md
+deleted file mode 100644
+index 9f4e764..0000000
+--- a/plugins/naumi-enterprise/skills/naumi-desktop/references/platform-1.3.1.md
++++ /dev/null
+@@ -1,112 +0,0 @@
+----
+-name: agent-desktop-windows
+-tags: windows-automation, accessibility, uia, ai-agent, gui-automation, cli
+-requirements:
+-  - agent-desktop
+-description: >
+-  Windows platform guide for the agent-desktop CLI. Lists per command group
+-  what works on Windows and what refuses, the first-contact gotchas
+-  (PowerShell ref quoting, minimized windows, headed-only input), and where
+-  to find shell surfaces, notifications, the cursor overlay, UIPI elevation,
+-  Chromium/Electron settle behavior and troubleshooting.
+-  Triggers on: "windows desktop automation", "UIA tree", "automate Windows app",
+-  "agent-desktop on Windows", "elevated window input blocked", "E_ACCESSDENIED",
+-  or any Windows GUI interaction task.
+----
+-
+-# agent-desktop-windows
+-
+-This file covers only what differs on Windows. The observe-act loop, refs, JSON
+-envelope, sessions and tracing are the same on every platform.
+-
+-Requires Windows 10 1809+ / Windows Server 2019+ (x64 or ARM64). Run it in the
+-interactive desktop session of the signed-in user. Session 0 (services and
+-SYSTEM tasks), Server Core, the secure desktop (UAC prompts, the sign-in
+-screen), a locked desktop and another user's session are not supported:
+-observation, actions and capture there fail or return nothing.
+-
+-## Capability Table
+-
+-| Group | Commands | Status on Windows |
+-|-------|----------|-------------------|
+-| Observation | `snapshot`, `find`, `get`, `is`, `screenshot` | Works. Surfaces are `window`, `focused`, a Chromium modal as `sheet`, and an open application menu as `menu` |
+-| Surfaces | `list-surfaces` | Works. Lists `window`, `focused` and `sheet` per process, plus `menu` with `item_count` while a menu is open |
+-| Shell surfaces | `open-system-surface` | Works for `start-menu`, `taskbar`, `system-tray`, `system-tray-overflow` and `action-center`, and returns the window `snapshot --surface <kind>` reads. `quick-settings` returns `INVALID_ARGS` naming `action-center` |
+-| Ref interaction | `click`, `right-click`, `type`, `set-value`, `clear`, `select`, `toggle`, `check`, `uncheck`, `expand`, `collapse`, `scroll`, `scroll-to` | Works, semantic in headless and `--headed` mode. `right-click` and `type` need `--headed` and return `POLICY_DENIED` headless |
+-| Multi-click and focus | `double-click`, `triple-click`, `focus` | Works with global `--headed` only |
+-| Keyboard and mouse | `press`, `hover`, `drag`, `mouse-click`, `mouse-move`, `mouse-wheel` | Works. Cursor-moving input needs `--headed`. First Contact covers `press --app` |
+-| Held input | `key-down`, `key-up`, `mouse-down`, `mouse-up` | Fails closed on every platform with `ACTION_NOT_SUPPORTED`. A headless `mouse-down` or `mouse-up` returns `POLICY_DENIED` first |
+-| App and window | `launch`, `close-app`, `list-windows`, `list-apps`, `focus-window`, `resize-window`, `move-window`, `minimize`, `maximize`, `restore` | Works. First Contact covers the name `launch` takes |
+-| Displays | `list-displays` | Works |
+-| Clipboard | `clipboard-get`, `clipboard-set`, `clipboard-clear` | Works; typed text and image content |
+-| Wait | `wait` | Works for ms, `--element`, `--window`, `--text`, `--menu`, `--menu-closed`, `--event` and `--notification` |
+-| Notifications | `list-notifications`, `dismiss-notification`, `dismiss-all-notifications`, `notification-action` | Works over the Action Center. Pass `--headed` when the center is closed |
+-| Cursor overlay | `cursor-overlay` | Works. `enable` returns `data.rendered: true` only after the renderer acknowledges over its pipe. See `references/shell-and-overlay.md` |
+-| System | `status`, `permissions`, `version`, `batch`, `skills`, `session`, `trace` | Works |
+-
+-## First Contact
+-
+-- **Quote every ref in PowerShell.** PowerShell reads a bare `@token` as its
+-  splatting operator and deletes the argument before the binary sees it, so
+-  `set-value @s8f3k2p9:e1 hi` fails `INVALID_ARGS`. Write
+-  `set-value '@s8f3k2p9:e1' hi`. cmd.exe and bash need no quoting.
+-- **A window behind another window is drivable. A minimized one is not.**
+-  Every element of a minimized window reports `offscreen` and ref actions
+-  fail. Run `restore --app <image>` and snapshot again. Do not use
+-  `focus-window` by reflex: it steals the user's foreground.
+-- **No permission dialog exists.** `permissions` reports `automation` as
+-  `not_required`. Elevation boundaries are the only access control.
+-- **Chromium and Electron apps read thin before they settle.** Pass a longer
+-  `--timeout-ms` to `snapshot` instead of concluding the tree is empty.
+-- **Blocked shortcuts.** `alt+f4`, `win+l`, `win+d`, `alt+tab`, `win+r`,
+-  `win+x`, `win+e`, `ctrl+shift+esc` and their modifier supersets are refused
+-  without `--force`. In combos, `cmd` and `meta` are the Windows key, so
+-  `meta+c` is a shell shortcut. Write `ctrl+c` to copy.
+-- **`type` needs `--headed`.** It is keystroke synthesis through `SendInput`,
+-  so a strict-headless `type` returns `POLICY_DENIED`. Use `set-value`, or pass
+-  `--headed`. It ends `delivered_unverified` (`verification_scope:
+-  "unavailable"`) when the field exposes no readable Text selection, and can
+-  verify when one is readable: confirm with a fresh `get`.
+-- **`press --app` writes to the foreground queue** with no per-process
+-  targeting. A headless press to a non-frontmost app fails closed. A
+-  non-interactive caller (service, scheduled task, CI job) gets
+-  `delivered_unverified`.
+-- **`launch` takes an absolute path or a bare name** under System32 or the
+-  Windows directory, with or without `.exe` (`notepad` or `notepad.exe`), not
+-  a display name. Use `list-apps` to find a running app.
+-- **Notifications:** `list-notifications` with the Action Center closed needs
+-  `--headed`. Single-item `dismiss-notification` and `notification-action` need
+-  `--headed` and `--expected-app` or `--expected-title` for the entry at INDEX.
+-- **Surfaces:** an open or context menu is the `menu` surface. Windows does
+-  not advertise a `menubar` surface.
+-- **Commands that raise shell chrome take the foreground.** Strict headless
+-  refuses them with `POLICY_DENIED` before anything is raised.
+-- **Stateful actions run once, then verify by re-reading.** `delivered_verified`
+-  means the readback matched. `ACTION_FAILED` with
+-  `details.kind: "post_action_verification"` means the action landed but the
+-  readback differs: read `details.post_state` and do not retry. A `set-value`
+-  the app reformats reads as failed. See `references/troubleshooting.md`.
+-- **Unsigned binary warnings are expected.** See `references/troubleshooting.md`.
+-
+-## What differs on Windows
+-
+-- Sandboxes are not available on Windows yet. To run agent-desktop in a container you manage yourself, see `agent-browser.dev/desktop/guides/docker-container`.
+-
+-- Ref actions are semantic UI Automation calls in headless and `--headed` mode, except `right-click`, `double-click`, `triple-click`, `type` and `focus`, which are physical or take focus and need `--headed`.
+-- A ref resolves only when it was the only element in the window its snapshot captured with its role, native id, name and description, and exactly one live element still matches. Uniqueness counts the whole window, not the shallow tree a `--skeleton` or `--max-depth` snapshot presents, so a twin below the cut still refuses the ref. Identical twins, such as several identical `Delete` buttons, are refused with `AMBIGUOUS_TARGET`, `details.kind: identity_not_unique`, before anything reaches the app; a live second match is `saved_ref_ambiguous`, and a removed element is `STALE_REF`, `saved_ref_absent`. Take a fresh snapshot after a list changes, and use `--headed mouse-click --xy` when you must pick one of two identical controls.
+-- The cursor overlay plays its per-action travel only for headless semantic actions. A `--headed` action moves the real cursor instead.
+-
+-## References
+-
+-- `references/shell-and-overlay.md`: open it for `open-system-surface`, tray
+-  and taskbar surfaces, notifications, the cursor overlay, hosted (UWP) window
+-  identity and menu detection coverage.
+-- `references/permissions-and-elevation.md`: integrity levels, UIPI, blocked
+-  combos, protected processes, the cross-process interaction lease.
+-- `references/chromium-and-electron.md`: settle timing, covered-window hazard,
+-  WPF wrong-provider trap, unnamed web content.
+-- `references/troubleshooting.md`: symptom-to-cause map, action verification
+-  outcomes, saving a document headless, install warnings.
+-
+-Read any file from the binary:
+-`agent-desktop skills get agent-desktop-windows references/troubleshooting.md`.
+diff --git a/plugins/naumi-enterprise/third-party/cua-driver/LICENSE b/plugins/naumi-enterprise/third-party/cua-driver/LICENSE
+new file mode 100644
+index 0000000..b8b198c
+--- /dev/null
++++ b/plugins/naumi-enterprise/third-party/cua-driver/LICENSE
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2025 Cua AI, Inc.
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/plugins/naumi-enterprise/third-party/cua-driver/THIRD_PARTY_NOTICES.md b/plugins/naumi-enterprise/third-party/cua-driver/THIRD_PARTY_NOTICES.md
+new file mode 100644
+index 0000000..c1c9ef1
+--- /dev/null
++++ b/plugins/naumi-enterprise/third-party/cua-driver/THIRD_PARTY_NOTICES.md
+@@ -0,0 +1,41 @@
++# Third-party notices
++
++Parts of the Cua Driver Rust workspace are derived from, or embed, these
++MIT-licensed projects. Each project's copyright notice is below, followed by the MIT
++License text they share.
++
++trope-cua's cursor motion is itself a port of Cua Driver's Swift cursor
++implementation (`CursorMotionPath.swift`, `Bezier.swift` and the Dubins glide in
++`AgentCursorRenderer.swift`, April 2026; MIT, Copyright (c) 2025 Cua AI, Inc.).
++In `cursor-overlay`, the motion knobs, their defaults, the arc formula and the
++Dubins glide originate in that Swift code; trope-cua is credited below only for
++the items listed.
++
++| Project                                                         | Copyright                                                                                                                              | Used in                                                                                                                                                                                                                                                                                                                                                                                                  | What                                                                                                                                                                                                                                                                                                                                                                                                                                                |
++| --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
++| [trope-cua](https://github.com/voctory/trope-cua)               | Copyright (c) 2026 Victor Vannara                                                                                                      | `crates/platform-windows` (`src/overlay.rs`, `src/input/`, `src/tools/`); `crates/cursor-overlay/src/motion.rs` (specific items only)                                                                                                                                                                                                                                                                    | Windows cursor overlay, background input and layered pixel-click dispatch; in `cursor-overlay`, the `press_duration_ms` knob, the 80 ms dwell default, the former 20 s idle default and the `with_overrides` method shape                                                                                                                                                                                                                           |
++| [Interface-Agent](https://github.com/francedot/Interface-Agent) | Copyright (c) 2024 Francesco Bonacci                                                                                                   | `crates/platform-windows` (`src/uia/`, `src/win32/`, `src/tools/`)                                                                                                                                                                                                                                                                                                                                       | Windows UI Automation tree walk, app and window enumeration, InvokePattern click and ValuePattern set-value                                                                                                                                                                                                                                                                                                                                         |
++| [yabai](https://github.com/koekeishiya/yabai)                   | Copyright (c) 2019 Åsmund Vikane                                                                                                       | `crates/platform-macos/src/input/skylight.rs` (`activate_without_raise`)                                                                                                                                                                                                                                                                                                                                 | The focus-without-raise SkyLight event-record sequence                                                                                                                                                                                                                                                                                                                                                                                              |
++| [QuickJS-ng](https://github.com/quickjs-ng/quickjs)             | Copyright (c) 2017-2026 Fabrice Bellard; (c) 2017-2024 Charlie Gordon; (c) 2023-2026 Ben Noordhuis; (c) 2023-2026 Saúl Ibarra Corretgé | `crates/cua-driver-core/src/script_tool/` (compiled in through rquickjs-sys)                                                                                                                                                                                                                                                                                                                             | The JavaScript engine behind the experimental `run_script` tool                                                                                                                                                                                                                                                                                                                                                                                     |
++| [rquickjs](https://github.com/DelSkayn/rquickjs)                | Copyright (c) 2020 Mees Delzenne; (c) 2025 Rquickjs Contributors                                                                       | `crates/cua-driver-core/src/script_tool/`                                                                                                                                                                                                                                                                                                                                                                | Rust bindings to QuickJS-ng                                                                                                                                                                                                                                                                                                                                                                                                                         |
++| [T3 Code](https://github.com/pingdotgg/t3code)                  | Copyright (c) 2026 T3 Tools Inc.                                                                                                       | `crates/cua-driver-sdk/src/embedded.rs` (`allowed_environment_name`); `crates/platform-linux/src/wayland/shell_helper.rs` and `shell_helper/transport.rs`; `crates/platform-linux/src/wayland/libei.rs` (input acknowledgement); `crates/platform-linux/src/wayland/mod.rs` and `src/tools/` (GNOME window capture); `../wayland-helper/winrects@cua/` (`CaptureWindow`, `CaptureWindowPreview`)         | Linux fixes ported from T3 Code's patch to Cua Driver 0.34.0 ([pingdotgg/t3code#16975](https://github.com/pingdotgg/t3code/pull/16975), `patches/cua-driver-linux/0.34.0.patch`): the `CUA_DRIVER_RS_ENABLE_WAYLAND` embedded-host pass-through, the persistent session-bus transport for the GNOME helper, waiting for EIS to acknowledge libei input, and per-window GNOME capture with compositor-side preview downscaling (helper API 9 and 10) |
++
++## MIT License
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/scripts/agent-desktop.mjs b/scripts/agent-desktop.mjs
+deleted file mode 100644
+index 9dcb676..0000000
+--- a/scripts/agent-desktop.mjs
++++ /dev/null
+@@ -1,7 +0,0 @@
+-import {spawn} from 'node:child_process';
+-import {resolveDesktopRuntime} from '../plugins/naumi-enterprise/desktop-runtime.js';
+-const runtime=resolveDesktopRuntime();
+-const args=process.argv.slice(2);
+-const child=spawn(runtime.command,args.length?args:['status'],{stdio:'inherit',shell:false,windowsHide:true,env:{...process.env,...runtime.env}});
+-child.on('error',error=>{process.stderr.write(error.message+'\n');process.exitCode=1;});
+-child.on('exit',(code,signal)=>{process.exitCode=signal?1:code??1;});
+diff --git a/scripts/cua.mjs b/scripts/cua.mjs
+new file mode 100644
+index 0000000..872155e
+--- /dev/null
++++ b/scripts/cua.mjs
+@@ -0,0 +1,3 @@
++import {CuaRuntime} from '../plugins/naumi-enterprise/cua-runtime.js';
++const action=process.argv[2]??'status';if(!['status','list_windows'].includes(action))throw Error('CUA_MAINTENANCE_READ_ONLY');
++const runtime=new CuaRuntime();try{console.log(JSON.stringify(await runtime.perform('maintenance',{action}),null,2));}finally{await runtime.close();}
+diff --git a/scripts/setup-naumi.ps1 b/scripts/setup-naumi.ps1
+index b36dbd5..dbc0156 100644
+--- a/scripts/setup-naumi.ps1
++++ b/scripts/setup-naumi.ps1
+@@ -5,7 +5,9 @@ try {
+     $env:DSH_HOME = Join-Path $root '.dsh'
+     $env:DSH_TELEMETRY_MODE = 'DISABLED'
+     & (Join-Path $PSScriptRoot 'setup-ego-browser.ps1')
+-    node scripts/agent-desktop.mjs version
++    node desktop/scripts/stage-cua.mjs
++    if ($LASTEXITCODE) { throw 'CUA provisioning failed' }
++    node scripts/cua.mjs status
+     if ($LASTEXITCODE) { throw 'Bundled desktop runtime verification failed; run npm ci before installing the profile' }
+     node scripts/build-naumi-layout.mjs
+     if ($LASTEXITCODE) { throw 'Layout preparation failed' }
+diff --git a/scripts/verify-cua-installed.mjs b/scripts/verify-cua-installed.mjs
+new file mode 100644
+index 0000000..6b9e204
+--- /dev/null
++++ b/scripts/verify-cua-installed.mjs
+@@ -0,0 +1,17 @@
++import {zstdDecompressSync} from 'node:zlib';
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import{createHash,randomUUID}from'node:crypto';import{createRequire}from'node:module';
++const root=process.env.NAUMI_LIVE_ROOT??'E:/Workspace/naumi-desktop',home=path.join(root,'.dsh'),out=path.resolve('evidence/cua-unified'),mode=process.argv[2]??'baseline',read=p=>JSON.parse(fs.readFileSync(p,'utf8').replace(/^\uFEFF/,'')),sha=b=>createHash('sha256').update(b).digest('hex'),require=createRequire(import.meta.url),runtime=read(path.join(process.env.APPDATA,'Naumi/desktop-runtime.json')),settings={root,home,url:runtime.backendURL,logDir:path.join(root,'logs'),identity:read(path.join(home,'desktop-instance.json')),enterpriseOrigin:read(path.join(home,'desktop-enterprise.json')).origin},backend=require('../desktop/app/backend.cjs');
++
++function readFrames(bytes){const rows=[];let at=0;while(at<bytes.length){const r=zstdDecompressSync(bytes.subarray(at),{info:true});assert(r.engine.bytesWritten>0);for(const line of r.buffer.toString('utf8').trim().split('\n'))rows.push(JSON.parse(line));at+=r.engine.bytesWritten;}assert.equal(at,bytes.length);return rows;}
++function retainedFiles(before,current){const receipts=[];for(const[file,expected]of Object.entries(before)){if(current[file]===expected)continue;assert(file.endsWith('session.v4.jsonl.zstd'),'PROTECTED_CONFIG_CHANGED '+file);const bytes=fs.readFileSync(path.join(root,file));let split=null;for(let i=1;i<bytes.length-4;i++)if(bytes[i]===0x28&&bytes[i+1]===0xb5&&bytes[i+2]===0x2f&&bytes[i+3]===0xfd&&sha(bytes.subarray(0,i))===expected){split=i;break;}assert(split,'ORIGINAL_SESSION_BYTES_CHANGED');const prior=readFrames(bytes.subarray(0,split)),added=readFrames(bytes.subarray(split)),lastInbox=prior.filter(r=>r.type==='agent/inbox/spliced').at(-1);assert.deepEqual(added.map(r=>r.type),['agent/inbox/spliced','session/end-seed']);assert.equal(added[0].seq,prior.at(-1).seq+1);assert.equal(added[1].seq,added[0].seq+1);assert.equal(added[0].data.outcome,'canceled');assert.equal(added[0].data.target,'next-step');assert.equal(added[0].data.removedCount,1);assert.equal(added[0].data.inserted.length,0);assert.equal(lastInbox.data.inserted.length,1);assert.equal(lastInbox.data.inserted[0].source.kind,'user-approval');receipts.push({file,originalPrefixBytes:split,appendedBytes:bytes.length-split,originalSha256:expected,currentSha256:current[file],originalBytesRetained:true,nativeRecords:added.map(r=>({type:r.type,seq:r.seq,time:r.time})),canceledStaleApproval:true,originalApprovalSeq:lastInbox.seq,replayed:false});}return receipts;}
++
++const proof=await backend.probeIdentity(settings);assert(proof,'real signed backend proof required');const launch=backend.launchFromLog(settings);const auth=await fetch(launch,{redirect:'manual'});assert.equal(auth.status,303);const cookie=auth.headers.getSetCookie().map(x=>x.split(';')[0]).join('; ');const get=async p=>{const r=await fetch(runtime.backendURL+p,{headers:{cookie},signal:AbortSignal.timeout(15000)});return{status:r.status,body:await r.json()};};
++const response=await fetch(runtime.backendURL+'/api/session/list',{method:'POST',headers:{cookie,'Content-Type':'application/json'},body:JSON.stringify({type:'client-request',rpcId:randomUUID(),method:'session/list',payload:{args:{_request:{}}}})});const envelope=await response.json();assert(envelope.result?.ok);const sessions=envelope.result.value.items;const active=sessions.filter(s=>['running','starting','busy'].includes(s.status)||s.loopRunning||s.activeRun);assert.equal(active.length,0,'LIVE_SESSION_ACTIVE');
++const previous=mode==='baseline'?read(path.join(root,'evidence/enterprise47/LIVE_BEFORE.json')):read(path.join(out,'LIVE_BEFORE.json'));
++const files=Object.fromEntries(Object.keys(previous.files).map(p=>[p,sha(fs.readFileSync(path.join(root,p)))]));const domains={};for(const[name,p]of[['bots','/naumi/bots'],['tasks','/naumi/bot-tasks?view=activity'],['groups','/naumi/bot-groups'],['models','/naumi/model-connections']]){const r=await get(p);assert.equal(r.status,200);domains[name]=sha(Buffer.from(JSON.stringify(r.body)));}
++const desktop=await get('/naumi/desktop');
++if(mode==='baseline'){fs.writeFileSync(path.join(out,'LIVE_BEFORE.json'),JSON.stringify({runtime:{clientVersion:runtime.clientVersion,serviceVersion:runtime.serviceVersion,mode:runtime.backendMode},sessions:sessions.map(s=>s.sessionId??s.id).sort(),files,domains,desktop:desktop.body,active:active.length},null,2));console.log('CUA_LIVE_BASELINE client='+runtime.clientVersion+' service='+runtime.serviceVersion+' sessions='+sessions.length+' protected='+Object.keys(files).length+' active=0 engine='+ (desktop.body.version??'unknown'));}
++else{
++ assert.equal(runtime.clientVersion,'0.4.4');assert.equal(runtime.serviceVersion,'0.4.4');const appends=retainedFiles(previous.files,files);fs.writeFileSync(path.join(out,'SESSION_APPEND.json'),JSON.stringify(appends,null,2));assert.deepEqual(domains,previous.domains);assert.deepEqual(sessions.map(s=>s.sessionId??s.id).sort(),previous.sessions);assert.equal(desktop.body.engine,'cua');assert.equal(desktop.body.legacyDesktop,false);assert.equal(desktop.body.toolRegistered,true);assert.equal((await fetch(runtime.backendURL+'/naumi/desktop')).status,401);assert.equal((await fetch(runtime.backendURL+'/naumi/desktop',{method:'POST',headers:{cookie}})).status,405);
++ const state=read(path.join(home,'desktop-linked-service.json')),plan=require('../desktop/app/linked-service.cjs').plan({root,home,releaseRoot:state.releaseRoot,version:'0.4.4'});assert.equal(plan.changed,0);const result={status:'PASS',clientVersion:runtime.clientVersion,serviceVersion:runtime.serviceVersion,engine:'cua',oldEngine:false,toolRegistered:true,sessions:sessions.length,protectedFiles:Object.keys(files).length,byteIdenticalProtectedFiles:Object.keys(files).length-appends.length,nativeLifecycleAppendFiles:appends.length,canceledStaleApprovalItems:appends.length,originalBytesRetained:true,changedDomains:[],officialCodeDelta:0,backendMode:runtime.backendMode,enterpriseOrigin:settings.enterpriseOrigin,unauthenticated:401,write:405,modelCalls:0,businessWrites:0,at:new Date().toISOString()};fs.writeFileSync(path.join(out,'INSTALLED.json'),JSON.stringify(result,null,2));console.log('CUA_INSTALLED '+JSON.stringify(result));
++}
+diff --git a/scripts/verify-cua-state.mjs b/scripts/verify-cua-state.mjs
+new file mode 100644
+index 0000000..e05eb40
+--- /dev/null
++++ b/scripts/verify-cua-state.mjs
+@@ -0,0 +1,30 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import assert from 'node:assert/strict';
++import {fileURLToPath} from 'node:url';
++import {createHash} from 'node:crypto';
++import {spawnSync} from 'node:child_process';
++const root=fileURLToPath(new URL('..',import.meta.url)),dir=path.join(root,'evidence/cua-unified'),manifest=JSON.parse(fs.readFileSync(path.join(dir,'TRANSACTION.json')));
++const sha=b=>createHash('sha256').update(b).digest('hex'),hash=f=>fs.existsSync(f)?sha(fs.readFileSync(f)):null;
++const targetFile=(target,relative)=>{const p=path.resolve(target,relative);assert(p.startsWith(path.resolve(target)+path.sep),'ROLLBACK_PATH_INVALID');return p;};
++function restore(target){
++ target=fs.realpathSync(target);assert(target!==path.parse(target).root,'ROLLBACK_ROOT_INVALID');
++ for(const r of manifest.sources){const file=targetFile(target,r.file),actual=hash(file);assert(actual===r.after||actual===r.before,'ROLLBACK_LATER_EDIT '+r.file);if(r.before)assert.equal(hash(path.join(dir,'originals',r.file)),r.before);}
++ for(const r of manifest.sources){const file=targetFile(target,r.file);if(r.before){fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,fs.readFileSync(path.join(dir,'originals',r.file)));}else if(fs.existsSync(file))fs.unlinkSync(file);}
++ for(const r of manifest.sources)assert.equal(hash(targetFile(target,r.file)),r.before);
++}
++const mode=process.argv[2]??'rollback-test';
++if(mode==='rollback'){
++ assert(process.argv[3],'ROLLBACK_EXPLICIT_COPY_PATH_REQUIRED');restore(path.resolve(process.argv[3]));console.log('ROLLBACK original_sha256_restored=all restart_required=1');
++}else if(mode==='rollback-test'){
++ const fixture=fs.mkdtempSync(path.join(dir,'rollback-copy-'));
++ const activeBefore=new Map(manifest.sources.map(r=>[r.file,hash(path.join(root,r.file))]));
++ for(const r of manifest.sources){const src=path.join(dir,'modified',r.file),dest=targetFile(fixture,r.file);assert.equal(hash(src),r.after,'MODIFIED_SNAPSHOT_DRIFT');if(r.after){fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(src,dest);}}
++ const support='plugins/naumi-enterprise/third-party/agent-desktop/LICENSE';fs.mkdirSync(path.dirname(path.join(fixture,support)),{recursive:true});fs.copyFileSync(path.join(root,support),path.join(fixture,support));
++ restore(fixture);
++ const test=spawnSync(process.execPath,['--test','tests/agent-desktop.test.mjs'],{cwd:fixture,encoding:'utf8',windowsHide:true});fs.writeFileSync(path.join(dir,'ROLLBACK_BASELINE_TESTS.txt'),test.stdout+test.stderr);assert.equal(test.status,0,test.stdout+test.stderr);
++ for(const r of manifest.sources)assert.equal(hash(path.join(root,r.file)),activeBefore.get(r.file),'ACTIVE_SOURCE_CHANGED_BY_ROLLBACK');
++ assert(fs.readFileSync(path.join(fixture,'plugins/naumi-enterprise/host.js'),'utf8').includes('installAgentDesktop(ctx)'));
++ assert(fs.readFileSync(path.join(root,'plugins/naumi-enterprise/host.js'),'utf8').includes('installCua(ctx)'));
++ console.log('ROLLBACK baseline_tests=10/10 restored_sha256=all active_cua_changed=1 exit=0');
++}else throw Error('CUA_STATE_MODE_INVALID');
+diff --git a/scripts/verify-cua.mjs b/scripts/verify-cua.mjs
+new file mode 100644
+index 0000000..28b11fe
+--- /dev/null
++++ b/scripts/verify-cua.mjs
+@@ -0,0 +1,48 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import assert from 'node:assert/strict';
++import {spawn} from 'node:child_process';
++import {CuaRuntime,DesktopLease} from '../plugins/naumi-enterprise/cua-runtime.js';
++import {resolveDesktopRuntime} from '../plugins/naumi-enterprise/desktop-runtime.js';
++const dir=path.resolve('evidence/cua-unified'),phase=process.argv[2]??'full';fs.mkdirSync(dir,{recursive:true});
++const wait=ms=>new Promise(r=>setTimeout(r,ms)),log=path.join(dir,'NATIVE_EVENTS.txt'),fixtureFile=path.join(dir,'NATIVE_FIXTURE.json');
++const runtime=new CuaRuntime({lease:new DesktopLease({directory:path.join(dir,'native-lock')})});
++const report={runtime:resolveDesktopRuntime().checks,phase};let child;
++const save=(r,file)=>{const img=r.content.find(x=>x.type==='image');assert(img,'real native screenshot required');fs.writeFileSync(path.join(dir,file),Buffer.from(img.data,'base64'));};
++try{
++ let fixture;
++ if(phase!=='act'){
++  fs.writeFileSync(log,'');child=spawn('powershell.exe',['-NoProfile','-NonInteractive','-STA','-WindowStyle','Hidden','-File',path.resolve('tests/fixtures/cua-window.ps1'),'-Log',log],{windowsHide:true,stdio:'ignore'});
++  for(let n=0;n<100&&!fs.readFileSync(log,'utf8').includes('READY=');n++)await wait(100);
++  assert(fs.readFileSync(log,'utf8').includes('READY='+child.pid),'fixture did not become ready');
++  const windows=await runtime.perform('native-acceptance',{action:'list_windows',pid:child.pid});fs.writeFileSync(path.join(dir,'NATIVE_WINDOWS.json'),JSON.stringify(windows,null,2));
++  const raw=windows.structuredContent??JSON.parse(windows.content.find(x=>x.type==='text').text);
++  const records=Array.isArray(raw)?raw:raw.windows;const w=records.find(w=>w.title==='Naumi CUA Acceptance (isolated)'&&w.pid===child.pid);assert(w,'exact fixture window not found');
++  fixture={pid:w.pid,window_id:w.window_id};fs.writeFileSync(fixtureFile,JSON.stringify(fixture));
++ }else fixture=JSON.parse(fs.readFileSync(fixtureFile));
++ let observation=await runtime.perform('native-acceptance',{action:'observe',...fixture});save(observation,'native-before.png');report.screenshot={width:observation.structuredContent.width,height:observation.structuredContent.height};
++ if(phase==='observe'){child.unref();child=null;console.log('CUA_NATIVE_OBSERVE real_png=1 exact_fixture=1');}
++ else{
++  const perform=async args=>{const result=await runtime.perform('native-acceptance',{...args,observationId:observation.structuredContent.observationId});if(result.isError)throw Error(JSON.stringify(result));fs.appendFileSync(path.join(dir,'NATIVE_RECEIPTS.jsonl'),JSON.stringify({action:args.action,data:result.structuredContent})+'\n');observation=result;await wait(180);return result;};
++  await perform({action:'click',x:105,y:155});
++  await perform({action:'click',x:120,y:80});
++  await perform({action:'type_text',text:'Naumi CUA native'});
++  const hotkey=await runtime.perform('native-acceptance',{action:'hotkey',keys:['ctrl','a'],x:120,y:80,observationId:observation.structuredContent.observationId});
++  if(hotkey.isError){assert.equal(hotkey.structuredContent.code,'background_unavailable');report.hotkeyBackground='background_unavailable';observation=await runtime.perform('native-acceptance',{action:'observe',...fixture});await perform({action:'hotkey',keys:['ctrl','a'],x:120,y:80,delivery_mode:'foreground'});}else observation=hotkey;
++  save(observation,'native-selected.png');
++  await perform({action:'type_text',text:'CUA verified',delivery_mode:'foreground'});
++  await perform({action:'press_key',key:'end'});
++  const scroll=await runtime.perform('native-acceptance',{action:'scroll',x:175,y:265,direction:'down',amount:4,observationId:observation.structuredContent.observationId});
++  if(scroll.isError){assert.equal(scroll.structuredContent.code,'background_unavailable');report.scrollBackground='background_unavailable';observation=await runtime.perform('native-acceptance',{action:'observe',...fixture});await perform({action:'scroll',x:175,y:265,direction:'down',amount:4,delivery_mode:'foreground'});}else observation=scroll;
++  await perform({action:'drag',from_x:405,from_y:245,to_x:555,to_y:350,duration_ms:400});
++  save(observation,'native-after.png');
++  await wait(300);const events=fs.readFileSync(log,'utf8');report.events={click:events.includes('CLICK=confirmed'),type:events.includes('TEXT=CUA verified'),hotkeyReplacement:events.includes('TEXT=CUA verified')&&!events.includes('TEXT=Naumi CUA nativeCUA verified'),scroll:/SCROLL=[1-9]/.test(events),drag:events.includes('DRAG=moved')&&events.includes('DRAG=up')};
++  assert(Object.values(report.events).every(Boolean),JSON.stringify(report.events));
++  await assert.rejects(runtime.perform('second-session',{action:'observe',...fixture}),/BUSY/);report.secondSession='CUA_DESKTOP_BUSY';
++  await runtime.perform('native-acceptance',{action:'release'});report.released=!fs.existsSync(runtime.lease.file);
++  await runtime.close();report.disposed=true;fs.writeFileSync(path.join(dir,'NATIVE_REPORT.json'),JSON.stringify(report,null,2));
++  console.log('CUA_NATIVE click=1 type=1 hotkey_replace=1 key=1 scroll=1 drag=1 screenshot_before_after=1 second_session_busy=1 release=1 dispose=1');
++  // Stop only this exact isolated fixture process, never an employee app.
++  process.kill(fixture.pid);child=null;
++ }
++}finally{await runtime.close();child?.kill();}
+diff --git a/tests/agent-desktop.test.mjs b/tests/agent-desktop.test.mjs
+deleted file mode 100644
+index 39061ae..0000000
+--- a/tests/agent-desktop.test.mjs
++++ /dev/null
+@@ -1,32 +0,0 @@
+-import test from 'node:test';
+-import assert from 'node:assert/strict';
+-import fs from 'node:fs';
+-import path from 'node:path';
+-import os from 'node:os';
+-import {createHash} from 'node:crypto';
+-import {resolveDesktopRuntime,desktopMcpConfig,desktopSkillConfig,AGENT_DESKTOP_VERSION} from '../plugins/naumi-enterprise/desktop-runtime.js';
+-import {installAgentDesktop} from '../plugins/naumi-enterprise/agent-desktop.js';
+-const digest=x=>createHash('sha256').update(x).digest('hex');
+-function fake(platform='win32',arch='x64',version=AGENT_DESKTOP_VERSION){
+- const manifest=path.resolve('TEST_INSTALL','agent-desktop','package.json');const files=new Map([[manifest,JSON.stringify({version})]]);const bin=path.join(path.dirname(manifest),'bin');
+- const add=name=>{const p=path.join(bin,name),bytes=Buffer.from(name);files.set(p,bytes);files.set(p+'.sha256',digest(bytes));};
+- add(`agent-desktop-${platform}-${arch}${platform==='win32'?'.exe':''}`);
+- if(platform==='darwin')add(`agent-desktop-macos-helper-${platform}-${arch}`);
+- if(platform==='linux')add(`agent-desktop-linux-clipboard-owner-${platform}-${arch}`);
+- return {files,options:{manifestPath:manifest,platform,arch,exists:p=>files.has(p),readFile:(p,encoding)=>{if(!files.has(p))throw Error('Missing fixture '+p);const b=Buffer.from(files.get(p));return encoding?b.toString(encoding):b;}}};
+-}
+-test('pinned packaged executable resolves without PATH or shell',()=>{const f=fake();const r=resolveDesktopRuntime(f.options);assert(r.command.endsWith('agent-desktop-win32-x64.exe'));assert.equal(r.checks.length,1);assert.deepEqual(r.env,{});});
+-test('six supported platform/architecture combinations include required helpers',()=>{for(const p of ['win32','darwin','linux'])for(const a of ['x64','arm64']){const r=resolveDesktopRuntime(fake(p,a).options);assert.equal(r.checks.length,p==='win32'?1:2);if(p==='darwin')assert(path.isAbsolute(r.env.AGENT_DESKTOP_MACOS_HELPER_PATH));}});
+-test('version drift and unsupported platform fail explicitly',()=>{assert.throws(()=>resolveDesktopRuntime(fake('win32','x64','999').options),/version mismatch/);assert.throws(()=>resolveDesktopRuntime(fake('sunos').options),/Unsupported/);});
+-test('missing or tampered executable and missing helper fail before spawn',()=>{for(const scenario of ['checksum','missing','helper']){const f=fake(scenario==='helper'?'linux':'win32');const key=[...f.files.keys()].find(p=>p.endsWith('.sha256'));if(scenario==='checksum')f.files.set(key,'0'.repeat(64));else if(scenario==='missing')f.files.delete(key);else f.files.delete([...f.files.keys()].find(p=>p.includes('clipboard-owner')&&!p.endsWith('.sha256')));assert.throws(()=>resolveDesktopRuntime(f.options),/checksum|Missing/);}});
+-test('MCP config is stdio, stable namespace, no automatic physical input or trace',()=>{const r=resolveDesktopRuntime(fake().options),c=desktopMcpConfig(r);assert.equal(c.command,r.command);assert.equal(c.serverName,'naumi_desktop');assert.deepEqual(c.args,['mcp','--session','naumi']);assert(!c.args.some(x=>/headed|force|trace/.test(x)));assert.equal(c.reconnect.enabled,true);assert.deepEqual(c.env,{});});
+-test('bundled skill provider adds one isolated root, not an override of employee skills',()=>{const c=desktopSkillConfig();assert.equal(c.providerName,'naumi-desktop');assert.equal(c.includeDefaultRoots,false);assert.equal(c.watch,false);assert.equal(c.customSkillDirs.length,1);assert(path.isAbsolute(c.customSkillDirs[0]));assert(fs.existsSync(path.join(c.customSkillDirs[0],'naumi-desktop','SKILL.md')));});
+-function host(admission={peer:{principal:{kind:'owner'}}},names=['mcp__naumi_desktop__desktop_status']){
+- const plugins=[],routes=new Map(),scope={plugin:(...a)=>plugins.push(a),effect:fn=>fn(),tools:{definitions:()=>names.map(name=>({name}))},connection:{admit:()=>admission},webServer:{register:r=>{routes.set(r.path,r.handler);return()=>routes.delete(r.path);}}};
+- const ctx={inject:(names,fn)=>{assert.deepEqual(names,['tools','skills']);fn(scope);return()=>{};}};installAgentDesktop(ctx);return {plugins,routes};
+-}
+-async function request(handler,method='GET'){const r={headers:{},setHeader(k,v){this.headers[k]=v;},writeHead(s){this.status=s;return this;},end(b){this.body=JSON.parse(b);}};await handler({method,headers:{}},r);return r;}
+-test('integration mounts only existing MCP and filesystem-skill plugins',()=>{const h=host();assert.equal(h.plugins.length,2);assert.equal(h.plugins[0][1].serverName,'naumi_desktop');assert.equal(h.plugins[1][1].providerName,'naumi-desktop');});
+-test('readiness requires owner admission and never exposes paths or desktop content',async()=>{const h=host(),r=await request(h.routes.get('/naumi/desktop'));assert.equal(r.status,200);assert.equal(r.body.toolCount,1);assert(!JSON.stringify(r.body).includes(os.homedir()));for(const admission of [{rejection:401},{peer:{principal:{kind:'guest'}}}]){const s=host(admission);const a=await request(s.routes.get('/naumi/desktop'));assert([401,403].includes(a.status));}});
+-test('readiness is read-only and honest while tools are not registered',async()=>{const h=host(undefined,[]);assert.equal((await request(h.routes.get('/naumi/desktop'))).status,503);assert.equal((await request(h.routes.get('/naumi/desktop'),'POST')).status,405);});
+-test('root and plugin use exact dependency versions; no lifetime install downloads',()=>{for(const p of ['package.json','plugins/naumi-enterprise/package.json'])assert.equal(JSON.parse(fs.readFileSync(p)).dependencies['agent-desktop'],'1.3.1');const source=fs.readFileSync('plugins/naumi-enterprise/desktop-runtime.js','utf8');assert(!/\bfetch\s*\(|execSync\(|npx\s+-y/.test(source));assert(fs.readFileSync('plugins/naumi-enterprise/third-party/agent-desktop/LICENSE','utf8').includes('Apache License'));});
+diff --git a/tests/cua.test.mjs b/tests/cua.test.mjs
+new file mode 100644
+index 0000000..513674f
+--- /dev/null
++++ b/tests/cua.test.mjs
+@@ -0,0 +1,106 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import os from 'node:os';
++import path from 'node:path';
++import {CuaRuntime,DesktopLease} from '../plugins/naumi-enterprise/cua-runtime.js';
++import {installCua,cuaSchema} from '../plugins/naumi-enterprise/cua.js';
++import {resolveDesktopRuntime,CUA_VERSION,desktopSkillConfig} from '../plugins/naumi-enterprise/desktop-runtime.js';
++import {assertSupportedJsonSchema} from '@deepseek-ai/dsh-tools';
++import {managedRuntimeHost} from './helpers/managed-runtime-host.mjs';
++const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==';
++const image=()=>({content:[{type:'image',mimeType:'image/png',data:png}],structuredContent:{capture_id:'native-capture'}});
++const ok=()=>({content:[{type:'text',text:'dispatched'}],structuredContent:{dispatched:true}});
++function fixture(overrides={}){
++ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-cua-test-')),calls=[];let now=1000,closed=0;
++ const runtime=new CuaRuntime({clock:()=>now,lease:new DesktopLease({directory:dir,clock:()=>now}),open:async()=>({call:async(n,a,s)=>{calls.push({n,a,s});return overrides.call?overrides.call(n,a,s):n.startsWith('get_')?image():ok();},close:async()=>{closed++;}})});
++ return {runtime,calls,dir,time:n=>now=n,closed:()=>closed,close:async()=>{await runtime.close();fs.rmSync(dir,{recursive:true,force:true});}};
++}
++const observe=(f,id='A',args={})=>f.runtime.perform(id,{action:'observe',...args});
++const click=(f,o,id='A')=>f.runtime.perform(id,{action:'click',x:0,y:0,observationId:o.structuredContent.observationId});
++test('offline CUA runtime pin, supported platform and tamper rejection',()=>{
++ assert.equal(resolveDesktopRuntime().version,CUA_VERSION);assert.deepEqual(resolveDesktopRuntime().args,['mcp','--direct','--embedded']);
++ assert.throws(()=>resolveDesktopRuntime({platform:'linux'}),/PLATFORM/);assert.throws(()=>resolveDesktopRuntime({readFile:()=>Buffer.from('tamper')}),/HASH/);assert.throws(()=>resolveDesktopRuntime({readFile:()=>{throw Error();}}),/MISSING/);
++});
++test('default host, dependency graph and package no longer mount agent-desktop',()=>{
++ for(const p of ['package.json','plugins/naumi-enterprise/package.json']){const m=JSON.parse(fs.readFileSync(p));assert(!m.dependencies['agent-desktop']);assert.equal(m.dependencies['@modelcontextprotocol/client'],'2.2.0');}
++ assert(!fs.existsSync('plugins/naumi-enterprise/agent-desktop.js'));assert(!fs.readFileSync('plugins/naumi-enterprise/host.js','utf8').includes('installAgentDesktop'));
++ assert(fs.readFileSync('plugins/naumi-enterprise/host.js','utf8').includes('installCua(ctx)'));assert(!JSON.stringify(JSON.parse(fs.readFileSync('package-lock.json')).packages).includes('node_modules/agent-desktop'));
++});
++test('one native tool schema, isolated skill root and no raw script/browser/AX operations',()=>{
++ assertSupportedJsonSchema(cuaSchema);assert.equal(cuaSchema.additionalProperties,false);assert(!cuaSchema.properties.session);assert(!cuaSchema.properties.element_token);
++ const skill=desktopSkillConfig();assert(!skill.includeDefaultRoots);assert(fs.readFileSync(path.join(skill.customSkillDirs[0],'naumi-desktop/SKILL.md'),'utf8').includes('naumi_cua'));
++});
++test('observe binds authoritative Session, exact target and real screenshot; action returns another image',async()=>{const f=fixture();try{
++ const o=await observe(f,'A',{pid:12,window_id:34});const result=await click(f,o);assert.equal(result.structuredContent.verificationRequired,true);assert(result.content.some(x=>x.type==='image'));
++ const c=f.calls.find(c=>c.n==='click');assert.equal(c.a.pid,12);assert.equal(c.a.window_id,34);assert.equal(c.a.capture_id,'native-capture');assert.equal(c.a.delivery_mode,'background');assert.equal(c.a.session,f.runtime.session('A'));
++ assert.deepEqual(f.calls.map(c=>c.n),['get_window_state','click','get_window_state']);assert.equal(f.calls[0].a.include_accessibility_tree,false);
++}finally{await f.close();}});
++test('all eight input verbs use the same CUA client and post-observation',async()=>{const f=fixture();try{
++ for(const action of ['click','double_click','right_click','type_text','press_key','hotkey','scroll','drag']){const o=await observe(f);await f.runtime.perform('A',{action,observationId:o.structuredContent.observationId,x:0,y:0,from_x:0,from_y:0,to_x:0,to_y:0,text:'test',key:'enter',keys:['ctrl','a'],direction:'down'});}
++ assert(f.calls.some(c=>c.n==='click'&&c.a.count===2));assert(f.calls.some(c=>c.n==='click'&&c.a.button==='right'));assert(f.calls.filter(c=>c.n==='get_desktop_state').length===16);
++}finally{await f.close();}});
++test('no observation, consumed observation and expired observation never dispatch',async()=>{const f=fixture();try{
++ await assert.rejects(click(f,{structuredContent:{observationId:'fake'}}),/FRESH/);const o=await observe(f);await click(f,o);await assert.rejects(click(f,o),/FRESH/);const fresh=await observe(f);f.time(32000);await assert.rejects(click(f,fresh),/FRESH/);assert.equal(f.calls.filter(c=>c.n==='click').length,1);
++}finally{await f.close();}});
++test('cross Session lease blocks concurrent Bots; release frees it without exposing another screenshot',async()=>{const f=fixture();try{
++ const a=await observe(f);await assert.rejects(observe(f,'B'),/BUSY/);assert.equal(f.calls.length,1);await assert.rejects(click(f,a,'B'),/BUSY/);await f.runtime.perform('A',{action:'release'});await observe(f,'B');assert(f.calls.at(-1).a.session!==f.calls[0].a.session);
++}finally{await f.close();}});
++test('an observation from an earlier lease is invalid after another Bot used the desktop',async()=>{const f=fixture();try{
++ const a=await observe(f);f.time(122000);await observe(f,'B');await f.runtime.perform('B',{action:'release'});await assert.rejects(click(f,a),/FRESH/);
++}finally{await f.close();}});
++test('OS-level lease blocks a second backend instance and never steals the current process',async()=>{const f=fixture(),second=new DesktopLease({directory:f.dir});try{
++ await observe(f);assert.throws(()=>second.acquire('B'),/BUSY/);await f.runtime.perform('A',{action:'release'});second.acquire('B');assert.throws(()=>f.runtime.lease.acquire('A'),/BUSY/);second.release('B');
++}finally{await f.close();}});
++test('incomplete lock record is not removed; dead PID recovery is bounded',()=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),'cua-lock-'));try{
++ const lease=new DesktopLease({directory:dir});fs.writeFileSync(lease.file,'');assert.throws(()=>lease.acquire('A'),/BUSY/);assert.equal(fs.readFileSync(lease.file,'utf8'),'');fs.writeFileSync(lease.file,JSON.stringify({pid:2147483647,nonce:'dead'}));lease.acquire('A');lease.release('A');assert(!fs.existsSync(lease.file));
++}finally{fs.rmSync(dir,{recursive:true,force:true});}});
++test('out-of-bounds and non-finite coordinates never reach native input',async()=>{const f=fixture();try{
++ const o=await observe(f);for(const x of [-1,1,Infinity,NaN])await assert.rejects(f.runtime.perform('A',{action:'click',x,y:0,observationId:o.structuredContent.observationId}),/COORDINATES|INPUT_INVALID/);assert(!f.calls.some(c=>c.n==='click'));
++}finally{await f.close();}});
++test('Session/AX/script injection and incomplete targets fail closed',async()=>{const f=fixture();try{
++ await assert.rejects(f.runtime.perform('',{action:'status'}),/SESSION_REQUIRED/);await assert.rejects(f.runtime.perform('A',{action:'run_script'}),/ACTION_INVALID/);await assert.rejects(observe(f,'A',{pid:12}),/EXACT_WINDOW/);await assert.rejects(f.runtime.perform('A',{action:'status',session:'other'}),/HOST_SCOPE/);
++}finally{await f.close();}});
++test('native write failure is UNKNOWN, has no automatic replay and pins its lease beyond TTL',async()=>{const f=fixture({call:async n=>n==='click'?Promise.reject(Error('transport lost')):n.startsWith('get_')?image():ok()});try{
++ const o=await observe(f);await assert.rejects(click(f,o),/UNKNOWN/);assert.equal(f.closed(),1);await assert.rejects(click(f,o),/OBSERVE_REQUIRED_AFTER_UNKNOWN/);await assert.rejects(f.runtime.perform('A',{action:'release'}),/OBSERVE_REQUIRED/);f.time(999999);await assert.rejects(observe(f,'B'),/BUSY/);assert.equal(f.calls.filter(c=>c.n==='click').length,1);await observe(f);assert(!f.runtime.unknown.has('A'));
++}finally{await f.close();}});
++test('native isError and failed post-capture are not reported as successful actions',async()=>{let captures=0;const f=fixture({call:async n=>n.startsWith('get_')?++captures===1?image():{isError:true,content:[{type:'text',text:'capture failed'}]}:ok()});try{
++ const o=await observe(f);assert.equal((await click(f,o)).isError,true);assert(f.runtime.unknown.has('A'));
++}finally{await f.close();}});
++test('cancellation before dispatch produces no desktop call',async()=>{const f=fixture();try{
++ const c=new AbortController();c.abort();await assert.rejects(f.runtime.perform('A',{action:'observe'},{signal:c.signal}),/abort/i);assert.equal(f.calls.length,0);
++}finally{await f.close();}});
++test('in-flight action cannot interleave, disposed Session cancels and drains before release',async()=>{let entered;const started=new Promise(r=>entered=r);const f=fixture({call:async(n,a,s)=>{if(n==='click'){entered();return new Promise((r,reject)=>s.addEventListener('abort',()=>reject(Error('aborted')),{once:true}));}return n.startsWith('get_')?image():ok();}});try{
++ const o=await observe(f),pending=click(f,o);await started;await assert.rejects(observe(f,'B'),/IN_FLIGHT/);const removing=f.runtime.remove('A');await assert.rejects(pending,/UNKNOWN/);await removing;assert.equal(f.runtime.lease.owner,null);await assert.rejects(observe(f),/DISPOSED/);await f.runtime.attach('A');await observe(f);
++}finally{await f.close();}});
++test('close drains the owned client and removes lock; no post-close action',async()=>{const f=fixture();try{await observe(f);await f.runtime.close();assert.equal(f.closed(),1);assert(!fs.existsSync(f.runtime.lease.file));await assert.rejects(observe(f),/DISPOSED/);}finally{await f.close();}});
++
++function host({vision=true,admission={peer:{principal:{kind:'owner'}}},installed=true,runtime}={}){
++ const definitions=new Map(),routes=new Map(),events=new Map(),cleanup=[],saved=[];const rt=runtime??{connected:false,perform:async()=>image(),remove:async()=>{},attach:async()=>{},close:async()=>{}};
++ const attachments={saveImages:async imgs=>{saved.push(...imgs);return imgs.map((x,i)=>({id:'durable-'+i,mimeType:x.mediaType}));}};
++ const scope={plugin:()=>{},get:n=>n==='attachments'?attachments:n==='llm'?{resolveModelInfo:async()=>({inputModalities:vision?['text','image']:['text']})}:undefined,tools:{register:def=>{definitions.set(def.name,def);return()=>definitions.delete(def.name);},definitions:()=>[...definitions.values()]},effect:fn=>{const d=fn();if(d)cleanup.push(d);},on:(n,f)=>events.set(n,f),connection:{admit:()=>admission},webServer:{register:r=>{routes.set(r.path,r.handler);return()=>routes.delete(r.path);}}};
++ installCua({inject:(_services,fn)=>fn(scope)},{runtime:rt,resolve:()=>{if(!installed)throw Error();return{};}});
++ return {definitions,routes,events,saved,close:async()=>{for(const d of cleanup.reverse())await d();}};
++}
++const exec=()=>({agent:{id:'real-session',options:{provider:'fixture',model:'vision'},session:{requestHeader:()=>({})}},signal:new AbortController().signal});
++test('original Harness MCP image projection creates native durable attachments for the real Session',async()=>{const h=host();try{
++ assert.deepEqual([...h.definitions.keys()],['naumi_cua']);const def=h.definitions.get('naumi_cua'),e=exec(),value=await def.execute({action:'observe'},e),content=def.output.render({},value);const projection=def.projectContent(e,{value,content});assert.equal(h.saved.length,1);assert.equal(projection[0].type,'image');assert.equal(projection[0].attachment.id,'durable-0');assert.equal(def.projectContent(e,{value,content}),undefined);
++}finally{await h.close();}});
++test('nonvision route is rejected before capture; Session identity is mandatory',async()=>{let calls=0;const h=host({vision:false,runtime:{perform:async()=>{calls++;return image();},close:async()=>{}}});try{
++ const def=h.definitions.get('naumi_cua');await assert.rejects(def.execute({action:'observe'},exec()),/VISION/);await assert.rejects(def.execute({action:'status'},{signal:exec().signal}),/SESSION_REQUIRED/);assert.equal(calls,0);
++}finally{await h.close();}});
++test('real Harness Tools/NativeExecutor and enterprise gate deny CUA without dispatch, then honor explicit allowlist',async()=>{
++ const f=await managedRuntimeHost();let registration,skillsProvider,dispatch=0;
++ try{
++  f.ctx.provide('skills',{registerProvider:create=>{skillsProvider=create({invalidate:()=>{},signal:new AbortController().signal});}});
++  registration=installCua(f.ctx,{runtime:{connected:false,perform:async()=>{dispatch++;return ok();},remove:async()=>{},attach:async()=>{},close:async()=>{}},resolve:()=>({})});await registration;
++  assert(f.ctx.tools.definitions(f.root).some(t=>t.name==='naumi_cua'));assert(!f.ctx.tools.definitions(f.root).some(t=>t.name.startsWith('mcp__naumi_desktop__')));
++  await f.attach();await f.resume();assert.equal((await f.invoke('naumi_cua',f.root,{action:'status'})).isError,true);assert.equal(dispatch,0);
++  let b=f.runtime.gate.binding(f.root.id);await f.command('pause',{expectedRevision:b.revision});b=f.runtime.gate.binding(f.root.id);await f.command('configure',{expectedRevision:b.revision,allowedTools:['naumi_cua'],allowOfflineLocal:true});await f.resume();
++  assert.equal((await f.invoke('naumi_cua',f.root,{action:'status'})).isError,false);assert.equal(dispatch,1);assert.equal(f.modelCalls,0);
++ }finally{await registration?.dispose();await skillsProvider?.dispose();await f.cleanup();}
++});
++async function request(h,method='GET'){const r={setHeader(){},writeHead(s){this.status=s;return this;},end(b){this.body=JSON.parse(b);return this;}};await h.routes.get('/naumi/desktop')({method},r);return r;}
++test('status HTTP is owner-only/read-only and distinguishes installed from ready',async()=>{
++ for(const config of [{},{installed:false},{admission:{rejection:401}},{admission:{peer:{principal:{kind:'guest'}}}}]){const h=host(config);try{const r=await request(h);if(config.admission)assert([401,403].includes(r.status));else{assert.equal(r.body.ready,false);assert.equal(r.body.legacyDesktop,false);assert.equal(r.status,config.installed===false?503:200);assert.equal((await request(h,'POST')).status,405);}}finally{await h.close();}}
++});
+diff --git a/tests/fixtures/cua-window.ps1 b/tests/fixtures/cua-window.ps1
+new file mode 100644
+index 0000000..195e572
+--- /dev/null
++++ b/tests/fixtures/cua-window.ps1
+@@ -0,0 +1,47 @@
++param([string]$Log)
++Add-Type -AssemblyName System.Windows.Forms
++Add-Type -AssemblyName System.Drawing
++function Record($v) { Add-Content -LiteralPath $Log -Value $v -Encoding UTF8 }
++$form=New-Object System.Windows.Forms.Form
++$form.Text='Naumi CUA Acceptance (isolated)'
++$form.ClientSize=New-Object System.Drawing.Size(680,480)
++$form.StartPosition='CenterScreen'
++$form.BackColor=[Drawing.Color]::White
++$form.TopMost=$true
++$font=New-Object Drawing.Font('Segoe UI',12)
++$form.Font=$font
++$editor=New-Object Windows.Forms.TextBox
++$editor.Location=New-Object Drawing.Point(30,35)
++$editor.Size=New-Object Drawing.Size(420,35)
++$editor.Add_TextChanged({Record ('TEXT='+$editor.Text)})
++$editor.Add_KeyDown({param($sender,$e) Record ('KEY='+$e.KeyCode+';CTRL='+$e.Control);if($e.Control -and $e.KeyCode -eq 'A'){$editor.SelectAll();Record 'HOTKEY=select_all';$e.SuppressKeyPress=$true}})
++$form.Controls.Add($editor)
++$button=New-Object Windows.Forms.Button
++$button.Text='Confirm'
++$button.Location=New-Object Drawing.Point(30,90)
++$button.Size=New-Object Drawing.Size(180,40)
++$button.Add_Click({$button.Text='Confirmed';Record 'CLICK=confirmed'})
++$form.Controls.Add($button)
++$list=New-Object Windows.Forms.ListBox
++$list.Location=New-Object Drawing.Point(30,155)
++$list.Size=New-Object Drawing.Size(280,270)
++1..60 | ForEach-Object {$list.Items.Add("Item $_") | Out-Null}
++$form.Controls.Add($list)
++$panel=New-Object Windows.Forms.Panel
++$panel.Location=New-Object Drawing.Point(350,155)
++$panel.Size=New-Object Drawing.Size(280,270)
++$panel.BackColor=[Drawing.Color]::AliceBlue
++$script:down=$false
++$panel.Add_MouseDown({$script:down=$true;Record 'DRAG=down'})
++$panel.Add_MouseUp({$script:down=$false;Record 'DRAG=up'})
++$panel.Add_MouseMove({if($script:down){$panel.BackColor=[Drawing.Color]::LightGreen;Record 'DRAG=moved'}})
++$form.Controls.Add($panel)
++$script:top=0
++$timer=New-Object Windows.Forms.Timer
++$timer.Interval=100
++$timer.Add_Tick({if($list.TopIndex -ne $script:top){$script:top=$list.TopIndex;Record ('SCROLL='+$script:top)}})
++$timer.Start()
++Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public class FixtureWindow{[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int cmd);}'
++$form.Add_Shown({[FixtureWindow]::ShowWindow($form.Handle,5)|Out-Null;$form.Activate();$editor.Focus()|Out-Null;Record ('HWND='+$form.Handle.ToInt64());Record ('READY='+$PID)})
++[Windows.Forms.Application]::Run($form)
++$timer.Dispose()
+diff --git a/tests/naumi-employee-activity.test.mjs b/tests/naumi-employee-activity.test.mjs
+index 722ca10..39e2d70 100644
+--- a/tests/naumi-employee-activity.test.mjs
++++ b/tests/naumi-employee-activity.test.mjs
+@@ -74,7 +74,7 @@ test('no-progress uses artifact evidence, never heartbeat or self-reported claim
+   }finally{f.close();}
+ });
+ test('capabilities distinguish registered tools from auth/health, expiration and bundled CLI inventory',async()=>{
+-  let now=10000;const c=new EmployeeCapabilities({ctx:{tools:{definitions:()=>[{name:'mcp__naumi_desktop__desktop_status'},{name:'naumi_browser'}]}},clock:()=>now,desktop:()=>({version:'1.3.1'}),browser:{health:async()=>({installed:true,connected:false,healthy:false,engine:'chromium',reasonCode:'NATIVE_BROWSER_DISCONNECTED'}),dispose:async()=>{}}});
++  let now=10000;const c=new EmployeeCapabilities({ctx:{tools:{definitions:()=>[{name:'naumi_cua'},{name:'naumi_browser'}]}},clock:()=>now,desktop:()=>({version:'0.54.0'}),browser:{health:async()=>({installed:true,connected:false,healthy:false,engine:'chromium',reasonCode:'NATIVE_BROWSER_DISCONNECTED'}),dispose:async()=>{}}});
+   try{await Promise.all([c.refresh(),c.refresh()]);const r=c.read('bot-1').records;assert.equal(r.find(v=>v.id==='desktop').connected,null);assert.equal(r.find(v=>v.id==='desktop').authorized,null);assert.equal(r.find(v=>v.id==='dingtalk').inventoryScope,'naumi_bundle');assert.equal(r.find(v=>v.id==='browser').healthy,false);now+=180001;assert(c.read('bot-1').records.every(r=>r.stale));assert(!JSON.stringify(r).includes('token'));
+   }finally{await c.close();}
+ });

@@ -74,7 +74,7 @@ test('no-progress uses artifact evidence, never heartbeat or self-reported claim
   }finally{f.close();}
 });
 test('capabilities distinguish registered tools from auth/health, expiration and bundled CLI inventory',async()=>{
-  let now=10000;const c=new EmployeeCapabilities({ctx:{tools:{definitions:()=>[{name:'mcp__naumi_desktop__desktop_status'},{name:'naumi_browser'}]}},clock:()=>now,desktop:()=>({version:'1.3.1'}),browser:{health:async()=>({installed:true,connected:false,healthy:false,engine:'chromium',reasonCode:'NATIVE_BROWSER_DISCONNECTED'}),dispose:async()=>{}}});
+  let now=10000;const c=new EmployeeCapabilities({ctx:{tools:{definitions:()=>[{name:'naumi_cua'},{name:'naumi_browser'}]}},clock:()=>now,desktop:()=>({version:'0.54.0'}),browser:{health:async()=>({installed:true,connected:false,healthy:false,engine:'chromium',reasonCode:'NATIVE_BROWSER_DISCONNECTED'}),dispose:async()=>{}}});
   try{await Promise.all([c.refresh(),c.refresh()]);const r=c.read('bot-1').records;assert.equal(r.find(v=>v.id==='desktop').connected,null);assert.equal(r.find(v=>v.id==='desktop').authorized,null);assert.equal(r.find(v=>v.id==='dingtalk').inventoryScope,'naumi_bundle');assert.equal(r.find(v=>v.id==='browser').healthy,false);now+=180001;assert(c.read('bot-1').records.every(r=>r.stale));assert(!JSON.stringify(r).includes('token'));
   }finally{await c.close();}
 });
