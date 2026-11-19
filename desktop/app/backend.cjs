@@ -115,7 +115,9 @@ async function ensureBackend(settings,{fetcher=fetch,startTimeoutMs=90000,pollMs
  }
  const entry=path.join(settings.root,'node_modules/@deepseek-ai/dsh/lib/bin.js');if(!fs.existsSync(entry))throw Error('BACKEND_RUNTIME_MISSING');
  fs.mkdirSync(settings.logDir,{recursive:true});
+ const trial=require('./internal-trial.cjs').trialLaunch(settings);
  const target=new URL(settings.url),runId=randomUUID(),env={...process.env,PATH:path.join(settings.root,'bin')+path.delimiter+settings.root+path.delimiter+(process.env.PATH??''),DSH_HOME:settings.home,DSH_TELEMETRY_MODE:'DISABLED'};
+ Object.assign(env,trial.env);
  delete env.ELECTRON_RUN_AS_NODE;delete env.NAUMI_DESKTOP_INSTANCE_ID;delete env.NAUMI_DESKTOP_BUNDLE_ID;delete env.NAUMI_ENTERPRISE_ORIGIN;
  const base={pid:null,port:Number(target.port),bundleId:settings.runtime?.bundleId,phase:'starting',runId};
  if(settings.isolated||settings.linkedService){env.NAUMI_DESKTOP_MAINTENANCE='1';env.NAUMI_DESKTOP_INSTANCE_ID=settings.identity.id;env.NAUMI_DESKTOP_BUNDLE_ID=settings.runtime.bundleId;if(settings.enterpriseOrigin)env.NAUMI_ENTERPRISE_ORIGIN=settings.enterpriseOrigin;}
@@ -123,7 +125,7 @@ async function ensureBackend(settings,{fetcher=fetch,startTimeoutMs=90000,pollMs
  let child;
  // Windows libuv's non-detached child job dies with the GUI. Standalone workers have an
  // independent lifetime, and are stopped only through their proven instance on normal quit.
- try{if(settings.isolated||settings.linkedService)saveReceipt(settings,base);child=spawn(settings.node,[entry,'web','--host','127.0.0.1','--port',target.port,'--no-open'],{cwd:settings.isolated?settings.workspace:settings.root,env,detached:!!(settings.isolated||settings.linkedService),windowsHide:true,stdio:['ignore',out,err]});}
+ try{if(settings.isolated||settings.linkedService)saveReceipt(settings,base);child=spawn(settings.node,[entry,'web',...trial.args,'--host','127.0.0.1','--port',target.port,'--no-open'],{cwd:settings.isolated?settings.workspace:settings.root,env,detached:!!(settings.isolated||settings.linkedService),windowsHide:true,stdio:['ignore',out,err]});}
  catch(e){if(settings.isolated||settings.linkedService)clearReceipt(settings,runId);throw e;}
  finally{fs.closeSync(out);fs.closeSync(err);}
  let error;child.on('error',e=>error=e);const backend={owned:true,child,instanceVerified:!!(settings.isolated||settings.linkedService)};

@@ -1,3 +1,4 @@
+import {stageTrialModels} from './internal-trial-models.mjs';
 import {installSidebarVisibility} from '../../scripts/native-sidebar-visibility-extension.mjs';
 import fs from 'node:fs';
 import {installNativeDeliveryExtensions} from '../../scripts/native-delivery-extension.mjs';
@@ -32,7 +33,7 @@ export function scanRuntimeInventory(files){
   for(const file of files)if(forbidden.test(file.path)||/^(?:sessions|logs|browser-profiles)\//i.test(file.path)||/(?:^|\/)(?:\.git|\.dsh|browser-profiles|identity-profiles)\//i.test(file.path))throw Error('RUNTIME_PRIVATE_FILE '+file.path);
   return {files:files.length,forbiddenPaths:0};
 }
-export async function prepareRuntime({root=project,target=path.join(root,'runtime/desktop-backend'),archive=process.env.NAUMI_DINGTALK_ARCHIVE}={}){
+export async function prepareRuntime({root=project,target=path.join(root,'runtime/desktop-backend'),archive=process.env.NAUMI_DINGTALK_ARCHIVE,trialInput}={}){
   root=path.resolve(root);target=path.resolve(target);
   const runtime=path.join(root,'runtime');
   if(!target.startsWith(runtime+path.sep)||fs.existsSync(target)&&fs.lstatSync(target).isSymbolicLink())throw Error('RUNTIME_TARGET_INVALID');
@@ -60,9 +61,10 @@ export async function prepareRuntime({root=project,target=path.join(root,'runtim
     const dingtalk=await stageDingTalk(staged,{archive});
     const closure=auditPackage(path.join(staged,'node_modules/@naumi/dsh-enterprise'),{checkInstalled:true,dependencyRoot:path.join(staged,'node_modules')});
     verifyStagedImports(staged);
+    const trial=trialInput?stageTrialModels(staged,trialInput):null;
     const inventory=runtimeInventory(staged),scan=scanRuntimeInventory(inventory);
     fs.writeFileSync(path.join(staged,'runtime-files.json'),JSON.stringify(inventory,null,2)+'\n');
-    const manifest={product:'Naumi',schemaVersion:2,desktop:{profileVersion:1,identityProtocol:2,maintenanceProtocol:1,workspaceProtocol:1},version:JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json'))).version,node:process.versions.node,harness:'0.2.2-rc.1',agentDesktop:'1.3.1',dingtalk,personalCredentials:false,browserProfiles:false,bootstrap:'offline',nodeSHA256:sha(path.join(staged,'node.exe')),inventorySHA256:sha(path.join(staged,'runtime-files.json')),closure,scan};
+    const manifest={product:'Naumi',...trial?{edition:'internal-trial',trial}:{},schemaVersion:2,desktop:{profileVersion:1,identityProtocol:2,maintenanceProtocol:1,workspaceProtocol:1},version:JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json'))).version,node:process.versions.node,harness:'0.2.2-rc.1',agentDesktop:'1.3.1',dingtalk,personalCredentials:!!trial,browserProfiles:false,bootstrap:'offline',nodeSHA256:sha(path.join(staged,'node.exe')),inventorySHA256:sha(path.join(staged,'runtime-files.json')),closure,scan};
     fs.writeFileSync(path.join(staged,'runtime-manifest.json'),JSON.stringify(manifest,null,2)+'\n');
     // Publish only after import/closure/content checks. Preserve the preceding bundle for rollback.
     let previous=null;if(fs.existsSync(target)){previous=target+'.previous-'+randomUUID();fs.renameSync(target,previous);}
