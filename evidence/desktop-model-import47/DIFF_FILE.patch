@@ -1,0 +1,420 @@
+diff --git a/scripts/lib/desktop-model-import.mjs b/scripts/lib/desktop-model-import.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/lib/desktop-model-import.mjs
+@@ -0,0 +1,38 @@
++import assert from 'node:assert/strict';
++import {createHash} from 'node:crypto';
++
++export const serial=value=>JSON.stringify(value&&typeof value==='object'?Array.isArray(value)?value.map(x=>JSON.parse(serial(x))):Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>[k,JSON.parse(serial(v))])):value);
++export const hash=value=>createHash('sha256').update(typeof value==='string'?value:serial(value)).digest('hex');
++const forbidden=/^(?:api_?key(?:env)?|authorization|password|secret|credential(?:_?ref)?|access_?token|token|cookie)$/i;
++export function assertPublic(value){
++ if(value&&typeof value==='object')for(const[k,v]of Object.entries(value)){assert(!forbidden.test(k),'SECRET_FIELD_IN_METADATA');assertPublic(v);}
++}
++export function prepareDesktopImport({providers,refs,sourceId,operationId}){
++ assert(/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,99}$/.test(sourceId),'SOURCE_ID_INVALID');
++ assert(/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(operationId),'OPERATION_ID_INVALID');
++ assert(providers&&typeof providers==='object'&&!Array.isArray(providers),'PROVIDERS_INVALID');
++ const entries=Object.entries(providers);assert(entries.length>0&&entries.length<=100,'PROVIDER_LIMIT');
++ const connections=entries.map(([sourceProviderId,p])=>{
++  assert(/^[a-z][a-z0-9_-]{0,79}$/.test(sourceProviderId),'PROVIDER_ID_INVALID');
++  assert(['openai-completions','openai-responses','anthropic-messages'].includes(p.api),'PROTOCOL_UNSUPPORTED');
++  const url=new URL(p.baseURL);assert(url.protocol==='https:'&&!url.username&&!url.password&&!url.search&&!url.hash,'PROVIDER_URL_INVALID');
++  assert(typeof p.displayName==='string'&&p.displayName.trim()&&p.displayName.length<=100,'PROVIDER_NAME_INVALID');
++  assert(typeof p.apiKeyEnv==='string'&&typeof refs?.[p.apiKeyEnv]==='string','LOCAL_CREDENTIAL_MISSING');
++  const key=refs[p.apiKeyEnv];assert(key.length>0&&key.length<=16384&&!/[\x00-\x1f\x7f]/.test(key),'LOCAL_CREDENTIAL_INVALID');
++  const {apiKeyEnv:_,models,...configuration}=structuredClone(p);assertPublic(configuration);
++  assert(Array.isArray(models)&&models.length>0&&models.length<=200,'MODEL_LIMIT');
++  assert(new Set(models.map(m=>m.id)).size===models.length,'DUPLICATE_MODEL');
++  for(const m of models){assertPublic(m);assert(typeof m.id==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/.test(m.id),'MODEL_ID_INVALID');for(const k of ['contextWindow','maxTokens'])if(m[k]!==undefined)assert(Number.isSafeInteger(m[k])&&m[k]>0&&m[k]<=2147483647,'MODEL_LENGTH_INVALID');}
++  return {providerId:'desktop-'+hash([sourceId,sourceProviderId]).slice(0,24),sourceProviderId,configuration,models,key};
++ });
++ assert(connections.reduce((n,p)=>n+p.models.length,0)<=600,'TOTAL_MODEL_LIMIT');
++ const publicConfig={schemaVersion:1,sourceId,connections:connections.map(({key:_,...p})=>p)};
++ return {schemaVersion:1,operationId,sourceId,configDigest:hash(publicConfig),connections};
++}
++export function sourceMetadata(connection,model,unknownSupplierMetadata){
++ const metadata=unknownSupplierMetadata();metadata.modality='text';metadata.capabilityState='configured';
++ metadata.capabilitySource='Naumi Desktop configured source; not supplier acceptance';
++ metadata.capabilities.contextTokens=model.contextWindow??connection.configuration.defaultContextWindow??null;
++ metadata.parameterMetadata.desktopSource={schemaVersion:1,sourceProviderId:connection.sourceProviderId,configuration:connection.configuration,model,employeeAvailability:'unassigned'};
++ assertPublic(metadata);return metadata;
++}
+diff --git a/scripts/lib/desktop-model-import-store.mjs b/scripts/lib/desktop-model-import-store.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/lib/desktop-model-import-store.mjs
+@@ -0,0 +1,92 @@
++import assert from 'node:assert/strict';
++import {randomUUID,createHmac} from 'node:crypto';
++import {serial,hash,prepareDesktopImport,sourceMetadata} from './desktop-model-import.mjs';
++
++const kind='desktop-model-import-v1';
++const fingerprint=request=>{assert(process.env.SETTINGS_SECRET?.trim().length>=32,'SETTINGS_SECRET_MISSING');return createHmac('sha256',process.env.SETTINGS_SECRET).update(serial(request)).digest('hex');};
++async function protectedState(tx){
++ const rows=await tx.query(`SELECT 'models' AS kind,md5(coalesce(jsonb_agg(to_jsonb(s) ORDER BY singleton)::text,'')) AS digest FROM app_model_config_state s UNION ALL SELECT 'billing',md5(coalesce(jsonb_agg(to_jsonb(s) ORDER BY version)::text,'')) FROM app_billing_config_versions s`);
++ return rows.rows;
++}
++async function existing(tx,operationId){return (await tx.query('SELECT * FROM app_supplier_source_snapshots WHERE kind=$1 AND source_data->>\'operationId\'=$2 ORDER BY provider_id',[kind,operationId])).rows;}
++async function checkStored(tx,rows,request,credentials,contracts){
++ assert.equal(rows.length,request.connections.length,'IMPORT_PARTIAL_OR_MISSING');
++ const fp=fingerprint(request);let models=0;
++ for(const c of request.connections){
++  const source=rows.find(r=>r.provider_id===c.providerId);assert(source&&source.content_hash===fp&&source.source_data.configDigest===request.configDigest,'IMPORT_CONTENT_CHANGED');
++  const document=source.source_data;assert.equal(serial(document.configuration),serial(c.configuration),'SOURCE_CONFIG_DRIFT');assert.equal(document.models.length,c.models.length,'SOURCE_MODEL_DRIFT');
++  assert.equal(await credentials.read(document.credentialRef,c.providerId),c.key,'CREDENTIAL_ROUNDTRIP_MISMATCH');
++  for(const record of document.models){
++   const expected=c.models.find(m=>m.id===record.modelId);assert(expected,'SOURCE_MODEL_DRIFT');assert.equal(record.metadataHash,hash(contracts.supplierMetadataSchema.parse(sourceMetadata(c,expected,contracts.unknownSupplierMetadata))),'SOURCE_MODEL_DRIFT');
++   const r=(await tx.query('SELECT * FROM app_supplier_model_metadata WHERE id=$1 AND provider_id=$2',[record.id,c.providerId])).rows[0];
++   assert(r&&r.model_id===record.modelId&&Number(r.revision)===1&&hash(r.metadata)===record.metadataHash,'IMPORTED_METADATA_CHANGED');models++;
++  }
++ }
++ let adminReadModels=0;
++ for(const c of request.connections){const view=await contracts.listSupplierModelsFrom(tx,{query:'',provider:c.providerId,family:'',brand:'',basis:'',state:'',page:1},true);assert.equal(view.total,c.models.length,'ADMIN_READ_MISMATCH');assert(view.facets.providers.some(p=>p.id===c.providerId),'ADMIN_SOURCE_MISSING');adminReadModels+=view.total;}
++ return {providers:rows.length,models,credentialsVerified:rows.length,adminReadModels};
++}
++export async function importDesktopModels({pool,contracts,request,mode='apply',fault=()=>{}}){
++ // Revalidate the finite transfer contract, including every original protocol/key.
++ request=prepareDesktopImport({providers:Object.fromEntries(request.connections.map(c=>[c.sourceProviderId,{...c.configuration,models:c.models,apiKeyEnv:c.sourceProviderId}])),refs:Object.fromEntries(request.connections.map(c=>[c.sourceProviderId,c.key])),sourceId:request.sourceId,operationId:request.operationId});
++ assert(['apply','verify'].includes(mode),'IMPORT_MODE_INVALID');
++ const credentials=mode==='verify'?contracts.createCredentialReader(pool):contracts.createCredentialStore(pool),tx=await pool.connect();
++ try{
++  await tx.query(mode==='verify'?'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY':'BEGIN');await tx.query("SET LOCAL lock_timeout='5s'; SET LOCAL statement_timeout='20s'");
++  await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',['desktop-model-import:'+request.sourceId]);
++  const before=await protectedState(tx),prior=await existing(tx,request.operationId);
++  if(prior.length){const receipt=await checkStored(tx,prior,request,credentials,contracts);await tx.query('COMMIT');return {status:'PASS',mode,replayed:mode==='apply',operationId:request.operationId,configDigest:request.configDigest,...receipt,activeModelsUnchanged:true,billingUnchanged:true,employeeGrants:0,modelCalls:0};}
++  assert(mode==='apply','IMPORT_NOT_FOUND');
++  for(const c of request.connections){
++   assert(!(await tx.query('SELECT 1 FROM app_supplier_source_snapshots WHERE provider_id=$1 UNION ALL SELECT 1 FROM app_supplier_model_metadata WHERE provider_id=$1',[c.providerId])).rowCount,'SOURCE_ALREADY_EXISTS');
++  }
++  const actor='operator:desktop-import:'+request.operationId;
++  for(const c of request.connections){
++   // Use the existing server credential owner: original AES-GCM, validation and store.
++   const saved=await credentials.importPlain({providerId:c.providerId,plain:c.key,actor},tx);fault('credential');
++   const records=[];
++   for(const model of c.models){
++    const metadata=contracts.supplierMetadataSchema.parse(sourceMetadata(c,model,contracts.unknownSupplierMetadata));
++    const id=randomUUID(),label=(model.name||model.id).slice(0,100);
++    await tx.query(`INSERT INTO app_supplier_model_metadata(id,provider_id,provider_name,model_id,label,catalog_owner,family,brand,modality,capability_state,metadata,updated_by) VALUES($1,$2,$3,$4,$5,'Naumi Desktop','','','text','configured',$6::jsonb,$7)`,[id,c.providerId,c.configuration.displayName,model.id,label,serial(metadata),actor]);
++    await tx.query('INSERT INTO app_supplier_model_metadata_versions(model_id,revision,actor,metadata) VALUES($1,1,$2,$3::jsonb)',[id,actor,serial(metadata)]);
++    records.push({id,modelId:model.id,metadataHash:hash(metadata)});fault('model');
++   }
++   const data={schemaVersion:1,operationId:request.operationId,sourceId:request.sourceId,sourceProviderId:c.sourceProviderId,configDigest:request.configDigest,configuration:c.configuration,credentialRef:saved.id,models:records,employeeAvailability:'unassigned'};
++   await tx.query('INSERT INTO app_supplier_source_snapshots(provider_id,kind,source_url,content_hash,source_data) VALUES($1,$2,$3,$4,$5::jsonb)',[c.providerId,kind,c.configuration.baseURL,fingerprint(request),serial(data)]);
++  }
++  assert.deepEqual(await protectedState(tx),before,'ACTIVE_REGISTRY_CHANGED');
++  // Read keys through the same transaction; public credential reads use another connection.
++  const rows=await existing(tx,request.operationId);assert.equal(rows.length,request.connections.length);
++  await tx.query('COMMIT');
++  const verified=await importDesktopModels({pool,contracts,request,mode:'verify'});
++  return {...verified,mode:'apply',replayed:false};
++ }catch(e){await tx.query('ROLLBACK').catch(()=>{});throw e;}finally{tx.release();}
++}
++export async function rollbackDesktopModels({pool,operationId}){
++ assert(/^[a-f0-9-]{36}$/i.test(operationId),'OPERATION_ID_INVALID');const tx=await pool.connect();
++ try{
++  await tx.query('BEGIN');await tx.query("SET LOCAL lock_timeout='5s'; SET LOCAL statement_timeout='20s'");
++  const sources=await existing(tx,operationId);assert(sources.length,'IMPORT_NOT_FOUND');
++  const sourceIds=[...new Set(sources.map(x=>x.source_data.sourceId))];assert.equal(sourceIds.length,1);
++  await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',['desktop-model-import:'+sourceIds[0]]);
++  const before=await protectedState(tx);let models=0;
++  for(const source of sources){
++   const data=source.source_data;
++   assert(!(await tx.query(`SELECT 1 FROM app_model_providers WHERE credential_ref=$1 UNION ALL SELECT 1 FROM app_model_config_versions WHERE config->'providers' @> $2::jsonb`,[data.credentialRef,serial([{credentialRef:data.credentialRef}])])).rowCount,'CREDENTIAL_NOW_REFERENCED');
++   assert(!(await tx.query("SELECT 1 FROM app_supplier_source_snapshots WHERE source_data->>'credentialRef'=$1 AND source_data->>'operationId' IS DISTINCT FROM $2",[data.credentialRef,operationId])).rowCount,'CREDENTIAL_NOW_REFERENCED');
++   for(const item of data.models){
++    const row=(await tx.query('SELECT * FROM app_supplier_model_metadata WHERE id=$1 FOR UPDATE',[item.id])).rows[0];
++    assert(row&&row.provider_id===source.provider_id&&row.updated_by==='operator:desktop-import:'+operationId&&Number(row.revision)===1&&hash(row.metadata)===item.metadataHash,'ROLLBACK_DRIFT');
++    assert(!(await tx.query('SELECT 1 FROM app_supplier_model_price_points WHERE model_id=$1',[item.id])).rowCount,'ROLLBACK_PRICE_DRIFT');
++    assert.equal(Number((await tx.query('SELECT count(*) AS n FROM app_supplier_model_metadata_versions WHERE model_id=$1',[item.id])).rows[0].n),1,'ROLLBACK_HISTORY_DRIFT');
++   }
++  }
++  for(const source of sources){
++   for(const item of source.source_data.models){await tx.query('DELETE FROM app_supplier_model_metadata_versions WHERE model_id=$1',[item.id]);await tx.query('DELETE FROM app_supplier_model_metadata WHERE id=$1',[item.id]);models++;}
++   await tx.query('DELETE FROM app_supplier_source_snapshots WHERE provider_id=$1 AND kind=$2 AND content_hash=$3',[source.provider_id,kind,source.content_hash]);
++   await tx.query('DELETE FROM app_model_credentials WHERE id=$1 AND provider_id=$2 AND created_by=$3',[source.source_data.credentialRef,source.provider_id,'operator:desktop-import:'+operationId]);
++  }
++  assert.deepEqual(await protectedState(tx),before,'ACTIVE_REGISTRY_CHANGED');await tx.query('COMMIT');return {status:'PASS',providers:sources.length,models,credentials:sources.length,activeModelsUnchanged:true,billingUnchanged:true};
++ }catch(e){await tx.query('ROLLBACK').catch(()=>{});throw e;}finally{tx.release();}
++}
+diff --git a/scripts/lib/desktop-model-import-fixture.mjs b/scripts/lib/desktop-model-import-fixture.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/lib/desktop-model-import-fixture.mjs
+@@ -0,0 +1,30 @@
++import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';import pg from 'pg';
++import {prepareDesktopImport} from './desktop-model-import.mjs';import {importDesktopModels,rollbackDesktopModels} from './desktop-model-import-store.mjs';
++export async function runImportFixture({pool,contracts,connectionString}){
++ const schema='desktop_model_import_test_'+randomUUID().replaceAll('-',''),checks=[];
++ const publicBefore=(await pool.query('SELECT count(*) AS n FROM public.app_model_credentials')).rows[0].n;
++ await pool.query('CREATE SCHEMA '+schema);
++ const own=new pg.Pool({connectionString,max:5,options:'-c search_path='+schema,connectionTimeoutMillis:5000,query_timeout:15000});
++ const check=(name,condition)=>{assert(condition,name);checks.push(name);};
++ try{
++  await contracts.ensureModelSchema(own);
++  await own.query(`CREATE TABLE app_billing_config_versions(version bigint PRIMARY KEY,config jsonb);INSERT INTO app_billing_config_versions VALUES(1,'{"kept":true}');
++   CREATE TABLE app_supplier_source_snapshots(provider_id text,kind text,source_url text,content_hash text,source_data jsonb,first_seen_at timestamptz DEFAULT now(),last_seen_at timestamptz DEFAULT now(),PRIMARY KEY(provider_id,kind,content_hash));
++   CREATE TABLE app_supplier_model_metadata(id uuid PRIMARY KEY,provider_id text,provider_name text,model_id text,label text,catalog_owner text,family text,brand text,modality text,capability_state text,metadata jsonb,revision bigint DEFAULT 1,updated_by text,created_at timestamptz DEFAULT now(),updated_at timestamptz DEFAULT now(),last_seen_at timestamptz DEFAULT now(),UNIQUE(provider_id,model_id));
++   CREATE TABLE app_supplier_model_metadata_versions(model_id uuid,revision bigint,actor text,metadata jsonb,PRIMARY KEY(model_id,revision));CREATE TABLE app_supplier_model_price_points(model_id uuid,basis text);`);
++  const request=()=>prepareDesktopImport({sourceId:'isolated-fixture',operationId:randomUUID(),providers:{a:{displayName:'Fixture A',api:'anthropic-messages',baseURL:'https://fixture.invalid/anthropic',apiKeyEnv:'A',defaultMaxTokens:128000,models:[{id:'model-a',contextWindow:1000000,maxTokens:128000,reasoningEfforts:{off:null}}]},b:{displayName:'Fixture B',api:'openai-responses',baseURL:'https://fixture.invalid/v1',apiKeyEnv:'B',models:[{id:'model-b'},{id:'model-c'}]}},refs:{A:'fixture-only-key-A',B:'fixture-only-key-B'}});
++  const counts=async()=>{const r=await own.query('SELECT (SELECT count(*) FROM app_model_credentials)::int AS credentials,(SELECT count(*) FROM app_supplier_model_metadata)::int AS models,(SELECT count(*) FROM app_supplier_source_snapshots)::int AS sources');return r.rows[0];};
++  const r=request(),first=await importDesktopModels({pool:own,contracts,request:r});check('actual_pg_import_and_existing_credential_crypto',first.providers===2&&first.models===3&&first.credentialsVerified===2);
++  const replay=await importDesktopModels({pool:own,contracts,request:r});check('same_operation_idempotent',replay.replayed&&(await counts()).credentials===2);
++  const changed=structuredClone(r);changed.connections[0].key+='changed';await assert.rejects(importDesktopModels({pool:own,contracts,request:changed}),/IMPORT_CONTENT_CHANGED/);check('same_id_different_key_rejected',true);
++  const another={...r,operationId:randomUUID()};await assert.rejects(importDesktopModels({pool:own,contracts,request:another}),/SOURCE_ALREADY_EXISTS/);check('different_import_does_not_overwrite_sources',true);
++  const row=(await own.query('SELECT * FROM app_supplier_model_metadata WHERE model_id=$1',['model-a'])).rows[0];check('protocol_lengths_reasoning_preserved',row.metadata.parameterMetadata.desktopSource.configuration.api==='anthropic-messages'&&row.metadata.parameterMetadata.desktopSource.model.maxTokens===128000&&row.metadata.parameterMetadata.desktopSource.model.reasoningEfforts.off===null);
++  const rolled=await rollbackDesktopModels({pool:own,operationId:r.operationId});check('copy_rollback_only_own_rows',rolled.models===3&&(await counts()).credentials===0&&(await counts()).sources===0);
++  await assert.rejects(importDesktopModels({pool:own,contracts,request:request(),fault:()=>{throw Error('FIXTURE_WRITE_FAILURE');}}),/FIXTURE_WRITE_FAILURE/);check('partial_write_is_atomic',(await counts()).credentials===0&&(await counts()).models===0);
++  const concurrent=request();const results=await Promise.all([importDesktopModels({pool:own,contracts,request:concurrent}),importDesktopModels({pool:own,contracts,request:concurrent})]);check('concurrent_same_import_single_effect',results.filter(x=>!x.replayed).length===1&&(await counts()).credentials===2);
++  const editable=(await own.query('SELECT id FROM app_supplier_model_metadata LIMIT 1')).rows[0].id;await own.query('UPDATE app_supplier_model_metadata SET revision=2 WHERE id=$1',[editable]);await assert.rejects(rollbackDesktopModels({pool:own,operationId:concurrent.operationId}),/ROLLBACK_DRIFT/);check('rollback_keeps_later_admin_edits',(await counts()).models===3);await own.query('UPDATE app_supplier_model_metadata SET revision=1 WHERE id=$1',[editable]);
++  const ref=(await own.query('SELECT id FROM app_model_credentials LIMIT 1')).rows[0].id;await own.query('INSERT INTO app_model_config_versions(operation_id,actor,reason,config,digest) VALUES($1,$2,$3,$4::jsonb,$5)',[randomUUID(),'fixture','fixture',JSON.stringify({providers:[{credentialRef:ref}]}),'fixture']);await assert.rejects(rollbackDesktopModels({pool:own,operationId:concurrent.operationId}),/CREDENTIAL_NOW_REFERENCED/);check('rollback_keeps_published_credential_reference',true);await own.query('DELETE FROM app_model_config_versions');await rollbackDesktopModels({pool:own,operationId:concurrent.operationId});
++  check('public_credentials_unchanged',(await pool.query('SELECT count(*) AS n FROM public.app_model_credentials')).rows[0].n===publicBefore);
++  check('local_only_never_grants_or_calls',true);return {status:'PASS',checks:checks.length,names:checks,isolatedSchema:true,realEmployeeData:false,modelCalls:0,publicWrites:0};
++ }finally{await own.end();await pool.query('DROP SCHEMA '+schema+' CASCADE');}
++}
+diff --git a/scripts/desktop-model-import47-cli.mjs b/scripts/desktop-model-import47-cli.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/desktop-model-import47-cli.mjs
+@@ -0,0 +1,34 @@
++import fs from 'node:fs';
++import assert from 'node:assert/strict';
++import {createHash} from 'node:crypto';
++import pg from 'pg';
++import * as contracts from 'naumi-admin-contracts';
++import {importDesktopModels,rollbackDesktopModels} from './lib/desktop-model-import-store.mjs';
++import {runImportFixture} from './lib/desktop-model-import-fixture.mjs';
++
++async function main(){
++const mode=process.argv[2];
++const pool=new pg.Pool({connectionString:process.env.DATABASE_URL,max:4,connectionTimeoutMillis:5000,query_timeout:20000});
++let code=0;
++try{
++ assert(['apply','verify','rollback','inspect','fixture'].includes(mode),'MODE_INVALID');
++ if(mode==='fixture')console.log(JSON.stringify(await runImportFixture({pool,contracts,connectionString:process.env.DATABASE_URL})));
++ else if(mode==='inspect'){
++  const r=await pool.query("SELECT current_database() AS name,to_regclass('app_supplier_model_metadata') IS NOT NULL AS metadata,to_regclass('app_model_credentials') IS NOT NULL AS credentials");
++  console.log(JSON.stringify({status:'PASS',mode,tables:r.rows[0].metadata&&r.rows[0].credentials}));
++ }else if(mode==='rollback')console.log(JSON.stringify(await rollbackDesktopModels({pool,operationId:process.argv[3]})));
++ else{
++  const chunks=[];let bytes=0;for await(const c of process.stdin){bytes+=c.length;assert(bytes<=2*1024*1024,'INPUT_LIMIT');chunks.push(c);}
++  const request=JSON.parse(Buffer.concat(chunks).toString('utf8'));
++  // Reuse existing schema/credential ownership, only on this explicit operator path.
++  if(mode==='apply')await contracts.ensureModelSchema(pool);
++  const result=await importDesktopModels({pool,contracts,request,mode});
++  console.log(JSON.stringify(result));
++ }
++}catch(e){
++ const message=typeof e.message==='string'&&/^[A-Z][A-Z0-9_]{2,80}$/.test(e.message)?e.message:'IMPORT_FAILED';
++ console.log(JSON.stringify({status:'FAIL',mode,error:message,code:/^[A-Z0-9]{5}$/.test(e.code??'')?e.code:undefined}));code=1;
++}finally{await pool.end();}
++process.exitCode=code;
++}
++main().catch(()=>{console.log(JSON.stringify({status:'FAIL',error:'CLI_FAILED'}));process.exitCode=1;});
+diff --git a/scripts/prepare-desktop-model-import47.mjs b/scripts/prepare-desktop-model-import47.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/prepare-desktop-model-import47.mjs
+@@ -0,0 +1,24 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import assert from 'node:assert/strict';
++import {createRequire} from 'node:module';
++import {execFileSync} from 'node:child_process';
++import {createHash} from 'node:crypto';
++const source=path.resolve(process.argv[2]??'E:/Workspace/naumi-central-identity-20261118');
++const require=createRequire(path.join(source,'package.json')),esbuild=require('esbuild');
++const out=path.resolve('runtime/desktop-model-import47');fs.mkdirSync(out,{recursive:true});
++const result=await esbuild.build({entryPoints:['scripts/desktop-model-import47-cli.mjs'],bundle:true,write:false,platform:'node',format:'cjs',packages:'external',treeShaking:true,tsconfig:path.join(source,'tsconfig.json'),plugins:[{
++ name:'operator-public-contracts',setup(b){
++  b.onResolve({filter:/^(?:https-proxy-agent|agent-base|debug|ms|supports-color|has-flag|lucide-react|react(?:\/.*)?)$/},args=>({path:require.resolve(args.path),external:false}));
++  b.onResolve({filter:/^naumi-admin-contracts$/},()=>({path:'contracts',namespace:'operator-contracts'}));
++  b.onLoad({filter:/.*/,namespace:'operator-contracts'},()=>({contents:`export {createCredentialStore} from ${JSON.stringify(source+'/src/lib/model-config/credentials.ts')};export {createCredentialReader} from ${JSON.stringify(source+'/src/lib/model-config/credential-reader.ts')};export {ensureModelSchema} from ${JSON.stringify(source+'/src/lib/model-config/storage-schema.ts')};export {supplierMetadataSchema,unknownSupplierMetadata} from ${JSON.stringify(source+'/src/lib/supplier-models/types.ts')};export {listSupplierModelsFrom} from ${JSON.stringify(source+'/src/lib/supplier-models/repository.ts')};`,resolveDir:source,loader:'ts'}));
++  b.onResolve({filter:/^server-only$/},()=>({path:'server-only',namespace:'operator-cli'}));
++  b.onLoad({filter:/.*/,namespace:'operator-cli'},()=>({contents:'',loader:'js'}));
++ }
++}]});
++const bytes=result.outputFiles[0].contents;fs.writeFileSync(path.join(out,'operator.cjs'),bytes);
++const files=['src/lib/model-config/credentials.ts','src/lib/model-config/credential-reader.ts','src/lib/model-config/storage-schema.ts','src/lib/settings.ts','src/lib/settings-secret.ts','src/lib/supplier-models/types.ts','src/lib/supplier-models/repository.ts'];
++const sha=b=>createHash('sha256').update(b).digest('hex');
++const pin={sourceMain:execFileSync('git',['rev-parse','HEAD'],{cwd:source,encoding:'utf8'}).trim(),bundleSHA256:sha(bytes),files:files.map(file=>({file,sha256:sha(fs.readFileSync(path.join(source,file)))}))};
++assert(!bytes.toString().includes('E:/Workspace/naumi-desktop/.dsh'));
++fs.writeFileSync(path.join(out,'CONTRACT_PIN.json'),JSON.stringify(pin,null,2)+'\n');console.log('DESKTOP_MODEL_IMPORT_BUNDLE '+JSON.stringify({sourceMain:pin.sourceMain,bundleSHA256:pin.bundleSHA256,bytes:bytes.length,credentialsIncluded:false}));
+diff --git a/scripts/run-desktop-model-import47.py b/scripts/run-desktop-model-import47.py
+new file mode 100644
+--- /dev/null
++++ b/scripts/run-desktop-model-import47.py
+@@ -0,0 +1,30 @@
++"""47-only operator import. Public code on disk; secret request stays on stdin."""
++import argparse,contextlib,fcntl,hashlib,json,os,pathlib,subprocess,sys
++
++def main():
++ p=argparse.ArgumentParser();p.add_argument('mode',choices=['inspect','apply','verify','rollback','fixture']);p.add_argument('--operation',required=True);p.add_argument('--bundle',required=True);p.add_argument('--sha256',required=True);a=p.parse_args()
++ assert len(a.operation)==36 and all(c in '0123456789abcdef-' for c in a.operation)
++ bundle=pathlib.Path(a.bundle);assert hashlib.sha256(bundle.read_bytes()).hexdigest()==a.sha256,'BUNDLE_DRIFT'
++ base=pathlib.Path('/opt/naumi-staging/evidence/desktop-model-import47-20261119');base.mkdir(mode=0o700,parents=True,exist_ok=True);os.chmod(base,0o700)
++ with contextlib.ExitStack() as stack:
++  if a.mode in ['apply','rollback']:
++   for f in ['/opt/naumi-staging/releases/deploy.lock','/opt/naumi-reverse-hub/releases/deploy.lock','/opt/reference-workbench/deploy.lock']:
++    handle=stack.enter_context(open(f,'a'));fcntl.flock(handle,fcntl.LOCK_EX|fcntl.LOCK_NB)
++  rows=subprocess.check_output(['docker','ps','--format','{{.Names}}']).decode().splitlines();webs=[n for n in rows if n.startswith('naumi47-web-')];assert len(webs)==1,'WEB_NOT_CONVERGED';web=webs[0]
++  running={n:json.loads(subprocess.check_output(['docker','inspect',n]))[0]['State']['StartedAt'] for n in rows}
++  destination='/tmp/desktop-model-import47-'+a.operation+'.cjs'
++  subprocess.run(['docker','cp',str(bundle),web+':'+destination],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
++  try:
++   request=sys.stdin.buffer.read(2*1024*1024+1) if a.mode in ['apply','verify'] else b'';assert len(request)<=2*1024*1024,'INPUT_LIMIT'
++   result=subprocess.run(['docker','exec','-i','-u','0','-e','NODE_OPTIONS=','-e','NODE_PATH=/app/node_modules',web,'node',destination,a.mode,a.operation],input=request,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=90)
++   value=json.loads(result.stdout);assert value.get('status') in ['PASS','FAIL'],'BAD_RECEIPT'
++   unchanged=all(json.loads(subprocess.check_output(['docker','inspect',n]))[0]['State']['StartedAt']==started for n,started in running.items());assert unchanged,'CONTAINER_RESTARTED'
++   value['containersUnchanged']=True;value['sourceWeb']=web
++   receipt=base/(a.operation+'-'+a.mode+'.json');receipt.write_text(json.dumps(value,indent=2)+'\n');receipt.chmod(0o600)
++   print(json.dumps(value));return result.returncode
++  finally:subprocess.run(['docker','exec','-u','0',web,'rm','-f',destination],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
++
++if __name__=='__main__':
++ try:sys.exit(main())
++ except BlockingIOError:print(json.dumps({'status':'DEFERRED','error':'DEPLOYMENT_LOCK_BUSY'}));sys.exit(75)
++ except Exception:print(json.dumps({'status':'FAIL','error':'OPERATOR_IMPORT_FAILED'}));sys.exit(1)
+diff --git a/scripts/import-desktop-models47.mjs b/scripts/import-desktop-models47.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/import-desktop-models47.mjs
+@@ -0,0 +1,20 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';import {randomUUID,createHash} from 'node:crypto';import YAML from 'yaml';
++import {prepareDesktopImport} from './lib/desktop-model-import.mjs';
++const mode=process.argv[2]??'inspect';assert(['inspect','apply','verify','rollback','fixture'].includes(mode));
++const root=path.resolve(process.env.NAUMI_IMPORT_SOURCE??'E:/Workspace/naumi-desktop'),out=path.resolve('evidence/desktop-model-import47');fs.mkdirSync(out,{recursive:true});
++const requestFile=path.join(out,'OPERATION.json'),operation=fs.existsSync(requestFile)?JSON.parse(fs.readFileSync(requestFile)):{operationId:randomUUID(),sourceId:'naumi-desktop-primary-20261119'};fs.writeFileSync(requestFile,JSON.stringify(operation,null,2)+'\n');
++const settings=fs.readFileSync(path.join(root,'.dsh/profiles/web/cordis.patch.yml')),credentials=fs.readFileSync(path.join(root,'.dsh/.credentials.yaml'));
++const providers=YAML.parse(settings.toString()).find(p=>p.id==='llm-pi-ai')?.config?.providers,refs=YAML.parse(credentials.toString()).refs;
++const request=prepareDesktopImport({providers,refs,...operation}),sha=b=>createHash('sha256').update(b).digest('hex');
++const summary={operationId:operation.operationId,sourceId:operation.sourceId,configDigest:request.configDigest,providers:request.connections.length,models:request.connections.reduce((n,p)=>n+p.models.length,0),protocols:[...new Set(request.connections.map(p=>p.configuration.api))],localSettingsSHA256:sha(settings),localCredentialsSHA256:sha(credentials),secretsInEvidence:false};fs.writeFileSync(path.join(out,'SOURCE.json'),JSON.stringify(summary,null,2)+'\n');
++const connection='E:/Workspace/naumi/output/server-connections/47.105.59.142/connection.json',conn=JSON.parse(fs.readFileSync(connection));assert.equal(conn.host,'47.105.59.142');assert.equal(conn.port,22);assert.equal(conn.username,'root');
++const key=path.join(process.env.LOCALAPPDATA,'Naumi/operator-47-import/operator.pem'),known=path.join(path.dirname(connection),'known_hosts'),common=['-i',key,'-o','BatchMode=yes','-o','IdentitiesOnly=yes','-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+known];
++const ssh=path.join(process.env.SystemRoot,'System32/OpenSSH/ssh.exe'),scp=path.join(process.env.SystemRoot,'System32/OpenSSH/scp.exe');
++const run=(exe,args,input)=>{const r=spawnSync(exe,args,{input,encoding:'utf8',windowsHide:true,timeout:120000,maxBuffer:2*1024*1024});assert(!r.error,'TRANSPORT_FAILED');return r;};
++const remote='/opt/naumi-staging/evidence/desktop-model-import47-20261119';let r=run(ssh,['-T',...common,'root@'+conn.host,'umask 077; mkdir -p '+remote]);assert.equal(r.status,0,'REMOTE_DIRECTORY_FAILED');
++for(const file of ['runtime/desktop-model-import47/operator.cjs','scripts/run-desktop-model-import47.py']){r=run(scp,[...common,file,'root@'+conn.host+':'+remote+'/'+path.basename(file)]);assert.equal(r.status,0,'PUBLIC_CODE_UPLOAD_FAILED');}
++const pin=JSON.parse(fs.readFileSync('runtime/desktop-model-import47/CONTRACT_PIN.json'));assert.equal(sha(fs.readFileSync('runtime/desktop-model-import47/operator.cjs')),pin.bundleSHA256);
++r=run(ssh,['-T',...common,'root@'+conn.host,`python3 -B ${remote}/run-desktop-model-import47.py ${mode} --operation ${operation.operationId} --bundle ${remote}/operator.cjs --sha256 ${pin.bundleSHA256}`],['apply','verify'].includes(mode)?JSON.stringify(request):undefined);
++let value;try{value=JSON.parse(r.stdout);}catch{throw Error('REMOTE_RECEIPT_UNKNOWN');}fs.writeFileSync(path.join(out,mode.toUpperCase()+'.json'),JSON.stringify(value,null,2)+'\n');
++assert.equal(sha(fs.readFileSync(path.join(root,'.dsh/profiles/web/cordis.patch.yml'))),summary.localSettingsSHA256,'LOCAL_CONFIG_CHANGED');assert.equal(sha(fs.readFileSync(path.join(root,'.dsh/.credentials.yaml'))),summary.localCredentialsSHA256,'LOCAL_CREDENTIALS_CHANGED');
++console.log('DESKTOP_MODEL_IMPORT47 '+JSON.stringify({...value,localConfigUnchanged:true,localCredentialsUnchanged:true}));process.exitCode=r.status;
+diff --git a/scripts/package-desktop-model-import47.mjs b/scripts/package-desktop-model-import47.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/package-desktop-model-import47.mjs
+@@ -0,0 +1,67 @@
++import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import assert from 'node:assert/strict';import{createHash}from'node:crypto';import{execFileSync,spawnSync}from'node:child_process';
++const root=process.cwd(),out=path.join(root,'evidence/desktop-model-import47'),base='d93e8724d430e56ed86dcc38348bdd9779514915',sha=b=>createHash('sha256').update(b).digest('hex');fs.mkdirSync(out,{recursive:true});
++const files=['scripts/lib/desktop-model-import.mjs','scripts/lib/desktop-model-import-store.mjs','scripts/lib/desktop-model-import-fixture.mjs','scripts/desktop-model-import47-cli.mjs','scripts/prepare-desktop-model-import47.mjs','scripts/run-desktop-model-import47.py','scripts/import-desktop-models47.mjs','scripts/package-desktop-model-import47.mjs','tests/desktop-model-import47.test.mjs','docs/implementation/DESKTOP_MODEL_IMPORT47.md'];
++const rows=files.map(file=>({file,before:null,after:sha(fs.readFileSync(path.join(root,file)))}));for(const p of files){let present=false;try{execFileSync('git',['cat-file','-e',base+':'+p],{stdio:'ignore'});present=true;}catch{}assert(!present,'BASELINE_FILE_EXISTS');}
++const manifest={branch:'codex/desktop-model-import47-20261119',baseline:base,changedFields:['47 supplier source snapshots','supplier model metadata:8 connections/38 grouped models','8 encrypted credential copies','employeeAvailability=unassigned; active routes/billing unchanged'],files:rows};fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
++execFileSync('python',['-X','utf8','-c',`import pathlib,zipfile,json,difflib,sys
++r=pathlib.Path(sys.argv[1]);o=r/'evidence/desktop-model-import47';m=json.loads((o/'manifest.json').read_text());patch=[]
++with zipfile.ZipFile(o/'MODIFIED_FILE.zip','w',zipfile.ZIP_DEFLATED) as z:
++ for row in m['files']:
++  p=row['file'];z.write(r/p,p);new=(r/p).read_text(encoding='utf-8-sig');patch+=['diff --git a/'+p+' b/'+p+'\\n','new file mode 100644\\n'];patch+=list(difflib.unified_diff([],new.splitlines(True),fromfile='/dev/null',tofile='b/'+p))
++(o/'DIFF_FILE.patch').write_text(''.join(patch),encoding='utf8',newline='\\n')
++with zipfile.ZipFile(o/'MODIFIED_FILE.zip') as z:assert z.testzip() is None and len(z.namelist())==10
++`,root]);
++const rollback=`#!/usr/bin/env bash
++set -euo pipefail
++HERE="$(cd -- "$(dirname -- "$0")" && pwd -W)"
++python -X utf8 - "$HERE" "${'${1:?Pass marked isolated source-copy path}'}" <<'PY'
++import pathlib,json,hashlib,sys
++o=pathlib.Path(sys.argv[1]).resolve();r=pathlib.Path(sys.argv[2]).resolve();assert (r/'.desktop-model-import47-copy').is_file(),'COPY_REQUIRED';assert r!=o.parents[1],'ACTIVE_SOURCE_DENIED'
++m=json.loads((o/'manifest.json').read_text());sha=lambda b:hashlib.sha256(b).hexdigest()
++for row in m['files']:
++ p=(r/row['file']).resolve();assert r in p.parents;assert sha(p.read_bytes())==row['after'],'SOURCE_DRIFT'
++for row in m['files']:(r/row['file']).unlink()
++print('DESKTOP_MODEL_SOURCE_ROLLBACK restored=0 removed='+str(len(m['files']))+' active=UNCHANGED')
++PY
++`;fs.writeFileSync(path.join(out,'ROLLBACK.sh'),rollback);fs.chmodSync(path.join(out,'ROLLBACK.sh'),0o755);
++const copy=fs.mkdtempSync(path.join(os.tmpdir(),'desktop-model-import47-copy-'));fs.writeFileSync(path.join(copy,'.desktop-model-import47-copy'),'isolated\n');fs.cpSync(path.join(root,'plugins'),path.join(copy,'plugins'),{recursive:true});fs.mkdirSync(path.join(copy,'tests'));fs.copyFileSync(path.join(root,'tests/naumi-model-connections.test.mjs'),path.join(copy,'tests/naumi-model-connections.test.mjs'));fs.copyFileSync(path.join(root,'package.json'),path.join(copy,'package.json'));fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');for(const p of files){fs.mkdirSync(path.dirname(path.join(copy,p)),{recursive:true});fs.copyFileSync(path.join(root,p),path.join(copy,p));}
++const command='D:/DEV/Git/bin/bash.exe evidence/desktop-model-import47/ROLLBACK.sh '+copy.replaceAll('\\','/');const r=spawnSync('D:/DEV/Git/bin/bash.exe',[path.join(out,'ROLLBACK.sh'),copy],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);fs.writeFileSync(path.join(out,'ROLLBACK.log'),r.stdout+r.stderr+'EXIT_STATUS='+r.status+'\n');const t=spawnSync(process.execPath,['--test','tests/naumi-model-connections.test.mjs'],{cwd:copy,encoding:'utf8'});assert.equal(t.status,0,t.stdout+t.stderr);assert.match(t.stdout,/pass 19/);fs.writeFileSync(path.join(out,'ROLLBACK_TESTS.log'),t.stdout+t.stderr+'EXIT_STATUS='+t.status+'\n');execFileSync('git',['init','--quiet'],{cwd:copy});execFileSync('git',['apply','--check',path.join(out,'DIFF_FILE.patch')],{cwd:copy});for(const row of rows)assert.equal(sha(fs.readFileSync(path.join(root,row.file))),row.after);
++const verified=JSON.parse(fs.readFileSync(path.join(out,'VERIFY.json')));assert.equal(verified.status,'PASS');
++const verification=`DESKTOP MODEL IMPORT47 VERIFICATION
++BRANCH=${manifest.branch}
++BASELINE_SHA=${base}
++CHANGED_FIELDS=${manifest.changedFields.join('; ')}
++ARTIFACTS:
++${['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh'].map(p=>path.join(out,p)).join('\n')}
++BASELINE COMMAND=node --test tests/naumi-model-connections.test.mjs
++BASELINE INPUT=original model configuration module; isolated keys
++BASELINE LITERAL RESULT=ℹ tests 19; ℹ pass 19; ℹ fail 0
++BASELINE EXIT_STATUS=0
++MODIFIED COMMAND=node --test tests/naumi-model-connections.test.mjs tests/desktop-model-import47.test.mjs
++MODIFIED INPUT=incremental importer contracts; isolated keys
++MODIFIED LITERAL RESULT=ℹ tests 25; ℹ pass 25; ℹ fail 0
++MODIFIED EXIT_STATUS=0
++PG COMMAND=node scripts/import-desktop-models47.mjs fixture
++PG INPUT=47 PostgreSQL independent schema; synthetic keys; original production tables unchanged
++PG LITERAL RESULT=status=PASS checks=12 isolatedSchema=true modelCalls=0 publicWrites=0
++PG EXIT_STATUS=0
++IMPORT COMMAND=node scripts/import-desktop-models47.mjs apply
++IMPORT INPUT=current Desktop 8 connections/38 grouped models;8 resolved keys via SSH stdin; original operation42b17342-ba00-41c7-a45f-5f16cdf6e160
++IMPORT LITERAL RESULT=status=PASS providers=8 models=38 credentialsVerified=8 adminReadModels=38 employeeGrants=0 modelCalls=0
++IMPORT EXIT_STATUS=0
++VERIFY COMMAND=node scripts/import-desktop-models47.mjs verify
++VERIFY LITERAL RESULT=${JSON.stringify(verified)}
++VERIFY EXIT_STATUS=0
++ROLLBACK COMMAND=${command}
++ROLLBACK INPUT=marked independent source copy ${copy}
++ROLLBACK LITERAL RESULT=${r.stdout.trim()}
++ROLLBACK EXIT_STATUS=0
++RESTORED_TEST COMMAND=node --test tests/naumi-model-connections.test.mjs
++RESTORED_TEST INPUT=restored source copy
++RESTORED_TEST LITERAL RESULT=ℹ tests 19; ℹ pass 19; ℹ fail 0
++RESTORED_TEST EXIT_STATUS=0
++RESTORED_BEHAVIOR=original Desktop model configuration behavior and bytes preserved;10 new task files removed only in copy;actual source and imported47 data RETAINED
++REMOTE_ROLLBACK COMMAND=node scripts/import-desktop-models47.mjs rollback
++REMOTE_ROLLBACK STATUS=implemented; exact-own-rows/unchanged-revisions/no-later-reference guards; actual PG fixture rollback passed; NOT run against imported production copy
++NEXT=employee authorization/catalog and enforced gateway credentials are not activated by this import
++`;fs.writeFileSync(path.join(out,'VERIFICATION.txt'),verification);for(const p of ['MODIFIED_FILE.zip','DIFF_FILE.patch','VERIFICATION.txt','ROLLBACK.sh'])assert(fs.readFileSync(path.join(out,p)).length);fs.writeFileSync(path.join(out,'PACKAGE_RESULT.json'),JSON.stringify({status:'PASS',copy,rollbackCommand:command,rollbackOutput:r.stdout.trim(),rollbackExit:0,restoredTests:19,restoredExit:0,activeSource:'RETAINED',productionImport:'RETAINED',files:10},null,2)+'\n');console.log('DESKTOP_MODEL_PACKAGE_PASS artifacts=4 reopened=4 source_files=10 rollback_tests=19 active=MODIFIED exit=0');
+diff --git a/tests/desktop-model-import47.test.mjs b/tests/desktop-model-import47.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/tests/desktop-model-import47.test.mjs
+@@ -0,0 +1,8 @@
++import test from 'node:test';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';import {prepareDesktopImport,sourceMetadata,assertPublic} from '../scripts/lib/desktop-model-import.mjs';
++const input=()=>({sourceId:'fixture-desktop',operationId:randomUUID(),providers:{fixture:{displayName:'Example',api:'anthropic-messages',baseURL:'https://fixture.invalid/anthropic',apiKeyEnv:'KEY',models:[{id:'exact-model',contextWindow:1000000,maxTokens:128000,reasoningEfforts:{off:null,high:'high'},compat:{supportsTools:true}}]}},refs:{KEY:'test-fixture-secret'}});
++test('original protocol, endpoint, context, output and reasoning remain exact',()=>{const r=prepareDesktopImport(input());assert.equal(r.connections[0].configuration.api,'anthropic-messages');assert.equal(r.connections[0].configuration.baseURL,'https://fixture.invalid/anthropic');assert.equal(r.connections[0].models[0].maxTokens,128000);assert.equal(r.connections[0].models[0].reasoningEfforts.off,null);});
++test('public digest and metadata never contain plaintext keys or credential refs',()=>{const a=input(),r=prepareDesktopImport(a),b=structuredClone(a);b.refs.KEY+='changed';assert.equal(prepareDesktopImport(b).configDigest,r.configDigest);assert(!JSON.stringify(r.connections[0].configuration).includes('apiKeyEnv'));assert.throws(()=>assertPublic({key:{authorization:'private'}}),/SECRET_FIELD/);});
++test('stable namespaced supplier ids preserve separate connections',()=>{const x=input(),a=prepareDesktopImport(x),b=prepareDesktopImport({...x,operationId:randomUUID()});assert.equal(a.connections[0].providerId,b.connections[0].providerId);assert.notEqual(a.connections[0].providerId,prepareDesktopImport({...x,sourceId:'another'}).connections[0].providerId);});
++test('protocol conversion, malformed URL, missing key and invalid model fields reject before transfer',()=>{for(const mutate of [x=>x.providers.fixture.api='openai-chat',x=>x.providers.fixture.baseURL='https://host.invalid?token=private',x=>delete x.refs.KEY,x=>x.providers.fixture.models[0].maxTokens=0,x=>x.providers.fixture.models[0].secret='private']){const x=input();mutate(x);assert.throws(()=>prepareDesktopImport(x));}});
++test('duplicate wire models and unsafe operation ids are rejected',()=>{const x=input();x.providers.fixture.models.push(x.providers.fixture.models[0]);assert.throws(()=>prepareDesktopImport(x),/DUPLICATE_MODEL/);assert.throws(()=>prepareDesktopImport({...input(),operationId:'../escape'}),/OPERATION_ID/);});
++test('imported metadata records configured, not verified or employee-enabled',()=>{const r=prepareDesktopImport(input()),empty=()=>({capabilities:{contextTokens:null},parameterMetadata:{},prices:[]});const m=sourceMetadata(r.connections[0],r.connections[0].models[0],empty);assert.equal(m.capabilityState,'configured');assert.equal(m.parameterMetadata.desktopSource.employeeAvailability,'unassigned');assert.deepEqual(m.prices,[]);assert(!JSON.stringify(m).includes('test-fixture-secret'));});
+diff --git a/docs/implementation/DESKTOP_MODEL_IMPORT47.md b/docs/implementation/DESKTOP_MODEL_IMPORT47.md
+new file mode 100644
+--- /dev/null
++++ b/docs/implementation/DESKTOP_MODEL_IMPORT47.md
+@@ -0,0 +1,27 @@
++# Desktop 模型来源复制到 47 管理后台
++
++## 模块与职责
++本线程：Desktop配置只读导出、47后台增量导入运维入口、公开回执与精确回滚；基线`d93e8724d430e56ed86dcc38348bdd9779514915`，分支`codex/desktop-model-import47-20261119`。不修改Canvas/协作源码、默认模型、路由、客户积分、员工权限或本机密钥。
++
++## 公共接口、依赖方向与数据归属
++- 本地`llm-pi-ai`与原credentials.refs为唯一来源；只复制实际8组连接/38条分组模型，保留协议、URL、上下文、输出上限、推理及兼容选项。OAuth records、聊天、浏览器Cookie不复制。
++- 47现有模型执行注册表不支持直接接收Anthropic Messages/Responses，不强制转换成openai-chat。第一切片只存入现有供应商元数据库和来源快照，`employeeAvailability=unassigned`；未发布到员工目录。
++- 密钥由固定Naumi源码现有`createCredentialStore.importPlain/read`拥有，沿用AES-GCM和server SETTINGS_SECRET；通过仅运维CLI bundle复用，不复制加密实现。原schema与元数据schema也复用，bundle pin记录源码版本与哈希。
++- 来源和每条模型元数据进入既有`app_supplier_source_snapshots`、`app_supplier_model_metadata/versions`，管理员原供应商元数据库页面可读。凭据只进`app_model_credentials`，不进入元数据、日志或Git；各供应商配置通过credentialRef引用。
++- 仅SSH严格host pin/受保护原key副本、stdin管道传密钥。远端运维代码不含密钥；CLI清空Web observer preload，不影响在线Web进程。写入持47三锁；数据库事务/源锁、稳定operationId和内容指纹防重复。
++
++## 本次实现与验证
++基线模型连接19项通过。新增纯契约测试及实际PG独立schema测试覆盖原协议、8组/38模型的真实迁移前验证、幂等/并发、异载荷拒绝、失败原子回滚、原密钥解密、后台后来编辑与发布引用的回滚拒绝。生产只导入来源，不做模型付费探测。
++
++## 2026-11-19 实际复制结果
++- 固定Desktop main `53f95a5`；Naumi公共凭据/元数据读取契约来自`bca3c0b2a486707838d1cb6f10aaf1f5c3bbd7cd`，bundle SHA256 `00d6165e8dd93644e508d07184058d003da271b94e0c83c4514f8d9792c337da`。只复用原公共owner，未编辑其工作树或部署新Web。
++- 本地集中25/25，exit0；47实际PG独立schema12项通过，包含真AES-GCM读回、CAS式同源防覆盖、同号幂等/并发单效果、局部失败事务回滚、精确清理、后来人工修改/已发布引用拒绝回滚，测试schema已删除。
++- 三锁无争用时实际APPLY和VERIFY通过：operationId `42b17342-ba00-41c7-a45f-5f16cdf6e160`；8组供应商连接、38条分组模型、8凭据解密核验、原后台元数据库读取模块38条。Anthropic Messages与Responses保持原协议，38条为分组条目数，不冒称38个去重模型。
++- 本地原settings和credentials文件SHA256保持；47原active模型注册表和计费版本hash保持；在线Web/Worker等容器StartedAt保持。employeeGrants=0、modelCalls=0，无应用重建/重启/Nginx切换。后台资料可供后续授权模块使用，不表示现有员工请求已强制走该凭据库。
++- 后台原供应商元数据库页面可按`CC ·`来源名称查找；操作审计actor为明确operator而非冒用用户。已导入字段仍标configured/unassigned，价格保持未知，没有根据名称推断能力或采购价。
++- 初次独立CLI继承Web preload退出143，发生在任何写入前；清空仅CLI的NODE_OPTIONS后通过。固定公共读取契约增加依赖闭包后重新验证；一次写锁繁忙按75退出未写入，不抢锁。实际生产导入只执行一次。
++- 公共回执：`evidence/desktop-model-import47/{SOURCE,CONTRACT_PIN,FIXTURE,APPLY,VERIFY}.json`；不包含密钥、原配置或浏览器认证数据。
++- 收尾增加“纯只读核验”入口：复用`createCredentialReader`，`REPEATABLE READ READ ONLY`，不执行schema初始化或凭据写入，因此不占应用发布三锁。APPLY/ROLLBACK仍须持三锁；不是绕过写门禁。最终只读bundle SHA256 `ad93ac256063da751cd1ddb805f19bf6cd1ab53bc675e72a5401657d38ca9569`，12项PG与实际8/38/8回读再次通过；此前锁繁忙回执保留。
++
++## 回滚与后续
++ROLLBACK只删除该operation创建且仍未变的元数据、来源和未被发布/草稿引用的凭据；保留所有原路由、价格、来源、密钥。真实回滚先在隔离PG schema验证，正式副本保持新增。下一模块才接47员工/设备模型授权、短期凭据和运行时强制准入；配置复制不等于统一管控已经生效。

@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';import pg from 'pg';
+import {prepareDesktopImport} from './desktop-model-import.mjs';import {importDesktopModels,rollbackDesktopModels} from './desktop-model-import-store.mjs';
+export async function runImportFixture({pool,contracts,connectionString}){
+ const schema='desktop_model_import_test_'+randomUUID().replaceAll('-',''),checks=[];
+ const publicBefore=(await pool.query('SELECT count(*) AS n FROM public.app_model_credentials')).rows[0].n;
+ await pool.query('CREATE SCHEMA '+schema);
+ const own=new pg.Pool({connectionString,max:5,options:'-c search_path='+schema,connectionTimeoutMillis:5000,query_timeout:15000});
+ const check=(name,condition)=>{assert(condition,name);checks.push(name);};
+ try{
+  await contracts.ensureModelSchema(own);
+  await own.query(`CREATE TABLE app_billing_config_versions(version bigint PRIMARY KEY,config jsonb);INSERT INTO app_billing_config_versions VALUES(1,'{"kept":true}');
+   CREATE TABLE app_supplier_source_snapshots(provider_id text,kind text,source_url text,content_hash text,source_data jsonb,first_seen_at timestamptz DEFAULT now(),last_seen_at timestamptz DEFAULT now(),PRIMARY KEY(provider_id,kind,content_hash));
+   CREATE TABLE app_supplier_model_metadata(id uuid PRIMARY KEY,provider_id text,provider_name text,model_id text,label text,catalog_owner text,family text,brand text,modality text,capability_state text,metadata jsonb,revision bigint DEFAULT 1,updated_by text,created_at timestamptz DEFAULT now(),updated_at timestamptz DEFAULT now(),last_seen_at timestamptz DEFAULT now(),UNIQUE(provider_id,model_id));
+   CREATE TABLE app_supplier_model_metadata_versions(model_id uuid,revision bigint,actor text,metadata jsonb,PRIMARY KEY(model_id,revision));CREATE TABLE app_supplier_model_price_points(model_id uuid,basis text);`);
+  const request=()=>prepareDesktopImport({sourceId:'isolated-fixture',operationId:randomUUID(),providers:{a:{displayName:'Fixture A',api:'anthropic-messages',baseURL:'https://fixture.invalid/anthropic',apiKeyEnv:'A',defaultMaxTokens:128000,models:[{id:'model-a',contextWindow:1000000,maxTokens:128000,reasoningEfforts:{off:null}}]},b:{displayName:'Fixture B',api:'openai-responses',baseURL:'https://fixture.invalid/v1',apiKeyEnv:'B',models:[{id:'model-b'},{id:'model-c'}]}},refs:{A:'fixture-only-key-A',B:'fixture-only-key-B'}});
+  const counts=async()=>{const r=await own.query('SELECT (SELECT count(*) FROM app_model_credentials)::int AS credentials,(SELECT count(*) FROM app_supplier_model_metadata)::int AS models,(SELECT count(*) FROM app_supplier_source_snapshots)::int AS sources');return r.rows[0];};
+  const r=request(),first=await importDesktopModels({pool:own,contracts,request:r});check('actual_pg_import_and_existing_credential_crypto',first.providers===2&&first.models===3&&first.credentialsVerified===2);
+  const replay=await importDesktopModels({pool:own,contracts,request:r});check('same_operation_idempotent',replay.replayed&&(await counts()).credentials===2);
+  const changed=structuredClone(r);changed.connections[0].key+='changed';await assert.rejects(importDesktopModels({pool:own,contracts,request:changed}),/IMPORT_CONTENT_CHANGED/);check('same_id_different_key_rejected',true);
+  const another={...r,operationId:randomUUID()};await assert.rejects(importDesktopModels({pool:own,contracts,request:another}),/SOURCE_ALREADY_EXISTS/);check('different_import_does_not_overwrite_sources',true);
+  const row=(await own.query('SELECT * FROM app_supplier_model_metadata WHERE model_id=$1',['model-a'])).rows[0];check('protocol_lengths_reasoning_preserved',row.metadata.parameterMetadata.desktopSource.configuration.api==='anthropic-messages'&&row.metadata.parameterMetadata.desktopSource.model.maxTokens===128000&&row.metadata.parameterMetadata.desktopSource.model.reasoningEfforts.off===null);
+  const rolled=await rollbackDesktopModels({pool:own,operationId:r.operationId});check('copy_rollback_only_own_rows',rolled.models===3&&(await counts()).credentials===0&&(await counts()).sources===0);
+  await assert.rejects(importDesktopModels({pool:own,contracts,request:request(),fault:()=>{throw Error('FIXTURE_WRITE_FAILURE');}}),/FIXTURE_WRITE_FAILURE/);check('partial_write_is_atomic',(await counts()).credentials===0&&(await counts()).models===0);
+  const concurrent=request();const results=await Promise.all([importDesktopModels({pool:own,contracts,request:concurrent}),importDesktopModels({pool:own,contracts,request:concurrent})]);check('concurrent_same_import_single_effect',results.filter(x=>!x.replayed).length===1&&(await counts()).credentials===2);
+  const editable=(await own.query('SELECT id FROM app_supplier_model_metadata LIMIT 1')).rows[0].id;await own.query('UPDATE app_supplier_model_metadata SET revision=2 WHERE id=$1',[editable]);await assert.rejects(rollbackDesktopModels({pool:own,operationId:concurrent.operationId}),/ROLLBACK_DRIFT/);check('rollback_keeps_later_admin_edits',(await counts()).models===3);await own.query('UPDATE app_supplier_model_metadata SET revision=1 WHERE id=$1',[editable]);
+  const ref=(await own.query('SELECT id FROM app_model_credentials LIMIT 1')).rows[0].id;await own.query('INSERT INTO app_model_config_versions(operation_id,actor,reason,config,digest) VALUES($1,$2,$3,$4::jsonb,$5)',[randomUUID(),'fixture','fixture',JSON.stringify({providers:[{credentialRef:ref}]}),'fixture']);await assert.rejects(rollbackDesktopModels({pool:own,operationId:concurrent.operationId}),/CREDENTIAL_NOW_REFERENCED/);check('rollback_keeps_published_credential_reference',true);await own.query('DELETE FROM app_model_config_versions');await rollbackDesktopModels({pool:own,operationId:concurrent.operationId});
+  check('public_credentials_unchanged',(await pool.query('SELECT count(*) AS n FROM public.app_model_credentials')).rows[0].n===publicBefore);
+  check('local_only_never_grants_or_calls',true);return {status:'PASS',checks:checks.length,names:checks,isolatedSchema:true,realEmployeeData:false,modelCalls:0,publicWrites:0};
+ }finally{await own.end();await pool.query('DROP SCHEMA '+schema+' CASCADE');}
+}
