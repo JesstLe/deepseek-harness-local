@@ -15,3 +15,13 @@
 验证命令、结果及证据层级：原IM网关/平台21/21基线通过；模块/隔离HTTP/真实微信扫码/收发分别记在evidence/weixin-primary/VERIFICATION.txt，不以受控协议替代真实账号。复用IMStore、IMService、IMDelivery、原Bot runtime以及原approval/question waterfall，不新建Agent或输入器。
 
 未完成项与下一步：集中验证、固定main加载、用户扫码与本人真实私聊收发核验、四工件。真实微信授权需要用户在微信确认，未扫码前不称已连接。功能模块计数1，文档0。
+
+## 本轮收口（2026-11-19）
+
+同步记录：微信实现381aaa9，边界修正9981c92，已普通整合浏览器主线a654a42126ab7737bd85b6ee5a66272f1ab6fcfa为317052d；浏览器main/preload/tools及CUA安装升级实现原样保留。功能模块计数1，文档0。
+
+验证：基线原IM21/21；微信+原IM定向最终32/32；整合全仓并发2为1006/1006，exit0；实际隔离Harness/Chrome12项通过，0 page errors、0模型调用、真实腾讯QR接口与本地二维码渲染通过，未扫码。增补二维码TTL、主身份变化、超长文字准入；已连接弹窗自动刷新真实状态，配对码提交错误在原弹窗反馈。
+
+回滚：四工件及逐文件原/改SHA256在evidence/weixin-primary。ROLLBACK.sh仅在新建副本上恢复原6文件并移除新增文件，原IM21项通过；新增transport_state表和原cursor留存，user_version仍为1。此为源码副本回滚，不是已安装包回退，也不降级真实数据库。
+
+交付接续：0.4.4是managed bundled runtime，禁止向已安装目录或运行profile随意热补。浏览器和微信均合入后，从固定main构建下一完整版本（拟0.4.5），核对原生代码同步计划并在空闲维护窗口升级；未正式加载、未扫码、未真实微信收发前继续记pending。扫描/确认由用户在自己的微信完成。不开公共Release、不复制用户模型凭据进标准安装包。
