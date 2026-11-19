@@ -1,0 +1,74 @@
+Naumi 内测安装包验收
+任务分支：codex/internal-trial-20261119
+原基线：d93e8724d430e56ed86dcc38348bdd9779514915
+实际构建固定main：ddd504f77e4330edbf69cbf442938958af82006e
+源码四工件版本：fbf2c012f0dad9f7184e605d16a889cfec58ad2d（后续只新增验收脚本/文档，不改变已固定EXE）
+改变的分支/字段：backend试用运行时追加原生--patch；临时ui-settings-general.disabled=true；llm-pi-ai.config.providers仅精选GPT和精确deepseek-flash；Flash的name=claude fable5.2，id/协议/URL保持；正式资源无edition则不追加patch。profile只为精确匹配首次模板的全新home种子原名称配置与原生credentials.refs，已有用户配置不覆盖。应用appId=com.naumi.desktop、productName=Naumi、userData和NSIS身份、稳定latest更新feed不变。
+安装包：D:\NaumiReleases\internal-test-0.4.3\Naumi-Test-Setup-0.4.3-x64.exe
+版本：0.4.3，Windows x64；大小：495467864 bytes；SHA256：cd73ce2572371dbf732a2bc9b425eac02c3961c40d945fcb7c8c2943966c9a4e
+5组/17个模型连接项（16 GPT连接项、1 DeepSeek Flash），原分组保留。
+四工件：
+E:/Workspace/naumi-desktop/evidence/internal-trial/MODIFIED_FILE.zip
+E:/Workspace/naumi-desktop/evidence/internal-trial/DIFF_FILE.patch
+E:/Workspace/naumi-desktop/evidence/internal-trial/VERIFICATION.txt
+E:/Workspace/naumi-desktop/evidence/internal-trial/ROLLBACK.sh
+源码ZIP不含密钥/员工数据/EXE；密钥仅存在本地内测分发资源与ignored运行目录，未提交Git或公开发布。
+
+BASELINE
+command: node --test desktop/tests/backend.test.cjs desktop/tests/updates.test.cjs tests/naumi-settings.test.mjs
+cwd/input: D:/NaumiBuild/nt，原基线backend/updates/settings测试
+literal output/result: ℹ tests 52 / ℹ pass 52 / ℹ fail 0
+exit status: 0
+
+MODIFIED
+command: node --test tests/naumi-internal-trial.test.mjs desktop/tests/backend.test.cjs desktop/tests/updates.test.cjs tests/naumi-settings.test.mjs
+input: 模型筛选、名称/路由、首次种子、既有配置保护、重试/恢复、正式资源恢复与原行为
+literal output/result: ℹ tests 63 / ℹ pass 63 / ℹ fail 0
+exit status: 0
+command: node --test tests/*.test.mjs desktop/tests/*.test.cjs
+input: 整合78e1f81后的全仓，FULL_MAIN.log
+literal output/result: ℹ tests 955 / ℹ pass 955 / ℹ fail 0
+exit status: 0
+command: node scripts/verify-internal-trial.mjs
+input: 实际隔离Harness/native模型适配器/Chromium，fake本地provider，无真实模型
+literal output/result: TRIAL_NATIVE_COMPLETE checks=16 page_errors=0 real_supplier_calls=0
+exit status: 0
+2次loopback请求包括原生标题生成；wire model仍为deepseek-flash，不是claude；正式资源恢复后配置语义/credential refs和Session保持。首次认证创建浏览器grant及YAML格式化是原生行为，不声称全文件字节恒定。
+command: node scripts/build-internal-trial.mjs E:/Workspace/naumi-desktop/.dsh D:/NaumiReleases/internal-test-0.4.3
+input: 固定main ddd504f77e4330edbf69cbf442938958af82006e，只读提取用户现有5组精选连接；native runtime + stock NSIS/uninstaller
+literal output/result: TRIAL_MODEL_EXPORT groups=5 models=17 source_unchanged=1
+literal output/result: INTERNAL_TRIAL_BUILD_PASS published=0 installed=0
+exit status: 0
+command: node scripts/verify-internal-trial-package.mjs D:/NaumiReleases/internal-test-0.4.3
+input: 实际打包EXE/asar/45661运行资源，2次测试程序启动、1次当前正式程序启动，独立LOCALAPPDATA/userData/账号服务fixture/端口
+literal output/result: TRIAL_PACKAGE_COMPLETE checks=19 inventory=45661 model_calls=0
+exit status: 0
+验证：5组17模型全预置、设置入口隐藏、更新入口保留、alias仅展示、正式程序切换后设置恢复、原Session/配置/凭据引用保持；0page errors。当前正式安装exe/asar/manifest哈希保持，无3080重启。
+command: D:/DEV/7zip/7z.exe t D:/NaumiReleases/internal-test-0.4.3/Naumi-Test-Setup-0.4.3-x64.exe
+input: 完整NSIS安装包
+literal output/result: Everything is Ok / Files: 28 / Size: 425918902 / Compressed: 495467864
+exit status: 0
+command: node scripts/publish-desktop-update.mjs --skip-build
+input: 内测资源，验证公开发布器拒绝此包
+literal output/result: Error: INTERNAL_TRIAL_PUBLICATION_FORBIDDEN
+exit status: 1（预期拒绝，未调用GitHub发布）
+
+ROLLBACK
+command: node scripts/package-internal-trial.mjs
+input: 14个明确源码/文档，zip重开逐hash，标记独立源码副本回滚
+literal output/result: TRIAL_ARTIFACTS_PASS files=14 zip_reopened=1 rollback_exit=0 restored_tests=52 source_still_modified=1
+exit status: 0
+exact rollback command: D:/DEV/Git/bin/bash.exe D:/NaumiBuild/nt/evidence/internal-trial/ROLLBACK.sh D:/NaumiBuild/nt/runtime/trial-artifacts-c04c43ce-6b7f-4f90-94b2-6c2cc41f210b/rollback-copy
+input: D:\NaumiBuild\nt\runtime\trial-artifacts-c04c43ce-6b7f-4f90-94b2-6c2cc41f210b\rollback-copy，.trial-copy.json标记，HASHES.json和original原件；不对用户安装目录执行
+literal output/result: TRIAL_ROLLBACK_PASS files=14 original_hashes=restored source_still_modified=1
+exit status: 0
+restored behavior command: node --test desktop/tests/backend.test.cjs desktop/tests/updates.test.cjs tests/naumi-settings.test.mjs
+cwd/input: D:\NaumiBuild\nt\runtime\trial-artifacts-c04c43ce-6b7f-4f90-94b2-6c2cc41f210b\rollback-copy，原backend/updates/settings测试
+literal output/result: ℹ tests 52 / ℹ pass 52 / ℹ fail 0
+exit status: 0
+恢复状态：14文件恢复原hash/新增删除、原52基线通过；实际源码仍保留内测构建功能，已构建EXE保持内测版。没有执行真实用户安装降级。
+
+限制及层级
+测试→正式的用户数据接续已通过两份真实可执行程序验证；未来更高版本安装器尚未发布，未声称执行过未来版本的实际NSIS覆盖。固定同应用ID/目录/更新源，后续高于0.4.3的正式版可沿原路径升级，正式资源不携带临时限制。
+本次只单独生成安装包，不安装/卸载当前用户应用，不向GitHub Release发布，不调用真实供应商，不改47服务器配置。无需重新登录开发者账号或复制任何现有员工会话。
+早期失败已纠正：env对象原型比较错误（日志仅私有runtime，不进Git）；native fixture误假定仅一次请求/配置原字节不变，见INITIAL日志；猜测7zip依赖路径不存在，改用已安装7z后通过。源码包git show对新增文件报“不在原基线”为预期原文件不存在，不是打包失败。
