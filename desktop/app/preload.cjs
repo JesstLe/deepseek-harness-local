@@ -2,6 +2,7 @@
 const {contextBridge,ipcRenderer}=require('electron');
 const subscribe=(channel,listener)=>{const handler=(_event,value)=>listener(value);ipcRenderer.on(channel,handler);return()=>ipcRenderer.removeListener(channel,handler);};
 const browser={
+  manage:input=>ipcRenderer.invoke('naumi:browser-manager',input),
   acquire:workspace=>ipcRenderer.invoke('naumi:browser-acquire',workspace),
   release:lease=>ipcRenderer.invoke('naumi:browser-release',lease),
   onOpenRequested:(lease,listener)=>subscribe('naumi:browser-open',value=>{if(value?.lease===lease)listener(value.url);})

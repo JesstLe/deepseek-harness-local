@@ -23,7 +23,7 @@ export class NativeBrowserRuntime {
   }
   async perform(sessionId,input,{signal}={}){
     const descriptor=input.frame===true?null:this.descriptor();
-    if(!descriptor)return this.legacy.perform(sessionId,input,{signal});
+    if(!descriptor){if(['accounts','login'].includes(input.action))throw Error('NATIVE_BROWSER_REQUIRED');return this.legacy.perform(sessionId,input,{signal});}
     const args=validateBrowserInput(input);let response;
     try{response=await fetch(`http://127.0.0.1:${descriptor.port}/op`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+descriptor.token},body:JSON.stringify({sessionId,input:args}),signal:AbortSignal.any([...(signal?[signal]:[]),AbortSignal.timeout(45000)])});}
     catch(e){if(signal?.aborted)throw signal.reason;throw Error(e.name==='TimeoutError'?'NATIVE_BROWSER_TIMEOUT_NO_REPLAY':'NATIVE_BROWSER_DISCONNECTED_NO_REPLAY');}

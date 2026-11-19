@@ -5,8 +5,8 @@ import {BROWSER_ACTIONS} from './browser-runtime.js';
 import {NativeBrowserRuntime} from './native-browser-runtime.js';
 
 export function createBrowserTool(runtime){
-  return defineTool({name:'naumi_browser',description:'Operate the same page displayed in this Naumi session’s right sidebar. Desktop uses native Chromium; Web uses the legacy ego transport. Read the naumi-browser skill first. Observe with snapshot before semantic click/fill. Never replay an uncertain write. No arbitrary JavaScript or shell execution.',
-    parameters:{action:{type:'string',enum:BROWSER_ACTIONS,required:true},url:{type:'string'},selector:{type:'string'},text:{type:'string'},key:{type:'string'},label:{type:'string'},x:{type:'number'},y:{type:'number'},deltaX:{type:'number'},deltaY:{type:'number'}},
+  return defineTool({name:'naumi_browser',description:'Operate the current session’s native sidebar page or an existing Chrome/Edge tab explicitly connected by the user. Existing tabs retain their original cookies and password manager. Read naumi-browser skill first. Snapshot before click/fill; accounts lists approved IDs for the current origin; login fills that account locally without exposing its password or submitting. Never replay an uncertain write. No arbitrary JavaScript or shell.',
+    parameters:{action:{type:'string',enum:BROWSER_ACTIONS,required:true},url:{type:'string'},selector:{type:'string'},text:{type:'string'},key:{type:'string'},label:{type:'string'},accountId:{type:'string'},usernameSelector:{type:'string'},passwordSelector:{type:'string'},x:{type:'number'},y:{type:'number'},deltaX:{type:'number'},deltaY:{type:'number'}},
     output:{schema:{type:'json'},render:(_args,data)=>[{type:'text',text:JSON.stringify(data)}]},
     async execute(args,exec){const sessionId=exec.agent?.id;if(!sessionId)throw Error('BROWSER_SESSION_REQUIRED');return runtime.perform(sessionId,{...args,frame:false},{signal:exec.signal});}
   });
