@@ -2,7 +2,7 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{randomUUID}=require('node:crypto');
 const profile=require('./profile.cjs'),code=require('./service-code.cjs');
 const plugins=[['naumi-enterprise','dsh-enterprise'],['naumi-ui-layout','dsh-ui-layout'],['naumi-sidebar-browser','dsh-sidebar-browser']];
-const nativeFiles=['dsh-client-ui-conversation/lib/client.js','dsh-client-ui-deliverables/lib/client.js','dsh-client-ui-input-trigger/lib/client.js','dsh-client-ui-sidebar-right/lib/client.js','dsh-client-ui-settings-general/lib/client.js','dsh-llm-pi-ai/lib/index.js'];
+const nativeFiles=['dsh-client-ui-workspace/lib/client.js','dsh-client-ui-conversation/lib/client.js','dsh-client-ui-deliverables/lib/client.js','dsh-client-ui-input-trigger/lib/client.js','dsh-client-ui-sidebar-right/lib/client.js','dsh-client-ui-settings-general/lib/client.js','dsh-llm-pi-ai/lib/index.js'];
 const stateFile=home=>path.join(home,'desktop-linked-service.json');
 function beneath(root,relative){assert(typeof relative==='string'&&!relative.includes('\\')&&!relative.split('/').some(p=>p==='..'||p==='.'||p===''),'SERVICE_PATH_INVALID');const file=path.resolve(root,relative);assert(file.startsWith(path.resolve(root)+path.sep),'SERVICE_PATH_ESCAPE');return file;}
 function plainPath(file){for(let p=file;fs.existsSync(p);p=path.dirname(p)){assert(!fs.lstatSync(p).isSymbolicLink(),'SERVICE_LINKED_PATH');if(p===path.dirname(p))break;}return file;}
