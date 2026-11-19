@@ -7,7 +7,7 @@ def main():
  bundle=pathlib.Path(a.bundle);assert hashlib.sha256(bundle.read_bytes()).hexdigest()==a.sha256,'BUNDLE_DRIFT'
  base=pathlib.Path('/opt/naumi-staging/evidence/desktop-model-import47-20261119');base.mkdir(mode=0o700,parents=True,exist_ok=True);os.chmod(base,0o700)
  with contextlib.ExitStack() as stack:
-  if a.mode in ['apply','verify','rollback']:
+  if a.mode in ['apply','rollback']:
    for f in ['/opt/naumi-staging/releases/deploy.lock','/opt/naumi-reverse-hub/releases/deploy.lock','/opt/reference-workbench/deploy.lock']:
     handle=stack.enter_context(open(f,'a'));fcntl.flock(handle,fcntl.LOCK_EX|fcntl.LOCK_NB)
   rows=subprocess.check_output(['docker','ps','--format','{{.Names}}']).decode().splitlines();webs=[n for n in rows if n.startswith('naumi47-web-')];assert len(webs)==1,'WEB_NOT_CONVERGED';web=webs[0]

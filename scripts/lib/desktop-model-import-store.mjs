@@ -30,9 +30,9 @@ export async function importDesktopModels({pool,contracts,request,mode='apply',f
  // Revalidate the finite transfer contract, including every original protocol/key.
  request=prepareDesktopImport({providers:Object.fromEntries(request.connections.map(c=>[c.sourceProviderId,{...c.configuration,models:c.models,apiKeyEnv:c.sourceProviderId}])),refs:Object.fromEntries(request.connections.map(c=>[c.sourceProviderId,c.key])),sourceId:request.sourceId,operationId:request.operationId});
  assert(['apply','verify'].includes(mode),'IMPORT_MODE_INVALID');
- const credentials=contracts.createCredentialStore(pool),tx=await pool.connect();
+ const credentials=mode==='verify'?contracts.createCredentialReader(pool):contracts.createCredentialStore(pool),tx=await pool.connect();
  try{
-  await tx.query('BEGIN');await tx.query("SET LOCAL lock_timeout='5s'; SET LOCAL statement_timeout='20s'");
+  await tx.query(mode==='verify'?'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY':'BEGIN');await tx.query("SET LOCAL lock_timeout='5s'; SET LOCAL statement_timeout='20s'");
   await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',['desktop-model-import:'+request.sourceId]);
   const before=await protectedState(tx),prior=await existing(tx,request.operationId);
   if(prior.length){const receipt=await checkStored(tx,prior,request,credentials,contracts);await tx.query('COMMIT');return {status:'PASS',mode,replayed:mode==='apply',operationId:request.operationId,configDigest:request.configDigest,...receipt,activeModelsUnchanged:true,billingUnchanged:true,employeeGrants:0,modelCalls:0};}
