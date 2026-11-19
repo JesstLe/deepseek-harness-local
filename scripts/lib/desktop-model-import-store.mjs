@@ -74,9 +74,10 @@ export async function rollbackDesktopModels({pool,operationId}){
   for(const source of sources){
    const data=source.source_data;
    assert(!(await tx.query(`SELECT 1 FROM app_model_providers WHERE credential_ref=$1 UNION ALL SELECT 1 FROM app_model_config_versions WHERE config->'providers' @> $2::jsonb`,[data.credentialRef,serial([{credentialRef:data.credentialRef}])])).rowCount,'CREDENTIAL_NOW_REFERENCED');
+   assert(!(await tx.query("SELECT 1 FROM app_supplier_source_snapshots WHERE source_data->>'credentialRef'=$1 AND source_data->>'operationId' IS DISTINCT FROM $2",[data.credentialRef,operationId])).rowCount,'CREDENTIAL_NOW_REFERENCED');
    for(const item of data.models){
     const row=(await tx.query('SELECT * FROM app_supplier_model_metadata WHERE id=$1 FOR UPDATE',[item.id])).rows[0];
-    assert(row&&row.provider_id===source.provider_id&&Number(row.revision)===1&&hash(row.metadata)===item.metadataHash,'ROLLBACK_DRIFT');
+    assert(row&&row.provider_id===source.provider_id&&row.updated_by==='operator:desktop-import:'+operationId&&Number(row.revision)===1&&hash(row.metadata)===item.metadataHash,'ROLLBACK_DRIFT');
     assert(!(await tx.query('SELECT 1 FROM app_supplier_model_price_points WHERE model_id=$1',[item.id])).rowCount,'ROLLBACK_PRICE_DRIFT');
     assert.equal(Number((await tx.query('SELECT count(*) AS n FROM app_supplier_model_metadata_versions WHERE model_id=$1',[item.id])).rows[0].n),1,'ROLLBACK_HISTORY_DRIFT');
    }
