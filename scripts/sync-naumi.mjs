@@ -1,3 +1,4 @@
+import {installSidebarVisibility} from './native-sidebar-visibility-extension.mjs';
 import fs from 'node:fs';
 import {installNativeDeliveryExtensions} from './native-delivery-extension.mjs';
 import path from 'node:path';
@@ -37,3 +38,5 @@ installAgentTriggers(path.resolve('node_modules/@deepseek-ai/dsh-client-ui-input
 installNativeSettings(path.resolve('node_modules/@deepseek-ai/dsh-client-ui-settings-general/lib/client.js'));
 
 installReasoningDefaults(path.resolve('node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js'));
+
+installSidebarVisibility(path.resolve('node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js'));
