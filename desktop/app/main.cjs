@@ -2,7 +2,7 @@
 const path=require('node:path');
 const fs=require('node:fs');
 const {app,BrowserWindow,ipcMain,Menu,nativeTheme,shell,session,dialog,safeStorage}=require('electron');
-const {readConnection,connect,EnterpriseSession}=require('./enterprise.cjs');
+const {EnterpriseSession}=require('./enterprise.cjs');
 const {workspaceSummary,selectWorkspace,verifyConnection,assertWorkspaceIdle}=require('./workspaces.cjs');
 const {Guests}=require('./guests.cjs');
 const {startBridge}=require('./tools.cjs');
@@ -25,6 +25,7 @@ const market=new MarketSession({identity:()=>identityRuntime});
 const cloud=new CloudSession({identity:()=>identityRuntime});
 const creation=new CreationVault({identity:()=>identityRuntime,safeStorage});
 const DEFAULT_IDENTITY_ORIGIN='https://47.105.59.142';
+const {enterpriseConnection,allowedEnterpriseNavigation}=require('./enterprise-defaults.cjs');
 let cloudBusy=0;
 let window,primarySession,guests,bridge,backend,settings,enterprise,login,loginAfterBoot=false,booting=false,closing=false,connecting=false,editingConnection=false,connectionFlight,maintenanceTicket=null,maintenanceUntil=0,updates=null,quitGate;
 if(!locked){app.quit();}else{
@@ -49,7 +50,7 @@ app.whenReady().then(async()=>{
  window.webContents.on('will-navigate',(event,url)=>{if(settings&&new URL(url).origin!==settings.url)event.preventDefault();});
  window.webContents.setWindowOpenHandler(({url})=>{
   try{const u=new URL(url);if(!['http:','https:'].includes(u.protocol))return {action:'deny'};
-   if(settings?.isolated&&u.origin===settings.enterpriseOrigin&&u.pathname==='/login'){openEnterpriseLogin();
+   if((settings?.isolated||settings?.linkedService)&&u.origin===settings.enterpriseOrigin&&u.pathname==='/login'){openEnterpriseLogin();
    }else if(!settings?.isolated&&u.origin==='http://127.0.0.1:3112'&&u.pathname.startsWith('/login')){
     const login=new BrowserWindow({parent:window,width:1040,height:780,title:'Naumi · 登录',icon,backgroundColor:'#fff',webPreferences:{session:window.webContents.session,sandbox:true,contextIsolation:true,nodeIntegration:false}});
     login.webContents.setWindowOpenHandler(()=>({action:'deny'}));login.webContents.on('will-navigate',(e,next)=>{if(new URL(next).origin!==u.origin)e.preventDefault();});void login.loadURL(url);
@@ -187,10 +188,9 @@ async function boot(){
     if(candidate.isolated)settings=localSettings(accountApp());else settings=candidate;
    }else settings=candidate;
   }
-  if(settings.isolated){
-   installerState.registerProfile(path.resolve(process.resourcesPath,'..'),identityUserData??app.getPath('userData'));
-   let connection=readConnection(settings.home);
-   if(process.env.NAUMI_ENTERPRISE_ORIGIN)connection=connect(settings.home,process.env.NAUMI_ENTERPRISE_ORIGIN);
+  if(settings.isolated||settings.linkedService){
+   if(settings.isolated)installerState.registerProfile(path.resolve(process.resourcesPath,'..'),identityUserData??app.getPath('userData'));
+   const connection=enterpriseConnection({home:settings.home,packaged:app.isPackaged,identityOrigin:identityRuntime?.active?.origin??'',configuredOrigin:process.env.NAUMI_ENTERPRISE_ORIGIN});
    if(!connection&&!identityRuntime?.active){await window.loadFile(path.join(__dirname,'connect.html'));return;}
    settings.enterpriseOrigin=connection?.origin??'';
    if(connection)enterprise??=new EnterpriseSession({origin:connection.origin,session:session.fromPartition('persist:naumi-enterprise-'+(identityRuntime?.active?.profileId??'legacy')+'-'+require('node:crypto').createHash('sha256').update(connection.origin).digest('hex'))});
@@ -247,7 +247,7 @@ function openEnterpriseLogin(){
  if(closing||!enterprise||!settings?.enterpriseOrigin)return;
  if(login&&!login.isDestroyed()){if(process.env.NAUMI_TEST_HIDDEN!=='1')login.focus();return;}
  login=new BrowserWindow({parent:window,width:1040,height:780,show:process.env.NAUMI_TEST_HIDDEN!=='1',title:'Naumi · 登录',icon:path.join(__dirname,'assets/naumi.ico'),backgroundColor:'#fff',webPreferences:{session:enterprise.session,sandbox:true,contextIsolation:true,nodeIntegration:false}});
- const origin=settings.enterpriseOrigin,allowed=url=>{try{return new URL(url).origin===origin;}catch{return false;}};
+ const origin=settings.enterpriseOrigin,allowed=url=>allowedEnterpriseNavigation(origin,url);
  login.webContents.setWindowOpenHandler(()=>({action:'deny'}));
  for(const event of ['will-navigate','will-redirect'])login.webContents.on(event,(e,url)=>{if(!allowed(url))e.preventDefault();});
  void login.loadURL(origin+'/login').catch(()=>{});
