@@ -6,7 +6,8 @@ import {reasoningLevels,configureReasoning,reasoningView,validateDefault} from '
 
 const protocols=['openai-completions','openai-responses','anthropic-messages'];
 const effortMap=z.record(z.string(),z.union([z.string().min(1).max(40),z.null()]));
-const model=z.object({id:z.string().trim().min(1).max(512),reasoningPreset:z.enum(['inherit','disabled','official','custom']).optional(),reasoningEfforts:z.union([z.literal(false),effortMap]).optional(),reasoningMode:z.enum(['native','adaptive','budget']).optional(),name:z.string().trim().max(160).optional(),contextWindow:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),maxTokens:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional()}).strict();
+const modelInput=z.array(z.enum(['text','image'])).min(1).max(2).refine(v=>new Set(v).size===v.length);
+const model=z.object({id:z.string().trim().min(1).max(512),input:z.union([modelInput,z.null()]).optional(),reasoningPreset:z.enum(['inherit','disabled','official','custom']).optional(),reasoningEfforts:z.union([z.literal(false),effortMap]).optional(),reasoningMode:z.enum(['native','adaptive','budget']).optional(),name:z.string().trim().max(160).optional(),contextWindow:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),maxTokens:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional()}).strict();
 const save=z.object({action:z.literal('save'),id:z.string().regex(/^[a-z][a-z0-9_-]{0,79}$/),expectedRevision:z.number().int().nonnegative(),displayName:z.string().trim().min(1).max(120),baseURL:z.string().trim().min(1).max(2048),api:z.enum(protocols),reasoning:z.enum(reasoningLevels).nullable().optional(),models:z.array(model).min(1).max(200),apiKey:z.string().trim().min(1).max(16000).optional()}).strict();
 const remove=z.object({action:z.literal('remove'),id:z.string().min(1).max(80),expectedRevision:z.number().int().nonnegative()}).strict();
 const refresh=z.object({action:z.literal('refresh-specs'),expectedRevision:z.number().int().nonnegative()}).strict();
@@ -46,7 +47,7 @@ export class ModelConnections{
     try{for(;;){const {done,value}=await reader.read();if(done)break;bytes+=value.length;if(bytes>1048576)throw error('MODEL_DISCOVERY_TOO_LARGE',502);chunks.push(Buffer.from(value));}}finally{await reader.cancel().catch(()=>{});}
     let body;try{body=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw error('MODEL_DISCOVERY_INVALID',502);}
     if(!Array.isArray(body?.data)||body.has_more!==undefined&&typeof body.has_more!=='boolean')throw error('MODEL_DISCOVERY_INVALID',502);
-    for(const row of body.data){const result=model.safeParse({id:row?.id,...typeof row?.display_name==='string'?{name:row.display_name}: {}});if(!result.success||/[\u0000-\u001f\u007f]/.test(result.data.id))throw error('MODEL_DISCOVERY_INVALID',502);models.set(result.data.id,result.data);if(models.size>2000)throw error('MODEL_DISCOVERY_TOO_LARGE',502);}
+    for(const row of body.data){const declared=row?.input??row?.input_modalities??row?.modalities?.input,input=modelInput.safeParse(declared);const result=model.safeParse({id:row?.id,...input.success?{input:input.data}:{},...typeof row?.display_name==='string'?{name:row.display_name}: {}});if(!result.success||/[\u0000-\u001f\u007f]/.test(result.data.id))throw error('MODEL_DISCOVERY_INVALID',502);models.set(result.data.id,result.data);if(models.size>2000)throw error('MODEL_DISCOVERY_TOO_LARGE',502);}
     if(!body.has_more)return {models:[...models.values()]};
     if(typeof body.last_id!=='string'||!body.last_id||body.last_id.length>512||body.last_id===url.searchParams.get('after_id'))throw error('MODEL_DISCOVERY_INVALID',502);
     url.searchParams.set('after_id',body.last_id);
@@ -59,7 +60,7 @@ export class ModelConnections{
  async read(){const ns=this.namespace(),groups=[];for(const[id,p]of Object.entries(ns.value.providers??{})){
   const info=p.apiKeyEnv?await this.ctx.credentials.describe(p.apiKeyEnv):{configured:false,writable:true};
   groups.push({id,displayName:p.displayName??id,api:p.api??'openai-completions',reasoning:p.reasoning??null,baseURL:p.baseURL??'',models:(p.models??[]).map(m=>({id:m.id,...m.name?{name:m.name}:{}})),configured:info.configured,editable:protocols.includes(p.api)&&Array.isArray(p.models)&&p.models.length>0});
- }for(const group of groups){const provider=ns.value.providers[group.id];group.models=group.models.map(m=>{const raw=provider.models.find(row=>row.id===m.id);return {...modelSpecView({...m,...raw.contextWindow===undefined?{}:{contextWindow:raw.contextWindow},...raw.maxTokens===undefined?{}:{maxTokens:raw.maxTokens}},provider),...reasoningView(raw,provider.api)};});}return {revision:ns.revision,writable:this.ctx.settings.writable,groups,specs:officialModelSpecs};}
+ }for(const group of groups){const provider=ns.value.providers[group.id];group.models=group.models.map(m=>{const raw=provider.models.find(row=>row.id===m.id);return {...modelSpecView({...m,...raw.contextWindow===undefined?{}:{contextWindow:raw.contextWindow},...raw.maxTokens===undefined?{}:{maxTokens:raw.maxTokens}},provider),input:raw.input?.length?[...raw.input]:null,...reasoningView(raw,provider.api)};});}return {revision:ns.revision,writable:this.ctx.settings.writable,groups,specs:officialModelSpecs};}
  async repairDefault(removed){
   const current=this.ctx.agentDefaultModel.currentSelection();
   const p=this.namespace().value.providers??{},own=p[current.provider];
@@ -87,7 +88,7 @@ export class ModelConnections{
   }else{
    if(new Set(p.models.map(m=>m.id)).size!==p.models.length)throw error('MODEL_DUPLICATE_ID');
    if(!p.apiKey&&!previous?.apiKeyEnv)throw error('MODEL_KEY_REQUIRED');
-   const profile={...stored,displayName:p.displayName,baseURL:endpoint(p.baseURL),api:p.api,models:p.models.map(m=>configureReasoning(m,configureModelSpec(m,(stored?.models??previous?.models)?.find(old=>old.id===m.id),previous??{}),p.api)),apiKeyEnv:previous?.apiKeyEnv};
+   const profile={...stored,displayName:p.displayName,baseURL:endpoint(p.baseURL),api:p.api,models:p.models.map(m=>{const value=configureReasoning(m,configureModelSpec(m,(stored?.models??previous?.models)?.find(old=>old.id===m.id),previous??{}),p.api);if(m.input===null)delete value.input;return value;}),apiKeyEnv:previous?.apiKeyEnv};
    if(p.reasoning!==undefined){if(p.reasoning===null)delete profile.reasoning;else profile.reasoning=p.reasoning;}
    if(p.reasoning!==undefined||p.models.some(m=>m.reasoningPreset!==undefined||m.reasoningEfforts!==undefined)){profile.preserveReasoningDefault=true;validateDefault(profile,profile.reasoning);}
    if(p.apiKey){if(/[\r\n\u0000-\u001f\u007f]/.test(p.apiKey))throw error('MODEL_KEY_INVALID');newRef='NAUMI_MODEL_'+randomUUID().replaceAll('-','').toUpperCase();profile.apiKeyEnv=newRef;await this.ctx.credentials.set(newRef,p.apiKey);}

@@ -18,3 +18,7 @@ Exact-window actions default to background delivery. Only after the driver repor
 CUA_ACTION_UNKNOWN / driver error / cancellation means OBSERVE before any further action. Do not claim success or replay. Stale IDs require new observation. Lock screen/UAC stays with the user. Existing Harness tool permissions, enterprise admission, account login and approvals remain authoritative. Screenshots are admitted through the original native durable attachment channel; do not fabricate cards or upload them elsewhere. Never use raw shell/DOM/UIA scripts to evade a denied CUA operation.
 
 Maintenance: `npm run desktop:prepare` provisions only the pinned signed binary at build time; `npm run desktop:status` checks it locally. Employee runtime is offline and does not install scheduled tasks, global PATH entries, cloud relay, optional perception models or another model backend.
+
+## Screenshot readiness
+
+The status result includes imageAdmission for the exact active provider/model and native attachment service. Driver/UIA/PostMessage readiness alone does not prove image input readiness. On CUA_MODEL_IMAGE_INPUT_REQUIRED, inspect that exact model connection's input capability; use a verified text+image declaration for the configured gateway, not a guess based on the model name. CUA_ATTACHMENT_STORE_REQUIRED and CUA_MODEL_METADATA_UNAVAILABLE identify distinct host failures. Never remove the image guard or operate without a delivered screenshot.

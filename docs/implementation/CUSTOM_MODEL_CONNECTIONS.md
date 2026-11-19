@@ -1,5 +1,7 @@
 # 自定义模型连接与官方账户解耦
 
+2026-11-20：现有模型参数区新增输入能力选择；API `input` 省略保留、`null` 恢复继承。自定义代理不按官方同名型号推断视觉能力，详见 [CUA 截图准入变更记录](../changes/2026-11-20-cua-image-admission.md)。
+
 日期：2026-11-17。基线：c1fe9f0955f5d2344cbf3f7c6a2d2523fd2fa3b3。分支：codex/custom-model-auth-20261117；工作树：E:/Workspace/naumi-custom-model-auth。功能模块计数1。
 
 ## 模块与职责

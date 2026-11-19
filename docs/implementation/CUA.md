@@ -1,5 +1,7 @@
 # CUA 统一桌面引擎
 
+2026-11-20 截图准入诊断与逐路由输入能力修复见 [变更记录](../changes/2026-11-20-cua-image-admission.md)。`naumi_cua status` 现在单独返回会话级 `imageAdmission`；驱动 installed/connected 不代表当前模型支持图片。
+
 ## 模块与职责
 桌面 UI 执行统一为 `naumi_cua`：固定 Cua Driver 0.54.0，Windows x64。本模块不创建第二个模型服务。原 agent-desktop 默认挂载、依赖、CLI 及技能正文已移除。浏览器、Blender、Naumi 创作仍使用自己的领域接口，不充当桌面输入兜底。
 
