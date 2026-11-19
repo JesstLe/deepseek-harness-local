@@ -1,3 +1,4 @@
+import {stageCuaDriver} from './stage-cua.mjs';
 import {stageTrialModels} from './internal-trial-models.mjs';
 import {installSidebarVisibility} from '../../scripts/native-sidebar-visibility-extension.mjs';
 import fs from 'node:fs';
@@ -43,7 +44,7 @@ export async function prepareRuntime({root=project,target=path.join(root,'runtim
   fs.mkdirSync(runtime,{recursive:true});const staged=path.join(runtime,'desktop-stage-'+randomUUID());fs.mkdirSync(staged);
   try{
     // Only runtime dependencies and source plugins are input. No user home/profile/config is copied.
-    fs.cpSync(path.join(root,'node_modules'),path.join(staged,'node_modules'),{recursive:true,dereference:true,filter:source=>!source.split(path.sep).some(x=>['.cache','.bin','dingtalk-workspace-cli'].includes(x))&&!isRuntimeDevelopmentArtifact(source)});
+    fs.cpSync(path.join(root,'node_modules'),path.join(staged,'node_modules'),{recursive:true,dereference:true,filter:source=>!source.split(path.sep).some(x=>['.cache','.bin','dingtalk-workspace-cli','agent-desktop'].includes(x))&&!isRuntimeDevelopmentArtifact(source)});
     installReasoningDefaults(path.join(staged,'node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js'));
     installNativeDeliveryExtensions(path.join(staged,'node_modules'));
     installNativeComposer(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'));
@@ -52,6 +53,8 @@ export async function prepareRuntime({root=project,target=path.join(root,'runtim
     installSidebarVisibility(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js'));
     fs.cpSync(path.join(root,'plugins'),path.join(staged,'plugins'),{recursive:true});
     for(const [source,name]of [['naumi-enterprise','dsh-enterprise'],['naumi-ui-layout','dsh-ui-layout'],['naumi-sidebar-browser','dsh-sidebar-browser']])fs.cpSync(path.join(root,'plugins',source),path.join(staged,'node_modules/@naumi',name),{recursive:true});
+    await stageCuaDriver(path.join(staged,'node_modules/@naumi/dsh-enterprise'));
+    await stageCuaDriver(path.join(staged,'plugins/naumi-enterprise'));
     fs.copyFileSync(process.execPath,path.join(staged,'node.exe'));
     const defaults=path.join(staged,'defaults');fs.mkdirSync(defaults);
     fs.writeFileSync(path.join(defaults,'profile.json'),JSON.stringify({name:'naumi-profile-web',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}},null,2));
@@ -64,7 +67,7 @@ export async function prepareRuntime({root=project,target=path.join(root,'runtim
     const trial=trialInput?stageTrialModels(staged,trialInput):null;
     const inventory=runtimeInventory(staged),scan=scanRuntimeInventory(inventory);
     fs.writeFileSync(path.join(staged,'runtime-files.json'),JSON.stringify(inventory,null,2)+'\n');
-    const manifest={product:'Naumi',...trial?{edition:'internal-trial',trial}:{},schemaVersion:2,desktop:{profileVersion:1,identityProtocol:2,maintenanceProtocol:1,workspaceProtocol:1},version:JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json'))).version,node:process.versions.node,harness:'0.2.2-rc.1',agentDesktop:'1.3.1',dingtalk,personalCredentials:!!trial,browserProfiles:false,bootstrap:'offline',nodeSHA256:sha(path.join(staged,'node.exe')),inventorySHA256:sha(path.join(staged,'runtime-files.json')),closure,scan};
+    const manifest={product:'Naumi',...trial?{edition:'internal-trial',trial}:{},schemaVersion:2,desktop:{profileVersion:1,identityProtocol:2,maintenanceProtocol:1,workspaceProtocol:1},version:JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json'))).version,node:process.versions.node,harness:'0.2.2-rc.1',desktopEngine:'cua',cuaDriver:'0.54.0',dingtalk,personalCredentials:!!trial,browserProfiles:false,bootstrap:'offline',nodeSHA256:sha(path.join(staged,'node.exe')),inventorySHA256:sha(path.join(staged,'runtime-files.json')),closure,scan};
     fs.writeFileSync(path.join(staged,'runtime-manifest.json'),JSON.stringify(manifest,null,2)+'\n');
     // Publish only after import/closure/content checks. Preserve the preceding bundle for rollback.
     let previous=null;if(fs.existsSync(target)){previous=target+'.previous-'+randomUUID();fs.renameSync(target,previous);}

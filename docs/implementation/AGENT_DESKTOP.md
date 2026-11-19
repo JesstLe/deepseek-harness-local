@@ -1,3 +1,7 @@
+# 历史记录：agent-desktop（已被 CUA 取代）
+
+当前实现见 [CUA](CUA.md)。以下保留旧集成验收，不代表当前默认工具。
+
 # agent-desktop 集成记录
 
 ## 目标

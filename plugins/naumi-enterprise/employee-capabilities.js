@@ -16,7 +16,7 @@ export class EmployeeCapabilities{
     const save=(id,value)=>this.values.set(id,{id,...base,...value});
     let desktop;try{desktop=this.desktop();}catch{}
     let names=[];try{names=(this.ctx.tools.definitions?.()??[]).map(t=>t.name);}catch{}
-    const registered=names.includes('mcp__naumi_desktop__desktop_status');
+    const registered=names.includes('naumi_cua');
     save('desktop',{installed:!!desktop,version:desktop?.version??null,toolRegistered:registered,reasonCode:!desktop?'DESKTOP_BUNDLE_INVALID':registered?'DESKTOP_HEALTH_NOT_PROBED':'DESKTOP_TOOL_NOT_REGISTERED'});
     const health=await this.browser.health();
     save('browser',{installed:health.installed,connected:health.connected,healthy:health.healthy,toolRegistered:names.includes('naumi_browser'),engine:health.engine,reasonCode:health.reasonCode});

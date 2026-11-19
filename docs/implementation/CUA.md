@@ -1,0 +1,38 @@
+# CUA 统一桌面引擎
+
+## 模块与职责
+桌面 UI 执行统一为 `naumi_cua`：固定 Cua Driver 0.54.0，Windows x64。本模块不创建第二个模型服务。原 agent-desktop 默认挂载、依赖、CLI 及技能正文已移除。浏览器、Blender、Naumi 创作仍使用自己的领域接口，不充当桌面输入兜底。
+
+## 公共接口、依赖方向、状态归属
+- `host.js → cua.js → cua-runtime.js → Cua Driver stdio`；直接模式随 stdin EOF 关闭，不注册计划任务，不改 PATH，不连接云 relay。
+- 一个原生 Harness 工具 `naumi_cua`；实际复用 `createMcpToolDefinition` 的截图附件准入、持久化及模型投影。执行继续受原 NativeToolExecutor 和 EmployeeRuntimeGate 管理。
+- Session 来自 `exec.agent.id`，模型不可传入 session、AX token、脚本或 DOM。Driver session 为真实 ID 的哈希标签。
+- 输入锁为本机 LocalAppData/Naumi/cua/input.lock；同进程 Session 租约 120 秒，另一后端也必须拿同一文件锁。活 PID/不完整锁不抢占。死 PID 恢复使用单独原子 recovery guard。异常 recovery guard 保留为人工排查状态，不推测清理。
+- 每次观察返回 PNG 原生附件、尺寸、30 秒 observationId；绑定目标窗口和租约随机号。所有输入在 native dispatch 前消耗观察号；点击额外传上游 capture_id。双击/右键统一映射为同一 click 原语（count/button），保留 capture_id。
+- 每次输入后自动重新截图；结果标记 verificationRequired，模型必须观察图像判断效果。原生 dispatch 不是业务成功。
+- 丢回执、取消、native isError 或后截图失败进入 UNKNOWN，无自动重放；不确定输入关闭原 transport 并等待退出，原 Session 重新观察后才可继续/释放。UNKNOWN 锁不因 idle TTL 转交给另一 Bot。
+- `agent/disposed` 取消、等待当前操作、释放锁；重建同 ID 时重新 attach，历史 observation 不复用。插件 dispose 关闭自有 Driver，不停止别的进程。
+- `/naumi/desktop` 只读 owner 接口：installed 与 connected/ready 分开，不因工具注册冒称完成桌面操作。
+
+## 固定产物与发行
+上游 MIT，`https://github.com/trycua/cua/releases/tag/cua-driver-rs-v0.54.0`。
+- ZIP SHA256 `c0b92cb56ec7863ca177a2813bf5e22bdea5772a56f5bc4e8be064eed34498d7`
+- cua-driver.exe SHA256 `99a4b7a04fb3a25a450cc64ed4b806406c18aa08f27ec83a8364a0c601b1865e`
+- 下载产物实际 Authenticode = Valid，签发对象 Cua AI, Inc.；未声称验证 Sigstore。
+- `desktop/scripts/stage-cua.mjs` 只在构建阶段下载，校验 ZIP pin、exe pin、Authenticode 后复制进插件。员工运行时只离线 hash 验证。runtime packaging 排除旧 agent-desktop，即使开发 node_modules 仍残留旧缓存。
+- telemetry 用实测环境变量 CUA_DRIVER_RS_TELEMETRY_ENABLED=false 关闭。未装可选 perception/OmniParser、SDK DLL、全局技能链接或更新器。
+- 本次 Windows x64；其他平台明确缺少打包，不回落旧引擎。
+
+## 本次实现与迁移状态
+负责人：本任务线程。基线 origin/main `301c4423715f8f5fe4988131f67bb136078cefe3`，分支 `codex/cua-unified-20261119`，独立 worktree `E:/Workspace/naumi-desktop-cua`。共享本地 main `0b9822cbf1c84574d127b3d5d4fff2608cd2e0ae` 比远端多 3 个其他任务提交，保持不变；不通过本任务顺带发布。
+模块迭代 1。明确文件范围：CUA runtime/host 接线、desktop capability probe、默认技能、固定构建 stage、相关测试、依赖及本文档；不改会话、模型配置、企业密钥、UI。
+
+## 验证与下一步
+基线旧集成测试 10/10 exit0。集中测试、真实 native fixture、回滚副本及整合证据随验收更新至 evidence/cua-unified/VERIFICATION.txt。
+0.4.4 的固定 runtime stage 已完成，45,636 个文件通过离线依赖闭合与隐私路径扫描，真实打包路径的 CUA stdio probe 通过，旧引擎程序不在包中。完整 NSIS、实际已安装 Desktop 更新与跨平台验收状态见交付证据后续更新；Git 或本地 native fixture 不等于产品已安装上线。
+
+## 集中验收更新
+- 新增工具经过真实 Cordis Tools/NativeToolExecutor/企业运行门：未授权调用 dispatch=0，显式 allowlist 后 dispatch=1；未触发模型请求。
+- 真实 WinForms 隔离窗口点击、输入、Ctrl+A KeyDown（fixture 明确定义选全）、End、滚动和拖拽均产生 native 事件及前后 PNG；背景快捷键/滚轮得到 background_unavailable 后，测试显式重新观察并前台执行。不是通用所有应用验收。
+- 实测暴露并修复：原生 schema 子集拒绝 min/max 关键字，改为 zod 执行期约束；原生 Cordis route 服务需显式 inject；PowerShell 5.1 继承 PS7 ModulePath 导致签名检查加载失败，构建 probe 已按系统模块根修正。
+- CUA 截图准入失败将撤销 observation 并返回错误，不留下仅文本提示下可继续操作的 token。

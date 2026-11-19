@@ -5,7 +5,9 @@ try {
     $env:DSH_HOME = Join-Path $root '.dsh'
     $env:DSH_TELEMETRY_MODE = 'DISABLED'
     & (Join-Path $PSScriptRoot 'setup-ego-browser.ps1')
-    node scripts/agent-desktop.mjs version
+    node desktop/scripts/stage-cua.mjs
+    if ($LASTEXITCODE) { throw 'CUA provisioning failed' }
+    node scripts/cua.mjs status
     if ($LASTEXITCODE) { throw 'Bundled desktop runtime verification failed; run npm ci before installing the profile' }
     node scripts/build-naumi-layout.mjs
     if ($LASTEXITCODE) { throw 'Layout preparation failed' }
