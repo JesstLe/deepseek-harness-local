@@ -13,5 +13,14 @@
 ## 本次实现与验证
 基线模型连接19项通过。新增纯契约测试及实际PG独立schema测试覆盖原协议、8组/38模型的真实迁移前验证、幂等/并发、异载荷拒绝、失败原子回滚、原密钥解密、后台后来编辑与发布引用的回滚拒绝。生产只导入来源，不做模型付费探测。
 
+## 2026-11-19 实际复制结果
+- 固定Desktop main `53f95a5`；Naumi公共凭据/元数据读取契约来自`bca3c0b2a486707838d1cb6f10aaf1f5c3bbd7cd`，bundle SHA256 `00d6165e8dd93644e508d07184058d003da271b94e0c83c4514f8d9792c337da`。只复用原公共owner，未编辑其工作树或部署新Web。
+- 本地集中25/25，exit0；47实际PG独立schema12项通过，包含真AES-GCM读回、CAS式同源防覆盖、同号幂等/并发单效果、局部失败事务回滚、精确清理、后来人工修改/已发布引用拒绝回滚，测试schema已删除。
+- 三锁无争用时实际APPLY和VERIFY通过：operationId `42b17342-ba00-41c7-a45f-5f16cdf6e160`；8组供应商连接、38条分组模型、8凭据解密核验、原后台元数据库读取模块38条。Anthropic Messages与Responses保持原协议，38条为分组条目数，不冒称38个去重模型。
+- 本地原settings和credentials文件SHA256保持；47原active模型注册表和计费版本hash保持；在线Web/Worker等容器StartedAt保持。employeeGrants=0、modelCalls=0，无应用重建/重启/Nginx切换。后台资料可供后续授权模块使用，不表示现有员工请求已强制走该凭据库。
+- 后台原供应商元数据库页面可按`CC ·`来源名称查找；操作审计actor为明确operator而非冒用用户。已导入字段仍标configured/unassigned，价格保持未知，没有根据名称推断能力或采购价。
+- 初次独立CLI继承Web preload退出143，发生在任何写入前；清空仅CLI的NODE_OPTIONS后通过。固定公共读取契约增加依赖闭包后重新验证；一次写锁繁忙按75退出未写入，不抢锁。实际生产导入只执行一次。
+- 公共回执：`evidence/desktop-model-import47/{SOURCE,CONTRACT_PIN,FIXTURE,APPLY,VERIFY}.json`；不包含密钥、原配置或浏览器认证数据。
+
 ## 回滚与后续
 ROLLBACK只删除该operation创建且仍未变的元数据、来源和未被发布/草稿引用的凭据；保留所有原路由、价格、来源、密钥。真实回滚先在隔离PG schema验证，正式副本保持新增。下一模块才接47员工/设备模型授权、短期凭据和运行时强制准入；配置复制不等于统一管控已经生效。
