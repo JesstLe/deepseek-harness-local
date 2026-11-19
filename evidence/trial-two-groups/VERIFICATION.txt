@@ -1,0 +1,79 @@
+内测模型两组修订 / VERIFICATION
+任务分支：codex/trial-two-groups-20261119
+BASE SHA：f13112085406dcbdc8c139807ba0b1100b2e3c6f
+实际构建固定main：9ddd9f13d5a8a0f016e84753e546b3a847f519cd；源码工件：24cbe29f143039482cf12f7d6481c7dadaa621e7（后续仅验收/文档，不改变已固定EXE）。
+changed branch/field：selectTrialModels只选单一已配置Codex GPT组与精确DeepSeek Flash组；active.providers.*.displayName分别openai/claude；同组models按id去重；DeepSeek仅name=claude fable5.2，id仍deepseek-flash。原source provider IDs/endpoint/协议/能力/凭据不改，不合并不同endpoint、不改原生选择器。GPT五个真实名称：gpt-6.1-sol、GPT-5.6 Sol、GPT-5.6 Luna、GPT-5.6 Terra、GPT-6 Astra。
+四工件绝对路径：
+E:/Workspace/naumi-desktop/evidence/trial-two-groups/MODIFIED_FILE.zip
+E:/Workspace/naumi-desktop/evidence/trial-two-groups/DIFF_FILE.patch
+E:/Workspace/naumi-desktop/evidence/trial-two-groups/VERIFICATION.txt
+E:/Workspace/naumi-desktop/evidence/trial-two-groups/ROLLBACK.sh
+原SHA与修改SHA逐文件见HASHES.json；原件见original/。回滚在独立标记副本完成，活动源码与新EXE保留修改。
+安装包：D:\NaumiReleases\internal-test-0.4.3-r2\Naumi-Test-Setup-0.4.3-x64.exe
+版本0.4.3，本地交付修订r2，不作为新公开Release。
+bytes=495467052; SHA256=0acf90423bf797604f574ffa08c9ac0b122c854a2ec755262e2e2aa1cb360741
+原版包保留：D:/NaumiReleases/internal-test-0.4.3/Naumi-Test-Setup-0.4.3-x64.exe
+原版SHA256=cd73ce2572371dbf732a2bc9b425eac02c3961c40d945fcb7c8c2943966c9a4e
+
+BASELINE
+command: node --test tests/naumi-internal-trial.test.mjs
+cwd/input: D:/NaumiBuild/nt2，原内测11项用例，旧5组策略；BASELINE.log
+literal output/result: ℹ tests 11 / ℹ pass 11 / ℹ fail 0
+exit status: 0
+说明：旧基线通过并不代表用户期望的两组菜单已满足。
+
+MODIFIED
+command: node --test tests/naumi-internal-trial.test.mjs
+input: 保留原11项及单一GPT源/两组/同名去重新增测试；MODULE.log
+literal output/result: ℹ tests 12 / ℹ pass 12 / ℹ fail 0
+exit status: 0
+command: node --test tests/*.test.mjs desktop/tests/*.test.cjs
+input: 集中全仓；FULL.log
+literal output/result: ℹ tests 956 / ℹ pass 956 / ℹ fail 0
+exit status: 0
+command: node runtime/probe-one-gpt.mjs
+input: 原配置ccs-codex-gpt-2f6b6a，gpt-6.1-sol，原endpoint/credential，Reply exactly OK.，max_tokens=64
+literal output/result: {"provider":"ccs-codex-gpt-2f6b6a","model":"gpt-6.1-sol","http":200,"passed":true,"outputCharacters":2,"usage":{"input_tokens":10,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":5,"claude_cache_creation_5_m_tokens":0,"claude_cache_creation_1_h_tokens":0},"realSupplierRequests":1,"maxOutputTokens":64,"sourceWrites":0}
+exit status: 0
+该项唯一一次真实供应商探针：HTTP200/文本OK，input_tokens=10/output_tokens=5；不扩展为所有5型号当次已推理验收。原配置只读无写入，未在用户Bot中建会话。
+command: node scripts/verify-internal-trial.mjs
+input: 真实隔离Harness/native adapter/Chromium，GPT Original是fixture占位名，仅验证布局与原生选择，不是产品型号
+literal output/result: TRIAL_NATIVE_COMPLETE checks=17 page_errors=0 real_supplier_calls=0
+exit status: 0
+2次本地loopback请求含原生标题；Flash实际wire id保持，切换/刷新/正式恢复通过。
+command: node scripts/build-internal-trial.mjs E:/Workspace/naumi-desktop/.dsh D:/NaumiReleases/internal-test-0.4.3-r2
+input: 固定main 9ddd9f13d5a8a0f016e84753e546b3a847f519cd，原用户配置只读，新独立构建目录
+literal output/result: TRIAL_MODEL_EXPORT groups=2 models=6 source_unchanged=1
+literal output/result: INTERNAL_TRIAL_BUILD_PASS published=0 installed=0
+exit status: 0
+command: node scripts/verify-internal-trial-package.mjs D:/NaumiReleases/internal-test-0.4.3-r2
+input: 新EXE/asar/全45661运行文件，同隔离home依次启动新测试2次+当前正式1次，不发prompt
+literal output/result: TRIAL_PACKAGE_COMPLETE checks=21 inventory=45661 model_calls=0
+exit status: 0
+实际原生picker菜单标题精确openai/claude各1，6型号无重复/CC/协议后缀，GPT切换及Flash重开保持，截图model-picker.png来自实际新包。设置隐藏、更新入口保留，正式恢复与原Session/配置/凭据refs保持。
+command: NAUMI_TRIAL_PREVIOUS_EXE=D:/NaumiReleases/internal-test-0.4.3/win-unpacked/Naumi.exe node scripts/verify-internal-trial-package.mjs D:/NaumiReleases/internal-test-0.4.3-r2
+input: 环境变量以上路径；原5组旧测试版先初始化home，随后新2组版和当前正式版依次接续；OLD_TEST_UPGRADE.json/log
+literal output/result: TRIAL_PACKAGE_COMPLETE checks=23 inventory=45661 model_calls=0
+exit status: 0
+旧profile和凭据不覆盖，真正旧测试初始化的数据接续通过。只在独立账号/userData/LOCALAPPDATA/端口进行，正式安装exe/asar/manifest哈希保持；3080未重启。未执行真实用户NSIS覆盖或尚未发布的未来正式版。
+command: D:/DEV/7zip/7z.exe t D:/NaumiReleases/internal-test-0.4.3-r2/Naumi-Test-Setup-0.4.3-x64.exe
+input: 完整新NSIS安装包
+literal output/result: Everything is Ok / Files: 28 / Size: 425918080 / Compressed: 495467052
+exit status: 0
+
+ROLLBACK
+command: node scripts/package-trial-two-groups.mjs
+input: 8个任务源码/文档文件，原SHA原件，修改版ZIP独立解包核hash；源码副本标记.trial-copy.json
+literal output/result: TRIAL_ARTIFACTS_PASS files=8 zip_reopened=1 rollback_exit=0 restored_tests=63 source_still_modified=1
+exit status: 0
+exact rollback command: D:/DEV/Git/bin/bash.exe D:/NaumiBuild/nt2/evidence/trial-two-groups/ROLLBACK.sh D:/NaumiBuild/nt2/runtime/trial-artifacts-ddd219ea-9173-4f57-9feb-26ad53b1b5e7/rollback-copy
+input: D:\NaumiBuild\nt2\runtime\trial-artifacts-ddd219ea-9173-4f57-9feb-26ad53b1b5e7\rollback-copy，只回滚受标记副本，非用户安装/主checkout
+literal output/result: TRIAL_ROLLBACK_PASS files=8 original_hashes=restored source_still_modified=1
+exit status: 0
+restored behavior command: node --test desktop/tests/backend.test.cjs desktop/tests/updates.test.cjs tests/naumi-settings.test.mjs tests/naumi-internal-trial.test.mjs
+cwd/input: D:\NaumiBuild\nt2\runtime\trial-artifacts-ddd219ea-9173-4f57-9feb-26ad53b1b5e7\rollback-copy；原backend/updates/settings及旧11内测测试
+literal output/result: ℹ tests 63 / ℹ pass 63 / ℹ fail 0
+exit status: 0
+restored behavior/status：8文件原hash恢复/新增删除，旧测试策略恢复并通过63项；活动源码、新安装包继续保持修复后的两组设计。旧EXE留作回退原件，没有执行用户安装降级。
+
+收口边界：真实供应商调用仅GPT可用性探针1次；所有UI/新包/旧包接续验收无真实模型调用。现有用户安装/源配置保持，未公开发布测试包。后续>0.4.3正式版继续沿同应用ID/数据目录/更新feed覆盖；本次隔离程序接续不冒称未来安装器已实际安装。8件源码包不含API Key/员工数据；EXE是用户授权的本地内部测试分发，包含选定两组访问配置。
