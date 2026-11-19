@@ -2,15 +2,17 @@ import {openBotOverview,BOT_OVERVIEW_PANEL,selectedBotId} from './bot-overview.j
 import {createBotAvatar} from './bot-avatar.js';
 import {EXPERIENCE_EVENT,EXPERIENCE_ACTIONS,advancedEmployeeAccess} from './employee-experience-model.js';
 import {taskActivity,employeeTaskState,employeeTasks,receptionTarget} from './bot-task-model.js';
-import {MODE_KEY,transientDragNotice,navigationMode,botActivity,botSummary,botTone,botCatalog,currentSessionId,botSelected} from './bot-sidebar-model.js';
+import {MODE_KEY,transientDragNotice,navigationMode,botActivity,botSummary,botTone,botCatalog,currentSessionId,botSelected,createThreadVisibility,archivedBotRows} from './bot-sidebar-model.js';
 import {CHAT_PANEL,CHAT_EVENT,PIN_KEY,ORDER_KEY,pendingBotGroup,readBotOrder,writeBotOrder,reorderBotIds,groupBotIds,groupRequest,groupError,groupCatalog,conversationRows,roomPreview,roomWorking} from './bot-chat-model.js';
 import {PRIMARY_PANEL,CREATE_BOT_EVENT,primaryBot,enterBotMode} from './primary-bot.js';
 
 export function installBotSidebar(ctx,React,Icon,createPortal){
-  return ctx.inject(['remote.session'],scope=>installNavigation(scope,React,Icon,createPortal));
+  return ctx.inject(['remote.session','uiWorkspace','sessions','workspaces'],scope=>installNavigation(scope,React,Icon,createPortal));
 }
 function installNavigation(ctx,React,Icon,createPortal){
   const h=React.createElement,{useState,useEffect,useLayoutEffect,useRef,useSyncExternalStore}=React,source=botCatalog(),activity=taskActivity(),groups=groupCatalog(),Avatar=createBotAvatar(React);
+  const visibility=createThreadVisibility({catalog:source,activity,groups,sessions:ctx.sessions.list,workspaces:ctx.workspaces.list});
+  ctx.effect(()=>ctx.uiWorkspace.registerSidebarVisibility?.(visibility));
   function BotRow({bot,props,pinned,onPin,primary=false,dragProps={},folderPreview=null}){
     const {useSessions,useSessionStatus,usePanelInfo,useWorkspaces}=props;
     const sessions=useSessions(s=>s),status=useSessionStatus(s=>s),workspaces=useWorkspaces(s=>s),panelId=usePanelInfo(s=>s.activePanelId),currentId=currentSessionId(sessions,panelId);
@@ -20,7 +22,7 @@ function installNavigation(ctx,React,Icon,createPortal){
     const jobs=useSyncExternalStore(activity.subscribe,activity.getSnapshot,activity.getSnapshot);
     const target=receptionTarget(bot,jobs.tasks,sessions,workspaces),state=jobs.status==='ready'?employeeTaskState(bot,jobs.tasks,botActivity(bot,sessions,status)):botActivity(bot,sessions,status);
     const active=employeeTasks(bot,jobs.tasks).active.filter(t=>t.targetBotId===bot.id);
-    const stateName={running:'工作中',starting:'准备中',waiting:'待你确认',queued:'排队中',idle:'待命',unknown:'待同步'}[state];
+    const stateName=bot.status==='archived'?'已归档':{running:'工作中',starting:'准备中',waiting:'待你确认',queued:'排队中',idle:'待命',unknown:'待同步'}[state];
     const open=id=>{setError(null);try{ctx.layout.beginNavigation?.();ctx.uiWorkspace.openSession(id);}catch{setError('任务暂未就绪');}};
     return h('div',{className:'naumi-bot-entry','data-bot-id':bot.id,'data-primary':primary,'data-pinned':!!pinned,'data-selected':panelId===BOT_OVERVIEW_PANEL?selectedBotId()===bot.id:botSelected(bot,currentId,sessions),'data-bot-state':state,...dragProps},
       h('div',{className:'naumi-bot-row'},h('button',{type:'button',className:'naumi-bot-open',onClick:()=>target?open(target):setError('主聊天暂未就绪'),'aria-label':bot.name+'，'+stateName,title:bot.name},h(Avatar,{bot,state}),h('span',{className:'naumi-bot-caption'},h('strong',null,bot.name),h('span',null,state!=='idle'&&state!=='unknown'?stateName:botSummary(bot,sessions))),state!=='idle'&&state!=='unknown'&&h('span',{className:'naumi-bot-state',title:stateName,'aria-label':stateName})),
@@ -31,8 +33,8 @@ function installNavigation(ctx,React,Icon,createPortal){
       error&&h('div',{className:'naumi-bot-error',role:'alert'},error));
   }
   function Navigation(props){
-      const [mode,setMode]=useState(()=>{try{return navigationMode(localStorage.getItem(MODE_KEY));}catch{return 'threads';}}),[search,setSearch]=useState(''),[error,setError]=useState(null);
-      const [pinned,setPinned]=useState(()=>{try{return localStorage.getItem(PIN_KEY);}catch{return null;}}),[adding,setAdding]=useState(false),addRef=useRef(null),lastNative=useRef(null),entryIntent=useRef(0);
+      const [mode,setMode]=useState(()=>{try{return navigationMode(localStorage.getItem(MODE_KEY));}catch{return 'threads';}}),[search,setSearch]=useState(''),[archived,setArchived]=useState(false),[error,setError]=useState(null);
+      const [pinned,setPinned]=useState(()=>{try{return localStorage.getItem(PIN_KEY);}catch{return null;}}),[adding,setAdding]=useState(false),addRef=useRef(null),lastNative=useRef(null),entryIntent=useRef(0),threadReturn=useRef(null);
       const [order,setOrder]=useState(()=>readBotOrder()),[selected,setSelected]=useState([]),[drop,setDrop]=useState(null),[busy,setBusy]=useState(false),[dragNotice,publishDragNotice]=useState(''),[retry,setRetry]=useState(()=>pendingBotGroup());
       const notice=useRef(null);notice.current??=transientDragNotice(publishDragNotice);const setDragNotice=value=>notice.current.set(value);
       useEffect(()=>()=>notice.current.dispose(),[]);
@@ -40,8 +42,10 @@ function installNavigation(ctx,React,Icon,createPortal){
       useEffect(()=>{if(!arrived)return;const timer=setTimeout(()=>setArrived(null),640);return()=>clearTimeout(timer);},[arrived]);
       const dragging=useRef(null),dropRef=useRef(null),mutation=useRef(null),flight=useRef(false),anchor=useRef(null),alive=useRef(true);
       useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
-      const roomState=useSyncExternalStore(mode==='bot'?groups.subscribe:()=>()=>{},groups.getSnapshot,groups.getSnapshot),panel=props.usePanelInfo(s=>s.activePanelId),sessions=props.useSessions(s=>s);
-      const sessionId=currentSessionId(sessions,panel);if(sessionId)lastNative.current=sessionId;
+      const roomState=useSyncExternalStore(groups.subscribe,groups.getSnapshot,groups.getSnapshot),panel=props.usePanelInfo(s=>s.activePanelId),sessions=props.useSessions(s=>s);
+      const ownership=useSyncExternalStore(visibility.subscribe,visibility.getSnapshot,visibility.getSnapshot),hiddenSessions=new Set(ownership.sessionIds);
+      const sessionId=currentSessionId(sessions,panel);if(sessionId&&!ownership.waiting&&!hiddenSessions.has(sessionId))lastNative.current=sessionId;
+      useEffect(()=>{if(threadReturn.current===sessionId||threadReturn.current==='panel'&&panel!==null)threadReturn.current=null;if(mode==='threads'&&sessionId&&!threadReturn.current&&!ownership.waiting&&hiddenSessions.has(sessionId)){setMode('bot');try{localStorage.setItem(MODE_KEY,'bot');}catch{}}},[sessionId,ownership,mode]);
       const [surface,setSurface]=useState(null),[wide,setWide]=useState(true);
       const catalog=useSyncExternalStore(source.subscribe,source.getSnapshot,source.getSnapshot);
       useLayoutEffect(()=>{
@@ -61,16 +65,16 @@ function installNavigation(ctx,React,Icon,createPortal){
       },[]);
       useLayoutEffect(()=>{if(surface){surface.dataset.navigationMode=mode;surface.dataset.wide=String(wide);}},[surface,mode,wide]);
       useEffect(()=>{const change=e=>{if(e.key===MODE_KEY)setMode(navigationMode(e.newValue));};window.addEventListener('storage',change);return()=>window.removeEventListener('storage',change);},[]);
-      const choose=(value,enter=true)=>{const intent=++entryIntent.current;setMode(value);setAdding(false);try{localStorage.setItem(MODE_KEY,value);}catch{}
-        if(value==='threads'&&[CHAT_PANEL,PRIMARY_PANEL,BOT_OVERVIEW_PANEL].includes(panel)){if(lastNative.current)ctx.uiWorkspace.openSession(lastNative.current);else ctx.layout.selectPanel('naumi-workbench');}
+      const choose=(value,enter=true)=>{const intent=++entryIntent.current;threadReturn.current=value==='threads'?(lastNative.current??'panel'):null;setMode(value);setAdding(false);try{localStorage.setItem(MODE_KEY,value);}catch{}
+        if(value==='threads'&&([CHAT_PANEL,PRIMARY_PANEL,BOT_OVERVIEW_PANEL].includes(panel)||sessionId&&hiddenSessions.has(sessionId))){if(lastNative.current&&!hiddenSessions.has(lastNative.current))ctx.uiWorkspace.openSession(lastNative.current);else ctx.layout.selectPanel('naumi-workbench');}
         if(value==='bot'&&enter)void source.refresh().then(()=>{if(entryIntent.current===intent)return enterBotMode(ctx,source.getSnapshot());}).catch(()=>setError('目录尚未读取，请重试。'));
       };
       useEffect(()=>{if(mode==='bot'&&catalog.status==='ready'&&!primaryBot(catalog)&&panel!==PRIMARY_PANEL){ctx.layout.beginNavigation?.();ctx.layout.selectPanel(PRIMARY_PANEL);}},[mode,catalog.status,catalog.primaryBotId,panel]);
       useEffect(()=>{const change=()=>choose('bot',false);window.addEventListener(CHAT_EVENT,change);return()=>window.removeEventListener(CHAT_EVENT,change);},[panel]);
       useEffect(()=>{if(!adding)return;const close=e=>{if(e.type==='keydown'&&e.key!=='Escape')return;if(e.type!=='keydown'&&addRef.current?.contains(e.target))return;setAdding(false);};document.addEventListener('pointerdown',close);document.addEventListener('keydown',close);return()=>{document.removeEventListener('pointerdown',close);document.removeEventListener('keydown',close);};},[adding]);
       const pin=id=>{setPinned(id);try{if(id)localStorage.setItem(PIN_KEY,id);else localStorage.removeItem(PIN_KEY);}catch{}};
-      const bots=catalog.bots.filter(bot=>bot.status==='active'&&(!search||bot.name.toLocaleLowerCase().includes(search.toLocaleLowerCase())));
-      const allRows=conversationRows(catalog.bots,roomState.rooms,'',pinned,order);
+      const bots=catalog.bots.filter(bot=>bot.status===(archived?'archived':'active')&&(!search||bot.name.toLocaleLowerCase().includes(search.toLocaleLowerCase())));
+      const allRows=archived?archivedBotRows(catalog.bots,pinned):conversationRows(catalog.bots,roomState.rooms,'',pinned,order);
       if(!order.length)allRows.sort((a,b)=>Number(b.id===catalog.primaryBotId)-Number(a.id===catalog.primaryBotId));
       const rows=allRows.filter(row=>!search||row.name.toLocaleLowerCase().includes(search.toLocaleLowerCase())),orderedIds=allRows.filter(r=>r.kind==='bot').map(r=>r.id);
       const saveOrder=value=>{setOrder(writeBotOrder(value));pin(null);};
@@ -113,10 +117,11 @@ function installNavigation(ctx,React,Icon,createPortal){
       if(!surface)return null;
       return createPortal(h(React.Fragment,null,
         h('div',{className:'naumi-navigation-switch','data-naumi-navigation-owned':true,role:'group','aria-label':'导航模式'},h('button',{type:'button','aria-pressed':mode==='threads',onClick:()=>choose('threads'),title:'线程模式'},wide?'线程':h(Icon,{name:'chat',size:16})),h('button',{type:'button','aria-pressed':mode==='bot',onClick:()=>choose('bot'),title:'Bot 模式'},wide?'Bot':h(Icon,{name:'spark',size:16}))),
-        h('div',{className:'naumi-bot-navigation','data-naumi-navigation-owned':true,hidden:mode!=='bot'},h('div',{className:'naumi-bot-toolbar',ref:addRef},wide&&h('label',{className:'naumi-bot-search'},h(Icon,{name:'search',size:14}),h('input',{'aria-label':'搜索对话',placeholder:'搜索',value:search,onChange:e=>setSearch(e.target.value)})),h('button',{type:'button',className:'naumi-bot-add','aria-label':'新建对话','aria-haspopup':'menu','aria-expanded':adding,onClick:()=>setAdding(v=>!v)},'+'),adding&&h('div',{className:'naumi-chat-add-menu',role:'menu'},h('button',{type:'button',role:'menuitem',onClick:()=>{setAdding(false);create();}},'新增员工'),h('button',{type:'button',role:'menuitem',onClick:()=>{setAdding(false);if(primaryBot(catalog))groups.select(ctx,roomState.selected,{create:true});else enterBotMode(ctx,catalog);}},'新建群聊'))),
+        mode==='threads'&&ownership.waiting&&h('div',{'data-naumi-navigation-owned':true,className:'naumi-bot-error',role:'status'},ownership.error?'会话分类读取失败':'正在读取会话…',ownership.error&&h('button',{type:'button',className:'naumi-bot-link',onClick:()=>{void source.refresh();void activity.refresh();void groups.refresh();}},'重试')),
+        h('div',{className:'naumi-bot-navigation','data-naumi-navigation-owned':true,hidden:mode!=='bot'},h('div',{className:'naumi-bot-toolbar',ref:addRef},wide&&h('label',{className:'naumi-bot-search'},h(Icon,{name:'search',size:14}),h('input',{'aria-label':'搜索对话',placeholder:'搜索',value:search,onChange:e=>setSearch(e.target.value)})),h('button',{type:'button',className:'naumi-bot-add','aria-label':'新建对话','aria-haspopup':'menu','aria-expanded':adding,onClick:()=>setAdding(v=>!v)},'+'),adding&&h('div',{className:'naumi-chat-add-menu',role:'menu'},h('button',{type:'button',role:'menuitem',onClick:()=>{setAdding(false);create();}},'新增员工'),h('button',{type:'button',role:'menuitem',onClick:()=>{setAdding(false);if(primaryBot(catalog))groups.select(ctx,roomState.selected,{create:true});else enterBotMode(ctx,catalog);}},'新建群聊'),h('button',{type:'button',role:'menuitem',onClick:()=>{setAdding(false);setArchived(v=>!v);}},archived?'查看在岗 Bot':'查看已归档 Bot'))),
           catalog.status==='loading'&&catalog.bots.length===0&&h('p',{className:'naumi-bot-empty',role:'status'},wide?'读取中…':'…'),
           ['error','forbidden'].includes(catalog.status)&&h('div',{className:'naumi-bot-error',role:'alert'},wide?(catalog.status==='forbidden'?'请重新连接工作空间':'Bot 目录读取失败'):'!',h('button',{type:'button',className:'naumi-bot-link',onClick:()=>source.refresh()},'重试')),
-          catalog.status==='ready'&&bots.length===0&&h('div',{className:'naumi-bot-empty',role:'status'},wide&&h('span',null,search?'没有匹配的 Bot':'暂无 Bot'),!search&&wide&&h('button',{type:'button',className:'naumi-bot-create',onClick:create},primaryBot(catalog)?'创建 Bot':'创建主 Bot')),
+          catalog.status==='ready'&&bots.length===0&&h('div',{className:'naumi-bot-empty',role:'status'},wide&&h('span',null,search?'没有匹配的 Bot':archived?'暂无已归档 Bot':'暂无 Bot'),!search&&!archived&&wide&&h('button',{type:'button',className:'naumi-bot-create',onClick:create},primaryBot(catalog)?'创建 Bot':'创建主 Bot')),
           (selected.length>1||busy)&&h('div',{className:'naumi-drag-selection'},h('span',null,busy?'正在保存…':'已选 '+selected.length+' 位'),!busy&&h('button',{type:'button',onClick:()=>finishDrop({kind:'bot',id:selected[0]},'group',selected)},'建群'),!busy&&h('button',{type:'button','aria-label':'取消选择',onClick:()=>setSelected([])},'×')),
           h('span',{className:'naumi-drag-notice',role:'status','aria-live':'polite'},dragNotice),
           retry&&h('button',{type:'button',className:'naumi-bot-link',disabled:busy,onClick:()=>runGroup(retry)},'重试保存'),
