@@ -66,6 +66,7 @@ function prepareProfile(settings,{fault=()=>{}}={}){
   atomic(journalFile(home),{...j,phase:'switched'});fault('switched');
   for(const [file,template]of [['package.json','profile.json'],['cordis.patch.yml','profile.yml']])if(!exists(path.join(profile,file)))fs.copyFileSync(path.join(target.root,'defaults',template),path.join(profile,file),fs.constants.COPYFILE_EXCL);
   if(!exists(path.join(home,'cordis.patch.yml')))fs.copyFileSync(path.join(target.root,'defaults/home.yml'),path.join(home,'cordis.patch.yml'),fs.constants.COPYFILE_EXCL);
+  require('./internal-trial.cjs').seedTrialCredentials(settings);
   const previous=state&&(state.current.bundleId!==target.bundleId||!samePath(state.current.root,target.root))?state.current:state?.previous??null;
   atomic(stateFile(home),{version:1,ownerId:id.id,current:target,previous});fault('committed');
   if(exists(path.join(profile,backup)))fs.unlinkSync(path.join(profile,backup));fs.unlinkSync(journalFile(home));

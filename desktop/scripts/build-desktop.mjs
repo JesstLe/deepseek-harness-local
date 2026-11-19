@@ -38,9 +38,12 @@ export async function buildDesktop(args=process.argv.slice(2)){
  const pkg=JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json')));
  if(pkg.build.nsis.script)throw Error('NSIS_CUSTOM_SCRIPT_BYPASSES_STOCK_UNINSTALLER');
  if(require('app-builder-lib/package.json').version!==metadata.version)throw Error('NSIS_BUILDER_VERSION_CHANGED');
- for(const arg of args)if(arg!=='--dir'&&arg!=='--reuse-packaged'&&!arg.startsWith('--output='))throw Error('UNKNOWN_BUILD_ARGUMENT '+arg);
+ for(const arg of args)if(arg!=='--dir'&&arg!=='--reuse-packaged'&&arg!=='--internal-trial'&&!arg.startsWith('--output='))throw Error('UNKNOWN_BUILD_ARGUMENT '+arg);
  const output=args.find(a=>a.startsWith('--output='))?.slice('--output='.length);
  const stockUtil=fs.readFileSync(require.resolve('app-builder-lib/templates/nsis/include/installUtil.nsh'),'utf8').replaceAll('\r\n','\n'),modifiedUtil=fs.readFileSync(path.join(dir,'install-util.nsh'),'utf8');if(sha(stockUtil)!==metadata.installUtilOriginalSHA256||sha(modifiedUtil)!==metadata.installUtilModifiedSHA256)throw Error('NSIS_SHORTCUT_POLICY_SOURCE_CHANGED');
+ const trial=args.includes('--internal-trial'),manifest=JSON.parse(fs.readFileSync(path.join(root,'runtime/desktop-backend/runtime-manifest.json')));
+ if(trial!==(manifest.edition==='internal-trial'))throw Error('TRIAL_BUILD_EDITION_MISMATCH');
+ if(trial&&args.includes('--reuse-packaged'))throw Error('TRIAL_REUSE_FORBIDDEN');
  const callerCwd=process.cwd();
  const budget=installPathBudget(JSON.parse(fs.readFileSync(path.join(root,'runtime/desktop-backend/runtime-files.json'))));
  fs.writeFileSync(path.join(root,'runtime/installer-path-budget.nsh'),'!define NAUMI_MAX_INSTALLDIR_CHARS '+budget.maxInstallDirChars+'\n');
@@ -49,7 +52,7 @@ export async function buildDesktop(args=process.argv.slice(2)){
  try{
   process.chdir(path.join(root,'desktop'));
   console.log('NAUMI_BUILDER stock_uninstaller=1 stock_signing=1 stock_size_check=1 engine_delta=2');
-  return await build({...args.includes('--reuse-packaged')?{prepackaged:path.join(root,'runtime/naumi-desktop-release/win-unpacked')}:{},projectDir:path.join(root,'desktop'),targets:Platform.WINDOWS.createTarget(args.includes('--dir')?'dir':'nsis',Arch.x64),publish:'never',...(output?{config:{directories:{output}}}:{})});
+  return await build({...args.includes('--reuse-packaged')?{prepackaged:path.join(root,'runtime/naumi-desktop-release/win-unpacked')}:{},projectDir:path.join(root,'desktop'),targets:Platform.WINDOWS.createTarget(args.includes('--dir')?'dir':'nsis',Arch.x64),publish:'never',...((output||trial)?{config:{...output?{directories:{output}}:{},...trial?{win:{artifactName:'Naumi-Test-Setup-${version}-${arch}.${ext}'},extraMetadata:{naumiEdition:'internal-trial'}}:{}}}:{})});
  }finally{restore();process.chdir(callerCwd);}
 }
 if(process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url)await buildDesktop();

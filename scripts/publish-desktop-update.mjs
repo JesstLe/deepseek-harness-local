@@ -76,9 +76,12 @@ function main() {
   if (!args.includes('--skip-build')) run(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build'], {cwd: desktop});
 
   const output = path.join(root, 'runtime', 'naumi-desktop-release');
+  const stagedManifest = path.join(root, 'runtime', 'desktop-backend', 'runtime-manifest.json');
+  if (fs.existsSync(stagedManifest) && JSON.parse(fs.readFileSync(stagedManifest)).edition === 'internal-trial') throw Error('INTERNAL_TRIAL_PUBLICATION_FORBIDDEN');
   const manifest = path.join(output, 'latest.yml');
   const installer = path.join(output, `Naumi-Setup-${version}-x64.exe`);
   for (const file of [manifest, installer]) if (!fs.existsSync(file)) throw Error('RELEASE_ARTIFACT_MISSING ' + file);
+  if (fs.readFileSync(manifest, 'utf8').includes('Naumi-Test-Setup-')) throw Error('INTERNAL_TRIAL_PUBLICATION_FORBIDDEN');
 
   const notes = extractReleaseNotes(fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8'), version);
   if (!notes) throw Error('RELEASE_NOTES_MISSING add a ## ' + version + ' section to CHANGELOG.md');
