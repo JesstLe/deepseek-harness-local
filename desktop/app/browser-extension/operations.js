@@ -9,9 +9,9 @@ export function pageExpression(input){
   if(selector!==undefined&&(typeof selector!=='string'||!selector||selector.length>4096))throw Error('INVALID_BROWSER_SELECTOR');
   if(['fill','text'].includes(action)&&(typeof text!=='string'||text.length>16384))throw Error('INVALID_BROWSER_TEXT');
   const find=selector?`document.querySelector(${literal(selector)})`:'document.activeElement';
-  const editable=`if(!e.matches('input:not([type=password]):not([type=file]):not([type=hidden]),textarea,[contenteditable=true]'))throw Error('BROWSER_FIELD_NOT_EDITABLE');`;
+  const editable=`if(e.readOnly||!e.matches('input:not([type=password]):not([type=file]):not([type=hidden]),textarea,[contenteditable=true]'))throw Error('BROWSER_FIELD_NOT_EDITABLE');`;
   const prefix=`const e=${find};if(!e||!e.getClientRects().length||e.disabled)throw Error('BROWSER_ELEMENT_NOT_VISIBLE');e.scrollIntoView({block:'center',inline:'center'});`;
-  if(action==='click'&&selector)return `(()=>{${prefix}e.click();return {clicked:true}})()`;
+  if(action==='click'&&selector)return `(()=>{${prefix}const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`;
   if(action==='fill'||action==='text')return `(()=>{${prefix}${editable}e.focus();const text=${literal(text)};if(e.isContentEditable)e.textContent=${action==='text'?'e.textContent+text':'text'};else{const p=e.tagName==='TEXTAREA'?HTMLTextAreaElement:HTMLInputElement;Object.getOwnPropertyDescriptor(p.prototype,'value').set.call(e,${action==='text'?'e.value+text':'text'});}e.dispatchEvent(new Event('input',{bubbles:true}));return {filled:true}})()`;
   if(action==='press'&&selector)return `(()=>{${prefix}e.focus();return {focused:true}})()`;
  }

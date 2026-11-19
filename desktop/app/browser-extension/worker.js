@@ -30,9 +30,12 @@ async function operate(job,connection){
   const parts=String(input.key).split('+'),key=parts.pop();const mask={Alt:1,Control:2,Ctrl:2,Meta:4,Shift:8};if(parts.some(p=>!mask[p])||!key||key.length>32)throw Error('INVALID_BROWSER_KEY');
   const modifiers=parts.reduce((n,p)=>n|mask[p],0),code={Enter:13,Tab:9,Escape:27,Backspace:8,ArrowDown:40,ArrowUp:38,ArrowLeft:37,ArrowRight:39}[key]||(key.length===1?key.toUpperCase().charCodeAt(0):0);
   if(!code)throw Error('INVALID_BROWSER_KEY');await chrome.debugger.sendCommand({tabId},'Input.dispatchKeyEvent',{type:'keyDown',key,windowsVirtualKeyCode:code,modifiers});await chrome.debugger.sendCommand({tabId},'Input.dispatchKeyEvent',{type:'keyUp',key,windowsVirtualKeyCode:code,modifiers});
- }else if(action==='click'&&!input.selector){
-  if(!Number.isFinite(input.x)||!Number.isFinite(input.y)||input.x<0||input.y<0)throw Error('INVALID_BROWSER_POINT');
-  for(const [type,buttons]of [['mousePressed',1],['mouseReleased',0]])await chrome.debugger.sendCommand({tabId},'Input.dispatchMouseEvent',{type,x:input.x,y:input.y,button:'left',buttons,clickCount:1});
+ }else if(action==='click'){
+  const point=input.selector?await evaluate(tabId,pageExpression(input)):input;
+  if(!Number.isFinite(point.x)||!Number.isFinite(point.y)||point.x<0||point.y<0)throw Error('INVALID_BROWSER_POINT');
+  for(const [type,buttons]of [['mousePressed',1],['mouseReleased',0]])await chrome.debugger.sendCommand({tabId},'Input.dispatchMouseEvent',{type,x:point.x,y:point.y,button:'left',buttons,clickCount:1});
+ }else if(action==='wheel'){
+  const values={x:input.x??60,y:input.y??60,deltaX:input.deltaX??0,deltaY:input.deltaY??0};if(Object.values(values).some(x=>!Number.isFinite(x)))throw Error('INVALID_BROWSER_NUMBER');await chrome.debugger.sendCommand({tabId},'Input.dispatchMouseEvent',{type:'mouseWheel',...values});
  }else return evaluate(tabId,pageExpression(input));
  const current=await chrome.tabs.get(tabId);return {url:current.url,title:current.title};
 }
@@ -42,6 +45,8 @@ async function poll(){
   const connection=await state();if(!connection?.tabs.length)break;
   let response;try{response=await request(connection,'/poll',{});}catch{await detachAll(connection);break;}
   for(const job of response.jobs){
+   if((await state())?.token!==connection.token)return;
+   try{await request(connection,'/permit',{id:job.id});}catch{await detachAll(connection);return;}
    let result;try{result={id:job.id,ok:true,data:await operate(job,connection)};}catch{result={id:job.id,ok:false};}
    // Result loss is never repaired by executing the action again.
    try{await request(connection,'/result',result);}catch{await detachAll(connection);return;}
