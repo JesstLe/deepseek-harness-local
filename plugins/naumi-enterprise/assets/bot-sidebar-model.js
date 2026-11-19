@@ -1,5 +1,26 @@
 export const MODE_KEY='naumi.navigationMode.v1';
 export const navigationMode=value=>value==='bot'?'bot':'threads';
+/** Exact identities/lineage, never titles or a workspace name heuristic. */
+export function threadOwnership(catalog,jobs,groups,sessions,workspaces){
+ const ids=new Set(),botIds=new Set(catalog.bots.map(b=>b.id)),add=id=>{if(typeof id==='string'&&id)ids.add(id);};
+ for(const bot of catalog.bots){add(bot.homeSessionId);bot.sessionIds.forEach(add);}
+ for(const task of jobs.tasks??[]){if(botIds.has(task.targetBotId))add(task.targetSessionId);if(botIds.has(task.sourceBotId))add(task.sourceSessionId);}
+ for(const room of groups.rooms??[])for(const member of room.members??[])add(member.sessionId);
+ // The native list's parentId is authoritative; loaded team projections cover
+ // live members not yet in the durable catalog. Descend to a fixed point.
+ let changed=true;while(changed){const count=ids.size;for(const row of Object.values(sessions.byId)){if(ids.has(row.parentId))add(row.id);if(ids.has(row.id))for(const member of sessions.projectionsBySession?.[row.id]?.values?.agentTeam?.members??[])add(member.id);}changed=count!==ids.size;}
+ const normalize=p=>typeof p==='string'?p.replaceAll('\\','/').replace(/\/+$/,'').toLocaleLowerCase():null;
+ const paths=new Set(catalog.bots.map(b=>normalize(b.cwd)).filter(Boolean));
+ // Keep a shared directory if even one ordinary conversation lives there.
+ const workspaceIds=workspaces.items.filter(w=>paths.has(normalize(w.path))&&w.sessionIds.every(id=>ids.has(id))).map(w=>w.workspaceId);
+ const waiting=!['ready','loading','error'].includes(catalog.status)||catalog.status!=='ready'&&!catalog.bots.length||jobs.status!=='ready'||groups.status!=='ready';
+ return{waiting,error:[catalog,jobs,groups].some(s=>['error','forbidden'].includes(s.status)),sessionIds:[...ids],workspaceIds};
+}
+export function createThreadVisibility({catalog,activity,groups,sessions,workspaces}){
+ const sources=[catalog,activity,groups,sessions,workspaces],listeners=new Set();let stops=[],snapshot={waiting:true,sessionIds:[],workspaceIds:[]};
+ const update=()=>{snapshot=threadOwnership(...sources.map(s=>s.getSnapshot()));for(const listener of listeners)listener();};
+ return{getSnapshot:()=>snapshot,subscribe(listener){listeners.add(listener);if(listeners.size===1){stops=sources.map(s=>s.subscribe(update));update();}return()=>{listeners.delete(listener);if(!listeners.size){stops.forEach(stop=>stop());stops=[];snapshot={waiting:true,sessionIds:[],workspaceIds:[]};}};}};
+}
 export function botForSession(bots,sessionId){return bots.find(bot=>bot.sessionIds.includes(sessionId))??null;}
 export function botSessions(bot,sessions,workspaces){return bot.sessionIds.filter(id=>sessions.byId[id]&&!workspaces?.archivedSessionIds?.includes(id)).map(id=>({...sessions.byId[id],sessionId:id}));}
 export function botTarget(bot,sessions,status,workspaces){
@@ -77,3 +98,5 @@ export function transientDragNotice(publish,{schedule=setTimeout,cancel=clearTim
  let timer=null;const clear=()=>{if(timer!==null)cancel(timer);timer=null;};
  return {set(value){clear();publish(value);if(['群聊已创建','成员已加入群聊','顺序已保存'].includes(value))timer=schedule(()=>{timer=null;publish('');},3000);},dispose:clear};
 }
+
+export function archivedBotRows(bots,pinned=null){return bots.filter(bot=>bot.status==='archived').map(bot=>({kind:'bot',id:bot.id,bot,name:bot.name,pinned:bot.id===pinned}));}

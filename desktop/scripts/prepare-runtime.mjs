@@ -1,3 +1,4 @@
+import {installSidebarVisibility} from '../../scripts/native-sidebar-visibility-extension.mjs';
 import fs from 'node:fs';
 import {installNativeDeliveryExtensions} from '../../scripts/native-delivery-extension.mjs';
 import path from 'node:path';
@@ -47,6 +48,7 @@ export async function prepareRuntime({root=project,target=path.join(root,'runtim
     installNativeComposer(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'));
     installAgentTriggers(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js'));
     installNativeSettings(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-settings-general/lib/client.js'));
+    installSidebarVisibility(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js'));
     fs.cpSync(path.join(root,'plugins'),path.join(staged,'plugins'),{recursive:true});
     for(const [source,name]of [['naumi-enterprise','dsh-enterprise'],['naumi-ui-layout','dsh-ui-layout'],['naumi-sidebar-browser','dsh-sidebar-browser']])fs.cpSync(path.join(root,'plugins',source),path.join(staged,'node_modules/@naumi',name),{recursive:true});
     fs.copyFileSync(process.execPath,path.join(staged,'node.exe'));

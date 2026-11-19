@@ -59,7 +59,7 @@ test('mode surface is an additive portal and never redeclares or replaces the na
   const source=fs.readFileSync('plugins/naumi-enterprise/assets/bot-sidebar.js','utf8');
   assert(source.includes("name:'shell.overlay'"));assert(!source.includes("name:'sidebar.workspaces'"));assert(!source.includes('children:entry.children'));assert(source.includes('createPortal(h(React.Fragment'));
   assert(fs.readFileSync('plugins/naumi-enterprise/client.js','utf8').includes("ctx.inject(['remote'],scope=>scope.effect"));
-  assert(source.includes("ctx.inject(['remote.session']"));
+  assert(source.includes("ctx.inject(['remote.session','uiWorkspace','sessions','workspaces']"));
 });
 test('Bot selection uses the real normalized session IDs and retains member navigation',()=>{
   const bot={id:'b',sessionIds:['s1','s2']},sessions={byId:{s1:{id:'s1',retainedBy:{mainView:0},running:false},s2:{id:'s2',retainedBy:{mainView:1},running:false},child:{id:'child',retainedBy:{mainView:0},running:true}},projectionsBySession:{s2:{values:{agentTeam:{members:[{id:'child'}],tasks:[{status:'in_progress',subject:'真实任务'}]},title:'当前任务'}}}},status=new Map();
