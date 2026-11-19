@@ -2,6 +2,7 @@ import {createMcpToolDefinition} from '@deepseek-ai/dsh-mcp-client';
 import {isDeepStrictEqual} from 'node:util';
 import * as filesystemSkills from '@deepseek-ai/dsh-skill-filesystem';
 import {CuaRuntime} from './cua-runtime.js';
+import {inspectCuaImageAdmission,requireCuaImageAdmission} from './cua-admission.js';
 import {resolveDesktopRuntime,desktopSkillConfig,CUA_VERSION} from './desktop-runtime.js';
 
 const number={type:'number'},integer={type:'integer'};
@@ -11,12 +12,8 @@ export function installCua(ctx,{runtime=new CuaRuntime(),resolve=resolveDesktopR
   scope.plugin(filesystemSkills,desktopSkillConfig());
   const definition=createMcpToolDefinition(scope,{name:'naumi_cua',rawName:'naumi_cua',description:'Operate the desktop with screenshot-grounded CUA. status, list_windows, then observe. Use the returned one-use observationId and screenshot coordinates; every action returns a fresh screenshot which must be inspected. One Session owns the desktop until release/expiry. Do not replay an uncertain action. No shell, DOM or accessibility actions in this tool.',inputSchema:cuaSchema,call:async(args,exec)=>{
    const id=exec.agent?.id;if(!id)throw Error('CUA_SESSION_REQUIRED');
-   if(!['status','list_windows','release'].includes(args.action)){
-    const config=exec.agent.session?.requestHeader?.()?.config??{};
-    const provider=config.provider??exec.agent.options?.provider,model=config.model??exec.agent.options?.model;
-    const info=provider&&model&&await scope.get('llm')?.resolveModelInfo(provider,model,exec.signal);
-    if(!info?.inputModalities?.includes('image')||!scope.get('attachments'))throw Error('CUA_VISION_AND_ATTACHMENTS_REQUIRED');
-   }
+   if(args.action==='status'){const [result,imageAdmission]=await Promise.all([runtime.perform(id,args,{signal:exec.signal}),inspectCuaImageAdmission(scope,exec.agent,exec.signal)]);return {...result,structuredContent:{...result.structuredContent,imageAdmission},content:[...result.content,{type:'text',text:JSON.stringify({imageAdmission})}]};}
+   if(!['list_windows','release'].includes(args.action))requireCuaImageAdmission(await inspectCuaImageAdmission(scope,exec.agent,exec.signal));
    return runtime.perform(id,args,{signal:exec.signal});
   }});
   // Keep the original bridge projection, but do not leave an actionable observation when image admission fails.

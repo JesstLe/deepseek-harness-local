@@ -87,7 +87,7 @@ test('original Harness MCP image projection creates native durable attachments f
  assert.deepEqual([...h.definitions.keys()],['naumi_cua']);const def=h.definitions.get('naumi_cua'),e=exec(),value=await def.execute({action:'observe'},e),content=def.output.render({},value);const projection=def.projectContent(e,{value,content});assert.equal(h.saved.length,1);assert.equal(projection[0].type,'image');assert.equal(projection[0].attachment.id,'durable-0');assert.equal(def.projectContent(e,{value,content}),undefined);
 }finally{await h.close();}});
 test('nonvision route is rejected before capture; Session identity is mandatory',async()=>{let calls=0;const h=host({vision:false,runtime:{perform:async()=>{calls++;return image();},close:async()=>{}}});try{
- const def=h.definitions.get('naumi_cua');await assert.rejects(def.execute({action:'observe'},exec()),/VISION/);await assert.rejects(def.execute({action:'status'},{signal:exec().signal}),/SESSION_REQUIRED/);assert.equal(calls,0);
+ const def=h.definitions.get('naumi_cua');await assert.rejects(def.execute({action:'observe'},exec()),/CUA_MODEL_IMAGE_INPUT_REQUIRED/);await assert.rejects(def.execute({action:'status'},{signal:exec().signal}),/SESSION_REQUIRED/);assert.equal(calls,0);
 }finally{await h.close();}});
 test('real Harness Tools/NativeExecutor and enterprise gate deny CUA without dispatch, then honor explicit allowlist',async()=>{
  const f=await managedRuntimeHost();let registration,skillsProvider,dispatch=0;
