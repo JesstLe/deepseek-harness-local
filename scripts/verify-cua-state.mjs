@@ -18,11 +18,12 @@ if(mode==='rollback'){
  assert(process.argv[3],'ROLLBACK_EXPLICIT_COPY_PATH_REQUIRED');restore(path.resolve(process.argv[3]));console.log('ROLLBACK original_sha256_restored=all restart_required=1');
 }else if(mode==='rollback-test'){
  const fixture=fs.mkdtempSync(path.join(dir,'rollback-copy-'));
- for(const r of manifest.sources){const src=path.join(root,r.file),dest=targetFile(fixture,r.file);assert.equal(hash(src),r.after,'ACTIVE_SOURCE_DRIFT');if(r.after){fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(src,dest);}}
+ const activeBefore=new Map(manifest.sources.map(r=>[r.file,hash(path.join(root,r.file))]));
+ for(const r of manifest.sources){const src=path.join(dir,'modified',r.file),dest=targetFile(fixture,r.file);assert.equal(hash(src),r.after,'MODIFIED_SNAPSHOT_DRIFT');if(r.after){fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(src,dest);}}
  const support='plugins/naumi-enterprise/third-party/agent-desktop/LICENSE';fs.mkdirSync(path.dirname(path.join(fixture,support)),{recursive:true});fs.copyFileSync(path.join(root,support),path.join(fixture,support));
  restore(fixture);
  const test=spawnSync(process.execPath,['--test','tests/agent-desktop.test.mjs'],{cwd:fixture,encoding:'utf8',windowsHide:true});fs.writeFileSync(path.join(dir,'ROLLBACK_BASELINE_TESTS.txt'),test.stdout+test.stderr);assert.equal(test.status,0,test.stdout+test.stderr);
- for(const r of manifest.sources)assert.equal(hash(path.join(root,r.file)),r.after,'ACTIVE_SOURCE_CHANGED_BY_ROLLBACK');
+ for(const r of manifest.sources)assert.equal(hash(path.join(root,r.file)),activeBefore.get(r.file),'ACTIVE_SOURCE_CHANGED_BY_ROLLBACK');
  assert(fs.readFileSync(path.join(fixture,'plugins/naumi-enterprise/host.js'),'utf8').includes('installAgentDesktop(ctx)'));
  assert(fs.readFileSync(path.join(root,'plugins/naumi-enterprise/host.js'),'utf8').includes('installCua(ctx)'));
  console.log('ROLLBACK baseline_tests=10/10 restored_sha256=all active_cua_changed=1 exit=0');
