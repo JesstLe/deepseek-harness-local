@@ -188,7 +188,7 @@ async function boot(){
     if(candidate.isolated)settings=localSettings(accountApp());else settings=candidate;
    }else settings=candidate;
   }
-  if(settings.isolated||settings.linkedService){
+  if(settings.isolated||settings.linkedService||settings.linkedServiceCandidate){
    if(settings.isolated)installerState.registerProfile(path.resolve(process.resourcesPath,'..'),identityUserData??app.getPath('userData'));
    const connection=enterpriseConnection({home:settings.home,packaged:app.isPackaged,identityOrigin:identityRuntime?.active?.origin??'',configuredOrigin:process.env.NAUMI_ENTERPRISE_ORIGIN});
    if(!connection&&!identityRuntime?.active){await window.loadFile(path.join(__dirname,'connect.html'));return;}
