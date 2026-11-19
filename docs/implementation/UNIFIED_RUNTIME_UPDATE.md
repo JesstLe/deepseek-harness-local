@@ -29,3 +29,10 @@ BASELINE：backend/update-gate/updates/UI/service-alignment，69/69 pass，exit0
 - 新版本号客户端/package-lock/productVersion统一0.4.2；无公共0.4.1资产覆盖。当前真实用户114sessions/0running/0activeTasks（读时状态，不当作持续空闲保证）。
 
 主线并入线程/Bot分离模块后，补齐同一包的native workspace visibility扩展到7个固定native模块核验/同步，防止新Bot侧栏只升级资产而漏原生扩展。
+
+## 固定包验收
+- 固定main563ca3d48aa978e31f091ba5330636cea21d5521构建0.4.2，exit0；45,659运行文件逐SHA核对、插件对固定source、asar main/updates/relaunch对固定source、private_paths0、closurePASS。
+- 安装包495,525,862字节，SHA256 a40a5b694d2d6d5e02efe16006af64612760d729276301239a4067cdb25c1e61；稳定副本D:/NaumiReleases/0.4.2，CRC/字节复核。
+- 实际完整packaged Naumi.exe在隔离home运行：旧外接0.3.9→0.4.2，双版本0.4.2、原home及自定义插件、signed worker退出/重开，共10项pass；常规新账号/内置服务/模型入口/钉钉离线/owned退出另一路真实package runner通过。
+- hidden截图可能缺浮层，版本结论来自真实DOM+native IPC+ready回执，不把截图冒称用户当前桌面完成。helper首次误匹配带noCache的fixture feed及hidden screenshot timeout已修正runner；真实公开更新源未改动。
+- 安装覆盖QA初次路径超过原66字符预算返回43，未装入；以显式独立D:/NaumiQA/i042短根继续，仍验证中文空格、HKLM/现有安装/快捷方式保持。测试驱动变化不进入已固定应用包。
