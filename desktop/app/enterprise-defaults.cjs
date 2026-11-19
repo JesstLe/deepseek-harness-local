@@ -32,8 +32,12 @@ function allowedEnterpriseNavigation(origin,value){
   if(url.origin===origin)return true;
   // Only the official deployment uses this authority. Other enterprises never
   // inherit an unrelated issuer, and API/session cookies never cross the bridge.
+  const interaction=/^\/api\/identity-interaction\/[-_a-zA-Z0-9]+(?:\/[-_a-zA-Z0-9]+)*\/?$/;
+  const signIn=['/','/dashboard'].includes(url.pathname)&&url.searchParams.get('auth')==='sign-in'&&
+   url.searchParams.getAll('auth').length===1&&url.searchParams.getAll('redirect').length===1&&
+   interaction.test(url.searchParams.get('redirect')??'')&&[...url.searchParams.keys()].every(k=>['auth','redirect'].includes(k));
   return origin===DEFAULT_ENTERPRISE_ORIGIN&&url.origin===CENTRAL_IDENTITY_ORIGIN&&
-   (/^\/api\/identity\/(?:auth|session\/end)(?:\/|$)/.test(url.pathname)||/^\/api\/identity-interaction\/[-_a-zA-Z0-9]+(?:\/[-_a-zA-Z0-9]+)*\/?$/.test(url.pathname));
+   (/^\/api\/identity\/(?:auth|session\/end)(?:\/|$)/.test(url.pathname)||interaction.test(url.pathname)||signIn);
  }catch{return false;}
 }
 module.exports={DEFAULT_ENTERPRISE_ORIGIN,CENTRAL_IDENTITY_ORIGIN,enterpriseConnection,allowedEnterpriseNavigation};
