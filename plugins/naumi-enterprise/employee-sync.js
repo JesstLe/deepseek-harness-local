@@ -64,6 +64,7 @@ export class EmployeeSync {
   async http(endpoint,options={},session=false){
     const request=session&&this.sessionRequest?this.sessionRequest:this.request;
     const r=await request(this.origin+endpoint,{...options,redirect:'error',signal:AbortSignal.any([...(options.signal?[options.signal]:[]),AbortSignal.timeout(15000)])});
+    if(r.status===404&&endpoint==='/api/digital-employees'){await r.body?.cancel();const error=Error('EMP_SERVICE_NOT_DEPLOYED');error.status=503;throw error;}
     const text=await r.text();if(text.length>8*1024*1024)fail('EMP_SYNC_RESPONSE_TOO_LARGE');let value;try{value=JSON.parse(text);}catch{fail('EMP_SYNC_RESPONSE_INVALID');}
     if(!r.ok){const code=session&&r.status===401?'COLLABORATION_LOGIN_REQUIRED':value.code??'EMP_SYNC_UNAVAILABLE';if(['DEVICE_REVOKED','MEMBER_INACTIVE','TENANT_INACTIVE','ACCESS_PENDING','DEVICE_REENROLLMENT_REQUIRED'].includes(code)){this.set('revoked',true);this.db.exec('DELETE FROM shared_cache');}const error=Error(code);error.status=r.status;throw error;}
     return value;

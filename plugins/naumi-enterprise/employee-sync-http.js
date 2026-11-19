@@ -51,7 +51,7 @@ export function installEmployeeSync(scope,directory,data,{origin,sync:provided}=
       if(p.action==='business_retry')result=await sync.enterpriseWork.retry(p.botId,p.operationId);
       if(p.action==='execution_acquire'){const binding=await sync.enterpriseWork.binding(p.botId);result=await sync.enterpriseWork.leases.ensure(p.botId,binding.employeeId,p.taskId);}
       send(200,result);
-    }catch(e){const code=/^[A-Z_]+$/.test(e.message)?e.message:'EMP_CONTROL_UNAVAILABLE';send(e.status===401?401:/UNAVAILABLE|NO_REPLAY|BRIDGE/.test(code)?503:/CONFLICT|REVISION|REPLAY/.test(code)?409:/REQUIRED|REVOKED|FORBIDDEN|APPROVAL/.test(code)?403:400,{error:code});}
+    }catch(e){const code=/^[A-Z_]+$/.test(e.message)?e.message:'EMP_CONTROL_UNAVAILABLE';send(e.status===401?401:/UNAVAILABLE|NO_REPLAY|BRIDGE|NOT_DEPLOYED/.test(code)?503:/CONFLICT|REVISION|REPLAY/.test(code)?409:/REQUIRED|REVOKED|FORBIDDEN|APPROVAL/.test(code)?403:400,{error:code});}
   }}));
   sync.start();return sync;
 }

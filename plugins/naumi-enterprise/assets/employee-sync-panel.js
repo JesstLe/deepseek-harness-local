@@ -1,5 +1,5 @@
 const stateLabels={local_only:'仅本地',pending:'待同步',conflict:'有冲突',synced:'已同步',attention:'需要处理',paused:'同步已暂停'};
-const errors={COLLABORATION_LOGIN_REQUIRED:'请先登录企业账号',DEVICE_REVOKED:'设备已被撤销',MEMBER_INACTIVE:'企业账号已停用',EMP_AUTH_EXPIRED:'离线授权已到期',EMP_AUTH_CLOCK_ROLLBACK:'系统时间发生回拨',EMP_CONTROL_UNAVAILABLE:'企业服务暂不可达',EMP_FIELD_LOCKED:'请先解锁冲突字段',SELF_APPROVAL:'申请人不可审批自己的共享提案',APPROVER_REQUIRED:'当前账号没有共享审批权',SIGNING_NOT_CONFIGURED:'企业设备签名服务尚未配置'};
+const errors={COLLABORATION_LOGIN_REQUIRED:'请先登录企业账号',EMP_SERVICE_NOT_DEPLOYED:'企业数字员工服务尚未部署',DEVICE_REVOKED:'设备已被撤销',MEMBER_INACTIVE:'企业账号已停用',EMP_AUTH_EXPIRED:'离线授权已到期',EMP_AUTH_CLOCK_ROLLBACK:'系统时间发生回拨',EMP_CONTROL_UNAVAILABLE:'企业服务暂不可达',EMP_FIELD_LOCKED:'请先解锁冲突字段',SELF_APPROVAL:'申请人不可审批自己的共享提案',APPROVER_REQUIRED:'当前账号没有共享审批权',SIGNING_NOT_CONFIGURED:'企业设备签名服务尚未配置'};
 export function createEmployeeSyncPanel(React){
   const h=React.createElement,{useState,useEffect,useRef}=React;
   return function SyncPanel({botId}){
