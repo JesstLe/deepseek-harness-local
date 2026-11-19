@@ -1,5 +1,6 @@
 /** Async presentation-only module; the original enterprise app below stays intact. */
 function installNaumiContextUI(ctx,React,createPortal,Icon){
+  ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/weixin.js').then(m=>{if(!closed)dispose=m.installWeixinUI(ctx,React,createPortal);}).catch(()=>console.error('Naumi Weixin UI unavailable'));return()=>{closed=true;dispose?.();};});
   ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/session-import.js').then(m=>{if(!closed)dispose=m.installSessionImportUI(ctx,React);}).catch(e=>console.error('Naumi session import:',e));return()=>{closed=true;dispose?.();};});
   ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/creation-settings.js').then(m=>{if(!closed)dispose=m.installCreationUI(ctx,React);}).catch(e=>console.error('Naumi creation:',e));return()=>{closed=true;dispose?.();};});
   ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/bot-overview.js').then(module=>{if(!closed)dispose=module.installBotOverviewUI(ctx,React);});return()=>{closed=true;dispose?.();};});
