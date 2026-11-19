@@ -14,5 +14,15 @@
 ## 验证命令、结果及证据层级
 原backend/updates/settings基线52/52，exit0；集中验证/实际构建/回滚见evidence/internal-trial/VERIFICATION.txt。不把构建完成当作用户已安装，不把静态兼容断言当作真实安装覆盖。
 
-## 未完成项与下一步
-集中测试、主线合并、固定main构建、完整包隔离验收与四工件待完成。功能切片计数1，文档不计。
+## 验收与交付状态
+原基线52/52；本切片定向63/63；整合模型导入47主线78e1f81后全仓955/955。16项真实隔离Harness/Chromium验证包括原生响应及别名不改wire model、保留历史与真实凭据引用；2次loopback请求（含标题生成）、真实供应商0。初次runner把原生标题请求误当多发，以及把首次浏览器授权新增记录/原生YAML格式化误当数据改动；修正证据断言后通过，失败日志保留。
+
+固定main `ddd504f77e4330edbf69cbf442938958af82006e` 构建 `0.4.3` 内测版，5分组/17模型连接项（16个GPT连接项、1个DeepSeek Flash）。本地EXE `D:/NaumiReleases/internal-test-0.4.3/Naumi-Test-Setup-0.4.3-x64.exe`，495467864 bytes，SHA256 `cd73ce2572371dbf732a2bc9b425eac02c3961c40d945fcb7c8c2943966c9a4e`。
+
+完整45,661运行文件逐hash通过；实际测试版EXE2次启动、当前正式EXE1次启动，19项隔离检查通过，0page errors/0模型调用。两份真实可执行程序依次接同一隔离userData：设置恢复、别名恢复、会话/模型配置/凭据引用保留。正式安装路径的exe/asar/manifest原hash保持，现有3080不重启；测试使用独立LOCALAPPDATA、账号和随机端口。
+
+同产品application ID/用户目录/NSIS维护入口与latest更新feed保留。后续高于0.4.3的正式版可沿原安装路径覆盖；已经验证程序及配置接续，不冒称尚未发布的未来安装器实际覆盖已完成。测试版不单独注册另一个产品。隐藏设置时独立更新入口仍可用。
+
+发布器明确拒绝internal-trial资源（exit1是预期拒绝），构建始终publish:never。源码回滚仅在标记副本，52基线重新通过；不对用户正式安装执行降级。四工件见VERIFICATION及HASHES，包含源码但不包含密钥或测试员工数据。
+
+功能切片计数1，文档/证据计数0。最终证据提交不改变已固定的EXE。未进行真实供应商付费验收、真实用户安装、GitHub Release发布或服务器配置修改。

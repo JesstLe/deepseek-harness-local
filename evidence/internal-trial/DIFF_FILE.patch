@@ -1,0 +1,372 @@
+diff --git a/original/.gitattributes b/modified/.gitattributes
+index dfeb6df..7bcd89b 100644
+--- a/original/.gitattributes
++++ b/modified/.gitattributes
+@@ -425,3 +425,6 @@ plugins/naumi-enterprise/third-party/ds-bot-im/** -text
+ /evidence/unified-runtime-update/DIFF_FILE.patch -text whitespace=-blank-at-eol
+ /evidence/unified-runtime-update/ROLLBACK.sh text eol=lf
+ /evidence/release-042/** -text whitespace=cr-at-eol
++# Internal trial evidence remains byte-exact; executable copy-only rollback.
++/evidence/internal-trial/** -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab,cr-at-eol
++/evidence/internal-trial/ROLLBACK.sh text eol=lf
+diff --git a/original/desktop/app/backend.cjs b/modified/desktop/app/backend.cjs
+index 3c6f198..6de9a9a 100644
+--- a/original/desktop/app/backend.cjs
++++ b/modified/desktop/app/backend.cjs
+@@ -115,7 +115,9 @@ async function ensureBackend(settings,{fetcher=fetch,startTimeoutMs=90000,pollMs
+  }
+  const entry=path.join(settings.root,'node_modules/@deepseek-ai/dsh/lib/bin.js');if(!fs.existsSync(entry))throw Error('BACKEND_RUNTIME_MISSING');
+  fs.mkdirSync(settings.logDir,{recursive:true});
++ const trial=require('./internal-trial.cjs').trialLaunch(settings);
+  const target=new URL(settings.url),runId=randomUUID(),env={...process.env,PATH:path.join(settings.root,'bin')+path.delimiter+settings.root+path.delimiter+(process.env.PATH??''),DSH_HOME:settings.home,DSH_TELEMETRY_MODE:'DISABLED'};
++ Object.assign(env,trial.env);
+  delete env.ELECTRON_RUN_AS_NODE;delete env.NAUMI_DESKTOP_INSTANCE_ID;delete env.NAUMI_DESKTOP_BUNDLE_ID;delete env.NAUMI_ENTERPRISE_ORIGIN;
+  const base={pid:null,port:Number(target.port),bundleId:settings.runtime?.bundleId,phase:'starting',runId};
+  if(settings.isolated||settings.linkedService){env.NAUMI_DESKTOP_MAINTENANCE='1';env.NAUMI_DESKTOP_INSTANCE_ID=settings.identity.id;env.NAUMI_DESKTOP_BUNDLE_ID=settings.runtime.bundleId;if(settings.enterpriseOrigin)env.NAUMI_ENTERPRISE_ORIGIN=settings.enterpriseOrigin;}
+@@ -123,7 +125,7 @@ async function ensureBackend(settings,{fetcher=fetch,startTimeoutMs=90000,pollMs
+  let child;
+  // Windows libuv's non-detached child job dies with the GUI. Standalone workers have an
+  // independent lifetime, and are stopped only through their proven instance on normal quit.
+- try{if(settings.isolated||settings.linkedService)saveReceipt(settings,base);child=spawn(settings.node,[entry,'web','--host','127.0.0.1','--port',target.port,'--no-open'],{cwd:settings.isolated?settings.workspace:settings.root,env,detached:!!(settings.isolated||settings.linkedService),windowsHide:true,stdio:['ignore',out,err]});}
++ try{if(settings.isolated||settings.linkedService)saveReceipt(settings,base);child=spawn(settings.node,[entry,'web',...trial.args,'--host','127.0.0.1','--port',target.port,'--no-open'],{cwd:settings.isolated?settings.workspace:settings.root,env,detached:!!(settings.isolated||settings.linkedService),windowsHide:true,stdio:['ignore',out,err]});}
+  catch(e){if(settings.isolated||settings.linkedService)clearReceipt(settings,runId);throw e;}
+  finally{fs.closeSync(out);fs.closeSync(err);}
+  let error;child.on('error',e=>error=e);const backend={owned:true,child,instanceVerified:!!(settings.isolated||settings.linkedService)};
+diff --git a/modified/desktop/app/internal-trial.cjs b/modified/desktop/app/internal-trial.cjs
+new file mode 100644
+index 0000000..f6f102c
+--- /dev/null
++++ b/modified/desktop/app/internal-trial.cjs
+@@ -0,0 +1,39 @@
++'use strict';
++// Edition policy is an immutable installation resource, not a persisted user preference.
++const fs=require('node:fs'),path=require('node:path'),{createHash}=require('node:crypto');
++const hash=b=>createHash('sha256').update(b).digest('hex');
++function trialResources(root){
++ const manifestFile=path.join(root,'runtime-manifest.json');
++ if(!fs.existsSync(manifestFile))return null;
++ const manifest=JSON.parse(fs.readFileSync(manifestFile));
++ if(!manifest.edition)return null;
++ if(manifest.edition!=='internal-trial'||manifest.trial?.version!==1)throw Error('TRIAL_EDITION_INVALID');
++ const read=(name,expected)=>{const file=path.join(root,'defaults',name);if(fs.lstatSync(file).isSymbolicLink())throw Error('TRIAL_RESOURCE_LINK');const bytes=fs.readFileSync(file);if(hash(bytes)!==expected)throw Error('TRIAL_RESOURCE_CHANGED');return {file,bytes};};
++ const overlay=read('internal-trial.patch.json',manifest.trial.overlaySHA256);
++ const access=read('internal-trial-access.json',manifest.trial.accessSHA256);
++ const initial=read('internal-trial-initial.json',manifest.trial.initialSHA256);
++ const credentials=JSON.parse(access.bytes);
++ if(Object.entries(credentials).some(([key,value])=>!/^NAUMI_TRIAL_ACTIVE_[A-F0-9]{24}$/.test(key)||typeof value!=='string'||!value||/[\r\n\x00]/.test(value)))throw Error('TRIAL_ACCESS_INVALID');
++ return {overlay,credentials,initial,manifest};
++}
++function trialLaunch(settings){
++ // Never turn an arbitrary external backend into a test distribution.
++ if(!settings.isolated&&!settings.linkedService)return {args:[],env:{}};
++ const r=trialResources(settings.releaseRoot??settings.root);
++ return r?{args:['--patch',r.overlay.file],env:r.credentials}:{args:[],env:{}};
++}
++function seedTrialCredentials(settings){
++ const r=trialResources(settings.runtime.root);if(!r)return {seeded:false};
++ const receipt=path.join(settings.home,'desktop-trial-bootstrap.json');
++ if(fs.existsSync(receipt))return {seeded:false};
++ const config=path.join(settings.home,'profiles/web/cordis.patch.yml');
++ // Only the exact fresh-install template is ours. Existing homes/config/credentials win.
++ if(hash(fs.readFileSync(config))!==r.manifest.trial.profileSHA256)return {seeded:false};
++ const file=path.join(settings.home,'.credentials.yaml'),bytes=r.initial.bytes;
++ if(fs.existsSync(file)){
++  if(fs.lstatSync(file).isSymbolicLink()||hash(fs.readFileSync(file))!==hash(bytes))return {seeded:false};
++ }else fs.writeFileSync(file,bytes,{flag:'wx',mode:0o600});
++ require('./profile.cjs').atomic(receipt,{version:1,kind:'initial-model-connections',credentialsSHA256:hash(bytes)});
++ return {seeded:true};
++}
++module.exports={trialResources,trialLaunch,seedTrialCredentials};
+diff --git a/original/desktop/app/profile.cjs b/modified/desktop/app/profile.cjs
+index 02e2d03..3f00d9a 100644
+--- a/original/desktop/app/profile.cjs
++++ b/modified/desktop/app/profile.cjs
+@@ -66,6 +66,7 @@ function prepareProfile(settings,{fault=()=>{}}={}){
+   atomic(journalFile(home),{...j,phase:'switched'});fault('switched');
+   for(const [file,template]of [['package.json','profile.json'],['cordis.patch.yml','profile.yml']])if(!exists(path.join(profile,file)))fs.copyFileSync(path.join(target.root,'defaults',template),path.join(profile,file),fs.constants.COPYFILE_EXCL);
+   if(!exists(path.join(home,'cordis.patch.yml')))fs.copyFileSync(path.join(target.root,'defaults/home.yml'),path.join(home,'cordis.patch.yml'),fs.constants.COPYFILE_EXCL);
++  require('./internal-trial.cjs').seedTrialCredentials(settings);
+   const previous=state&&(state.current.bundleId!==target.bundleId||!samePath(state.current.root,target.root))?state.current:state?.previous??null;
+   atomic(stateFile(home),{version:1,ownerId:id.id,current:target,previous});fault('committed');
+   if(exists(path.join(profile,backup)))fs.unlinkSync(path.join(profile,backup));fs.unlinkSync(journalFile(home));
+diff --git a/original/desktop/scripts/build-desktop.mjs b/modified/desktop/scripts/build-desktop.mjs
+index d73b6ca..1d47849 100644
+--- a/original/desktop/scripts/build-desktop.mjs
++++ b/modified/desktop/scripts/build-desktop.mjs
+@@ -38,9 +38,12 @@ export async function buildDesktop(args=process.argv.slice(2)){
+  const pkg=JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json')));
+  if(pkg.build.nsis.script)throw Error('NSIS_CUSTOM_SCRIPT_BYPASSES_STOCK_UNINSTALLER');
+  if(require('app-builder-lib/package.json').version!==metadata.version)throw Error('NSIS_BUILDER_VERSION_CHANGED');
+- for(const arg of args)if(arg!=='--dir'&&arg!=='--reuse-packaged'&&!arg.startsWith('--output='))throw Error('UNKNOWN_BUILD_ARGUMENT '+arg);
++ for(const arg of args)if(arg!=='--dir'&&arg!=='--reuse-packaged'&&arg!=='--internal-trial'&&!arg.startsWith('--output='))throw Error('UNKNOWN_BUILD_ARGUMENT '+arg);
+  const output=args.find(a=>a.startsWith('--output='))?.slice('--output='.length);
+  const stockUtil=fs.readFileSync(require.resolve('app-builder-lib/templates/nsis/include/installUtil.nsh'),'utf8').replaceAll('\r\n','\n'),modifiedUtil=fs.readFileSync(path.join(dir,'install-util.nsh'),'utf8');if(sha(stockUtil)!==metadata.installUtilOriginalSHA256||sha(modifiedUtil)!==metadata.installUtilModifiedSHA256)throw Error('NSIS_SHORTCUT_POLICY_SOURCE_CHANGED');
++ const trial=args.includes('--internal-trial'),manifest=JSON.parse(fs.readFileSync(path.join(root,'runtime/desktop-backend/runtime-manifest.json')));
++ if(trial!==(manifest.edition==='internal-trial'))throw Error('TRIAL_BUILD_EDITION_MISMATCH');
++ if(trial&&args.includes('--reuse-packaged'))throw Error('TRIAL_REUSE_FORBIDDEN');
+  const callerCwd=process.cwd();
+  const budget=installPathBudget(JSON.parse(fs.readFileSync(path.join(root,'runtime/desktop-backend/runtime-files.json'))));
+  fs.writeFileSync(path.join(root,'runtime/installer-path-budget.nsh'),'!define NAUMI_MAX_INSTALLDIR_CHARS '+budget.maxInstallDirChars+'\n');
+@@ -49,7 +52,7 @@ export async function buildDesktop(args=process.argv.slice(2)){
+  try{
+   process.chdir(path.join(root,'desktop'));
+   console.log('NAUMI_BUILDER stock_uninstaller=1 stock_signing=1 stock_size_check=1 engine_delta=2');
+-  return await build({...args.includes('--reuse-packaged')?{prepackaged:path.join(root,'runtime/naumi-desktop-release/win-unpacked')}:{},projectDir:path.join(root,'desktop'),targets:Platform.WINDOWS.createTarget(args.includes('--dir')?'dir':'nsis',Arch.x64),publish:'never',...(output?{config:{directories:{output}}}:{})});
++  return await build({...args.includes('--reuse-packaged')?{prepackaged:path.join(root,'runtime/naumi-desktop-release/win-unpacked')}:{},projectDir:path.join(root,'desktop'),targets:Platform.WINDOWS.createTarget(args.includes('--dir')?'dir':'nsis',Arch.x64),publish:'never',...((output||trial)?{config:{...output?{directories:{output}}:{},...trial?{win:{artifactName:'Naumi-Test-Setup-${version}-${arch}.${ext}'},extraMetadata:{naumiEdition:'internal-trial'}}:{}}}:{})});
+  }finally{restore();process.chdir(callerCwd);}
+ }
+ if(process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url)await buildDesktop();
+diff --git a/modified/desktop/scripts/internal-trial-models.mjs b/modified/desktop/scripts/internal-trial-models.mjs
+new file mode 100644
+index 0000000..642d217
+--- /dev/null
++++ b/modified/desktop/scripts/internal-trial-models.mjs
+@@ -0,0 +1,52 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import {createHash,randomBytes} from 'node:crypto';
++import {parse} from 'yaml';
++const hash=b=>createHash('sha256').update(b).digest('hex');
++export const TRIAL_ALIAS='claude fable5.2';
++export const allowedTrialModel=id=>/^gpt-/i.test(id)||id==='deepseek-flash';
++export function selectTrialModels(providers,credentials){
++ const selected={},access={},originalRefs={};
++ for(const[id,p]of Object.entries(providers??{})){
++  const models=(p.models??[]).filter(m=>allowedTrialModel(m.id));if(!models.length)continue;
++  if(!['openai-responses','openai-completions','anthropic-messages'].includes(p.api))throw Error('TRIAL_PROTOCOL_UNSUPPORTED');
++  const url=new URL(p.baseURL);if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash)throw Error('TRIAL_ENDPOINT_INVALID');
++  const key=credentials[p.apiKeyEnv];if(typeof key!=='string'||!key||/[\r\n\x00]/.test(key))throw Error('TRIAL_CREDENTIAL_MISSING '+id);
++  const ref='NAUMI_TRIAL_ACTIVE_'+randomBytes(12).toString('hex').toUpperCase();
++  selected[id]={...structuredClone(p),models:structuredClone(models)};access[ref]=key;originalRefs[p.apiKeyEnv]=key;
++  selected[id].trialActiveRef=ref;
++ }
++ if(!Object.values(selected).some(p=>p.models.some(m=>m.id==='deepseek-flash'))||!Object.values(selected).some(p=>p.models.some(m=>/^gpt-/i.test(m.id))))throw Error('TRIAL_MODEL_FAMILIES_REQUIRED');
++ const original=Object.fromEntries(Object.entries(selected).map(([id,p])=>{const {trialActiveRef,...rest}=p;return[id,rest];}));
++ const active=Object.fromEntries(Object.entries(selected).map(([id,p])=>{const {trialActiveRef,...rest}=p;return[id,{...rest,apiKeyEnv:trialActiveRef,models:rest.models.map(m=>m.id==='deepseek-flash'?{...m,name:TRIAL_ALIAS}:m)}];}));
++ const deepseek=Object.entries(original).find(([,p])=>p.models.some(m=>m.id==='deepseek-flash'));
++ return {original,active,access,initial:{version:1,records:{},refs:originalRefs},selection:{provider:deepseek[0],model:'deepseek-flash'}};
++}
++export function exportTrialInput(home,destination){
++ home=fs.realpathSync(home);let llm;
++ const inputs=['cordis.patch.yml','profiles/web/cordis.patch.yml','.credentials.yaml'];
++ const before=Object.fromEntries(inputs.map(f=>[f,hash(fs.readFileSync(path.join(home,f)))]));
++ for(const file of inputs.slice(0,2)){const rows=parse(fs.readFileSync(path.join(home,file),'utf8'));for(const row of rows??[])if(row.id==='llm-pi-ai')llm=row.config;}
++ if(!llm)throw Error('TRIAL_NO_LOCAL_CONNECTIONS');
++ const credentials=parse(fs.readFileSync(path.join(home,'.credentials.yaml'),'utf8'));
++ const value=selectTrialModels(llm.providers,credentials.refs);
++ fs.mkdirSync(path.dirname(destination),{recursive:true});fs.writeFileSync(destination,JSON.stringify(value),{flag:'wx',mode:0o600});
++ for(const f of inputs)if(hash(fs.readFileSync(path.join(home,f)))!==before[f])throw Error('TRIAL_SOURCE_CHANGED');
++ return {groups:Object.keys(value.original).length,models:Object.values(value.original).reduce((n,p)=>n+p.models.length,0),sourceUnchanged:true,privateInput:destination};
++}
++export function stageTrialModels(staged,input){
++ const value=JSON.parse(fs.readFileSync(input));
++ // Revalidate exported input without trusting arbitrary extra overlay operations.
++ const flat=Object.values(value.original??{}).flatMap(p=>p.models??[]);
++ if(!flat.length||flat.some(m=>!allowedTrialModel(m.id)))throw Error('TRIAL_UNEXPECTED_MODEL');
++ for(const[id,p]of Object.entries(value.original)){
++  const active=value.active?.[id];if(!active||!value.access?.[active.apiKeyEnv]||value.initial?.refs?.[p.apiKeyEnv]!==value.access[active.apiKeyEnv])throw Error('TRIAL_INPUT_INTEGRITY');
++  const expected={...p,apiKeyEnv:active.apiKeyEnv,models:p.models.map(m=>m.id==='deepseek-flash'?{...m,name:TRIAL_ALIAS}:m)};
++  if(JSON.stringify(expected)!==JSON.stringify(active))throw Error('TRIAL_ALIAS_CHANGED_ROUTE');
++ }
++ if(Object.keys(value.original).length!==Object.keys(value.active).length)throw Error('TRIAL_INPUT_INTEGRITY');
++ const defaults=path.join(staged,'defaults'),write=(file,obj)=>{const bytes=Buffer.from(JSON.stringify(obj,null,2)+'\n');fs.writeFileSync(path.join(defaults,file),bytes,{mode:0o600});return hash(bytes);};
++ const overlay=[{id:'ui-settings-general',disabled:true},{id:'llm-pi-ai',config:{providers:value.active}},{id:'agent-default-model',config:value.selection}];
++ const fresh=[{id:'ui-settings-general',config:{welcomeNoticeVersion:'2026-09-28.1'}},{id:'llm-pi-ai',config:{providers:value.original}},{id:'agent-default-model',config:value.selection}];
++ return {version:1,overlaySHA256:write('internal-trial.patch.json',overlay),accessSHA256:write('internal-trial-access.json',value.access),initialSHA256:write('internal-trial-initial.json',value.initial),profileSHA256:write('profile.yml',fresh),groups:Object.keys(value.original).length,models:flat.length,settingsHidden:true,displayAlias:TRIAL_ALIAS,upstreamModel:'deepseek-flash',upgradeChannel:'latest',persistentRestrictions:false};
++}
+diff --git a/original/desktop/scripts/prepare-runtime.mjs b/modified/desktop/scripts/prepare-runtime.mjs
+index 61b7c18..fcfee23 100644
+--- a/original/desktop/scripts/prepare-runtime.mjs
++++ b/modified/desktop/scripts/prepare-runtime.mjs
+@@ -1,3 +1,4 @@
++import {stageTrialModels} from './internal-trial-models.mjs';
+ import {installSidebarVisibility} from '../../scripts/native-sidebar-visibility-extension.mjs';
+ import fs from 'node:fs';
+ import {installNativeDeliveryExtensions} from '../../scripts/native-delivery-extension.mjs';
+@@ -32,7 +33,7 @@ export function scanRuntimeInventory(files){
+   for(const file of files)if(forbidden.test(file.path)||/^(?:sessions|logs|browser-profiles)\//i.test(file.path)||/(?:^|\/)(?:\.git|\.dsh|browser-profiles|identity-profiles)\//i.test(file.path))throw Error('RUNTIME_PRIVATE_FILE '+file.path);
+   return {files:files.length,forbiddenPaths:0};
+ }
+-export async function prepareRuntime({root=project,target=path.join(root,'runtime/desktop-backend'),archive=process.env.NAUMI_DINGTALK_ARCHIVE}={}){
++export async function prepareRuntime({root=project,target=path.join(root,'runtime/desktop-backend'),archive=process.env.NAUMI_DINGTALK_ARCHIVE,trialInput}={}){
+   root=path.resolve(root);target=path.resolve(target);
+   const runtime=path.join(root,'runtime');
+   if(!target.startsWith(runtime+path.sep)||fs.existsSync(target)&&fs.lstatSync(target).isSymbolicLink())throw Error('RUNTIME_TARGET_INVALID');
+@@ -60,9 +61,10 @@ export async function prepareRuntime({root=project,target=path.join(root,'runtim
+     const dingtalk=await stageDingTalk(staged,{archive});
+     const closure=auditPackage(path.join(staged,'node_modules/@naumi/dsh-enterprise'),{checkInstalled:true,dependencyRoot:path.join(staged,'node_modules')});
+     verifyStagedImports(staged);
++    const trial=trialInput?stageTrialModels(staged,trialInput):null;
+     const inventory=runtimeInventory(staged),scan=scanRuntimeInventory(inventory);
+     fs.writeFileSync(path.join(staged,'runtime-files.json'),JSON.stringify(inventory,null,2)+'\n');
+-    const manifest={product:'Naumi',schemaVersion:2,desktop:{profileVersion:1,identityProtocol:2,maintenanceProtocol:1,workspaceProtocol:1},version:JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json'))).version,node:process.versions.node,harness:'0.2.2-rc.1',agentDesktop:'1.3.1',dingtalk,personalCredentials:false,browserProfiles:false,bootstrap:'offline',nodeSHA256:sha(path.join(staged,'node.exe')),inventorySHA256:sha(path.join(staged,'runtime-files.json')),closure,scan};
++    const manifest={product:'Naumi',...trial?{edition:'internal-trial',trial}:{},schemaVersion:2,desktop:{profileVersion:1,identityProtocol:2,maintenanceProtocol:1,workspaceProtocol:1},version:JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json'))).version,node:process.versions.node,harness:'0.2.2-rc.1',agentDesktop:'1.3.1',dingtalk,personalCredentials:!!trial,browserProfiles:false,bootstrap:'offline',nodeSHA256:sha(path.join(staged,'node.exe')),inventorySHA256:sha(path.join(staged,'runtime-files.json')),closure,scan};
+     fs.writeFileSync(path.join(staged,'runtime-manifest.json'),JSON.stringify(manifest,null,2)+'\n');
+     // Publish only after import/closure/content checks. Preserve the preceding bundle for rollback.
+     let previous=null;if(fs.existsSync(target)){previous=target+'.previous-'+randomUUID();fs.renameSync(target,previous);}
+diff --git a/modified/docs/implementation/INTERNAL_TRIAL.md b/modified/docs/implementation/INTERNAL_TRIAL.md
+new file mode 100644
+index 0000000..4390271
+--- /dev/null
++++ b/modified/docs/implementation/INTERNAL_TRIAL.md
+@@ -0,0 +1,28 @@
++# 本地内测安装包
++
++## 模块与职责
++负责人：本线程；codex/internal-trial-20261119，基线 d93e8724d430e56ed86dcc38348bdd9779514915。仅desktop后端启动/首次profile与构建脚本、独立内测资源及定向测试。其他模型导入47脚本、生产服务/账号/安装不动；单独本地构建，不向更新源发布。
++
++## 公共接口、依赖方向、数据/状态/事务归属
++复用原生启动 `--patch` 临时最高优先级配置层：禁用设置UI插件，原模型适配器只装载精选连接，DeepSeek Flash仅name显示claude fable5.2、id/URL/协议不变。用户配置不删除、别名与UI限制不落盘；正式安装资源不含edition时无需迁移即可恢复。原设置API权限不变；隐藏UI不代表安全隔离。
++新安装仅用defaults初始化原生profile和选定凭据，采用原模型真实名称；通过精确模板hash判断是否首次种子，存在用户配置/不同凭据时不覆盖。bootstrap记录使重复启动不再播种。临时模型密钥只在后端环境使用，不放浏览器，正式升级沿用首次保存的原生凭据。
++测试包包含用户明确选择的可用连接凭据，只保存在ignored runtime和本地交付目录，不进Git、不上传GitHub、不含其他组/会话/员工/浏览器资料。不开真实模型验收。
++
++## 实现与迁移状态
++应用ID、productName、用户目录、NSIS标识和稳定更新feed保持原值。沿用当前main数字版本，文件名加Test区别，后续更高正式版本正常覆盖；不新建“Naumi Test”并行应用。测试包限制依赖随包启动参数，不写永久disabled到用户profile。先做独立Harness/profile/模拟供应商测试，再验证完整包。
++
++## 验证命令、结果及证据层级
++原backend/updates/settings基线52/52，exit0；集中验证/实际构建/回滚见evidence/internal-trial/VERIFICATION.txt。不把构建完成当作用户已安装，不把静态兼容断言当作真实安装覆盖。
++
++## 验收与交付状态
++原基线52/52；本切片定向63/63；整合模型导入47主线78e1f81后全仓955/955。16项真实隔离Harness/Chromium验证包括原生响应及别名不改wire model、保留历史与真实凭据引用；2次loopback请求（含标题生成）、真实供应商0。初次runner把原生标题请求误当多发，以及把首次浏览器授权新增记录/原生YAML格式化误当数据改动；修正证据断言后通过，失败日志保留。
++
++固定main `ddd504f77e4330edbf69cbf442938958af82006e` 构建 `0.4.3` 内测版，5分组/17模型连接项（16个GPT连接项、1个DeepSeek Flash）。本地EXE `D:/NaumiReleases/internal-test-0.4.3/Naumi-Test-Setup-0.4.3-x64.exe`，495467864 bytes，SHA256 `cd73ce2572371dbf732a2bc9b425eac02c3961c40d945fcb7c8c2943966c9a4e`。
++
++完整45,661运行文件逐hash通过；实际测试版EXE2次启动、当前正式EXE1次启动，19项隔离检查通过，0page errors/0模型调用。两份真实可执行程序依次接同一隔离userData：设置恢复、别名恢复、会话/模型配置/凭据引用保留。正式安装路径的exe/asar/manifest原hash保持，现有3080不重启；测试使用独立LOCALAPPDATA、账号和随机端口。
++
++同产品application ID/用户目录/NSIS维护入口与latest更新feed保留。后续高于0.4.3的正式版可沿原安装路径覆盖；已经验证程序及配置接续，不冒称尚未发布的未来安装器实际覆盖已完成。测试版不单独注册另一个产品。隐藏设置时独立更新入口仍可用。
++
++发布器明确拒绝internal-trial资源（exit1是预期拒绝），构建始终publish:never。源码回滚仅在标记副本，52基线重新通过；不对用户正式安装执行降级。四工件见VERIFICATION及HASHES，包含源码但不包含密钥或测试员工数据。
++
++功能切片计数1，文档/证据计数0。最终证据提交不改变已固定的EXE。未进行真实供应商付费验收、真实用户安装、GitHub Release发布或服务器配置修改。
+diff --git a/modified/scripts/build-internal-trial.mjs b/modified/scripts/build-internal-trial.mjs
+new file mode 100644
+index 0000000..19b91c2
+--- /dev/null
++++ b/modified/scripts/build-internal-trial.mjs
+@@ -0,0 +1,17 @@
++// Local-only internal distribution. Source must be a fixed main snapshot.
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {execFileSync} from 'node:child_process';
++import {exportTrialInput} from '../desktop/scripts/internal-trial-models.mjs';
++import {prepareRuntime} from '../desktop/scripts/prepare-runtime.mjs';
++import {buildDesktop} from '../desktop/scripts/build-desktop.mjs';
++const root=process.cwd(),home=path.resolve(process.argv[2]),out=path.resolve(process.argv[3]);
++assert(home&&out&&process.argv.length===4,'Usage: node scripts/build-internal-trial.mjs SOURCE_HOME OUTPUT_DIRECTORY');
++const git=(...args)=>execFileSync('git',args,{encoding:'utf8'}).trim(),source=git('rev-parse','HEAD');
++assert.equal(git('status','--porcelain','--untracked-files=no'),'','TRIAL_DIRTY_SOURCE');assert.equal(source,git('rev-parse','main'),'TRIAL_BUILD_REQUIRES_FIXED_MAIN');
++const privateDir=path.join(root,'runtime/internal-trial-private');fs.mkdirSync(privateDir,{recursive:true});
++const input=path.join(privateDir,'models-'+Date.now()+'.json');const selected=exportTrialInput(home,input);
++console.log('TRIAL_MODEL_EXPORT groups='+selected.groups+' models='+selected.models+' source_unchanged=1');
++for(const script of ['scripts/build-naumi-layout.mjs','scripts/build-naumi-browser.mjs','desktop/scripts/build-icons.mjs','desktop/scripts/build-installer-ui.mjs'])execFileSync(process.execPath,[script],{stdio:'inherit',windowsHide:true});
++await prepareRuntime({trialInput:input});
++await buildDesktop(['--internal-trial','--output='+out]);
++fs.writeFileSync(path.join(out,'TRIAL_BUILD.json'),JSON.stringify({source,edition:'internal-trial',version:JSON.parse(fs.readFileSync('desktop/package.json')).version,appId:'com.naumi.desktop',userDataName:'Naumi',groups:selected.groups,models:selected.models,sourceConfigurationUnchanged:true,published:false,installed:false,credentialsIncluded:'selected-internal-test-connections-only'},null,2));
++console.log('INTERNAL_TRIAL_BUILD_PASS published=0 installed=0');
+diff --git a/modified/scripts/package-internal-trial.mjs b/modified/scripts/package-internal-trial.mjs
+new file mode 100644
+index 0000000..8657731
+--- /dev/null
++++ b/modified/scripts/package-internal-trial.mjs
+@@ -0,0 +1,11 @@
++import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {randomUUID,createHash} from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';
++const root=process.cwd(),base='d93e8724d430e56ed86dcc38348bdd9779514915',out=path.resolve('evidence/internal-trial'),stage=path.resolve('runtime/trial-artifacts-'+randomUUID()),modified=path.join(stage,'modified'),original=path.join(stage,'original'),copy=path.join(stage,'rollback-copy'),sha=b=>createHash('sha256').update(b).digest('hex'),write=(p,b)=>{fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,b);},git=(...a)=>execFileSync('git',a,{maxBuffer:20e6});
++const files=['.gitattributes','desktop/app/backend.cjs','desktop/app/profile.cjs','desktop/app/internal-trial.cjs','desktop/scripts/build-desktop.mjs','desktop/scripts/prepare-runtime.mjs','desktop/scripts/internal-trial-models.mjs','scripts/build-internal-trial.mjs','scripts/publish-desktop-update.mjs','scripts/verify-internal-trial.mjs','scripts/verify-internal-trial-package.mjs','scripts/package-internal-trial.mjs','tests/naumi-internal-trial.test.mjs','docs/implementation/INTERNAL_TRIAL.md'];
++const rows=files.map(file=>{let before=null;try{before=git('show',base+':'+file);}catch{}const after=fs.readFileSync(file);if(before){write(path.join(original,file),before);write(path.join(out,'original',file),before);}write(path.join(modified,file),after);return{file,originalSHA256:before?sha(before):null,modifiedSHA256:sha(after)};});write(path.join(out,'HASHES.json'),JSON.stringify({base,source:git('rev-parse','HEAD').toString().trim(),files:rows},null,2));const diff=spawnSync('git',['diff','--binary','--no-index','--','original','modified'],{cwd:stage,maxBuffer:20e6});assert.equal(diff.status,1);write(path.join(out,'DIFF_FILE.patch'),diff.stdout);
++write(path.join(out,'ROLLBACK.sh'),'#!/usr/bin/env sh\nset -eu\n[ "$#" -eq 1 ] || { echo "Usage: ROLLBACK.sh COPY_DIRECTORY" >&2; exit 64; }\nHERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec node "$HERE/rollback.mjs" "$1"\n');
++write(path.join(out,'rollback.mjs'),`import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {fileURLToPath} from 'node:url';import {createHash} from 'node:crypto';const out=path.dirname(fileURLToPath(import.meta.url)),root=fs.realpathSync(process.argv[2]),sha=b=>createHash('sha256').update(b).digest('hex');assert.equal(JSON.parse(fs.readFileSync(path.join(root,'.trial-copy.json'))).root,root);const rows=JSON.parse(fs.readFileSync(path.join(out,'HASHES.json'))).files;for(const r of rows){const p=path.resolve(root,r.file);assert(p.startsWith(root+path.sep));for(let q=p;q!==root;q=path.dirname(q))if(fs.existsSync(q))assert(!fs.lstatSync(q).isSymbolicLink());assert([r.originalSHA256,r.modifiedSHA256].includes(fs.existsSync(p)?sha(fs.readFileSync(p)):null));if(r.originalSHA256)assert.equal(sha(fs.readFileSync(path.join(out,'original',r.file))),r.originalSHA256);}for(const r of rows){const p=path.join(root,r.file);if(r.originalSHA256){fs.mkdirSync(path.dirname(p),{recursive:true});fs.copyFileSync(path.join(out,'original',r.file),p);}else if(fs.existsSync(p))fs.unlinkSync(p);}for(const r of rows)assert.equal(fs.existsSync(path.join(root,r.file))?sha(fs.readFileSync(path.join(root,r.file))):null,r.originalSHA256);console.log('TRIAL_ROLLBACK_PASS files='+rows.length+' original_hashes=restored source_still_modified=1');\n`);
++const zip=path.join(out,'MODIFIED_FILE.zip'),unpacked=path.join(stage,'reopened');execFileSync('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-Command',`Compress-Archive -Path '${modified}/*' -DestinationPath '${zip}' -Force;Expand-Archive -LiteralPath '${zip}' -DestinationPath '${unpacked}'`],{windowsHide:true});for(const r of rows)assert.equal(sha(fs.readFileSync(path.join(unpacked,r.file))),r.modifiedSHA256);
++fs.mkdirSync(copy);const tar=path.join(stage,'baseline.tar');execFileSync('git',['archive','--format=tar','--output='+tar,base,'desktop','tests','plugins','scripts','package.json','.gitattributes']);execFileSync('tar',['-xf',tar,'-C',copy]);for(const r of rows)write(path.join(copy,r.file),fs.readFileSync(path.join(modified,r.file)));write(path.join(copy,'.trial-copy.json'),JSON.stringify({root:fs.realpathSync(copy)}));fs.symlinkSync(path.join(root,'node_modules'),path.join(copy,'node_modules'),'junction');fs.symlinkSync(path.join(root,'desktop/node_modules'),path.join(copy,'desktop/node_modules'),'junction');
++const shell='D:/DEV/Git/bin/bash.exe',command=[path.join(out,'ROLLBACK.sh'),copy.replaceAll('\\','/')],r=spawnSync(shell,command,{encoding:'utf8',windowsHide:true});write(path.join(out,'ROLLBACK.log'),r.stdout+r.stderr);assert.equal(r.status,0);
++const args=['--test','desktop/tests/backend.test.cjs','desktop/tests/updates.test.cjs','tests/naumi-settings.test.mjs'],t=spawnSync(process.execPath,args,{cwd:copy,encoding:'utf8',windowsHide:true,timeout:120000});write(path.join(out,'ROLLBACK_TESTS.log'),t.stdout+t.stderr);assert.equal(t.status,0);for(const row of rows)assert.equal(sha(fs.readFileSync(row.file)),row.modifiedSHA256);
++const result={status:'PASS',base,source:git('rev-parse','HEAD').toString().trim(),files:rows.length,zipSHA256:sha(fs.readFileSync(zip)),zipReopened:true,rollbackCommand:shell+' '+command.map(x=>x.replaceAll('\\','/')).join(' '),rollbackExit:r.status,rollbackCopy:copy,restoredCommand:'node '+args.join(' '),restoredExit:t.status,restoredTests:52,sourceStillModified:true,installerAndCredentialsExcludedFromSourceArchive:true};write(path.join(out,'ARTIFACTS.json'),JSON.stringify(result,null,2));console.log('TRIAL_ARTIFACTS_PASS files='+rows.length+' zip_reopened=1 rollback_exit=0 restored_tests=52 source_still_modified=1');
+diff --git a/original/scripts/publish-desktop-update.mjs b/modified/scripts/publish-desktop-update.mjs
+index c1b62e7..61f1b46 100644
+--- a/original/scripts/publish-desktop-update.mjs
++++ b/modified/scripts/publish-desktop-update.mjs
+@@ -76,9 +76,12 @@ function main() {
+   if (!args.includes('--skip-build')) run(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build'], {cwd: desktop});
+ 
+   const output = path.join(root, 'runtime', 'naumi-desktop-release');
++  const stagedManifest = path.join(root, 'runtime', 'desktop-backend', 'runtime-manifest.json');
++  if (fs.existsSync(stagedManifest) && JSON.parse(fs.readFileSync(stagedManifest)).edition === 'internal-trial') throw Error('INTERNAL_TRIAL_PUBLICATION_FORBIDDEN');
+   const manifest = path.join(output, 'latest.yml');
+   const installer = path.join(output, `Naumi-Setup-${version}-x64.exe`);
+   for (const file of [manifest, installer]) if (!fs.existsSync(file)) throw Error('RELEASE_ARTIFACT_MISSING ' + file);
++  if (fs.readFileSync(manifest, 'utf8').includes('Naumi-Test-Setup-')) throw Error('INTERNAL_TRIAL_PUBLICATION_FORBIDDEN');
+ 
+   const notes = extractReleaseNotes(fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8'), version);
+   if (!notes) throw Error('RELEASE_NOTES_MISSING add a ## ' + version + ' section to CHANGELOG.md');
+diff --git a/modified/scripts/verify-internal-trial-package.mjs b/modified/scripts/verify-internal-trial-package.mjs
+new file mode 100644
+index 0000000..647292d
+--- /dev/null
++++ b/modified/scripts/verify-internal-trial-package.mjs
+@@ -0,0 +1,20 @@
++import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import assert from 'node:assert/strict';import {createHash,randomUUID} from 'node:crypto';import {createRequire} from 'node:module';import {parse} from 'yaml';
++const root=process.cwd(),release=path.resolve(process.argv[2]),out=path.join(root,'evidence/internal-trial'),require=createRequire(path.join(root,'desktop/package.json')),{_electron}=require('playwright'),asar=require('@electron/asar'),sha=b=>createHash('sha256').update(b).digest('hex'),resources=path.join(release,'win-unpacked/resources'),backend=path.join(resources,'backend'),checks=[];const check=(name,ok)=>{assert(ok,name);checks.push(name);console.log('TRIAL_PACKAGE_PASS '+name);};
++const manifest=JSON.parse(fs.readFileSync(path.join(backend,'runtime-manifest.json'))),inventory=JSON.parse(fs.readFileSync(path.join(backend,'runtime-files.json'))),archive=path.join(resources,'app.asar'),pkg=JSON.parse(asar.extractFile(archive,'package.json'));
++check('private_trial_label_and_original_application_identity',manifest.edition==='internal-trial'&&manifest.personalCredentials===true&&pkg.naumiEdition==='internal-trial'&&pkg.name==='naumi-desktop'&&asar.extractFile(archive,'app/main.cjs').toString().includes("app.setName('Naumi');app.setAppUserModelId('com.naumi.desktop')"));check('same_client_service_version',pkg.version===manifest.version);
++for(const r of inventory)assert.equal(sha(fs.readFileSync(path.join(backend,r.path))),r.sha256,'PACKAGED_INVENTORY '+r.path);check('complete_resource_inventory_hashes',true);
++for(const file of ['backend.cjs','profile.cjs','internal-trial.cjs','main.cjs','updates.cjs'])assert.equal(asar.extractFile(archive,'app/'+file).toString().replaceAll('\r\n','\n'),fs.readFileSync(path.join(root,'desktop/app',file),'utf8').replaceAll('\r\n','\n'));check('actual_asar_has_fixed_source',true);
++const overlay=JSON.parse(fs.readFileSync(path.join(backend,'defaults/internal-trial.patch.json'))),providers=overlay.find(r=>r.id==='llm-pi-ai').config.providers,models=Object.values(providers).flatMap(p=>p.models);check('seventeen_selected_model_routes',models.length===17&&models.every(m=>/^gpt-/i.test(m.id)||m.id==='deepseek-flash'));check('only_flash_has_requested_alias',models.filter(m=>m.id.startsWith('deepseek')).length===1&&models.find(m=>m.id==='deepseek-flash').name==='claude fable5.2');
++const exe=path.join(release,'win-unpacked/Naumi.exe'),setup=path.join(release,'Naumi-Test-Setup-'+pkg.version+'-x64.exe'),bytes=fs.readFileSync(setup);check('installer_is_real_PE',bytes.subarray(0,2).toString()==='MZ');
++const temp=path.join(root,'runtime/package-smoke-'+randomUUID()),user=path.join(temp,'user'),local=path.join(temp,'local');fs.mkdirSync(user,{recursive:true});fs.mkdirSync(local,{recursive:true});const official='C:/Program Files/Naumi/Naumi.exe',officialFiles=[official,'C:/Program Files/Naumi/resources/app.asar','C:/Program Files/Naumi/resources/backend/runtime-manifest.json'],officialBefore=officialFiles.map(p=>sha(fs.readFileSync(p)));
++const server=http.createServer((q,r)=>{r.setHeader('Content-Type','application/json');const pathname=q.url.split('?')[0];if(pathname==='/api/auth/session')r.end(JSON.stringify({user:{email:'trial-package@example.test',name:'隔离验收'}}));else if(pathname==='/latest.yml'){r.setHeader('Content-Type','text/yaml');r.end('version: '+pkg.version+'\nsha512: '+Buffer.alloc(64).toString('base64')+'\nfiles:\n - url: fixture.exe\n   sha512: '+Buffer.alloc(64).toString('base64')+'\n');}else r.writeHead(401).end(JSON.stringify({code:'UNAUTHENTICATED'}));});await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port,socket=http.createServer();await new Promise(r=>socket.listen(0,'127.0.0.1',r));const url='http://127.0.0.1:'+socket.address().port;await new Promise(r=>socket.close(r));let app,home,firstHome,sid,workerPid,errors=[],calls=0;
++async function launch(binary){const env={...process.env,NAUMI_USER_DATA:user,LOCALAPPDATA:local,NAUMI_IDENTITY_ORIGIN:origin,NAUMI_ENTERPRISE_ORIGIN:origin,NAUMI_UPDATE_URL:origin,NAUMI_HOST_URL:url,NAUMI_TEST:'1',NAUMI_TEST_HIDDEN:'1'};for(const k of ['ELECTRON_RUN_AS_NODE','NAUMI_ROOT','NAUMI_DSH_HOME'])delete env[k];app=await _electron.launch({executablePath:binary,args:[],env,timeout:90000});const page=await app.firstWindow();page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(r.url().includes('/api/session/prompt'))calls++;});await page.waitForURL(u=>u.origin===url,{timeout:90000});await page.waitForFunction(()=>document.body.getAttribute('data-naumi')==='enterprise');const state=await app.evaluate(()=>({home:__naumiTest.settings.home,pid:__naumiTest.backend.child?.pid,owned:__naumiTest.backend.owned}));home=state.home;workerPid=state.pid;assert(state.owned);return page;}
++async function close(){if(app){await app.close();app=null;}if(workerPid){let dead=false;for(let n=0;n<80;n++){try{process.kill(workerPid,0);await new Promise(r=>setTimeout(r,100));}catch{dead=true;break;}}assert(dead,'FIXTURE_WORKER_REMAINS');}}
++const getModels=page=>page.evaluate(async()=>{const r=await fetch('/naumi/model-connections');const v=await r.json();return v.groups.map(g=>({id:g.id,configured:g.configured,models:g.models.map(m=>({id:m.id,name:m.name}))}));});
++try{
++ let page=await launch(exe);firstHome=home;let groups=await getModels(page);check('packaged_fresh_install_has_all_selected_connections',groups.length===5&&groups.every(g=>g.configured)&&groups.flatMap(g=>g.models).length===17);check('update_entry_still_available',await page.locator('.nup-trigger').count()===1);check('packaged_settings_hidden',await page.getByRole('button',{name:'设置',exact:true}).count()===0);check('packaged_alias_visible_in_catalog',groups.flatMap(g=>g.models).some(m=>m.id==='deepseek-flash'&&m.name==='claude fable5.2'));
++ sid=await page.evaluate(async cwd=>{const r=await fetch('/api/session/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'client-request',rpcId:'trial-package',method:'session/create',payload:{args:{request:{cwd}}}})});const b=await r.json();if(!b.result?.ok)throw Error('SESSION_CREATE_FAILED');return b.result.value.sessionId;},path.join(home,'workspace'));await close();const protectedFiles=['profiles/web/cordis.patch.yml','.credentials.yaml'],config=parse(fs.readFileSync(path.join(home,protectedFiles[0]),'utf8')),refs=parse(fs.readFileSync(path.join(home,protectedFiles[1]),'utf8')).refs;
++ page=await launch(exe);check('test_restart_preserves_configuration',JSON.stringify(await getModels(page))===JSON.stringify(groups));await close();
++ page=await launch(official);check('formal_binary_opens_same_employee_home',home===firstHome);await page.getByRole('button',{name:'设置',exact:true}).waitFor();check('formal_binary_restores_settings',true);groups=await getModels(page);check('formal_binary_retains_model_credentials_and_restores_real_name',groups.every(g=>g.configured)&&groups.flatMap(g=>g.models).find(m=>m.id==='deepseek-flash').name!=='claude fable5.2');const sessions=await page.evaluate(async()=>{const r=await fetch('/api/session/list',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'client-request',rpcId:'trial-list',method:'session/list',payload:{args:{_request:{}}}})});return(await r.json()).result.value.items.map(s=>s.sessionId);});check('formal_binary_keeps_test_session',sessions.includes(sid));assert.deepEqual(parse(fs.readFileSync(path.join(home,protectedFiles[0]),'utf8')),config);assert.deepEqual(parse(fs.readFileSync(path.join(home,protectedFiles[1]),'utf8')).refs,refs);check('model_profile_and_refs_preserved',true);check('zero_prompt_calls_and_page_errors',calls===0&&errors.length===0);await close();check('installed_official_binaries_unchanged',officialFiles.every((p,i)=>sha(fs.readFileSync(p))===officialBefore[i]));
++ const receipt={status:'PASS',checks,version:pkg.version,installer:setup,installerBytes:bytes.length,installerSHA256:sha(bytes),runtimeFiles:inventory.length,groups:5,modelRoutes:17,source:JSON.parse(fs.readFileSync(path.join(release,'TRIAL_BUILD.json'))).source,realPackagedExecutables:true,trialBoots:2,formalBoots:1,pageErrors:errors,realSupplierCalls:0,userInstallationChanged:false,publicRelease:false,upgradeTier:'trial and current formal executable sequentially opened same isolated home; future newer installer identity/version compatibility verified, not an actual future-version installation'};fs.writeFileSync(path.join(out,'PACKAGE.json'),JSON.stringify(receipt,null,2));console.log('TRIAL_PACKAGE_COMPLETE checks='+checks.length+' inventory='+inventory.length+' model_calls=0');
++}finally{await close();server.closeAllConnections();await new Promise(r=>server.close(r));}
+diff --git a/modified/scripts/verify-internal-trial.mjs b/modified/scripts/verify-internal-trial.mjs
+new file mode 100644
+index 0000000..22189b9
+--- /dev/null
++++ b/modified/scripts/verify-internal-trial.mjs
+@@ -0,0 +1,20 @@
++import {parse} from 'yaml';
++import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import assert from 'node:assert/strict';import {randomUUID,createHash} from 'node:crypto';import {spawn} from 'node:child_process';import {createRequire} from 'node:module';
++import {chromium} from '../desktop/node_modules/playwright/index.mjs';import {selectTrialModels,stageTrialModels} from '../desktop/scripts/internal-trial-models.mjs';
++const require=createRequire(import.meta.url),{seedTrialCredentials,trialLaunch}=require('../desktop/app/internal-trial.cjs'),root=process.cwd(),out=path.join(root,'evidence/internal-trial'),temp=path.join(root,'runtime/trial-native-'+randomUUID()),bundle=path.join(temp,'bundle'),home=path.join(temp,'home'),profile=path.join(home,'profiles/web'),sha=b=>createHash('sha256').update(b).digest('hex');fs.mkdirSync(path.join(bundle,'defaults'),{recursive:true});fs.mkdirSync(path.join(profile,'node_modules/@naumi'),{recursive:true});
++for(const[name,folder]of [['dsh-enterprise','naumi-enterprise'],['dsh-ui-layout','naumi-ui-layout'],['dsh-sidebar-browser','naumi-sidebar-browser']])fs.symlinkSync(path.join(root,'plugins',folder),path.join(profile,'node_modules/@naumi',name),'junction');fs.symlinkSync(path.join(root,'node_modules/@deepseek-ai'),path.join(profile,'node_modules/@deepseek-ai'),'junction');
++const requests=[],upstream=http.createServer(async(req,res)=>{let raw='';for await(const b of req)raw+=b;const data=JSON.parse(raw);requests.push({model:data.model,key:req.headers.authorization});res.writeHead(200,{'Content-Type':'text/event-stream'});for(const c of [{delta:{role:'assistant',content:'TRIAL_NATIVE_OK'},finish_reason:null},{delta:{},finish_reason:'stop'}])res.write('data: '+JSON.stringify({id:'trial-native',object:'chat.completion.chunk',created:1,model:data.model,choices:[{index:0,...c}],usage:{prompt_tokens:1,completion_tokens:1,total_tokens:2}})+'\n\n');res.end('data: [DONE]\n\n');});await new Promise(r=>upstream.listen(0,'127.0.0.1',r));
++const p={api:'openai-completions',baseURL:'http://127.0.0.1:'+upstream.address().port+'/v1',apiKeyEnv:'FIXTURE_KEY',models:[{id:'gpt-test',name:'GPT Original',contextWindow:128000,maxTokens:1024,reasoningEfforts:false},{id:'deepseek-flash',contextWindow:128000,maxTokens:1024,reasoningEfforts:false},{id:'deepseek-pro'},{id:'glm-test'}]},input=path.join(temp,'input.json'),value=selectTrialModels({fixture:p},{FIXTURE_KEY:'fixture-only'});fs.writeFileSync(input,JSON.stringify(value));const trial=stageTrialModels(bundle,input);fs.writeFileSync(path.join(bundle,'runtime-manifest.json'),JSON.stringify({edition:'internal-trial',trial}));fs.copyFileSync(path.join(bundle,'defaults/profile.yml'),path.join(profile,'cordis.patch.yml'));fs.writeFileSync(path.join(home,'cordis.patch.yml'),'[]');fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'trial-native',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}}));
++const settings={root:bundle,home,isolated:true,runtime:{root:bundle}};assert(seedTrialCredentials(settings).seeded);const protectedFiles=['profiles/web/cordis.patch.yml','.credentials.yaml'],before=protectedFiles.map(f=>sha(fs.readFileSync(path.join(home,f))));
++const socket=http.createServer();await new Promise(r=>socket.listen(0,'127.0.0.1',r));const port=socket.address().port;await new Promise(r=>socket.close(r));const base='http://127.0.0.1:'+port,checks=[],errors=[],logs=[];let child,output='',cookie,launch,browser;
++const check=(name,ok)=>{assert(ok,name);checks.push(name);console.log('TRIAL_NATIVE_PASS '+name);};
++async function boot(){output='';const policy=trialLaunch(settings);child=spawn(process.execPath,[path.join(root,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'web',...policy.args,'--host','127.0.0.1','--port',String(port),'--no-open'],{cwd:root,windowsHide:true,env:{...process.env,DSH_HOME:home,DSH_TELEMETRY_MODE:'DISABLED',...policy.env}});child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);launch=null;for(let i=0;i<200;i++){launch=output.match(new RegExp(base.replaceAll('.','\\.')+'/?\\?token=[A-Za-z0-9_~.%-]+'))?.[0];if(launch)break;if(child.exitCode!==null)throw Error('FIXTURE_BOOT_FAILED');await new Promise(r=>setTimeout(r,250));}assert(launch,'FIXTURE_TIMEOUT');const r=await fetch(launch,{redirect:'manual'});cookie=r.headers.getSetCookie().map(x=>x.split(';')[0]).join('; ');}
++async function stop(){if(child&&child.exitCode===null){child.kill();await new Promise(r=>child.once('close',r));}logs.push(output.replace(/token=[A-Za-z0-9_~.%-]+/g,'token=REDACTED'));}
++const request=async(url,body)=>{const r=await fetch(base+url,{method:body?'POST':'GET',headers:{cookie,'Content-Type':'application/json'},...body?{body:JSON.stringify(body)}:{}});assert(r.ok,'HTTP_'+r.status);return r.json();},rpc=async(method,args)=>{const v=await request('/api/'+method,{type:'client-request',rpcId:randomUUID(),method,payload:{args}});assert(v.result?.ok,JSON.stringify(v));return v.result.value;};
++try{
++ await boot();const models=await request('/naumi/model-connections');check('catalog_only_GPT_and_exact_Flash',models.groups.length===1&&models.groups[0].models.length===2&&models.groups[0].models.some(m=>m.id==='deepseek-flash'&&m.name==='claude fable5.2'));check('GPT_original_name',models.groups[0].models[0].name==='GPT Original');check('selected_credential_configured',models.groups[0].configured);
++ browser=await chromium.launch({headless:true,channel:'chrome'});const context=await browser.newContext({viewport:{width:1280,height:850}}),page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));await page.route('**/*',route=>{const u=new URL(route.request().url());return ['http:','https:'].includes(u.protocol)&&u.origin!==base?route.abort():route.continue();});await page.goto(launch);await page.waitForFunction(()=>document.body.getAttribute('data-naumi')==='enterprise');check('settings_entry_absent',await page.getByRole('button',{name:'设置',exact:true}).count()===0);await page.keyboard.press('Control+Alt+,');check('settings_shortcut_absent',await page.getByRole('dialog',{name:'设置',exact:true}).count()===0);check('zero_page_errors',errors.length===0);
++ const cwd=path.join(temp,'workspace');fs.mkdirSync(cwd);const {sessionId}=await rpc('session/create',{request:{cwd}});await rpc('session/selectModel',{request:{sessionId,provider:'fixture',model:'deepseek-flash'}});await rpc('session/prompt',{request:{sessionId,requestId:randomUUID(),mode:'queue',content:[{type:'text',text:'只回复 TRIAL_NATIVE_OK'}]}});for(let i=0;i<100&&requests.length<1;i++)await new Promise(r=>setTimeout(r,100));const result=await rpc('session/wait',{request:{sessionId,timeoutMs:30000,maxMessages:1}});check('wire_keeps_deepseek_flash_identity',requests.length>=1&&requests.every(r=>r.model==='deepseek-flash'&&r.key==='Bearer fixture-only'));check('native_response_delivered',JSON.stringify(result).includes('TRIAL_NATIVE_OK'));
++ const beforeUpgradeRequests=requests.length;await page.close();await stop();const savedConfig=parse(fs.readFileSync(path.join(profile,'cordis.patch.yml'),'utf8')),savedRefs=parse(fs.readFileSync(path.join(home,'.credentials.yaml'),'utf8')).refs;fs.writeFileSync(path.join(bundle,'runtime-manifest.json'),JSON.stringify({version:'next-stable'}));await boot();const stable=await request('/naumi/model-connections');check('formal_upgrade_removes_alias_without_config_migration',stable.groups[0].models.find(m=>m.id==='deepseek-flash').name!=='claude fable5.2');check('formal_preserves_credentials',stable.groups[0].configured);const fresh=await context.newPage();fresh.on('pageerror',e=>errors.push(e.message));await fresh.goto(launch);await fresh.getByRole('button',{name:'设置',exact:true}).waitFor();check('formal_restores_native_settings',true);await fresh.getByRole('button',{name:'设置',exact:true}).click();await fresh.getByRole('dialog',{name:'设置',exact:true}).waitFor();check('formal_settings_operable',true);const sessions=await rpc('session/list',{_request:{}});check('formal_preserves_session',sessions.items.some(s=>s.sessionId===sessionId));check('model_config_and_credential_refs_retained',JSON.stringify(parse(fs.readFileSync(path.join(profile,'cordis.patch.yml'),'utf8')))===JSON.stringify(savedConfig)&&JSON.stringify(parse(fs.readFileSync(path.join(home,'.credentials.yaml'),'utf8')).refs)===JSON.stringify(savedRefs));check('no_new_model_calls_during_upgrade',requests.length===beforeUpgradeRequests);check('formal_zero_page_errors',errors.length===0);
++ fs.writeFileSync(path.join(out,'NATIVE.json'),JSON.stringify({status:'PASS',checks,pageErrors:errors,boots:2,loopbackModelRequests:requests.length,realSupplierCalls:0,productionTouched:false,tier:'actual isolated Harness/native adapter and Chromium; stable policy replacement in same persistent home, not an OS installer upgrade'},null,2));console.log('TRIAL_NATIVE_COMPLETE checks='+checks.length+' page_errors=0 real_supplier_calls=0');
++}finally{await browser?.close();await stop();upstream.closeAllConnections();await new Promise(r=>upstream.close(r));fs.writeFileSync(path.join(out,'NATIVE_HOST.log'),logs.join('\n'));}
+diff --git a/modified/tests/naumi-internal-trial.test.mjs b/modified/tests/naumi-internal-trial.test.mjs
+new file mode 100644
+index 0000000..3061ed9
+--- /dev/null
++++ b/modified/tests/naumi-internal-trial.test.mjs
+@@ -0,0 +1,17 @@
++import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {createRequire} from 'node:module';import {createHash} from 'node:crypto';
++import {selectTrialModels,stageTrialModels,allowedTrialModel,exportTrialInput} from '../desktop/scripts/internal-trial-models.mjs';
++const require=createRequire(import.meta.url),{trialLaunch,seedTrialCredentials,trialResources}=require('../desktop/app/internal-trial.cjs');
++const hash=b=>createHash('sha256').update(b).digest('hex');
++function source(){return{g:{displayName:'CC GPT',api:'openai-responses',baseURL:'http://127.0.0.1:1/v1',apiKeyEnv:'GPT_KEY',reasoning:'high',models:[{id:'gpt-a',name:'GPT Original',contextWindow:128000},{id:'glm-x'}]},d:{displayName:'CC DeepSeek',api:'anthropic-messages',baseURL:'http://127.0.0.1:2',apiKeyEnv:'DS_KEY',models:[{id:'deepseek-flash',contextWindow:128000,maxTokens:8192},{id:'deepseek-v4-pro'},{id:'deepseek-v4.1-flash-uncensored'}]},other:{models:[{id:'kimi-x'}]}};}
++function fixture(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-trial-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));const bundle=path.join(root,'bundle'),home=path.join(root,'home');fs.mkdirSync(path.join(bundle,'defaults'),{recursive:true});fs.mkdirSync(path.join(home,'profiles/web'),{recursive:true});const input=path.join(root,'input.json'),value=selectTrialModels(source(),{GPT_KEY:'fixture-gpt',DS_KEY:'fixture-ds'});fs.writeFileSync(input,JSON.stringify(value));const trial=stageTrialModels(bundle,input);fs.writeFileSync(path.join(bundle,'runtime-manifest.json'),JSON.stringify({edition:'internal-trial',trial}));fs.copyFileSync(path.join(bundle,'defaults/profile.yml'),path.join(home,'profiles/web/cordis.patch.yml'));return{root,bundle,home,input,value,trial,settings:{root:bundle,home,isolated:true,runtime:{root:bundle}}};}
++test('filter keeps exact flash and GPT, preserves GPT names/route/metadata and never mutates source',()=>{const providers=source(),before=JSON.stringify(providers),v=selectTrialModels(providers,{GPT_KEY:'fixture-gpt',DS_KEY:'fixture-ds'});assert.equal(JSON.stringify(providers),before);assert.deepEqual(Object.keys(v.original),['g','d']);assert.equal(v.active.g.models[0].name,'GPT Original');assert.equal(v.active.d.models[0].name,'claude fable5.2');assert.equal(v.active.d.models[0].id,'deepseek-flash');assert.equal(v.original.d.models[0].name,undefined);assert.equal(v.active.g.reasoning,'high');assert.equal(v.active.d.models.length,1);assert.equal(v.active.d.baseURL,providers.d.baseURL);});
++test('missing selected credentials or missing family fail before packaging',()=>{assert.throws(()=>selectTrialModels(source(),{GPT_KEY:'fixture'}),/CREDENTIAL_MISSING/);assert.throws(()=>selectTrialModels({g:source().g},{GPT_KEY:'fixture'}),/FAMILIES_REQUIRED/);for(const id of ['claude-x','deepseek-pro','deepseek-v4.1-flash','xgpt-a'])assert(!allowedTrialModel(id));});
++test('trial launch uses native overlay and only selected process credentials, not parent env writes',t=>{const f=fixture(t),before=hash(JSON.stringify({...process.env})),v=trialLaunch(f.settings);assert.deepEqual(v.args,['--patch',path.join(f.bundle,'defaults/internal-trial.patch.json')]);assert.equal(Object.keys(v.env).length,2);assert.equal(hash(JSON.stringify({...process.env})),before);assert.deepEqual(trialLaunch({...f.settings,isolated:false}),{args:[],env:{}});assert.deepEqual(trialLaunch({...f.settings,isolated:false,linkedService:true,releaseRoot:f.bundle}),v);});
++test('native overlay overrides only settings UI, model routes, default; permanent fresh config has no restrictions',t=>{const f=fixture(t),patch=JSON.parse(fs.readFileSync(path.join(f.bundle,'defaults/internal-trial.patch.json'))),fresh=JSON.parse(fs.readFileSync(path.join(f.bundle,'defaults/profile.yml')));assert.deepEqual(patch.map(p=>p.id),['ui-settings-general','llm-pi-ai','agent-default-model']);assert.equal(patch[0].disabled,true);assert.equal(fresh[0].disabled,undefined);assert.equal(fresh[1].config.providers.d.models[0].name,undefined);assert.equal(JSON.stringify(patch).includes('fixture-ds'),false);});
++test('fresh seed persists original names and refs once; repeated startup preserves user edits',t=>{const f=fixture(t);assert(seedTrialCredentials(f.settings).seeded);const p=path.join(f.home,'.credentials.yaml');assert.deepEqual(JSON.parse(fs.readFileSync(p)),f.value.initial);fs.writeFileSync(p,'user changes');assert(!seedTrialCredentials(f.settings).seeded);assert.equal(fs.readFileSync(p,'utf8'),'user changes');});
++test('existing profiles and credentials are never overwritten',t=>{const f=fixture(t);fs.writeFileSync(path.join(f.home,'profiles/web/cordis.patch.yml'),'existing profile');assert(!seedTrialCredentials(f.settings).seeded);assert(!fs.existsSync(path.join(f.home,'.credentials.yaml')));fs.copyFileSync(path.join(f.bundle,'defaults/profile.yml'),path.join(f.home,'profiles/web/cordis.patch.yml'));fs.writeFileSync(path.join(f.home,'.credentials.yaml'),'old creds');assert(!seedTrialCredentials(f.settings).seeded);assert.equal(fs.readFileSync(path.join(f.home,'.credentials.yaml'),'utf8'),'old creds');});
++test('interrupted credential seed is idempotent; completed marker prevents reseeding a deleted store',t=>{const f=fixture(t),p=path.join(f.home,'.credentials.yaml');fs.copyFileSync(path.join(f.bundle,'defaults/internal-trial-initial.json'),p);assert(seedTrialCredentials(f.settings).seeded);fs.unlinkSync(p);assert(!seedTrialCredentials(f.settings).seeded);assert(!fs.existsSync(p));});
++test('stable resource replacement removes restrictions while keeping profile, credentials and session bytes',t=>{const f=fixture(t);seedTrialCredentials(f.settings);const files=['profiles/web/cordis.patch.yml','.credentials.yaml','desktop-trial-bootstrap.json'];fs.writeFileSync(path.join(f.home,'session.txt'),'existing task');files.push('session.txt');const before=files.map(p=>hash(fs.readFileSync(path.join(f.home,p))));fs.writeFileSync(path.join(f.bundle,'runtime-manifest.json'),JSON.stringify({version:'0.4.4'}));assert.equal(trialResources(f.bundle),null);assert.deepEqual(trialLaunch(f.settings),{args:[],env:{}});assert(!seedTrialCredentials(f.settings).seeded);assert.deepEqual(files.map(p=>hash(fs.readFileSync(path.join(f.home,p)))),before);});
++test('tampered edition resources and alias ID changes fail closed',t=>{const f=fixture(t);fs.appendFileSync(path.join(f.bundle,'defaults/internal-trial.patch.json'),' ');assert.throws(()=>trialLaunch(f.settings),/RESOURCE_CHANGED/);f.value.active.d.models[0].id='claude-fable';fs.writeFileSync(f.input,JSON.stringify(f.value));assert.throws(()=>stageTrialModels(f.bundle,f.input),/ALIAS_CHANGED_ROUTE/);});
++test('local export leaves original config and credentials byte-identical and excludes unrelated credentials',t=>{const f=fixture(t),p=path.join(f.home,'profiles/web/cordis.patch.yml');fs.writeFileSync(p,JSON.stringify([{id:'llm-pi-ai',config:{providers:source()}}]));fs.writeFileSync(path.join(f.home,'cordis.patch.yml'),'[]');fs.writeFileSync(path.join(f.home,'.credentials.yaml'),JSON.stringify({version:1,refs:{GPT_KEY:'fixture-gpt',DS_KEY:'fixture-ds',OTHER:'must-not-export'},records:{}}));const out=path.join(f.root,'export.json'),r=exportTrialInput(f.home,out);assert(r.sourceUnchanged);assert.equal(r.models,2);assert(!fs.readFileSync(out,'utf8').includes('must-not-export'));});
++test('identity, update feed and native installer are not forked for the trial build',()=>{const pkg=JSON.parse(fs.readFileSync('desktop/package.json'));assert.equal(pkg.build.appId,'com.naumi.desktop');assert.equal(pkg.build.productName,'Naumi');assert.equal(pkg.build.nsis.deleteAppDataOnUninstall,false);const builder=fs.readFileSync('desktop/scripts/build-desktop.mjs','utf8');assert(builder.includes("publish:'never'"));assert(builder.includes('TRIAL_BUILD_EDITION_MISMATCH'));assert(builder.includes('Naumi-Test-Setup-${version}-${arch}.${ext}'));const launch=fs.readFileSync('desktop/app/backend.cjs','utf8');assert(launch.includes("[entry,'web',...trial.args,'--host'"));assert(fs.readFileSync('desktop/app/updates.cjs','utf8').includes("base+'/latest.yml'"));});
