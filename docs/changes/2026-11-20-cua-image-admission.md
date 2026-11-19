@@ -27,3 +27,17 @@
 
 ## 未完成项与下一步
 真实供应商视觉能力尚待一次获准的小图测试；未获得测试答复前不自动调用、不自动改能力。确认该通道支持后，可通过原生 settings CAS 仅更新目标模型的 `input` 叶子，无需替换供应商/密钥/模型列表。客户端 UI 交付需下一固定 main 完整 bundle 与维护窗口，不热补运行目录。真实 Chrome 操作与 Cookies 复用仍需单独现场验收。
+
+## 后续：用户批准的一次真实视觉测试（2026-11-20）
+
+上述“尚待”是初次源码交付时的状态。用户随后明确允许一次小型视觉请求，本线程已执行；本次仅更新验收记录，功能迭代与发布计数均为 0。
+
+- 基线 main：`da8c45d98387a9b195381df7fe85989042d70b9a`；独立分支 `codex/cua-vision-live-20261120`。仅修改本文档，不改运行代码、配置或安装包。
+- 原供应商 `ccs-provider-8c7ab447-51aed7`、原模型 `gpt-6-luna`、原 `anthropic-messages` 协议，凭据仅在内存中用于原目标的认证，不记录密钥或完整请求头。
+- 本地生成 400×160 PNG，4918 字节，图中随机六位数 `376011`；文字提示只要求读图，未包含答案，也未上传个人桌面、Cookie、聊天内容或会话历史。
+- 请求 `max_tokens=64`，HTTP 200，回执模型 `gpt-6-luna`、`stop_reason=end_turn`，正文精确返回 `376011`；供应商报告 input_tokens=106、output_tokens=6。请求 1 次、重试 0、回退 0，命令 exit0。
+- 请求命令：`node E:/NaumiEvidence/cua-vision-live-20261120/VERIFY_VISUAL.mjs send`。一次性标记防止意外重跑；不因归档或复核再次请求供应商。
+- 实际配置与 credentials 文件前后 SHA256 分别一致；没有修改模型能力声明，没有重启服务或影响微信任务。
+- 证据：`E:/NaumiEvidence/cua-vision-live-20261120/RESULT.json`、`REQUEST_RESULT.txt`、`REQUEST.json`、`TEST_IMAGE.png`；图片已打开检查。
+
+结论：原自定义通道已通过一次真实图像读取测试，先前“未声明图像输入”的配置根因获得实测支持。证据层级是供应商 HTTP 视觉请求，不是安装版 Harness→CUA→Chrome 全链路验收。用户本次批准的是一次测试，当前生产 `input` 仍未改动，下一步仍是显式配置目标模型能力及正式桌面验收。
