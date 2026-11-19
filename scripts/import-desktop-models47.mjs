@@ -1,0 +1,20 @@
+import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';import {randomUUID,createHash} from 'node:crypto';import YAML from 'yaml';
+import {prepareDesktopImport} from './lib/desktop-model-import.mjs';
+const mode=process.argv[2]??'inspect';assert(['inspect','apply','verify','rollback','fixture'].includes(mode));
+const root=path.resolve(process.env.NAUMI_IMPORT_SOURCE??'E:/Workspace/naumi-desktop'),out=path.resolve('evidence/desktop-model-import47');fs.mkdirSync(out,{recursive:true});
+const requestFile=path.join(out,'OPERATION.json'),operation=fs.existsSync(requestFile)?JSON.parse(fs.readFileSync(requestFile)):{operationId:randomUUID(),sourceId:'naumi-desktop-primary-20261119'};fs.writeFileSync(requestFile,JSON.stringify(operation,null,2)+'\n');
+const settings=fs.readFileSync(path.join(root,'.dsh/profiles/web/cordis.patch.yml')),credentials=fs.readFileSync(path.join(root,'.dsh/.credentials.yaml'));
+const providers=YAML.parse(settings.toString()).find(p=>p.id==='llm-pi-ai')?.config?.providers,refs=YAML.parse(credentials.toString()).refs;
+const request=prepareDesktopImport({providers,refs,...operation}),sha=b=>createHash('sha256').update(b).digest('hex');
+const summary={operationId:operation.operationId,sourceId:operation.sourceId,configDigest:request.configDigest,providers:request.connections.length,models:request.connections.reduce((n,p)=>n+p.models.length,0),protocols:[...new Set(request.connections.map(p=>p.configuration.api))],localSettingsSHA256:sha(settings),localCredentialsSHA256:sha(credentials),secretsInEvidence:false};fs.writeFileSync(path.join(out,'SOURCE.json'),JSON.stringify(summary,null,2)+'\n');
+const connection='E:/Workspace/naumi/output/server-connections/47.105.59.142/connection.json',conn=JSON.parse(fs.readFileSync(connection));assert.equal(conn.host,'47.105.59.142');assert.equal(conn.port,22);assert.equal(conn.username,'root');
+const key=path.join(process.env.LOCALAPPDATA,'Naumi/operator-47-import/operator.pem'),known=path.join(path.dirname(connection),'known_hosts'),common=['-i',key,'-o','BatchMode=yes','-o','IdentitiesOnly=yes','-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+known];
+const ssh=path.join(process.env.SystemRoot,'System32/OpenSSH/ssh.exe'),scp=path.join(process.env.SystemRoot,'System32/OpenSSH/scp.exe');
+const run=(exe,args,input)=>{const r=spawnSync(exe,args,{input,encoding:'utf8',windowsHide:true,timeout:120000,maxBuffer:2*1024*1024});assert(!r.error,'TRANSPORT_FAILED');return r;};
+const remote='/opt/naumi-staging/evidence/desktop-model-import47-20261119';let r=run(ssh,['-T',...common,'root@'+conn.host,'umask 077; mkdir -p '+remote]);assert.equal(r.status,0,'REMOTE_DIRECTORY_FAILED');
+for(const file of ['runtime/desktop-model-import47/operator.cjs','scripts/run-desktop-model-import47.py']){r=run(scp,[...common,file,'root@'+conn.host+':'+remote+'/'+path.basename(file)]);assert.equal(r.status,0,'PUBLIC_CODE_UPLOAD_FAILED');}
+const pin=JSON.parse(fs.readFileSync('runtime/desktop-model-import47/CONTRACT_PIN.json'));assert.equal(sha(fs.readFileSync('runtime/desktop-model-import47/operator.cjs')),pin.bundleSHA256);
+r=run(ssh,['-T',...common,'root@'+conn.host,`python3 -B ${remote}/run-desktop-model-import47.py ${mode} --operation ${operation.operationId} --bundle ${remote}/operator.cjs --sha256 ${pin.bundleSHA256}`],['apply','verify'].includes(mode)?JSON.stringify(request):undefined);
+let value;try{value=JSON.parse(r.stdout);}catch{throw Error('REMOTE_RECEIPT_UNKNOWN');}fs.writeFileSync(path.join(out,mode.toUpperCase()+'.json'),JSON.stringify(value,null,2)+'\n');
+assert.equal(sha(fs.readFileSync(path.join(root,'.dsh/profiles/web/cordis.patch.yml'))),summary.localSettingsSHA256,'LOCAL_CONFIG_CHANGED');assert.equal(sha(fs.readFileSync(path.join(root,'.dsh/.credentials.yaml'))),summary.localCredentialsSHA256,'LOCAL_CREDENTIALS_CHANGED');
+console.log('DESKTOP_MODEL_IMPORT47 '+JSON.stringify({...value,localConfigUnchanged:true,localCredentialsUnchanged:true}));process.exitCode=r.status;
