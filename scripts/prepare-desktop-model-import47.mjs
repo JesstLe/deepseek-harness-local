@@ -11,7 +11,7 @@ const result=await esbuild.build({entryPoints:['scripts/desktop-model-import47-c
  name:'operator-public-contracts',setup(b){
   b.onResolve({filter:/^(?:https-proxy-agent|agent-base|debug|ms|supports-color|has-flag|lucide-react|react(?:\/.*)?)$/},args=>({path:require.resolve(args.path),external:false}));
   b.onResolve({filter:/^naumi-admin-contracts$/},()=>({path:'contracts',namespace:'operator-contracts'}));
-  b.onLoad({filter:/.*/,namespace:'operator-contracts'},()=>({contents:`export {createCredentialStore} from ${JSON.stringify(source+'/src/lib/model-config/credentials.ts')};export {ensureModelSchema} from ${JSON.stringify(source+'/src/lib/model-config/storage-schema.ts')};export {supplierMetadataSchema,unknownSupplierMetadata} from ${JSON.stringify(source+'/src/lib/supplier-models/types.ts')};export {listSupplierModelsFrom} from ${JSON.stringify(source+'/src/lib/supplier-models/repository.ts')};`,resolveDir:source,loader:'ts'}));
+  b.onLoad({filter:/.*/,namespace:'operator-contracts'},()=>({contents:`export {createCredentialStore} from ${JSON.stringify(source+'/src/lib/model-config/credentials.ts')};export {createCredentialReader} from ${JSON.stringify(source+'/src/lib/model-config/credential-reader.ts')};export {ensureModelSchema} from ${JSON.stringify(source+'/src/lib/model-config/storage-schema.ts')};export {supplierMetadataSchema,unknownSupplierMetadata} from ${JSON.stringify(source+'/src/lib/supplier-models/types.ts')};export {listSupplierModelsFrom} from ${JSON.stringify(source+'/src/lib/supplier-models/repository.ts')};`,resolveDir:source,loader:'ts'}));
   b.onResolve({filter:/^server-only$/},()=>({path:'server-only',namespace:'operator-cli'}));
   b.onLoad({filter:/.*/,namespace:'operator-cli'},()=>({contents:'',loader:'js'}));
  }

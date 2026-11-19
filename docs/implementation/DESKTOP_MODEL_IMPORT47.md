@@ -21,6 +21,7 @@
 - 后台原供应商元数据库页面可按`CC ·`来源名称查找；操作审计actor为明确operator而非冒用用户。已导入字段仍标configured/unassigned，价格保持未知，没有根据名称推断能力或采购价。
 - 初次独立CLI继承Web preload退出143，发生在任何写入前；清空仅CLI的NODE_OPTIONS后通过。固定公共读取契约增加依赖闭包后重新验证；一次写锁繁忙按75退出未写入，不抢锁。实际生产导入只执行一次。
 - 公共回执：`evidence/desktop-model-import47/{SOURCE,CONTRACT_PIN,FIXTURE,APPLY,VERIFY}.json`；不包含密钥、原配置或浏览器认证数据。
+- 收尾增加“纯只读核验”入口：复用`createCredentialReader`，`REPEATABLE READ READ ONLY`，不执行schema初始化或凭据写入，因此不占应用发布三锁。APPLY/ROLLBACK仍须持三锁；不是绕过写门禁。最终只读bundle SHA256 `ad93ac256063da751cd1ddb805f19bf6cd1ab53bc675e72a5401657d38ca9569`，12项PG与实际8/38/8回读再次通过；此前锁繁忙回执保留。
 
 ## 回滚与后续
 ROLLBACK只删除该operation创建且仍未变的元数据、来源和未被发布/草稿引用的凭据；保留所有原路由、价格、来源、密钥。真实回滚先在隔离PG schema验证，正式副本保持新增。下一模块才接47员工/设备模型授权、短期凭据和运行时强制准入；配置复制不等于统一管控已经生效。
