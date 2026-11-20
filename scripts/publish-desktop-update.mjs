@@ -48,12 +48,12 @@ function argValue(name) {
   return index >= 0 ? process.argv[index + 1] : undefined;
 }
 
-export function releaseCommands({existing,tag,notesFile,installer,manifest,prerelease=false}) {
+export function releaseCommands({existing,tag,notesFile,installer,manifest,prerelease=false,targetCommitish}) {
   const repo=['--repo',REPO];
   return existing ? [
     ['release','edit',tag,...repo,'--notes-file',notesFile],
     ['release','upload',tag,...repo,installer,manifest,'--clobber'],
-  ] : [['release','create',tag,...repo,'--title','Naumi Desktop '+tag,'--notes-file',notesFile,...(prerelease?['--prerelease']:[]),installer,manifest]];
+  ] : [['release','create',tag,...repo,'--title','Naumi Desktop '+tag,'--notes-file',notesFile,...(targetCommitish?['--target',targetCommitish]:[]),...(prerelease?['--prerelease']:[]),installer,manifest]];
 }
 
 function run(command, args, {cwd = root, env} = {}) {
@@ -81,7 +81,7 @@ function main() {
   if (fs.existsSync(stagedManifest) && JSON.parse(fs.readFileSync(stagedManifest)).edition === 'internal-trial') throw Error('INTERNAL_TRIAL_PUBLICATION_FORBIDDEN');
   const manifest = path.join(output, 'latest.yml');
   const installer = path.join(output, `Naumi-Setup-${version}-x64.exe`);
-  assertModelPickerRelease(output);
+  assertModelPickerRelease(output, version);
   for (const file of [manifest, installer]) if (!fs.existsSync(file)) throw Error('RELEASE_ARTIFACT_MISSING ' + file);
   if (fs.readFileSync(manifest, 'utf8').includes('Naumi-Test-Setup-')) throw Error('INTERNAL_TRIAL_PUBLICATION_FORBIDDEN');
 
@@ -94,7 +94,8 @@ function main() {
   const tag = 'v' + version;
   const ghArgs = ['--repo', REPO];
   const existing = capture('gh', ['release', 'view', tag, ...ghArgs]);
-  for(const command of releaseCommands({existing:existing.ok,tag,notesFile,installer,manifest,prerelease:args.includes('--prerelease')}))run('gh',command);
+  const targetCommitish=argValue('--target');if(targetCommitish&&!/^[a-f0-9]{40}$/.test(targetCommitish))throw Error('RELEASE_TARGET_INVALID');
+  for(const command of releaseCommands({existing:existing.ok,tag,notesFile,installer,manifest,prerelease:args.includes('--prerelease'),targetCommitish}))run('gh',command);
   const size = (fs.statSync(installer).size / 1024 / 1024).toFixed(1);
   console.log(`RELEASE ${tag} artifacts=Naumi-Setup-${version}-x64.exe(${size}MB)+latest.yml(with releaseNotes) feed=github:${REPO}`);
 }
