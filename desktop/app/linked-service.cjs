@@ -2,7 +2,7 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{randomUUID}=require('node:crypto');
 const profile=require('./profile.cjs'),code=require('./service-code.cjs');
 const plugins=[['naumi-enterprise','dsh-enterprise'],['naumi-ui-layout','dsh-ui-layout'],['naumi-sidebar-browser','dsh-sidebar-browser']];
-const nativeFiles=['dsh-client-ui-workspace/lib/client.js','dsh-client-ui-conversation/lib/client.js','dsh-client-ui-deliverables/lib/client.js','dsh-client-ui-input-trigger/lib/client.js','dsh-client-ui-sidebar-right/lib/client.js','dsh-client-ui-settings-general/lib/client.js','dsh-llm-pi-ai/lib/index.js'];
+const nativeFiles=['dsh-client-ui-workspace/lib/client.js','dsh-client-ui-conversation/lib/client.js','dsh-client-ui-deliverables/lib/client.js','dsh-client-ui-input-trigger/lib/client.js','dsh-client-ui-sidebar-right/lib/client.js','dsh-client-ui-settings-general/lib/client.js','dsh-client-ui-model-selection/lib/client.js','dsh-llm-pi-ai/lib/index.js'];
 const stateFile=home=>path.join(home,'desktop-linked-service.json');
 function beneath(root,relative){assert(typeof relative==='string'&&!relative.includes('\\')&&!relative.split('/').some(p=>p==='..'||p==='.'||p===''),'SERVICE_PATH_INVALID');const file=path.resolve(root,relative);assert(file.startsWith(path.resolve(root)+path.sep),'SERVICE_PATH_ESCAPE');return file;}
 function plainPath(file){for(let p=file;fs.existsSync(p);p=path.dirname(p)){assert(!fs.lstatSync(p).isSymbolicLink(),'SERVICE_LINKED_PATH');if(p===path.dirname(p))break;}return file;}
@@ -11,6 +11,8 @@ function release(root,version){
  for(const row of rows){const file=beneath(root,row.path);assert(!index.has(row.path),'SERVICE_DUPLICATE_INVENTORY');index.set(row.path,row);}
  const verify=relative=>{const row=index.get(relative);assert(row,'SERVICE_RELEASE_FILE_MISSING '+relative);const bytes=fs.readFileSync(plainPath(beneath(root,relative)));assert.equal(code.hash(bytes),row.sha256,'SERVICE_RELEASE_HASH '+relative);return bytes;};
  for(const [folder,name]of plugins){const expected=rows.filter(r=>r.path.startsWith('plugins/'+folder+'/'));assert(expected.length,'SERVICE_PLUGIN_MISSING');const actual=code.inventory(path.join(root,'plugins',folder));assert.equal(Object.keys(actual).length,expected.length,'SERVICE_RELEASE_EXTRA');for(const r of expected){verify(r.path);assert.equal(actual[r.path.slice(('plugins/'+folder+'/').length)],r.sha256);}}
+ // Every staged native extension must participate in this same code transaction.
+ for(const row of rows)if(row.path.startsWith('node_modules/@deepseek-ai/')&&row.path.endsWith('.naumi-original'))assert(nativeFiles.includes(row.path.slice('node_modules/@deepseek-ai/'.length,-'.naumi-original'.length)),'SERVICE_NATIVE_EXTENSION_UNTRACKED '+row.path);
  assert.equal(code.versionAt(path.join(root,'plugins/naumi-enterprise')),version,'SERVICE_RELEASE_LABEL_MISMATCH');for(const file of nativeFiles)verify('node_modules/@deepseek-ai/'+file);
  return {...runtime,manifest,verify};
 }

@@ -44,3 +44,18 @@ test('first-time adoption verifies exact process/port and never stops unknown or
 });
 
 test('only dead owned synchronization locks are recovered, live and unknown locks are preserved',()=>{const f=fixture();try{const file=path.join(f.root,'runtime/service-alignment.lock');f.write(file,{version:1,pid:2147483647,kind:'desktop-linked-update'});const release=service.acquire(f.root,'desktop-linked-update');assert.throws(()=>service.acquire(f.root,'desktop-linked-update'),/BUSY/);release();f.write(file,{pid:2147483647,kind:'another-tool'});assert.throws(()=>service.acquire(f.root,'desktop-linked-update'),/BUSY/);assert.equal(JSON.parse(fs.readFileSync(file)).kind,'another-tool');}finally{f.close();}});
+
+test('model picker is an explicit linked-service contract, including already-current labels',()=>{
+ assert(service.nativeFiles.includes('dsh-client-ui-model-selection/lib/client.js'));
+ const f=fixture(),relative='node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js';
+ try{service.synchronize(f.settings);f.write(path.join(f.root,relative),'stale model picker');const p=service.plan({root:f.root,home:f.home,releaseRoot:f.bundle,version:'0.4.2'});assert.equal(p.changed,1);assert.equal(p.native.find(n=>n.relative===relative).before,sha('stale model picker'));service.synchronize(f.settings);assert.equal(fs.readFileSync(path.join(f.root,relative),'utf8'),'new native');assert.equal(service.synchronize(f.settings).changed,0);assert.equal(fs.readFileSync(f.home+'/credentials.bin','utf8'),'never copy me');}finally{f.close();}
+});
+
+test('model-picker write failure rolls back exact UI before retry without touching credentials',()=>{
+ const f=fixture(),file=path.join(f.root,'node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js');
+ try{service.synchronize(f.settings);f.write(file,'old picker preserved');let writes=0;assert.throws(()=>service.synchronize(f.settings,{fault:step=>{if(step==='native'){writes++;throw Error('picker write failure');}}}),/picker write failure/);assert.equal(writes,1);assert.equal(fs.readFileSync(file,'utf8'),'old picker preserved');assert.equal(service.readState(f.home).phase,'ready');service.synchronize(f.settings);assert.equal(fs.readFileSync(file,'utf8'),'new native');assert.equal(fs.readFileSync(f.home+'/credentials.bin','utf8'),'never copy me');}finally{f.close();}
+});
+
+test('future staged native extension omitted from sync contract fails before any write',()=>{
+ const f=fixture();try{f.write(path.join(f.bundle,'node_modules/@deepseek-ai/future-ui/lib/client.js.naumi-original'),'original');f.seal();assert.throws(()=>service.synchronize(f.settings),/SERVICE_NATIVE_EXTENSION_UNTRACKED/);assert(!service.readState(f.home));assert.equal(fs.readFileSync(f.home+'/profiles/web/node_modules/@naumi/dsh-enterprise/product-version.js','utf8'),'export const PRODUCT_VERSION="0.3.9";');assert.equal(fs.readFileSync(f.home+'/credentials.bin','utf8'),'never copy me');}finally{f.close();}
+});
