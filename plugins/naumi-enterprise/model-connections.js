@@ -58,6 +58,7 @@ export class ModelConnections{
  }
  namespace(){const ns=this.ctx.settings.describe({redactSecrets:true}).find(n=>n.ns==='llm-pi-ai');if(!ns)throw error('MODEL_SETTINGS_UNAVAILABLE',503);return ns;}
  async read(){const ns=this.namespace(),groups=[];for(const[id,p]of Object.entries(ns.value.providers??{})){
+  if(this.ctx.get?.('naumiModelPolicy')&&!p.models?.length)continue;
   const info=p.apiKeyEnv?await this.ctx.credentials.describe(p.apiKeyEnv):{configured:false,writable:true};
   groups.push({id,displayName:p.displayName??id,api:p.api??'openai-completions',reasoning:p.reasoning??null,baseURL:p.baseURL??'',models:(p.models??[]).map(m=>({id:m.id,...m.name?{name:m.name}:{}})),configured:info.configured,editable:protocols.includes(p.api)&&Array.isArray(p.models)&&p.models.length>0});
  }for(const group of groups){const provider=ns.value.providers[group.id];group.models=group.models.map(m=>{const raw=provider.models.find(row=>row.id===m.id);return {...modelSpecView({...m,...raw.contextWindow===undefined?{}:{contextWindow:raw.contextWindow},...raw.maxTokens===undefined?{}:{maxTokens:raw.maxTokens}},provider),input:raw.input?.length?[...raw.input]:null,...reasoningView(raw,provider.api)};});}return {revision:ns.revision,writable:this.ctx.settings.writable&&!this.ctx.get?.('naumiModelPolicy'),managedPolicy:this.ctx.get?.('naumiModelPolicy')?.state??null,groups,specs:officialModelSpecs};}
@@ -69,7 +70,7 @@ export class ModelConnections{
   const first=missingModel?[current.provider,own]:Object.entries(p).find(([,v])=>v.models?.length);
   await this.ctx.agentDefaultModel.saveSelection(first?{provider:first[0],model:first[1].models[0].id}:unconfigured);
  }
- execute(input){if(this.ctx.get?.('naumiModelPolicy'))return Promise.reject(error('MODEL_POLICY_MANAGED',403));const run=this.queue.then(()=>this.write(input));this.queue=run.catch(()=>{});return run;}
+ execute(input){const policy=this.ctx.get?.('naumiModelPolicy');if(policy){if(input?.action==='retry-policy'&&Object.keys(input).every(k=>k==='action'||k==='expectedRevision'))return policy.apply().catch(()=>null).then(()=>this.read());return Promise.reject(error('MODEL_POLICY_MANAGED',403));}const run=this.queue.then(()=>this.write(input));this.queue=run.catch(()=>{});return run;}
  async write(input){
   const parsed=z.union([save,remove,refresh]).safeParse(input);if(!parsed.success)throw error('MODEL_INVALID_REQUEST');const p=parsed.data;
   const ns=this.namespace();if(!this.ctx.settings.writable)throw error('MODEL_SETTINGS_READ_ONLY',403);if(ns.revision!==p.expectedRevision)throw error('MODEL_SETTINGS_CONFLICT',409);
