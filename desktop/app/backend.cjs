@@ -118,6 +118,13 @@ async function ensureBackend(settings,{fetcher=fetch,startTimeoutMs=90000,pollMs
  const trial=require('./internal-trial.cjs').trialLaunch(settings);
  const target=new URL(settings.url),runId=randomUUID(),env={...process.env,PATH:path.join(settings.root,'bin')+path.delimiter+settings.root+path.delimiter+(process.env.PATH??''),DSH_HOME:settings.home,DSH_TELEMETRY_MODE:'DISABLED'};
  Object.assign(env,trial.env);
+ // Only an explicitly staged rollout enables replacement. Ordinary/frozen bundles stay unchanged.
+ delete env.NAUMI_MODEL_POLICY;
+ if(settings.isolated||settings.linkedService){
+  const manifestFile=path.join(settings.releaseRoot??settings.root,'runtime-manifest.json');
+  const policy=fs.existsSync(manifestFile)?JSON.parse(fs.readFileSync(manifestFile)).modelPolicy:undefined;
+  if(policy!==undefined){if(policy!=='two-vision-20261120')throw Error('MODEL_POLICY_RESOURCE_INVALID');env.NAUMI_MODEL_POLICY=policy;}
+ }
  delete env.ELECTRON_RUN_AS_NODE;delete env.NAUMI_DESKTOP_INSTANCE_ID;delete env.NAUMI_DESKTOP_BUNDLE_ID;delete env.NAUMI_ENTERPRISE_ORIGIN;
  const base={pid:null,port:Number(target.port),bundleId:settings.runtime?.bundleId,phase:'starting',runId};
  if(settings.isolated||settings.linkedService){env.NAUMI_DESKTOP_MAINTENANCE='1';env.NAUMI_DESKTOP_INSTANCE_ID=settings.identity.id;env.NAUMI_DESKTOP_BUNDLE_ID=settings.runtime.bundleId;if(settings.enterpriseOrigin)env.NAUMI_ENTERPRISE_ORIGIN=settings.enterpriseOrigin;}
