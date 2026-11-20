@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
+import {assertModelPickerRelease} from './native-model-picker-extension.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REPO = 'JesstLe/naumi-desktop';
@@ -80,6 +81,7 @@ function main() {
   if (fs.existsSync(stagedManifest) && JSON.parse(fs.readFileSync(stagedManifest)).edition === 'internal-trial') throw Error('INTERNAL_TRIAL_PUBLICATION_FORBIDDEN');
   const manifest = path.join(output, 'latest.yml');
   const installer = path.join(output, `Naumi-Setup-${version}-x64.exe`);
+  assertModelPickerRelease(output);
   for (const file of [manifest, installer]) if (!fs.existsSync(file)) throw Error('RELEASE_ARTIFACT_MISSING ' + file);
   if (fs.readFileSync(manifest, 'utf8').includes('Naumi-Test-Setup-')) throw Error('INTERNAL_TRIAL_PUBLICATION_FORBIDDEN');
 

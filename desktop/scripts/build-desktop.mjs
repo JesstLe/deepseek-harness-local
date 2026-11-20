@@ -52,7 +52,9 @@ export async function buildDesktop(args=process.argv.slice(2)){
  try{
   process.chdir(path.join(root,'desktop'));
   console.log('NAUMI_BUILDER stock_uninstaller=1 stock_signing=1 stock_size_check=1 engine_delta=2');
-  return await build({...args.includes('--reuse-packaged')?{prepackaged:path.join(root,'runtime/naumi-desktop-release/win-unpacked')}:{},projectDir:path.join(root,'desktop'),targets:Platform.WINDOWS.createTarget(args.includes('--dir')?'dir':'nsis',Arch.x64),publish:'never',...((output||trial)?{config:{...output?{directories:{output}}:{},...trial?{win:{artifactName:'Naumi-Test-Setup-${version}-${arch}.${ext}'},extraMetadata:{naumiEdition:'internal-trial'}}:{}}}:{})});
+  const artifacts=await build({...args.includes('--reuse-packaged')?{prepackaged:path.join(root,'runtime/naumi-desktop-release/win-unpacked')}:{},projectDir:path.join(root,'desktop'),targets:Platform.WINDOWS.createTarget(args.includes('--dir')?'dir':'nsis',Arch.x64),publish:'never',...((output||trial)?{config:{...output?{directories:{output}}:{},...trial?{win:{artifactName:'Naumi-Test-Setup-${version}-${arch}.${ext}'},extraMetadata:{naumiEdition:'internal-trial'}}:{}}}:{})});
+  if(!trial&&!args.includes('--dir')){const {verifyModelPickerDistribution}=await import('../../scripts/verify-model-picker-distribution.mjs');await verifyModelPickerDistribution({root,release:output??path.join(root,'runtime/naumi-desktop-release')});}
+  return artifacts;
  }finally{restore();process.chdir(callerCwd);}
 }
 if(process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url)await buildDesktop();
