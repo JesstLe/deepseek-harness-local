@@ -18,3 +18,5 @@
 
 集中结果：全仓首轮仅既有hotfix夹具Windows目录rename EPERM，定向复测11/11通过；最终全仓1108/1108 exit0。随后补充fresh profile无llm节点/凭据文件边界，修正YAML节点构造，最终新模块8/8 exit0（全仓计数不冒加为1109）。原失败日志保留。
 实际供应商最小Anthropic Messages请求1次，max_tokens16，HTTP200/OK，输入17输出4token；请求id为用户给定claude-sonnet-5-5，供应商回报model=claude-sonnet-5-5-high。无图像/桌面/个人聊天内容，未改变真实会话默认模型。此前模型目录GET200精确ID已确认。此证据是新通道小型文本验收，不冒称视觉/大上下文/高并发已验证。
+
+实际首包门禁捕获TRIAL_EDITION_INVALID：旧trialResources把任何非空edition都当旧内部试用包，新embedded-test触发拒绝，worker尚未启动。修正为显式识别本测试edition，校验必要声明后交由专用模块处理；相关模块/原内部试用与旧测试版升级定向回归通过。失败候选未发布。静态验包原清单还引用已由headless业务切片删除的business-context-client资产，已更新为固定主线实际源，不恢复已退役资产。
