@@ -24,3 +24,11 @@
 旧目录实际升级还捕获了已合headless业务切片的遗留资产迁移缺口：0.4.9原官方business-context-client.js仍在目标目录，原同步器判未知extra阻止升级。只将其实际发布的官方原字节hash列为可事务退役项；修改过的同名文件继续拒绝，备份和回滚恢复原字节。相关旧链接/embedded/原试用/退役模块39/39通过。没有恢复已移除业务UI或放宽未知文件保护。门禁另修复fixture把Sol/Terra同源地址错误拆分，以及上一版0.4.9已修复标题却仍要求复现旧标题的QA假设；真实源码策略未放宽。所有失败日志保留、失败候选均未发布。
 
 退役清单按主线headless完整删除范围核对为JS和CSS两个官方文件，均限定LF/CRLF两种已知hash，不按文件名盲删；修改任意一个同名文件继续拒绝。独立事务删除两个文件并逐字节回滚通过；补充定向结果见RETIRED_COMPLETE.log。打包中的自有第三候选在发现CSS遗漏后主动停止，未发布。
+
+## 最终交付
+- 固定main 4402c9db42f40801e09b83468377b24218be6527，0.4.10完整标准NSIS包；首次完整stage保留并验证，后续只从新固定main重打app/NSIS，后端字节与inventory保持不变。最终 node desktop/scripts/build-desktop.mjs exit0，含强制原生EXE验收；未把此前exit1或主动停止的候选写成成功。
+- 实际安装器EXE/asar/原生UI/内嵌配置四资源提取hash一致，28检查、四配置×十二场景通过；新用户、两批旧测试配置、已修复0.4.9链接服务同账号/home/端口/Cookie升级通过。八次loopback请求，原生Sonnet wire ID验证通过，真实供应商请求0（另有前述独立小型真实请求1次）。旧配置refs保留，实际生效providers只含四项，Bot/普通/群聊与切换刷新保持。
+- 静态实际包9检查PASS；manifest明确edition=embedded-test、personalCredentials=true、credentialBearing=true，不冒称无内嵌密钥。Git/日志/用户更新说明未包含密钥值。
+- 官方发布命令 --skip-build --ack-embedded-test --target 4402c9db42f40801e09b83468377b24218be6527 exit0；https://github.com/JesstLe/naumi-desktop/releases/tag/v0.4.10 已发布Latest。匿名真实latest.yml HTTP200、tag/资产digest/大小/文案/sha512回读一致；默认镜像429，原直连回退可用。
+- 安装器504621596bytes，SHA256 19181ad1b06446847e8088f6cf7eb6c7e4b3612f64e3d191f66bd0da05b7786c。稳定工件及完整命令/失败历史在D:/NaumiReleases/0.4.10/。源码/事务副本回滚均通过，实际新包保持修改态。
+- 用户当前安装只读回执仍0.4.9/0.4.9；本线程未自行安装或重启。两位测试者完成0.4.10安装并启动后才执行覆盖，不把发布当成远端已安装。后续管理后台统一授权、移除本应用内嵌凭据及轮换测试共享Key仍未实施。
