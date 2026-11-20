@@ -15,3 +15,5 @@
 验证注意：空Bot home是原生welcome composer，不渲染会话header，因此不能在那里断言团队栏；使用真实绑定且有历史的Bot Session验证。旧任务overview夹具并无历史条目，不把sidebar同名字幕当任务历史已可点；测试只通过注入的ctx公开uiWorkspace.openSession导航到隔离真实Session，未替换store/组件或写消息。浏览器按钮为原生可访问名包含浏览器，而非固定完全相同名称。前述QA断言失败均保留，修正轨迹后25项通过。
 
 源码原件hash与修改件见manifest；baseline31/31、另一副本restore31/31、portable ZIP4项CRC和原件hash通过。尚待main普通合入与运行资产加载。当前Desktop托管服务0.4.5；本轮不改已安装包/托管manifest或lease，不停服务。若热加载仅当前profile资产，后续启动同步旧包可能恢复旧展示，持久生效需包含本修复的新包，分别记录。
+
+最终收口：功能已普通合入并推送main 2a4e21a；再次整合2f6d37b原生业务工具主线，保留模型恢复。四件套位于evidence/thread-team-visibility，31基线/34修改/25真实隔离UI/31副本恢复通过。单资产加载命令在任何写入或拿锁前因3080 ECONNREFUSED退出1，运行未加载；用户服务无监听，未擅自启动旧托管服务、不碰其他线程隔离验收端口。不改已安装包、journal、模型或业务数据。后续运行加载/含本提交的新包仍是未完成门；不能以main合并代替上线。功能模块迭代计数1，收尾证据不新增发布计数。
