@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
 import {Context} from '@deepseek-ai/cordis';
 import * as pi from '@deepseek-ai/dsh-llm-pi-ai';
-import {modelPolicyPlan,ModelPolicy,modelPolicyBackup,installModelPolicy,MODEL_POLICY_REVISION} from '../plugins/naumi-enterprise/model-policy.js';
+import {modelPolicyPlan,ModelPolicy,modelPolicyBackup,installModelPolicy,MODEL_POLICY_REVISION,LUNA_TERRA_PROVIDER} from '../plugins/naumi-enterprise/model-policy.js';
 import {ModelConnections} from '../plugins/naumi-enterprise/model-connections.js';
 
 const source=()=>({
@@ -21,11 +22,11 @@ function fixture(){
  const service=new ModelPolicy(ctx,{backup:async value=>{if(f.failBackup)throw Error('backup failed');backups.push(structuredClone(value));}});
  return Object.assign(f,{ctx,service,backups,getProviders:()=>providers,changeProviders:v=>{providers=v;},getSelection:()=>selection,counters:()=>({writes,saves,revision})});
 }
-test('exact IDs, exact two aliases and explicit vision preserve endpoints, keys, budgets and compat',()=>{
+test('exact IDs, three display choices and explicit vision preserve endpoints, keys, budgets and compat',()=>{
  const p=source(),before=structuredClone(p),plan=modelPolicyPlan(p);assert.deepEqual(p,before);
- assert.deepEqual(Object.keys(plan.providers),['ccs-deepseek-992333','ccs-provider-8c7ab447-51aed7']);
- assert.deepEqual(Object.values(plan.providers).flatMap(p=>p.models.map(m=>[m.id,m.name,m.input])),[['deepseek-flash','claude fable5.2',['text','image']],['gpt-6-luna','gpt 6.1 sol',['text','image']]]);
- for(const[id,p]of Object.entries(plan.providers)){assert.equal(p.baseURL,before[id].baseURL);assert.equal(p.apiKeyEnv,before[id].apiKeyEnv);assert.equal(p.models[0].maxTokens,before[id].models[0].maxTokens);}
+ assert.deepEqual(Object.keys(plan.providers),['ccs-deepseek-992333','ccs-provider-8c7ab447-51aed7',LUNA_TERRA_PROVIDER]);
+ assert.deepEqual(Object.values(plan.providers).flatMap(p=>p.models.map(m=>[m.id,m.name,m.input])),[['deepseek-flash','claude fable5.2',['text','image']],['gpt-6-luna','gpt6.1sol',['text','image']],['gpt-6-luna','gpt6.1terra',['text','image']]]);
+ for(const[id,p]of Object.entries(plan.providers)){const original=before[id===LUNA_TERRA_PROVIDER?'ccs-provider-8c7ab447-51aed7':id];assert.equal(p.baseURL,original.baseURL);assert.equal(p.apiKeyEnv,original.apiKeyEnv);assert.equal(p.models[0].maxTokens,original.models[0].maxTokens);}
  assert.deepEqual(plan.providers['ccs-provider-8c7ab447-51aed7'].headers,{'x-fixture':'keep'});
 });
 test('similar Flash names do not qualify and missing sources never produce placeholders',()=>{
@@ -33,7 +34,7 @@ test('similar Flash names do not qualify and missing sources never produce place
  assert.throws(()=>modelPolicyPlan({}),/MODEL_POLICY_SOURCE_REQUIRED/);
 });
 test('both exact models on one endpoint stay on one credential reference',()=>{
- const p=source();p['ccs-deepseek-992333'].models.push(p['ccs-provider-8c7ab447-51aed7'].models[0]);delete p['ccs-provider-8c7ab447-51aed7'];delete p.duplicate;const v=modelPolicyPlan(p);assert.equal(Object.keys(v.providers).length,1);assert.equal(Object.values(v.providers)[0].models.length,2);
+ const p=source();p['ccs-deepseek-992333'].models.push(p['ccs-provider-8c7ab447-51aed7'].models[0]);delete p['ccs-provider-8c7ab447-51aed7'];delete p.duplicate;const v=modelPolicyPlan(p);assert.equal(Object.keys(v.providers).length,2);assert.equal(Object.values(v.providers)[0].models.length,2);assert.equal(v.providers[LUNA_TERRA_PROVIDER].apiKeyEnv,'FLASH');
 });
 test('invalid endpoints/protocols/ref reject before migration',()=>{
  for(const change of[{api:'invented'},{apiKeyEnv:null},{baseURL:'https://user:secret@example.com'},{baseURL:'file:///tmp/key'}]){const p=source();Object.assign(p['ccs-deepseek-992333'],change);assert.throws(()=>modelPolicyPlan(p),/MODEL_POLICY_SOURCE_INVALID/);}
@@ -47,6 +48,13 @@ test('one settings CAS persists only selected providers; backup precedes write, 
 });
 test('repeated startup is idempotent and does not rewrite backup, credentials or default',async()=>{
  const f=fixture();await f.service.apply();await f.service.apply();assert.deepEqual(f.counters(),{writes:1,saves:1,revision:1});assert.equal(f.backups.length,1);
+});
+test('Terra is an independent native selection sharing Sol credentials and preserves a saved Terra choice',async()=>{
+ const f=fixture();await f.service.apply();const p=f.getProviders();assert.equal(p[LUNA_TERRA_PROVIDER].apiKeyEnv,p['ccs-provider-8c7ab447-51aed7'].apiKeyEnv);assert.equal(p[LUNA_TERRA_PROVIDER].baseURL,p['ccs-provider-8c7ab447-51aed7'].baseURL);
+ const selection={provider:LUNA_TERRA_PROVIDER,model:'gpt-6-luna'};f.service.assert(selection);let writes=0;f.service.select({model:{current:()=>selection,select:()=>writes++}});assert.equal(writes,0);
+});
+test('reserved Terra route collisions refuse rather than overwrite another endpoint or key',()=>{
+ for(const extra of[{...source()['ccs-provider-8c7ab447-51aed7'],baseURL:'https://foreign.example'},{...source()['ccs-provider-8c7ab447-51aed7'],apiKeyEnv:'FOREIGN'},{...source()['ccs-provider-8c7ab447-51aed7'],models:[{id:'other-model'}]}]){const p=source();p[LUNA_TERRA_PROVIDER]=extra;assert.throws(()=>modelPolicyPlan(p),/MODEL_POLICY_ALIAS_ROUTE_COLLISION/);}
 });
 test('missing keys, read-only settings, backup failures and failed CAS never remove old providers',async()=>{
  for(const field of['keyMissing','readonly','failBackup','failWrite']){const f=fixture(),before=structuredClone(f.getProviders());f[field]=true;await assert.rejects(f.service.apply());assert.deepEqual(f.getProviders(),before);assert.equal(f.service.state.ready,false);assert.throws(()=>f.service.assert({provider:'removed',model:'old-model'}));}
@@ -73,7 +81,22 @@ test('distributed host hooks gate real dispatch, remap restored agents, and neve
  const scope={...f.ctx,agents:{list:()=>[agent]},provide:(k,v)=>services.set(k,v),on:(k,v)=>events.set(k,v)};
  try{installModelPolicy({inject:(_deps,fn)=>fn(scope)},{enabled:true,home:dir});await events.get('ready')();assert.equal(services.get('naumiModelPolicy').state.ready,true);assert.equal(selected.model,'deepseek-flash');let dispatch=0;const next=async function*(){dispatch++;yield{type:'fixture'};};const run=async opts=>{const out=[];for await(const c of events.get('llm/stream')(opts,next))out.push(c);return out;};await assert.rejects(run({provider:'removed',model:'old-model'}));assert.equal(dispatch,0);await run(selected);assert.equal(dispatch,1);await events.get('agent/created')({agent});assert.equal(selected.model,'deepseek-flash');}finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
-test('native pi-ai sees exactly two visual models with aliases, retaining actual wire IDs; network calls=0',async()=>{
+test('native pi-ai sees three visual options backed by two real model IDs with aliases, retaining actual wire IDs; network calls=0',async()=>{
  const ctx=new Context();let adapter;const h=ctx.plugin({apply(s){s.provide('llm',{registerConfigurableProviders:()=>({replace(){}}),registerModelDiscovery:()=>()=>{},registerAdapter:(_r,a)=>{adapter=a;return{replace(){}};}});s.provide('credentials',{resolve:async()=>({value:'fixture-only'})});}});await h;let p;
- try{p=ctx.plugin(pi,{providers:modelPolicyPlan(source()).providers});await p;for(const [provider,id,name]of[['ccs-deepseek-992333','deepseek-flash','claude fable5.2'],['ccs-provider-8c7ab447-51aed7','gpt-6-luna','gpt 6.1 sol']]){const m=await adapter.resolveModel(provider,id);assert.equal(m.id,id);assert.equal(m.name,name);assert.deepEqual(m.inputModalities,['text','image']);}}finally{await p?.dispose();await h.dispose();}
+ try{p=ctx.plugin(pi,{providers:modelPolicyPlan(source()).providers});await p;for(const [provider,id,name]of[['ccs-deepseek-992333','deepseek-flash','claude fable5.2'],['ccs-provider-8c7ab447-51aed7','gpt-6-luna','gpt6.1sol'],[LUNA_TERRA_PROVIDER,'gpt-6-luna','gpt6.1terra']]){const m=await adapter.resolveModel(provider,id);assert.equal(m.id,id);assert.equal(m.name,name);assert.deepEqual(m.inputModalities,['text','image']);}}finally{await p?.dispose();await h.dispose();}
+});
+
+test('real native Anthropic serialization sends gpt-6-luna for both Sol and Terra, never either display alias',async()=>{
+ const requests=[];const server=http.createServer(async(req,res)=>{
+  const parts=[];for await(const c of req)parts.push(c);const body=JSON.parse(Buffer.concat(parts));requests.push({path:req.url,model:body.model,key:req.headers['x-api-key']});
+  res.writeHead(200,{'content-type':'text/event-stream'});
+  const event=(type,value)=>res.write('event: '+type+'\ndata: '+JSON.stringify({type,...value})+'\n\n');
+  event('message_start',{message:{id:'fixture',type:'message',role:'assistant',content:[],model:'gpt-6-luna',usage:{input_tokens:5,output_tokens:0}}});
+  event('content_block_start',{index:0,content_block:{type:'text',text:''}});event('content_block_delta',{index:0,delta:{type:'text_delta',text:'ok'}});event('content_block_stop',{index:0});event('message_delta',{delta:{stop_reason:'end_turn',stop_sequence:null},usage:{output_tokens:1}});event('message_stop',{});res.end();
+ });await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const ctx=new Context();let adapter;const host=ctx.plugin({apply(s){s.provide('llm',{registerConfigurableProviders:()=>({replace(){}}),registerModelDiscovery:()=>()=>{},registerAdapter:(_r,a)=>{adapter=a;return{replace(){}};}});s.provide('credentials',{resolve:async()=>({value:'fixture-shared-luna-key'})});}});await host;let plugin;
+ try{const p=source();p['ccs-provider-8c7ab447-51aed7'].baseURL='http://127.0.0.1:'+server.address().port;plugin=ctx.plugin(pi,{providers:modelPolicyPlan(p).providers});await plugin;
+  for(const provider of['ccs-provider-8c7ab447-51aed7',LUNA_TERRA_PROVIDER]){const chunks=[];for await(const c of adapter.stream({provider,model:'gpt-6-luna',messages:[{role:'user',content:[{type:'text',text:'fixture'}]}],maxTokens:8,signal:AbortSignal.timeout(8000)}))chunks.push(c);assert(chunks.some(c=>c.type==='finish'&&c.reason.kind==='stop'));}
+  assert.equal(requests.length,2);assert(requests.every(r=>r.model==='gpt-6-luna'&&r.key==='fixture-shared-luna-key'));assert(requests.every(r=>!JSON.stringify(r).includes('gpt6.1sol')&&!JSON.stringify(r).includes('gpt6.1terra')));
+ }finally{await plugin?.dispose();await host.dispose();server.closeAllConnections();await new Promise(r=>server.close(r));}
 });
