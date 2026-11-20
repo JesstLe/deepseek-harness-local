@@ -1,5 +1,7 @@
 # 全量分发目标：两模型配置替换
 
+后续用户增加同源 Sol/Terra 两个显示选项，最新三选项及固定包标记见 [Luna 显示选项记录](2026-11-20-luna-display-aliases.md)。下文保留初次两模型切片的历史验收。
+
 ## 模块与职责
 用户指定全部已分发用户只开放 `deepseek-flash`（显示 `claude fable5.2`）和 `gpt-6-luna`（显示 `gpt 6.1 sol`），两者声明文本与图像输入。显示名是自定义别名，真实供应商、协议与模型 ID 保留，不声称 DeepSeek 实际变成 Claude 或 Luna 变成 Sol。
 

@@ -5,10 +5,12 @@ import {isDeepStrictEqual} from 'node:util';
 import {LlmError} from '@deepseek-ai/dsh-llm';
 import {resolveDshHome} from '@deepseek-ai/dsh-home-paths';
 
-export const MODEL_POLICY_REVISION='two-vision-20261120';
+export const MODEL_POLICY_REVISION='three-options-vision-20261120';
+export const LUNA_TERRA_PROVIDER='naumi-luna-terra';
 export const MODEL_POLICY_MODELS=Object.freeze([
  Object.freeze({id:'deepseek-flash',name:'claude fable5.2',preferredProvider:'ccs-deepseek-992333'}),
- Object.freeze({id:'gpt-6-luna',name:'gpt 6.1 sol',preferredProvider:'ccs-provider-8c7ab447-51aed7'}),
+ Object.freeze({id:'gpt-6-luna',name:'gpt6.1sol',preferredProvider:'ccs-provider-8c7ab447-51aed7'}),
+ Object.freeze({id:'gpt-6-luna',name:'gpt6.1terra',preferredProvider:'ccs-provider-8c7ab447-51aed7',aliasProvider:LUNA_TERRA_PROVIDER}),
 ]);
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const fail=code=>{throw Object.assign(Error(code),{code});};
@@ -17,14 +19,18 @@ const fail=code=>{throw Object.assign(Error(code),{code});};
 export function modelPolicyPlan(providers){
  const selected={},missing=[];
  for(const rule of MODEL_POLICY_MODELS){
-  const candidates=Object.entries(providers??{}).filter(([,p])=>p?.models?.some(m=>m.id===rule.id));
+  const candidates=Object.entries(providers??{}).filter(([id,p])=>id!==LUNA_TERRA_PROVIDER&&p?.models?.some(m=>m.id===rule.id));
   const row=candidates.find(([id])=>id===rule.preferredProvider)??candidates[0];
-  if(!row){missing.push(rule.id);continue;}
-  const [id,p]=row;
+  if(!row){if(!missing.includes(rule.id))missing.push(rule.id);continue;}
+  const [sourceId,p]=row,id=rule.aliasProvider??sourceId;
   if(!['openai-completions','openai-responses','anthropic-messages'].includes(p.api)||!p.apiKeyEnv)fail('MODEL_POLICY_SOURCE_INVALID');
   const url=new URL(p.baseURL);if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash)fail('MODEL_POLICY_SOURCE_INVALID');
   const model={...structuredClone(p.models.find(m=>m.id===rule.id)),name:rule.name,input:['text','image']};
-  if(!selected[id])selected[id]={...structuredClone(p),models:[]};
+  if(rule.aliasProvider&&providers[id]){
+   const prior=providers[id];
+   if(prior.api!==p.api||prior.baseURL!==p.baseURL||prior.apiKeyEnv!==p.apiKeyEnv||!isDeepStrictEqual(prior.headers??{},p.headers??{})||prior.models?.length!==1||prior.models[0].id!==rule.id)fail('MODEL_POLICY_ALIAS_ROUTE_COLLISION');
+  }
+  if(!selected[id])selected[id]={...structuredClone(p),...(rule.aliasProvider?{displayName:'GPT 6.1 Terra'}:{}),models:[]};
   selected[id].models.push(model);
  }
  if(missing.length)throw Object.assign(Error('MODEL_POLICY_SOURCE_REQUIRED'),{code:'MODEL_POLICY_SOURCE_REQUIRED',missing});
@@ -57,7 +63,7 @@ export class ModelPolicy{
    this.routes=structuredClone(actual);this.defaultSelection=plan.defaultSelection;
    let defaultPending=false;const current=this.ctx.agentDefaultModel.currentSelection();
    if(!this.allowed(current))try{await this.ctx.agentDefaultModel.saveSelection(this.remap(current));}catch{defaultPending=true;}
-   this.state={revision:MODEL_POLICY_REVISION,ready:true,error:null,models:MODEL_POLICY_MODELS.map(({id,name})=>({id,name,input:['text','image']})),defaultPending};
+   this.state={revision:MODEL_POLICY_REVISION,ready:true,error:null,models:Object.entries(actual).flatMap(([provider,p])=>p.models.map(({id,name})=>({provider,id,name,input:['text','image']}))),defaultPending};
    return this.state;
   }catch(error){this.state={revision:MODEL_POLICY_REVISION,ready:false,error:error.code??'MODEL_POLICY_APPLY_FAILED',...(error.missing?{missing:error.missing}:{})};throw error;}
  }

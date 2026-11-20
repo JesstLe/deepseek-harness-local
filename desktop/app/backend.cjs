@@ -123,7 +123,7 @@ async function ensureBackend(settings,{fetcher=fetch,startTimeoutMs=90000,pollMs
  if(settings.isolated||settings.linkedService){
   const manifestFile=path.join(settings.releaseRoot??settings.root,'runtime-manifest.json');
   const policy=fs.existsSync(manifestFile)?JSON.parse(fs.readFileSync(manifestFile)).modelPolicy:undefined;
-  if(policy!==undefined){if(policy!=='two-vision-20261120')throw Error('MODEL_POLICY_RESOURCE_INVALID');env.NAUMI_MODEL_POLICY=policy;}
+  if(policy!==undefined){if(policy!=='three-options-vision-20261120')throw Error('MODEL_POLICY_RESOURCE_INVALID');env.NAUMI_MODEL_POLICY=policy;}
  }
  delete env.ELECTRON_RUN_AS_NODE;delete env.NAUMI_DESKTOP_INSTANCE_ID;delete env.NAUMI_DESKTOP_BUNDLE_ID;delete env.NAUMI_ENTERPRISE_ORIGIN;
  const base={pid:null,port:Number(target.port),bundleId:settings.runtime?.bundleId,phase:'starting',runId};

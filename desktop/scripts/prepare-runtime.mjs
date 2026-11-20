@@ -35,7 +35,7 @@ export function scanRuntimeInventory(files){
   return {files:files.length,forbiddenPaths:0};
 }
 export async function prepareRuntime({root=project,target=path.join(root,'runtime/desktop-backend'),archive=process.env.NAUMI_DINGTALK_ARCHIVE,trialInput,modelPolicy=process.env.NAUMI_BUILD_MODEL_POLICY}={}){
-  if(modelPolicy!==undefined&&modelPolicy!=='two-vision-20261120')throw Error('MODEL_POLICY_RESOURCE_INVALID');
+  if(modelPolicy!==undefined&&modelPolicy!=='three-options-vision-20261120')throw Error('MODEL_POLICY_RESOURCE_INVALID');
   root=path.resolve(root);target=path.resolve(target);
   const runtime=path.join(root,'runtime');
   if(!target.startsWith(runtime+path.sep)||fs.existsSync(target)&&fs.lstatSync(target).isSymbolicLink())throw Error('RUNTIME_TARGET_INVALID');
