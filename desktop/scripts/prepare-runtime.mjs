@@ -1,4 +1,5 @@
 import {stageCuaDriver} from './stage-cua.mjs';
+import {installNativeModelPicker,MODEL_PICKER_POLICY} from '../../scripts/native-model-picker-extension.mjs';
 import {stageTrialModels} from './internal-trial-models.mjs';
 import {installSidebarVisibility} from '../../scripts/native-sidebar-visibility-extension.mjs';
 import fs from 'node:fs';
@@ -51,6 +52,7 @@ export async function prepareRuntime({root=project,target=path.join(root,'runtim
     installNativeComposer(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js'));
     installAgentTriggers(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js'));
     installNativeSettings(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-settings-general/lib/client.js'));
+    installNativeModelPicker(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js'));
     installSidebarVisibility(path.join(staged,'node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js'));
     fs.cpSync(path.join(root,'plugins'),path.join(staged,'plugins'),{recursive:true});
     for(const [source,name]of [['naumi-enterprise','dsh-enterprise'],['naumi-ui-layout','dsh-ui-layout'],['naumi-sidebar-browser','dsh-sidebar-browser']])fs.cpSync(path.join(root,'plugins',source),path.join(staged,'node_modules/@naumi',name),{recursive:true});
@@ -70,6 +72,7 @@ export async function prepareRuntime({root=project,target=path.join(root,'runtim
     fs.writeFileSync(path.join(staged,'runtime-files.json'),JSON.stringify(inventory,null,2)+'\n');
     const manifest={product:'Naumi',...trial?{edition:'internal-trial',trial}:{},schemaVersion:2,desktop:{profileVersion:1,identityProtocol:2,maintenanceProtocol:1,workspaceProtocol:1},version:JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json'))).version,node:process.versions.node,harness:'0.2.2-rc.1',desktopEngine:'cua',cuaDriver:'0.54.0',dingtalk,personalCredentials:!!trial,browserProfiles:false,bootstrap:'offline',nodeSHA256:sha(path.join(staged,'node.exe')),inventorySHA256:sha(path.join(staged,'runtime-files.json')),closure,scan};
     if(modelPolicy)manifest.modelPolicy=modelPolicy;
+    manifest.modelPicker=MODEL_PICKER_POLICY;
     fs.writeFileSync(path.join(staged,'runtime-manifest.json'),JSON.stringify(manifest,null,2)+'\n');
     // Publish only after import/closure/content checks. Preserve the preceding bundle for rollback.
     let previous=null;if(fs.existsSync(target)){previous=target+'.previous-'+randomUUID();fs.renameSync(target,previous);}
