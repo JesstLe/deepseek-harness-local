@@ -1,0 +1,52 @@
+普通线程团队显示修复 / thread-team-visibility
+BRANCH=codex/thread-team-visibility-20261120
+BASELINE_SHA=fc2d183dd49527ce264e55da8babcce43f26d128
+FUNCTION_COMMIT=f7b99a9
+MAIN_FUNCTION_MERGE=2a4e21abc3420faa0adb71d57894e08de134cc79
+INTEGRATED_SOURCE=2f6d37b
+CHANGED_FIELD=team-panel.js: useTeamScope/threadOwnership; ScopedContextPanel; TeamPortal/ScopedPortal; ThreadChrome.
+普通线程不挂载团队、不显示团队入口、不预留右栏；Bot归属会话保留。原输入器、模型、浏览器、草稿与隐藏轨迹设计保持。
+ARTIFACTS:
+E:/Workspace/naumi-desktop/evidence/thread-team-visibility/MODIFIED_FILE.zip
+E:/Workspace/naumi-desktop/evidence/thread-team-visibility/DIFF_FILE.patch
+E:/Workspace/naumi-desktop/evidence/thread-team-visibility/VERIFICATION.txt
+E:/Workspace/naumi-desktop/evidence/thread-team-visibility/ROLLBACK.sh
+
+BASELINE
+cwd/input=D:/NaumiChecks/thread-team-visibility-copy; original team-panel.js at BASELINE_SHA
+command=node --test tests/naumi-team-panel.test.mjs tests/naumi-thread-bot-separation.test.mjs
+literal result=tests 31; pass 31; fail 0
+wrapper output=BASELINE tests=31 pass=31 fail=0 thread_team=ORIGINAL exit=0
+exit=0; log=BASELINE_TESTS.log
+
+MODIFIED
+cwd/input=E:/Workspace/naumi-thread-team-visibility; modified team-panel.js
+command=node --test tests/thread-team-visibility.test.mjs tests/naumi-team-panel.test.mjs tests/naumi-thread-bot-separation.test.mjs
+literal result=tests 34; pass 34; fail 0
+exit=0; log=MODULE_ACCEPTANCE.log
+command=node scripts/verify-thread-team-visibility.mjs
+input=isolated actual Harness/Chrome, ordinary thread and Bot-bound session; no provider calls/shared3080 writes
+literal output=THREAD_TEAM_UI checks=25 models=0 shared3080=UNTOUCHED exit=0
+exit=0; log=UI_ACCEPTANCE.log; structured=UI.json
+Original thread team defect reproduced before modified candidate. UI runner earlier assertions failed; UI_FIRST/SECOND/THIRD/FINAL/COMPLETE and failure image retained. Correct final acceptance is UI_ACCEPTANCE, not earlier logs.
+
+ROLLBACK
+cwd=E:/Workspace/naumi-thread-team-visibility
+command=D:/DEV/Git/bin/bash.exe E:/Workspace/naumi-thread-team-visibility/evidence/thread-team-visibility/ROLLBACK.sh D:/NaumiChecks/thread-team-visibility-copy
+input=marked modified source COPY, not shared workspace/runtime
+literal output=ROLLBACK files=1 hashes=PASS thread_team=ORIGINAL source_scope=MODIFIED live=UNTOUCHED exit=0
+exit=0; log=ROLLBACK.log
+cwd=D:/NaumiChecks/thread-team-visibility-copy
+command=node --test tests/naumi-team-panel.test.mjs tests/naumi-thread-bot-separation.test.mjs
+literal result=tests 31; pass 31; fail 0
+wrapper output=ROLLBACK_TESTS tests=31 pass=31 fail=0 exit=0
+exit=0; log=ROLLBACK_TESTS.log
+restored behavior/status=copy restored original unscoped team implementation and original hash; 31 tests pass. Active source remains MODIFIED, live service untouched. No runtime downgrade performed. Portable ZIP rollback on second marked copy also PASS.
+
+RUNTIME LOAD - NOT APPLIED
+cwd=E:/Workspace/naumi-desktop
+command=node runtime/load-thread-team.mjs
+input=current mutable web profile, expected original team-panel asset, port3080
+literal error=TypeError: fetch failed; cause: connect ECONNREFUSED 127.0.0.1:3080
+exit=1; log=DEPLOYMENT.log
+Failure occurred BEFORE asset write/backup/lock. Current port3080 has no listener. Installed package, managed journal, models and business records unchanged; no restart. Other threads' isolated ports not modified. Source merge is NOT live deployment. Bundled old asset may be resynchronized by old installed release; persistent deployment requires future release containing this commit.

@@ -32,10 +32,11 @@ function validateRequest(input,origin){
  return {endpoint:input.endpoint,method,body:input.body};
 }
 class EnterpriseSession{
- constructor({origin,session}){this.origin=enterpriseOrigin(origin);this.session=session;this.running=0;}
- descriptor(){return {protocolVersion:1,origin:this.origin};}
+ constructor({origin,session,business}){this.origin=enterpriseOrigin(origin);this.session=session;this.business=business;this._running=0;}
+ get running(){return this._running+(this.business?.running??0);}
+ descriptor(){return {protocolVersion:1,origin:this.origin,...(this.business?{business:this.business.descriptor()}: {})};}
  async perform(input,{signal}={}){
-  const request=validateRequest(input,this.origin);if(this.running>=4)throw Error('ENTERPRISE_BUSY_NO_REPLAY');this.running++;
+  const request=validateRequest(input,this.origin);if(this.running>=4)throw Error('ENTERPRISE_BUSY_NO_REPLAY');this._running++;
   try{
    const response=await this.session.fetch(this.origin+request.endpoint,{method:request.method,body:request.body,credentials:'include',redirect:'error',headers:{Accept:'application/json',...(request.method==='POST'?{'Content-Type':'application/json',Origin:this.origin}:{})},signal:AbortSignal.any([...(signal?[signal]:[]),AbortSignal.timeout(15000)])});
    if(request.endpoint==='/api/digital-employees'&&request.method==='GET'&&response.status===404){await response.body?.cancel();return {status:503,body:JSON.stringify({code:'EMP_SERVICE_NOT_DEPLOYED'})};}
@@ -46,7 +47,7 @@ class EnterpriseSession{
    // Only JSON and status cross the loopback bridge. No Cookie/Set-Cookie or arbitrary headers.
    return {status:response.status,body};
   }catch(error){throw Error(/^ENTERPRISE_[A-Z_]+$/.test(error.message)?error.message:'ENTERPRISE_UNAVAILABLE_NO_REPLAY');}
-  finally{this.running--;}
+  finally{this._running--;}
  }
 }
 module.exports={enterpriseOrigin,readConnection,connect,validateRequest,EnterpriseSession,MAX_REQUEST,MAX_RESPONSE};
