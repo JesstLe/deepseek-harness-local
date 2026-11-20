@@ -2,7 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
-import {ModelPolicy,modelPolicyPlan,LUNA_TERRA_PROVIDER} from '../plugins/naumi-enterprise/model-policy.js';
+import os from 'node:os';
+import path from 'node:path';
+import {Context} from '@deepseek-ai/cordis';
+import * as pi from '@deepseek-ai/dsh-llm-pi-ai';
+import {ModelPolicy,modelPolicyPlan,modelPolicyRecovery,LUNA_TERRA_PROVIDER} from '../plugins/naumi-enterprise/model-policy.js';
 import {ModelConnections} from '../plugins/naumi-enterprise/model-connections.js';
 
 const trials=JSON.parse(fs.readFileSync(new URL('./fixtures/distributed-trial-models.json',import.meta.url)));
@@ -25,7 +29,7 @@ test('real r2 schema reproduces strict 046 failure, then authenticated catalog a
 });
 test('catalog authentication/network/timeout failures keep Flash usable, retain dormant source, and retry recovers without legacy choices',async()=>{
  for(const code of['MODEL_DISCOVERY_AUTH','MODEL_DISCOVERY_FAILED','MODEL_DISCOVERY_TIMEOUT']){
-  let online=false;const f=fixture('r2',{discover:async()=>{if(!online)throw Object.assign(Error(code),{code});return{models:[{id:'gpt-6-luna'}]};}});await f.policy.apply();assert.equal(f.policy.state.ready,true);assert.deepEqual(f.policy.state.missing,['gpt-6-luna']);assert.equal(f.providers['ccs-codex-gpt-2f6b6a'].models.length,0);assert.equal(Object.values(f.providers).flatMap(p=>p.models).length,1);f.policy.assert(f.selection);
+  let online=false;const f=fixture('r2',{discover:async()=>{if(!online)throw Object.assign(Error(code),{code});return{models:[{id:'gpt-6-luna'}]};}});await f.policy.apply();assert.equal(f.policy.state.ready,true);assert.deepEqual(f.policy.state.missing,['gpt-6-luna']);assert(!f.providers['ccs-codex-gpt-2f6b6a']);assert.equal(Object.values(f.providers).flatMap(p=>p.models).length,1);f.policy.assert(f.selection);
   assert.throws(()=>f.policy.assert({provider:'ccs-codex-gpt-2f6b6a',model:'gpt-6.1-sol'}),/MODEL_POLICY_MODEL_DENIED/);
   const api=new ModelConnections(f.ctx),partial=await api.read();assert.equal(partial.groups.length,1);assert.equal(partial.writable,false);
   online=true;const ready=await api.execute({action:'retry-policy'});assert.equal(ready.managedPolicy.missing.length,0);assert.equal(ready.groups.flatMap(g=>g.models).length,3);assert.equal(f.writes,2);
@@ -57,5 +61,15 @@ test('real bounded HTTP discovery reuses only each saved route credential; no ke
  try{const f=fixture();for(const p of Object.values(f.providers))p.baseURL='http://127.0.0.1:'+server.address().port;const service=new ModelPolicy(f.ctx,{backup:async()=>{}});await service.apply();assert.equal(service.state.models.length,3);assert(requests.length>0&&requests.length<=2);assert(requests.every(r=>r.path==='/v1/models'&&r.key.startsWith('fixture-key-for-FIXTURE_R2_')));assert(!requests.some(r=>r.path.includes('messages')));}finally{server.closeAllConnections();await new Promise(r=>server.close(r));}
 });
 test('startup discovery caps candidates and preserves undiscovered source references for later recovery',async()=>{
- const f=fixture();f.providers=Object.fromEntries(Array.from({length:20},(_,i)=>['route-'+i,{...structuredClone(Object.values(trials.r2)[0]),models:i===0?[{id:'deepseek-flash'}]:[{id:'old'}]}]));f.policy.discover=async input=>{f.requests.push(input);return{models:[]};};await f.policy.apply();assert.equal(f.requests.length,8);assert.equal(Object.keys(f.providers).length,20);assert.equal(f.policy.state.models.length,1);
+ const f=fixture();f.providers=Object.fromEntries(Array.from({length:20},(_,i)=>['route-'+i,{...structuredClone(Object.values(trials.r2)[0]),models:i===0?[{id:'deepseek-flash'}]:[{id:'old'}]}]));f.policy.discover=async input=>{f.requests.push(input);return{models:[]};};await f.policy.apply();assert.equal(f.requests.length,8);assert.equal(Object.keys(f.providers).length,1);assert.equal(Object.keys(f.policy.recovery.read().providers).length,19);assert.equal(f.policy.state.models.length,1);
+});
+
+test('partial plan satisfies real native provider validation; empty custom provider is rejected',async()=>{
+ const f=fixture('r2',{discover:async()=>({models:[]})});await f.policy.apply();const ctx=new Context();let adapter;const host=ctx.plugin({apply(s){s.provide('llm',{registerConfigurableProviders:()=>({replace(){}}),registerModelDiscovery:()=>()=>{},registerAdapter:(_r,a)=>{adapter=a;return{replace(){}};}});s.provide('credentials',{resolve:async()=>({value:'fixture-only'})});}});await host;let plugin;
+ try{plugin=ctx.plugin(pi,{providers:f.providers});await plugin;const resolved=await adapter.resolveModel(f.selection.provider,f.selection.model);assert.equal(resolved.id,'deepseek-flash');}finally{await plugin?.dispose();await host.dispose();}
+});
+test('protected recovery journal survives service restart, guards concurrent edits, and clears only after complete CAS',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-policy-recovery-'));try{const f=fixture('r2',{discover:async()=>({models:[]})}),journal=modelPolicyRecovery(dir);f.policy.recovery=journal;await f.policy.apply();const pending=journal.read();assert.equal(Object.keys(pending.providers).length,1);assert.equal(Object.values(pending.providers)[0].apiKeyEnv,'FIXTURE_R2_0');assert(!JSON.stringify(pending).includes('fixture-key-for-'));
+  assert.throws(()=>journal.write({},null),/MODEL_POLICY_RECOVERY_CONFLICT/);const restarted=new ModelPolicy(f.ctx,{recovery:modelPolicyRecovery(dir),discover:async()=>({models:[{id:'gpt-6-luna'}]}),backup:async()=>{}});await restarted.apply();assert.equal(restarted.state.models.length,3);assert.deepEqual(journal.read().providers,{});
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
