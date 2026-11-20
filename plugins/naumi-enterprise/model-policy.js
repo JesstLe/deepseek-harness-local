@@ -4,6 +4,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 import {LlmError} from '@deepseek-ai/dsh-llm';
 import {resolveDshHome} from '@deepseek-ai/dsh-home-paths';
+import {ModelConnections} from './model-connections.js';
 
 export const MODEL_POLICY_REVISION='three-options-vision-20261120';
 export const LUNA_TERRA_PROVIDER='naumi-luna-terra';
@@ -16,10 +17,10 @@ const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex
 const fail=code=>{throw Object.assign(Error(code),{code});};
 
 /** Select exact wire IDs without copying credentials or mixing endpoints. */
-export function modelPolicyPlan(providers){
+export function modelPolicyPlan(providers,{partial=false,eligible=()=>true}={}){
  const selected={},missing=[];
  for(const rule of MODEL_POLICY_MODELS){
-  const candidates=Object.entries(providers??{}).filter(([id,p])=>id!==LUNA_TERRA_PROVIDER&&p?.models?.some(m=>m.id===rule.id));
+  const candidates=Object.entries(providers??{}).filter(([id,p])=>id!==LUNA_TERRA_PROVIDER&&eligible(id,p)&&p?.models?.some(m=>m.id===rule.id));
   const row=candidates.find(([id])=>id===rule.preferredProvider)??candidates[0];
   if(!row){if(!missing.includes(rule.id))missing.push(rule.id);continue;}
   const [sourceId,p]=row,id=rule.aliasProvider??sourceId;
@@ -33,24 +34,59 @@ export function modelPolicyPlan(providers){
   if(!selected[id])selected[id]={...structuredClone(p),...(rule.aliasProvider?{displayName:'GPT 6.1 Terra'}:{}),models:[]};
   selected[id].models.push(model);
  }
- if(missing.length)throw Object.assign(Error('MODEL_POLICY_SOURCE_REQUIRED'),{code:'MODEL_POLICY_SOURCE_REQUIRED',missing});
- const first=Object.entries(selected).find(([,p])=>p.models.some(m=>m.id==='deepseek-flash'));
+ if(missing.length&&(!partial||!Object.keys(selected).length))throw Object.assign(Error('MODEL_POLICY_SOURCE_REQUIRED'),{code:'MODEL_POLICY_SOURCE_REQUIRED',missing});
+ // Keep dormant route references, not legacy model options, so an offline migration
+ // can retry discovery after reconnecting. Never discard its only recovery source.
+ if(missing.length)for(const[id,p]of Object.entries(providers))if(id!==LUNA_TERRA_PROVIDER&&!selected[id])selected[id]={...structuredClone(p),models:[]};
+ const first=Object.entries(selected).find(([,p])=>p.models.some(m=>m.id==='deepseek-flash'))??Object.entries(selected).find(([,p])=>p.models.length);
  const ops=Object.keys(providers).filter(id=>!Object.hasOwn(selected,id)).map(id=>({op:'unset',path:['providers',id]}));
  for(const[id,p]of Object.entries(selected))if(!isDeepStrictEqual(providers[id],p))ops.push({op:'set',path:['providers',id],value:p});
- return {providers:selected,ops,defaultSelection:{provider:first[0],model:'deepseek-flash'}};
+ return {providers:selected,ops,missing,defaultSelection:{provider:first[0],model:first[1].models[0].id}};
+}
+
+function validRoute(p){try{const u=new URL(p.baseURL);return ['openai-completions','openai-responses','anthropic-messages'].includes(p.api)&&!!p.apiKeyEnv&&['http:','https:'].includes(u.protocol)&&!u.username&&!u.password&&!u.search&&!u.hash;}catch{return false;}}
+
+/** Read-only, bounded, authenticated discovery on the device's existing routes.
+ * Exact catalog IDs alone may fill missing declarations; secrets never move. */
+async function recoverDeclarations(providers,configured,discover){
+ const required=[...new Set(MODEL_POLICY_MODELS.map(m=>m.id))];
+ const missing=required.filter(id=>!Object.entries(providers).some(([key,p])=>key!==LUNA_TERRA_PROVIDER&&configured.has(key)&&p.models?.some(m=>m.id===id)));
+ if(!missing.length)return providers;
+ const augmented=structuredClone(providers),signal=AbortSignal.timeout(12000);
+ const candidates=Object.entries(providers).filter(([id,p])=>id!==LUNA_TERRA_PROVIDER&&configured.has(id)&&validRoute(p)).sort(([a,p],[b,q])=>Number(q.models?.some(m=>/^gpt-/.test(m.id))) - Number(p.models?.some(m=>/^gpt-/.test(m.id)))).slice(0,8);
+ let cursor=0;
+ await Promise.all(Array.from({length:Math.min(3,candidates.length)},async()=>{
+  while(cursor<candidates.length&&!signal.aborted){
+   const[id,p]=candidates[cursor++];
+   try{
+    const result=await discover({action:'discover',id,baseURL:p.baseURL,api:p.api},{signal});
+    const additions=result.models.filter(m=>missing.includes(m.id)&&!p.models?.some(old=>old.id===m.id));
+    augmented[id].models=[...(p.models??[]),...additions];
+   }catch{/* A failed catalog must not disable another allowed, configured source. */}
+  }
+ }));
+ return augmented;
 }
 
 export class ModelPolicy{
- constructor(ctx,{backup}={}){this.ctx=ctx;this.backup=backup;this.state={revision:MODEL_POLICY_REVISION,ready:false,error:null};}
+ constructor(ctx,{backup,discover}={}){this.ctx=ctx;this.backup=backup;const connections=new ModelConnections(ctx,{timeoutMs:8000});this.discover=discover??connections.discover.bind(connections);this.queue=Promise.resolve();this.state={revision:MODEL_POLICY_REVISION,ready:false,error:null};}
  namespace(){const ns=this.ctx.settings.describe().find(n=>n.ns==='llm-pi-ai');if(!ns)fail('MODEL_POLICY_SETTINGS_REQUIRED');return ns;}
- async apply(){
+ apply(){const run=this.queue.then(()=>this.applyOnce());this.queue=run.catch(()=>{});return run;}
+ async applyOnce(){
   this.state.ready=false;
   try{
-   const ns=this.namespace(),plan=modelPolicyPlan(ns.value.providers??{});
-   for(const p of Object.values(plan.providers))if(!(await this.ctx.credentials.describe(p.apiKeyEnv)).configured)fail('MODEL_POLICY_CREDENTIAL_REQUIRED');
+   const ns=this.namespace(),original=ns.value.providers??{},configured=new Set();
+   for(const[id,p]of Object.entries(original))if(validRoute(p))try{if((await this.ctx.credentials.describe(p.apiKeyEnv)).configured)configured.add(id);}catch{/* Unavailable credentials affect only their own route. */}
+   if(Object.keys(original).length&&!configured.size)fail('MODEL_POLICY_CREDENTIAL_REQUIRED');
+   const recovered=await recoverDeclarations(original,configured,this.discover);
+   const plan=modelPolicyPlan(recovered,{partial:true,eligible:id=>configured.has(id)});
+   // Discovery is only an in-memory proposal. Back up the original, then persist
+   // the final allowlist once against the revision captured before network IO.
+   plan.ops=Object.keys(original).filter(id=>!Object.hasOwn(plan.providers,id)).map(id=>({op:'unset',path:['providers',id]}));
+   for(const[id,p]of Object.entries(plan.providers))if(!isDeepStrictEqual(original[id],p))plan.ops.push({op:'set',path:['providers',id],value:p});
    if(plan.ops.length){if(!this.ctx.settings.writable)fail('MODEL_POLICY_SETTINGS_READ_ONLY');await this.backup?.({policy:MODEL_POLICY_REVISION,providers:ns.user?.providers??ns.value.providers,defaultSelection:this.ctx.agentDefaultModel.currentSelection(),revision:ns.revision});await this.ctx.settings.mutate('llm-pi-ai',plan.ops,ns.revision);}
    const after=this.namespace(),actual=after.value.providers??{};
-   try{const check=modelPolicyPlan(actual);if(check.ops.length)fail('MODEL_POLICY_NOT_APPLIED');}
+   try{const check=modelPolicyPlan(actual,{partial:true,eligible:id=>configured.has(id)||id===LUNA_TERRA_PROVIDER});if(check.ops.length)fail('MODEL_POLICY_NOT_APPLIED');}
    catch(error){
     if(plan.ops.length){
      // Do not restore over a later writer. The durable backup remains for explicit recovery.
@@ -63,7 +99,8 @@ export class ModelPolicy{
    this.routes=structuredClone(actual);this.defaultSelection=plan.defaultSelection;
    let defaultPending=false;const current=this.ctx.agentDefaultModel.currentSelection();
    if(!this.allowed(current))try{await this.ctx.agentDefaultModel.saveSelection(this.remap(current));}catch{defaultPending=true;}
-   this.state={revision:MODEL_POLICY_REVISION,ready:true,error:null,models:Object.entries(actual).flatMap(([provider,p])=>p.models.map(({id,name})=>({provider,id,name,input:['text','image']}))),defaultPending};
+   this.state={revision:MODEL_POLICY_REVISION,ready:true,error:null,missing:plan.missing,models:Object.entries(actual).flatMap(([provider,p])=>p.models.map(({id,name})=>({provider,id,name,input:['text','image']}))),defaultPending};
+   for(const agent of this.ctx.agents?.list()??[])try{this.select(agent);}catch{this.state.defaultPending=true;}
    return this.state;
   }catch(error){this.state={revision:MODEL_POLICY_REVISION,ready:false,error:error.code??'MODEL_POLICY_APPLY_FAILED',...(error.missing?{missing:error.missing}:{})};throw error;}
  }
