@@ -68,6 +68,12 @@ async function startBridge({home,guests,window,enterprise,market,maintenance,bro
    catch(error){send(409,{error:/^INSTALL_[A-Z_]+$/.test(error.message)?error.message:'INSTALL_ACTIVITY_UNKNOWN'});}return;
   }
   if(maintenance?.blocked()){send(503,{error:'INSTALL_MAINTENANCE_ACTIVE'});return;}
+  if(req.method==='POST'&&req.url==='/enterprise/business'){
+   if(!enterprise?.business){send(503,{ok:false,error:'BUSINESS_DESKTOP_UPGRADE_REQUIRED'});return;}
+   const controller=new AbortController(),abort=()=>{if(!res.writableEnded)controller.abort();};res.on('close',abort);
+   try{let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>29*1024*1024)throw Error('BUSINESS_BODY_TOO_LARGE');chunks.push(chunk);}send(200,{ok:true,data:await enterprise.business.perform(JSON.parse(Buffer.concat(chunks)),{signal:controller.signal})});}
+   catch(error){send(409,{ok:false,error:/^BUSINESS_[A-Z_]+$/.test(error.message)?error.message:'BUSINESS_RESULT_UNKNOWN'});}finally{res.off('close',abort);}return;
+  }
   if(req.method==='POST'&&req.url==='/market/request'){
    if(!market){send(503,{error:'MARKET_LOGIN_REQUIRED'});return;}
    const controller=new AbortController(),abort=()=>{if(!res.writableEnded)controller.abort();};res.on('close',abort);

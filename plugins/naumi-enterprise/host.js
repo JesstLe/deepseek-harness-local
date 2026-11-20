@@ -1,5 +1,6 @@
 import {installSessionImport} from './session-import.js';
 import {installCreation} from './creation.js';
+import {installBusiness} from './business.js';
 import {installBlender} from './blender.js';
 import {installPluginMarket} from './plugin-market.js';
 import {PRODUCT_VERSION} from './product-version.js';
@@ -25,16 +26,20 @@ export function apply(ctx,config) {
   installPluginMarket(ctx);
   installCua(ctx);
   installBlender(ctx);
-  installCreation(ctx);
+  let creation;
+  installCreation(ctx,{onReady:manager=>{creation=manager;}});
   installEgoBrowser(ctx);
   installDingTalk(ctx);
   installTeamProfile(ctx);
   const collaborationOrigin=validateOrigin(desktopCollaborationOrigin(config.collaborationOrigin));
   const enterpriseTransport=new DesktopEnterpriseTransport({origin:collaborationOrigin});
+  installBusiness(ctx,{origin:collaborationOrigin,creation:()=>creation});
   installBots(ctx,{collaborationOrigin});
   const designOrigin=validateOrigin(config.designOrigin);
   const assets=new Map([['employee-enterprise-work.js','text/javascript; charset=utf-8'],['employee-memory-maintenance.js','text/javascript; charset=utf-8'],['employee-sync-panel.js','text/javascript; charset=utf-8'],['employee-center.js','text/javascript; charset=utf-8'],['employee-center-model.js','text/javascript; charset=utf-8'],['employee-center.css','text/css; charset=utf-8'],['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml'],['browser-client.js','text/javascript; charset=utf-8'],['browser-native-client.js','text/javascript; charset=utf-8'],['browser-native.css','text/css; charset=utf-8'],['browser-scheduler.js','text/javascript; charset=utf-8'],['browser.css','text/css; charset=utf-8'],['team-panel.css','text/css; charset=utf-8'],['team-panel.js','text/javascript; charset=utf-8'],['team-panel-model.js','text/javascript; charset=utf-8'],['bot-sidebar.js','text/javascript; charset=utf-8'],['bot-sidebar-model.js','text/javascript; charset=utf-8'],['bot-sidebar.css','text/css; charset=utf-8']]);
   assets.set('session-import.js','text/javascript; charset=utf-8');
+  assets.set('business-context-client.js','text/javascript; charset=utf-8');
+  assets.set('business-context.css','text/css; charset=utf-8');
   for(const name of ['weixin.js','weixin-qrcode.js'])assets.set(name,'text/javascript; charset=utf-8');
   assets.set('weixin.css','text/css; charset=utf-8');
   assets.set('session-import.css','text/css; charset=utf-8');
@@ -100,6 +105,7 @@ export function apply(ctx,config) {
   }}));
   ctx.on('webserver/index-inject',table=>{
     table.push({kind:'global',name:'__NAUMI__',value:{collaborationOrigin,designOrigin,version:'0.3.0',product:'Naumi',productVersion:PRODUCT_VERSION}});
+    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/business-context.css">'});
     table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/bot-groups.css"><link rel="stylesheet" href="/naumi/assets/primary-bot.css"><link rel="stylesheet" href="/naumi/assets/bot-overview.css"><link rel="stylesheet" href="/naumi/assets/session-import.css"><link rel="stylesheet" href="/naumi/assets/plugin-market.css"><link rel="stylesheet" href="/naumi/assets/desktop-updates.css"><link rel="stylesheet" href="/naumi/assets/delivery-center.css">'});
     table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/weixin.css"><link rel="stylesheet" href="/naumi/assets/product-identity.css"><link rel="stylesheet" href="/naumi/assets/model-connections.css"><link rel="stylesheet" href="/naumi/assets/im-settings.css"><link rel="stylesheet" href="/naumi/assets/blender-settings.css"><link rel="stylesheet" href="/naumi/assets/employee-center.css"><link rel="stylesheet" href="/naumi/assets/employee-experience.css"><link rel="stylesheet" href="/naumi/assets/browser.css"><link rel="stylesheet" href="/naumi/assets/browser-native.css"><link rel="stylesheet" href="/naumi/assets/team-panel.css"><link rel="stylesheet" href="/naumi/assets/bot-sidebar.css"><link rel="stylesheet" href="/naumi/assets/bot-task.css"><link rel="stylesheet" href="/naumi/assets/bot-avatar.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
   });

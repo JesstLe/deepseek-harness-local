@@ -1,0 +1,812 @@
+diff --git a/modified/desktop/app/business-session.cjs b/modified/desktop/app/business-session.cjs
+new file mode 100644
+index 0000000..78261cb
+--- /dev/null
++++ b/modified/desktop/app/business-session.cjs
+@@ -0,0 +1,111 @@
++'use strict';
++const fs=require('node:fs'),path=require('node:path');
++const {randomUUID,createHash}=require('node:crypto');
++const {protect}=require('./creation-vault.cjs');
++const hash=v=>createHash('sha256').update(typeof v==='string'||Buffer.isBuffer(v)?v:JSON.stringify(v)).digest('hex');
++/** Main-process-only HTTP. Freeze the real business cookie for the whole action.
++ * Chromium can transparently resend a POST after a connection reset. Commands have
++ * receipts, but /api/assets does not. Use one non-retrying Node request for writes;
++ * still take its only authentication cookie from the real Electron Session.
++ */
++function chromiumRequest({session,url,method='GET',headers={},body,signal,max=8*1024*1024}){
++ return new Promise((resolve,reject)=>{
++  const request=method==='GET'?require('electron').net.request({url,method,session,useSessionCookies:false,redirect:'error'}):require(new URL(url).protocol==='https:'?'node:https':'node:http').request(url,{method,agent:false});let done=false;
++  const finish=(error,value)=>{if(done)return;done=true;clearTimeout(timer);signal?.removeEventListener('abort',abort);error?reject(error):resolve(value);};
++  const abort=()=>{request.abort();finish(Error('BUSINESS_RESULT_UNKNOWN'));};const timer=setTimeout(abort,20000);
++  request.on('error',()=>finish(Error('BUSINESS_RESULT_UNKNOWN')));request.on('redirect',abort);
++  request.on('login',(_auth,callback)=>callback());
++  for(const [key,value]of Object.entries(headers))request.setHeader(key,value);
++  request.on('response',response=>{let size=0;const chunks=[];
++   response.on('data',chunk=>{size+=chunk.length;if(size>max){request.abort();finish(Error('BUSINESS_RESPONSE_TOO_LARGE'));}else chunks.push(chunk);});
++   response.on('error',()=>finish(Error('BUSINESS_RESULT_UNKNOWN')));response.on('end',()=>{
++    const contentType=response.headers['content-type'];if(!String(Array.isArray(contentType)?contentType[0]:contentType).toLowerCase().includes('application/json')){finish(Error('BUSINESS_RESPONSE_INVALID'));return;}
++    let data;try{data=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{finish(Error('BUSINESS_RESPONSE_INVALID'));return;}finish(null,{status:response.statusCode,data});
++   });
++  });
++  if(signal?.aborted){abort();return;}signal?.addEventListener('abort',abort,{once:true});if(body!==undefined)request.write(body);request.end();
++ });
++}
++class EncryptedBusinessStore{
++ constructor({root,safeStorage,protectPath=protect}){Object.assign(this,{root,safeStorage,protectPath});}
++ crypto(){if(!this.safeStorage.isEncryptionAvailable()||this.safeStorage.getSelectedStorageBackend?.()==='basic_text')throw Error('BUSINESS_OS_VAULT_UNAVAILABLE');}
++ file(key){return path.join(this.root,hash(key)+'.vault');}
++ read(key){this.crypto();const file=this.file(key);if(!fs.existsSync(file))return null;const s=fs.lstatSync(file);if(s.isSymbolicLink()||!s.isFile()||s.size>32*1024*1024)throw Error('BUSINESS_STORE_INVALID');this.protectPath(file);try{return JSON.parse(this.safeStorage.decryptString(fs.readFileSync(file)));}catch{throw Error('BUSINESS_STORE_INVALID');}}
++ write(key,value){this.crypto();if(fs.existsSync(this.root)&&(!fs.lstatSync(this.root).isDirectory()||fs.lstatSync(this.root).isSymbolicLink()))throw Error('BUSINESS_STORE_INVALID');fs.mkdirSync(this.root,{recursive:true,mode:0o700});this.protectPath(this.root,{directory:true});const file=this.file(key),temp=file+'.'+randomUUID()+'.tmp';try{fs.writeFileSync(temp,this.safeStorage.encryptString(JSON.stringify(value)),{flag:'wx',mode:0o600});this.protectPath(temp);fs.renameSync(temp,file);}finally{if(fs.existsSync(temp))fs.unlinkSync(temp);}}
++}
++class BusinessSession{
++ constructor({origin,session,root,safeStorage,contract,request=chromiumRequest,protectPath}){Object.assign(this,{origin,session,contract,request});this.store=new EncryptedBusinessStore({root,safeStorage,protectPath});this.flights=new Map();this.running=0;}
++ descriptor(){let operationStoreReady=true;try{this.store.crypto();}catch{operationStoreReady=false;}return {protocolVersion:1,commands:Object.keys(this.contract.commands),operationStoreReady,uploadRecovery:'manual_if_unknown'};}
++ async cookie(){const cookies=(await this.session.cookies.get({url:this.origin})).filter(x=>x.name==='design_ops_session');if(cookies.length!==1||!/^[A-Za-z0-9_-]{20,512}$/.test(cookies[0].value))throw Error('BUSINESS_LOGIN_REQUIRED');return 'design_ops_session='+cookies[0].value;}
++ async http(cookie,endpoint,{method='GET',body,contentType,signal}={}){return this.request({session:this.session,url:this.origin+endpoint,method,headers:{Cookie:cookie,Accept:'application/json',...(method==='POST'?{Origin:this.origin,'Content-Type':contentType||'application/json'}:{})},body,signal});}
++ async workspace(cookie,signal){const r=await this.http(cookie,'/api/workspace',{signal});if(r.status!==200)throw Error(r.status===401?'BUSINESS_LOGIN_REQUIRED':r.status===403?'BUSINESS_ACCESS_DENIED':'BUSINESS_UNAVAILABLE');this.contract.actorKey(r.data.actor);if(!Array.isArray(r.data.tasks))throw Error('BUSINESS_WORKSPACE_INVALID');return r.data;}
++ context(workspace,sessionId){const value=this.store.read('context:'+sessionId);if(!value)return null;if(value.origin!==this.origin||!this.contract.sameActor(value.actor,workspace.actor))throw Error('BUSINESS_CONTEXT_ACCOUNT_CHANGED');this.contract.selectContext(workspace,value.refs);return value;}
++ async perform(input,{signal}={}){
++  const c=this.contract;c.only(input,['action','sessionId','expectedActor','selection','expectedContextVersion','command','input','operationId','file']);c.sessionId(input.sessionId);
++  if(!['workspace','context.read','context.select','context.clear','command','operation.read','operation.recover','asset.upload'].includes(input.action))c.fail('BUSINESS_ACTION_UNSUPPORTED');
++  if(this.running>=4)c.fail('BUSINESS_BUSY_NO_REPLAY');this.running++;
++  try{
++   const cookie=await this.cookie(),workspace=await this.workspace(cookie,signal),actor=c.actorKey(workspace.actor);
++   if(input.expectedActor&&!c.sameActor(input.expectedActor,actor)||await this.cookie()!==cookie)c.fail('BUSINESS_ACCOUNT_CHANGED');
++   if(input.action==='workspace')return {origin:this.origin,workspace,operationStoreReady:this.descriptor().operationStoreReady};
++   if(input.action.startsWith('context.')){
++    if(input.action==='context.read'){const old=this.store.read('context:'+input.sessionId);if(old&&(!c.sameActor(old.actor,actor)||old.origin!==this.origin))return {context:null,state:'account_changed',clearVersion:old.version,actor};return {context:this.context(workspace,input.sessionId),actor};}
++    const old=this.store.read('context:'+input.sessionId);if(input.action!=='context.clear'&&old&&(!c.sameActor(old.actor,actor)||old.origin!==this.origin))c.fail('BUSINESS_CONTEXT_ACCOUNT_CHANGED');
++    if(!Number.isSafeInteger(input.expectedContextVersion)||input.expectedContextVersion!==(old?.version??0))c.fail('BUSINESS_CONTEXT_CONFLICT');
++    const value={origin:this.origin,actor,sessionId:input.sessionId,version:(old?.version??0)+1,refs:input.action==='context.clear'?{}:c.selectContext(workspace,input.selection)};this.store.write('context:'+input.sessionId,value);return {context:value,actor};
++   }
++   if(!c.uuid.test(input.operationId||''))c.fail('BUSINESS_OPERATION_ID_REQUIRED');
++   const old=this.store.read('operation:'+input.operationId);
++   if(old&&(old.origin!==this.origin||old.sessionId!==input.sessionId||!c.sameActor(old.actor,actor)))c.fail('BUSINESS_OPERATION_BINDING_CHANGED');
++   if(input.action==='operation.read')return {operationId:input.operationId,status:old?.status??'not_found',result:old?.status==='acknowledged'?old.result:undefined,recoverable:old?.kind==='command'};
++   if(input.action==='operation.recover'){
++    if(!old)c.fail('BUSINESS_OPERATION_NOT_FOUND');if(old.status==='acknowledged')return {operationId:input.operationId,status:old.status,result:old.result};
++    if(old.status==='rejected')return {operationId:input.operationId,status:'rejected',error:old.error};
++    if(old.kind!=='command')return {operationId:input.operationId,status:'unknown',recoverable:false,reason:'UPLOAD_RECEIPT_RECONCILIATION_REQUIRED'};
++    return await this.execute(old,cookie,workspace,signal);
++   }
++   const context=this.context(workspace,input.sessionId);
++   if(input.expectedContextVersion!==undefined&&input.expectedContextVersion!==(context?.version??0))c.fail('BUSINESS_CONTEXT_CONFLICT');
++   let payload,kind;
++   if(input.action==='command'){
++    payload=c.command(input.command,input.input);if(!c.mayCommand(workspace.actor,payload.name))c.fail('BUSINESS_ROLE_REQUIRED');c.contextAllows(workspace,context,payload.name,payload.input);kind='command';
++   }else{
++    c.only(input.file,['name','content','sha256','taskId','productId','purpose']);const f=input.file;
++    if(typeof f.name!=='string'||!f.name||f.name.length>180||/[\\/\x00-\x1f]/.test(f.name)||typeof f.content!=='string'||f.content.length>28*1024*1024||!f.content||f.taskId&&f.productId)c.fail('BUSINESS_FILE_INVALID');
++    const bytes=Buffer.from(f.content,'base64');if(!bytes.length||bytes.length>c.MAX_FILE||bytes.toString('base64')!==f.content||hash(bytes)!==f.sha256)c.fail('BUSINESS_FILE_HASH_INVALID');
++    if(f.taskId){if(!c.uuid.test(f.taskId))c.fail('BUSINESS_FILE_INVALID');const task=workspace.tasks.find(x=>x.id===f.taskId);if(!workspace.actor.roles.includes('designer')||task?.assigneeId!==actor.id)c.fail('BUSINESS_ASSIGNEE_REQUIRED');c.contextAllows(workspace,context,'task.claim',{id:f.taskId});}
++    else{if(!f.productId||!c.uuid.test(f.productId)||!workspace.products?.some(x=>x.id===f.productId)||!workspace.actor.roles.some(x=>['operations','operations_lead','owner'].includes(x)))c.fail('BUSINESS_PRODUCT_REQUIRED');if(context?.refs.taskId)c.fail('BUSINESS_CONTEXT_TARGET_MISMATCH');c.contextAllows(workspace,context,'product.save',{id:f.productId});}
++    if(f.purpose&&!['reference','white-image'].includes(f.purpose))c.fail('BUSINESS_FILE_INVALID');payload={...f};kind='upload';
++   }
++   const digest=hash(c.stable(payload));if(old){if(old.digest!==digest||old.kind!==kind)c.fail('BUSINESS_IDEMPOTENCY_CONFLICT');return {operationId:input.operationId,status:old.status==='pending'?'unknown':old.status,result:old.status==='acknowledged'?old.result:undefined,recoverable:old.kind==='command'};}
++   const intent={version:1,origin:this.origin,actor,sessionId:input.sessionId,operationId:input.operationId,kind,payload,digest,status:'pending',contextVersion:context?.version??0,context};
++   this.store.write('operation:'+input.operationId,intent);return await this.execute(intent,cookie,workspace,signal);
++  }finally{this.running--;}
++ }
++ async execute(intent,cookie,workspace,signal){
++  const existing=this.flights.get(intent.operationId);if(existing)return existing;
++  const run=this.send(intent,cookie,workspace,signal).finally(()=>this.flights.delete(intent.operationId));this.flights.set(intent.operationId,run);return run;
++ }
++ async send(intent,cookie,workspace,signal){
++  const c=this.contract,context=intent.context;if(context)c.selectContext(workspace,context.refs);
++  if(intent.kind==='command'){if(!c.mayCommand(workspace.actor,intent.payload.name))c.fail('BUSINESS_ROLE_REQUIRED');c.contextAllows(workspace,context,intent.payload.name,intent.payload.input);}
++  let endpoint,body,contentType;
++  if(intent.kind==='command'){endpoint='/api/commands';body=JSON.stringify({name:intent.payload.name,input:{...intent.payload.input,_idempotencyKey:intent.operationId}});}
++  else{
++   endpoint='/api/assets';const f=intent.payload,boundary='naumi-'+randomUUID(),parts=[];for(const field of ['taskId','productId','purpose'])if(f[field])parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${field}"\r\n\r\n${f[field]}\r\n`));
++   parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${f.name.replace(/"/g,'_')}"\r\nContent-Type: application/octet-stream\r\n\r\n`),Buffer.from(f.content,'base64'),Buffer.from(`\r\n--${boundary}--\r\n`));body=Buffer.concat(parts);contentType='multipart/form-data; boundary='+boundary;
++  }
++  let result;
++  try{
++   const r=await this.http(cookie,endpoint,{method:'POST',body,contentType,signal});
++   if(r.status>=200&&r.status<300){if(intent.kind==='command'&&r.data?.ok!==true||intent.kind==='upload'&&!c.uuid.test(r.data?.id||''))throw Error('BUSINESS_ACK_INVALID');intent.status='acknowledged';intent.result=intent.kind==='command'?r.data.result:r.data;}
++   else{intent.status=r.status>=400&&r.status<500?'rejected':'unknown';intent.error={status:r.status,code:typeof r.data?.code==='string'?r.data.code:'BUSINESS_COMMAND_REJECTED'};}
++  }catch{intent.status='unknown';intent.error={code:'BUSINESS_RESULT_UNKNOWN'};}
++  // Successful upload stores only metadata, not the file body. It is never automatically uploaded again.
++  if(intent.kind==='upload'){const {content,...metadata}=intent.payload;intent.payload=metadata;}
++  this.store.write('operation:'+intent.operationId,intent);
++  if(await this.cookie()!==cookie)c.fail('BUSINESS_ACCOUNT_CHANGED_NO_REPLAY');
++  return {operationId:intent.operationId,status:intent.status,...intent.status==='acknowledged'?{result:intent.result}:{error:intent.error},recoverable:intent.kind==='command'};
++ }
++}
++module.exports={BusinessSession,EncryptedBusinessStore,chromiumRequest};
+diff --git a/original/desktop/app/enterprise.cjs b/modified/desktop/app/enterprise.cjs
+index 9d6e514..eddfcd1 100644
+--- a/original/desktop/app/enterprise.cjs
++++ b/modified/desktop/app/enterprise.cjs
+@@ -32,10 +32,11 @@ function validateRequest(input,origin){
+  return {endpoint:input.endpoint,method,body:input.body};
+ }
+ class EnterpriseSession{
+- constructor({origin,session}){this.origin=enterpriseOrigin(origin);this.session=session;this.running=0;}
+- descriptor(){return {protocolVersion:1,origin:this.origin};}
++ constructor({origin,session,business}){this.origin=enterpriseOrigin(origin);this.session=session;this.business=business;this._running=0;}
++ get running(){return this._running+(this.business?.running??0);}
++ descriptor(){return {protocolVersion:1,origin:this.origin,...(this.business?{business:this.business.descriptor()}: {})};}
+  async perform(input,{signal}={}){
+-  const request=validateRequest(input,this.origin);if(this.running>=4)throw Error('ENTERPRISE_BUSY_NO_REPLAY');this.running++;
++  const request=validateRequest(input,this.origin);if(this.running>=4)throw Error('ENTERPRISE_BUSY_NO_REPLAY');this._running++;
+   try{
+    const response=await this.session.fetch(this.origin+request.endpoint,{method:request.method,body:request.body,credentials:'include',redirect:'error',headers:{Accept:'application/json',...(request.method==='POST'?{'Content-Type':'application/json',Origin:this.origin}:{})},signal:AbortSignal.any([...(signal?[signal]:[]),AbortSignal.timeout(15000)])});
+    if(request.endpoint==='/api/digital-employees'&&request.method==='GET'&&response.status===404){await response.body?.cancel();return {status:503,body:JSON.stringify({code:'EMP_SERVICE_NOT_DEPLOYED'})};}
+@@ -46,7 +47,7 @@ class EnterpriseSession{
+    // Only JSON and status cross the loopback bridge. No Cookie/Set-Cookie or arbitrary headers.
+    return {status:response.status,body};
+   }catch(error){throw Error(/^ENTERPRISE_[A-Z_]+$/.test(error.message)?error.message:'ENTERPRISE_UNAVAILABLE_NO_REPLAY');}
+-  finally{this.running--;}
++  finally{this._running--;}
+  }
+ }
+ module.exports={enterpriseOrigin,readConnection,connect,validateRequest,EnterpriseSession,MAX_REQUEST,MAX_RESPONSE};
+diff --git a/original/desktop/app/main.cjs b/modified/desktop/app/main.cjs
+index 7f644f5..82eabcf 100644
+--- a/original/desktop/app/main.cjs
++++ b/modified/desktop/app/main.cjs
+@@ -3,6 +3,7 @@ const path=require('node:path');
+ const fs=require('node:fs');
+ const {app,BrowserWindow,ipcMain,Menu,nativeTheme,shell,session,dialog,safeStorage,clipboard}=require('electron');
+ const {EnterpriseSession}=require('./enterprise.cjs');
++const {BusinessSession}=require('./business-session.cjs');
+ const {workspaceSummary,selectWorkspace,verifyConnection,assertWorkspaceIdle}=require('./workspaces.cjs');
+ const {Guests}=require('./guests.cjs');
+ const {startBridge}=require('./tools.cjs');
+@@ -217,7 +218,7 @@ async function boot(){
+    const connection=enterpriseConnection({home:settings.home,packaged:app.isPackaged,identityOrigin:identityRuntime?.active?.origin??'',configuredOrigin:process.env.NAUMI_ENTERPRISE_ORIGIN});
+    if(!connection&&!identityRuntime?.active){await window.loadFile(path.join(__dirname,'connect.html'));return;}
+    settings.enterpriseOrigin=connection?.origin??'';
+-   if(connection)enterprise??=new EnterpriseSession({origin:connection.origin,session:session.fromPartition('persist:naumi-enterprise-'+(identityRuntime?.active?.profileId??'legacy')+'-'+require('node:crypto').createHash('sha256').update(connection.origin).digest('hex'))});
++   if(connection&&!enterprise){const enterpriseBrowser=session.fromPartition('persist:naumi-enterprise-'+(identityRuntime?.active?.profileId??'legacy')+'-'+require('node:crypto').createHash('sha256').update(connection.origin).digest('hex'));const contract=require(path.join(settings.releaseRoot??settings.root,'plugins/naumi-enterprise/business-contract.cjs'));enterprise=new EnterpriseSession({origin:connection.origin,session:enterpriseBrowser,business:new BusinessSession({origin:connection.origin,session:enterpriseBrowser,root:path.join(settings.home,'naumi/business-private'),safeStorage,contract})});}
+   }
+   if(identityRuntime?.active&&settings.isolated)await creation.activate(settings.home);
+   if(settings.linkedService)installerState.registerProfile(path.resolve(process.resourcesPath,'..'),app.getPath('userData'));
+diff --git a/original/desktop/app/tools.cjs b/modified/desktop/app/tools.cjs
+index a795185..b20b278 100644
+--- a/original/desktop/app/tools.cjs
++++ b/modified/desktop/app/tools.cjs
+@@ -68,6 +68,12 @@ async function startBridge({home,guests,window,enterprise,market,maintenance,bro
+    catch(error){send(409,{error:/^INSTALL_[A-Z_]+$/.test(error.message)?error.message:'INSTALL_ACTIVITY_UNKNOWN'});}return;
+   }
+   if(maintenance?.blocked()){send(503,{error:'INSTALL_MAINTENANCE_ACTIVE'});return;}
++  if(req.method==='POST'&&req.url==='/enterprise/business'){
++   if(!enterprise?.business){send(503,{ok:false,error:'BUSINESS_DESKTOP_UPGRADE_REQUIRED'});return;}
++   const controller=new AbortController(),abort=()=>{if(!res.writableEnded)controller.abort();};res.on('close',abort);
++   try{let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>29*1024*1024)throw Error('BUSINESS_BODY_TOO_LARGE');chunks.push(chunk);}send(200,{ok:true,data:await enterprise.business.perform(JSON.parse(Buffer.concat(chunks)),{signal:controller.signal})});}
++   catch(error){send(409,{ok:false,error:/^BUSINESS_[A-Z_]+$/.test(error.message)?error.message:'BUSINESS_RESULT_UNKNOWN'});}finally{res.off('close',abort);}return;
++  }
+   if(req.method==='POST'&&req.url==='/market/request'){
+    if(!market){send(503,{error:'MARKET_LOGIN_REQUIRED'});return;}
+    const controller=new AbortController(),abort=()=>{if(!res.writableEnded)controller.abort();};res.on('close',abort);
+diff --git a/original/desktop/scripts/prepare-runtime.mjs b/modified/desktop/scripts/prepare-runtime.mjs
+index da380bd..a17a62d 100644
+--- a/original/desktop/scripts/prepare-runtime.mjs
++++ b/modified/desktop/scripts/prepare-runtime.mjs
+@@ -29,9 +29,9 @@ export function runtimeInventory(target){
+   walk(target);return files;
+ }
+ export function scanRuntimeInventory(files){
+-  const forbidden=/(?:^|\/)(?:\.env(?:\..*)?|\.credentials[^/]*|cookies(?:\.sqlite)?|login data|local state|web data|employee[^/]*\.sqlite(?:-wal|-shm)?|sessions|logs|\.git|\.dsh|browser-profiles|enterprise-workspaces|naumi-desktop-bridge\.json|backend-link\.json|naumi-identity\.json|identity-owner\.json|identity-profiles|desktop-(?:instance|profile|profile-journal|backend|enterprise|workspaces|maintenance)\.json|creation-private|grant\.vault|runtime-[^/]*\.token|device-private-key[^/]*|.*\.(?:pem|pfx|key))$/i;
++  const forbidden=/(?:^|\/)(?:\.env(?:\..*)?|\.credentials[^/]*|cookies(?:\.sqlite)?|login data|local state|web data|employee[^/]*\.sqlite(?:-wal|-shm)?|sessions|logs|\.git|\.dsh|browser-profiles|enterprise-workspaces|naumi-desktop-bridge\.json|backend-link\.json|naumi-identity\.json|identity-owner\.json|identity-profiles|desktop-(?:instance|profile|profile-journal|backend|enterprise|workspaces|maintenance)\.json|creation-private|business-private|[^/]*\.vault|runtime-[^/]*\.token|device-private-key[^/]*|.*\.(?:pem|pfx|key))$/i;
+   // SDK source directories named sessions are code, not a copied employee session store.
+-  for(const file of files)if(forbidden.test(file.path)||/^(?:sessions|logs|browser-profiles)\//i.test(file.path)||/(?:^|\/)(?:\.git|\.dsh|browser-profiles|identity-profiles)\//i.test(file.path))throw Error('RUNTIME_PRIVATE_FILE '+file.path);
++  for(const file of files)if(forbidden.test(file.path)||/^(?:sessions|logs|browser-profiles)\//i.test(file.path)||/(?:^|\/)(?:\.git|\.dsh|browser-profiles|identity-profiles|business-private|creation-private)\//i.test(file.path))throw Error('RUNTIME_PRIVATE_FILE '+file.path);
+   return {files:files.length,forbiddenPaths:0};
+ }
+ export async function prepareRuntime({root=project,target=path.join(root,'runtime/desktop-backend'),archive=process.env.NAUMI_DINGTALK_ARCHIVE,trialInput,modelPolicy=process.env.NAUMI_BUILD_MODEL_POLICY}={}){
+diff --git a/modified/desktop/scripts/verify-business-native.mjs b/modified/desktop/scripts/verify-business-native.mjs
+new file mode 100644
+index 0000000..0f68e85
+--- /dev/null
++++ b/modified/desktop/scripts/verify-business-native.mjs
+@@ -0,0 +1,43 @@
++import {execFileSync} from 'node:child_process';import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import http from 'node:http';import assert from 'node:assert/strict';import {createRequire} from 'node:module';import {randomUUID,createHash} from 'node:crypto';import {fileURLToPath} from 'node:url';
++const root=fileURLToPath(new URL('../..',import.meta.url)),require=createRequire(import.meta.url),{_electron}=require('playwright'),{build}=createRequire('E:/Workspace/naumi/package.json')('esbuild');
++const out=path.resolve(process.env.BUSINESS_EVIDENCE??'output/native-systems'),dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-business-electron-')),appDir=path.join(dir,'app'),home=path.join(dir,'home');fs.mkdirSync(out,{recursive:true});fs.mkdirSync(appDir);fs.mkdirSync(home);
++const ids=Object.fromEntries(['actor','tenant','project','request','task'].map(k=>[k,randomUUID()])),cookieA='A'.repeat(32),cookieB='B'.repeat(32),receipts=new Map(),checks=[],seen=[];let drop=true,delay=false,arrived,release,uploadAttempts=0;
++const workspace=()=>({actor:{id:ids.actor,tenantId:ids.tenant,name:'隔离设计师',roles:['designer']},revision:1,projects:[{id:ids.project,name:'新品项目'}],requests:[{id:ids.request,projectId:ids.project,title:'主图需求'}],tasks:[{id:ids.task,requestId:ids.request,title:'首版设计',assigneeId:ids.actor,revision:1}],deliverables:[],products:[],submissions:[],assets:[],members:[],teams:[],comments:[],decisions:[]});let uiBody,uiPosts=[];
++const server=http.createServer(async(req,res)=>{const send=(v,status=200)=>res.writeHead(status,{'Content-Type':'application/json'}).end(JSON.stringify(v));
++ if(req.url==='/ui')return res.writeHead(200,{'Content-Type':'text/html'}).end(uiBody);
++ if(req.url.startsWith('/naumi/systems')){const status={enterprise:{ready:true,operationStoreReady:true,counts:{projects:1,requests:1,tasks:1,deliverables:0}},creation:{configured:false,ready:false}};if(req.method==='GET'){const url=new URL(req.url,site);if(url.searchParams.get('sessionId')==='session-slow')await new Promise(r=>setTimeout(r,450));return send(url.searchParams.get('context')==='1'?{...status,workspace:workspace(),context:{context:null}}:status);}let raw='';for await(const c of req)raw+=c;uiPosts.push(JSON.parse(raw));return send({context:{version:1}});}
++ if(req.url==='/api/workspace'){const cookie=req.headers.cookie;seen.push({kind:'read',cookieA:cookie==='design_ops_session='+cookieA,cookieB:cookie==='design_ops_session='+cookieB,unrelated:cookie?.includes('unrelated')??false});return cookie==='design_ops_session='+cookieA?send(workspace()):send({code:'UNAUTHENTICATED'},401);}
++ if(req.url==='/api/assets'){uploadAttempts++;for await(const c of req){}req.socket.destroy();return;}
++ if(req.url==='/api/commands'){let raw='';for await(const c of req)raw+=c;const {input}=JSON.parse(raw),cookie=req.headers.cookie;seen.push({kind:'write',cookieA:cookie==='design_ops_session='+cookieA,unrelated:cookie?.includes('unrelated')??false});assert.equal(req.headers.origin,site);assert.equal(cookie,'design_ops_session='+cookieA);if(!receipts.has(input._idempotencyKey))receipts.set(input._idempotencyKey,{id:input.id,revision:2});if(delay){arrived?.();await new Promise(r=>{release=r;});}if(drop){drop=false;req.socket.destroy();return;}return send({ok:true,result:receipts.get(input._idempotencyKey)});}
++ return send({},404);
++});await new Promise(r=>server.listen(0,'127.0.0.1',r));const site='http://127.0.0.1:'+server.address().port;
++const code=`import React from 'react';import{createRoot}from'react-dom/client';import{createPortal}from'react-dom';import{installBusinessContextUI,createSystemsStatus}from'./plugins/naumi-enterprise/assets/business-context-client.js';
++const h=React.createElement,listeners=new Set();let selected='session-a',Button;const state={subscribe:f=>{listeners.add(f);return()=>listeners.delete(f)},getSnapshot:()=>selected};const ctx={inject:(_deps,fn)=>fn({sidebarRight:{mounted:state},effect:f=>f(),slots:{inject:(_slot,fn)=>fn(),register:(_slot,C)=>{Button=C;return()=>{}}}})};installBusinessContextUI(ctx,React,createPortal);const Status=createSystemsStatus(ctx,React);window.selectSession=id=>{selected=id;for(const f of listeners)f();};createRoot(document.getElementById('root')).render(h(React.Fragment,null,h('header',null,h('h1',null,'系统连接'),h(Button)),h(Status),h('textarea',{'aria-label':'原有输入框',defaultValue:'原有草稿保持'})));`;
++const bundled=await build({bundle:true,write:false,format:'iife',define:{'process.env.NODE_ENV':'"production"'},nodePaths:['E:/Workspace/naumi/node_modules'],stdin:{contents:code,resolveDir:root},logLevel:'silent'});
++uiBody='<!doctype html><html lang="zh"><meta charset="utf-8"><title>原生业务工具 · 隔离组件验收</title><style>body{margin:36px;font:15px "Segoe UI","Microsoft YaHei",sans-serif;color:#26354c;background:#f6f8fc}header,.naumi-connection-row{display:flex;align-items:center;gap:20px}header{justify-content:space-between}button{padding:9px 16px;border:1px solid #dce4ef;border-radius:8px;background:white;color:#26354c;cursor:pointer}.primary{background:#4264db;color:white}.naumi-modal-mask{position:fixed;inset:0;background:#17223933;display:flex;align-items:center;justify-content:center}.naumi-modal{padding:24px;border-radius:18px;width:450px;box-shadow:0 18px 70px #20335233}.naumi-section-head,.naumi-modal-actions{display:flex;align-items:center;justify-content:space-between;gap:10px}.naumi-connection-row{padding:18px 0}.naumi-connection-row span{margin-left:auto}textarea{display:block;width:100%;margin-top:30px;padding:14px;box-sizing:border-box;border:1px solid #dce4ef;border-radius:9px}'+fs.readFileSync(path.join(root,'plugins/naumi-enterprise/assets/business-context.css'),'utf8')+'</style><div id="root"></div><script>'+bundled.outputFiles[0].text.replaceAll('</script','<\\/script')+'</script></html>';
++fs.writeFileSync(path.join(appDir,'package.json'),JSON.stringify({name:'business-electron-fixture',main:'main.cjs'}));
++fs.writeFileSync(path.join(appDir,'main.cjs'),`const{app,BrowserWindow,session,safeStorage}=require('electron');app.setPath('userData',${JSON.stringify(path.join(dir,'user'))});app.whenReady().then(async()=>{const{BusinessSession}=require(${JSON.stringify(path.join(root,'desktop/app/business-session.cjs'))}),{EnterpriseSession}=require(${JSON.stringify(path.join(root,'desktop/app/enterprise.cjs'))}),{startBridge}=require(${JSON.stringify(path.join(root,'desktop/app/tools.cjs'))});const s=session.fromPartition('persist:business-fixture');await s.cookies.set({url:${JSON.stringify(site)},name:'design_ops_session',value:${JSON.stringify(cookieA)},httpOnly:true});await s.cookies.set({url:${JSON.stringify(site)},name:'unrelated',value:'never-send'});const business=new BusinessSession({origin:${JSON.stringify(site)},session:s,safeStorage,root:${JSON.stringify(path.join(dir,'private'))},contract:require(${JSON.stringify(path.join(root,'plugins/naumi-enterprise/business-contract.cjs'))})});let blocked=false;const enterprise=new EnterpriseSession({origin:${JSON.stringify(site)},session:s,business}),bridge=await startBridge({home:${JSON.stringify(home)},guests:{},window:()=>null,enterprise,maintenance:{blocked:()=>blocked}});global.__businessTest={business,enterprise,session:s,setBlocked:v=>{blocked=v;},bridge};const win=new BrowserWindow({show:false,width:1100,height:800,webPreferences:{nodeIntegration:false,contextIsolation:true}});await win.loadURL(${JSON.stringify(site+'/ui')});});app.on('window-all-closed',()=>app.quit());`);
++let application;const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;const check=(n,v)=>{assert(v,n);checks.push(n);console.log('BUSINESS_ELECTRON_PASS '+n);};
++const operationId=randomUUID(),claim={action:'command',sessionId:'session-a',command:'task.claim',input:{id:ids.task,revision:1},operationId};
++const launch=async()=>{application=await _electron.launch({executablePath:require('electron'),args:[appDir],env,timeout:30000});const page=await application.firstWindow();await page.waitForURL(site+'/ui');return page;};
++try{
++ let page=await launch();check('real_Electron_OS_crypto',await application.evaluate(({safeStorage})=>safeStorage.isEncryptionAvailable()));
++ const call=input=>application.evaluate(async(_e,args)=>global.__businessTest.business.perform(args),input);
++ const context=await call({action:'context.select',sessionId:'session-a',expectedContextVersion:0,selection:{taskId:ids.task}});check('real_cookie_authenticated_context',context.context.refs.projectId===ids.project);
++ const unknown=await call(claim);check('real_net_request_lost_response_UNKNOWN',unknown.status==='unknown'&&receipts.size===1);check('explicit_cookie_snapshot_excludes_other_cookies',seen.length>0&&seen.every(s=>!s.unrelated)&&seen.filter(s=>s.kind==='write').every(s=>s.cookieA));
++ const vaults=fs.readdirSync(path.join(dir,'private')).map(f=>fs.readFileSync(path.join(dir,'private',f)));check('DPAPI_vault_no_plaintext_payload_or_cookie',vaults.every(b=>!b.includes(Buffer.from(cookieA))&&!b.includes(Buffer.from('task.claim'))&&!b.includes(Buffer.from(ids.task))));
++ const dacl=execFileSync(path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe'),['-NoProfile','-NonInteractive','-Command',`$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value;foreach($p in @($env:NAUMI_TEST_PATH)+[System.IO.Directory]::GetFiles($env:NAUMI_TEST_PATH)){$a=if([System.IO.Directory]::Exists($p)){[System.IO.Directory]::GetAccessControl($p)}else{[System.IO.File]::GetAccessControl($p)};if(!$a.AreAccessRulesProtected){exit 2};foreach($r in $a.Access){if($r.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value -ne $sid){exit 3}}};'ACL_PASS'`],{windowsHide:true,encoding:'utf8',env:{...process.env,NAUMI_TEST_PATH:path.join(dir,'private')}}).trim();check('Windows_owner_only_DACL',dacl==='ACL_PASS');
++ await application.close();application=null;page=await launch();check('second_host_reads_encrypted_context',(await call({action:'context.read',sessionId:'session-a'})).context.version===1);
++ check('second_host_reads_UNKNOWN',(await call({action:'operation.read',sessionId:'session-a',operationId})).status==='unknown');check('same_UUID_recovery_once_after_restart',(await call({action:'operation.recover',sessionId:'session-a',operationId})).status==='acknowledged'&&receipts.size===1);
++ const fileBytes=Buffer.from('fixture-upload'),uploadId=randomUUID(),uploadInput={action:'asset.upload',sessionId:'session-a',operationId:uploadId,file:{name:'fixture.png',content:fileBytes.toString('base64'),sha256:createHash('sha256').update(fileBytes).digest('hex'),taskId:ids.task}};check('lost_upload_is_single_HTTP_attempt',(await call(uploadInput)).status==='unknown'&&uploadAttempts===1);await call(uploadInput);await call({action:'operation.recover',sessionId:'session-a',operationId:uploadId});check('upload_UNKNOWN_never_replayed_by_Chromium_or_recovery',uploadAttempts===1);
++ const descriptor=JSON.parse(fs.readFileSync(path.join(home,'naumi-desktop-bridge.json'))),bridgeURL='http://127.0.0.1:'+descriptor.port+'/enterprise/business',headers={'Content-Type':'application/json',Authorization:'Bearer '+descriptor.token};check('bridge_no_token_rejected',(await fetch(bridgeURL,{method:'POST',body:'{}'})).status===403);
++ await application.evaluate(()=>global.__businessTest.setBlocked(true));check('existing_maintenance_gate_blocks_business',(await fetch(bridgeURL,{method:'POST',headers,body:JSON.stringify({action:'workspace',sessionId:'session-a'})})).status===503);await application.evaluate(()=>global.__businessTest.setBlocked(false));
++ delay=true;const got=new Promise(r=>{arrived=r;}),changedId=randomUUID(),pending=call({...claim,operationId:changedId}).then(value=>({value}),e=>({error:e.message}));await got;check('business_running_in_existing_idle_gate',await application.evaluate(()=>global.__businessTest.enterprise.running===1));
++ await application.evaluate(async(_e,{site,cookieB})=>global.__businessTest.session.cookies.set({url:site,name:'design_ops_session',value:cookieB,httpOnly:true}),{site,cookieB});release();const changed=await pending;check('cookie_rotation_does_not_send_as_new_account',changed.error?.includes('BUSINESS_ACCOUNT_CHANGED_NO_REPLAY')&&seen.filter(s=>s.kind==='write').every(s=>s.cookieA));
++ await application.evaluate(async(_e,{site,cookieA})=>global.__businessTest.session.cookies.set({url:site,name:'design_ops_session',value:cookieA,httpOnly:true}),{site,cookieA});check('original_account_can_read_committed_receipt',(await call({action:'operation.read',sessionId:'session-a',operationId:changedId})).status==='acknowledged');
++ await page.getByText('可读取 · 按原权限执行',{exact:true}).waitFor();check('actual_UI_readiness_and_counts',(await page.locator('.naumi-business-counts').innerText()).includes('任务 1'));
++ await page.getByRole('button',{name:'业务上下文',exact:true}).click();await page.getByLabel('任务',{exact:true}).selectOption(ids.task);await page.getByRole('button',{name:'使用',exact:true}).click();await page.getByRole('dialog').waitFor({state:'hidden'});check('actual_UI_explicit_context_CAS',uiPosts.at(-1).selection.taskId===ids.task&&uiPosts.at(-1).expectedVersion===0&&uiPosts.at(-1).sessionId==='session-a');
++ await page.evaluate(()=>window.selectSession('session-slow'));await page.getByRole('button',{name:'业务上下文',exact:true}).click();await page.evaluate(()=>window.selectSession('session-b'));await page.getByRole('dialog').waitFor({state:'hidden'});await new Promise(r=>setTimeout(r,500));await page.getByRole('button',{name:'业务上下文',exact:true}).click();await page.getByLabel('项目',{exact:true}).waitFor();await page.getByRole('button',{name:'清除',exact:true}).click();await page.getByLabel('项目',{exact:true}).waitFor();check('late_old_session_response_not_saved_in_new_session',uiPosts.at(-1).sessionId==='session-b');
++ const png=await application.evaluate(async({BrowserWindow})=>Array.from((await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG()));fs.writeFileSync(path.join(out,'business-context.png'),Buffer.from(png));await page.keyboard.press('Escape');check('Escape_returns_focus_and_preserves_native_draft',await page.getByRole('button',{name:'业务上下文',exact:true}).evaluate(e=>e===document.activeElement)&&(await page.getByLabel('原有输入框').inputValue())==='原有草稿保持');
++ fs.writeFileSync(path.join(out,'ELECTRON.json'),JSON.stringify({tier:'real Electron net.request/Session/safeStorage/Windows DACL/bridge and shipped React UI; isolated enterprise/UI data fixtures',checks,hostStarts:2,productionModelCalls:0,sharedServiceWrites:0},null,2)+'\n');console.log('BUSINESS_ELECTRON_COMPLETE checks='+checks.length+' host_starts=2 OS_crypto=1 ACL=1 production=0');
++}finally{release?.();await application?.close();server.closeAllConnections();await new Promise(r=>server.close(r));if(!path.resolve(dir).startsWith(path.resolve(os.tmpdir())+path.sep))throw Error('TEMP_ESCAPE');fs.rmSync(dir,{recursive:true,force:true});}
+diff --git a/modified/docs/implementation/NATIVE_SYSTEMS.md b/modified/docs/implementation/NATIVE_SYSTEMS.md
+new file mode 100644
+index 0000000..0e97593
+--- /dev/null
++++ b/modified/docs/implementation/NATIVE_SYSTEMS.md
+@@ -0,0 +1,56 @@
++# 原生业务系统工具
++
++## 模块与职责
++2026-11-20，独立 `codex/native-systems-20261120`，实际基线 `07eba7876227c5e6599c5e03c906a81e7027c576`（开工fetch时29ed31d，建树前已新增安装验收提交）。
++负责将已有项目/需求/设计/交付业务能力注册到同一Harness工具运行时。新增business-*；main/enterprise/tools仅有限桥接，host/client/package只追加接线与上下文组件；不改浏览器/微信/CUA、模型、版本或安装器。
++
++## 调研结论与复用
++- 真实当前Desktop企业桥已只读HTTP200，实际账号具admin角色；workspace含204成员、0项目/0需求/0任务/0交付。没有创建真实验收业务、登记员工、发模型或读取他人凭据。
++- 现有企业前端只转发`/api/workspace`并把任务摘要放进草稿；企业员工work工具另有数字员工/租约约束，不能把它当作一般人类SSO权限代理，也不绕开其原执行门。
++- 原企业`/api/commands`已在同一业务事务持久化 `_idempotencyKey` 回执，原业务服务拥有角色/对象/状态/版本及审计。本切片只有限映射，不直接改库、不实现第二份业务状态机。
++- 原`/api/assets`上传没有稳定客户端幂等回执。因此上传只执行一次；响应丢失保留UNKNOWN，不把名字/大小相同当原文件证明，也不自动再次上传。原commands可显式按同一原始UUID/参数恢复。
++- 设计生成继续复用固定Creation MCP、原token授权/供应商适配/下载与present生命周期，不将93项source schema称为全部已上线，也不以企业登录Cookie绕过创作授权。
++
++## 公共接口、依赖及状态归属
++- `business-contract.cjs`是Desktop/Host共享的有限契约，11项命令与既有11类读取；拒绝自定义URL、Cookie、SQL、权限/验收命令和调用者自定幂等键字段。
++- `BusinessSession`在Electron主进程使用原企业Cookie快照发原系统API。Cookie只在主进程内；读取使用官方net.request，显式固定Cookie并关闭自动session cookie附加。真实Electron实验发现Chromium在连接重置时会透明重发POST，因此写入使用同一主进程的一次性Node HTTP(S)请求（关闭连接复用、不跟重定向、TLS验证保持），而不是把无幂等上传交给可自动重发的网络层。同一动作不随UI换号改成另一身份，返回前检查换号。
++- `EncryptedBusinessStore`用safeStorage+本机DACL持久化原意图、账号/租户/Session/原UUID/完整参数摘要及回执；不保存Cookie。上传成功移除文件body，仅保留hash/元数据。加密不可用不降级明文，写就绪与读就绪分开。
++- 复用原Desktop私有loopback认证/维护闸门，追加有限`/enterprise/business`。企业业务in-flight并入EnterpriseSession.running，更新时不漏算。
++- `BusinessRuntime`只做有界投影、关系过滤及工作目录文件准入。工具：naumi_systems、naumi_business_read、naumi_business_context、naumi_business_command、naumi_business_operation、naumi_business_upload；全部走原NativeToolExecutor/审批/managed员工工具准入。普通成员不能借工具成为业务owner，admin也不等于designer/operations。
++- 业务上下文是显式Session引用与CAS版本。不同账号/租户/会话不共用；原操作恢复使用冻结的原上下文，不跟随当前页面。更换账号后可明确清空旧选择再选新对象。
++
++## 实现状态
++原系统连接页补实际读取/写存储就绪与真实对象计数；聊天头部新增业务上下文选择器。原表格、导航、模型、输入器及任务草稿功能保持。
++新任务不会隐式借用其他Session上下文；主Bot派任务时携带明确业务ID，执行任务先读取/选择自己的上下文。尚未新增跨Session隐藏上下文迁移或修改Bot任务账本。
++
++## 验证命令、结果及证据层级
++本切片完成后集中执行共享契约、主进程Cookie冻结/加密意图/跨身份/UNKNOWN、实际Harness NativeToolExecutor与隔离HTTP业务链、真实Electron Session与UI、原有回归及副本回滚。逐项实际结果在后续补录，不把只读线上workspace200当作真实业务写入或收费生成验收。
++
++### 实际验收与问题修正
++- 集中模块：`node --test tests/naumi-business.test.mjs desktop/tests/enterprise.test.cjs tests/naumi-enterprise.test.mjs`，58/58；加原界面契约12项，合计70/70。
++- `node scripts/verify-native-systems.mjs`：17项。真实Harness作用域、原NativeToolExecutor、固定stdio MCP子进程、私有bridge、HTTP请求、原生present事件；业务数据库、供应商和该runner的OS加密为明确fixture。领取/开始→创作→下载核hash→上传→提交评审，丢提交响应原号恢复只产生1条submission，不伪称验收通过。
++- `node desktop/scripts/verify-business-native.mjs`：20项。真实Electron Session/net.request、主进程单次写请求、真实safeStorage/DPAPI与Windows owner-only DACL、两次宿主启动、Cookie冻结换号、维护闸门、实际React组件交互、跨会话迟到响应、焦点及草稿保持。企业HTTP与UI数据仍为隔离fixture，没有登录或写入真实业务。
++- 原始1063项全仓首轮1062通过/1失败：既有页面逐字契约尚未声明新增的两处组件接线。只扩展精确删除这两处新增片段后，再对所有旧页面保持整段逐字比较；修正后1063/1063。初轮日志保留，不以删除原断言代替验收。
++- 实际Electron检查抓到业务`perform`返回Promise时`finally`提前减计数：两处调用改为`return await execute`，请求真实结束前`EnterpriseSession.running`保持忙碌；新增并发同UUID和真实宿主门检查。
++- UI使用现有`slots.inject`等待原会话header子slot就绪；只追加入口，不改原输入器。请求使用AbortController+generation+当前Session校验，旧会话迟到结果不写入新选择。
++- 打包扫描拒绝`business-private`目录、子路径和所有`.vault`文件，不把业务上下文/回执带进安装资源。
++- 原始副本42/42；四工件包的原SHA清单绑定8个旧文件和11个新增文件。回滚仅恢复标记的独立副本，保留新源码与修改包。完整命令、输出及实际回滚状态见`evidence/native-systems/VERIFICATION.txt`。
++
++## 使用与下一完整包接续
++业务工具通过企业协作当前登录账号执行，角色/对象权限最终由原系统逐次检查。系统连接页读取实际就绪状态；会话头部可明确选择项目/需求/任务。创作生成仍需原Creation授权就绪，企业管理员角色不自动等于设计师或运营权限。
++
++可复用任务指令：
++```text
++先检查已连接系统和当前业务身份，再读取我指定项目下的真实需求与任务。
++使用可见的原始ID选择本会话业务上下文，保留原版本号。
++在我的原有权限及工具审批范围内执行任务；创作复用现有Creation MCP。
++把核对过的实际文件上传到原任务，并提交交付评审；分别报告创作、上传、提交评审的原始回执。
++如果回包丢失，先查原operationId。命令只按原UUID恢复；上传UNKNOWN保持待核对，不自动重传。
++```
++
++模块迭代计数1（完整原生业务纵向切片）；同步07eba78→fc2d183，保留主线公开更新说明规则。后续整合时保留其他线程团队入口修复与测试版升级接续；源码合入不等于已安装。新native桥和Host契约必须进同一后续完整bundle，不对0.4.6仅热补一侧文件。
++
++## 未完成项与下一步
++- 持久上传的服务端幂等回执需要原系统补协议；当前明确UNKNOWN+人工核对，不虚构可重试保证。
++- 创作MCP实际账号授权/工具ready和真实供应商生成单独核验，不创建token或擅自发收费请求。
++- 接线不等于发布。安装/服务加载窗口另协调，保留现有0.4.6及其他在途固定包；本轮尚未重启共享服务或写真实业务。
+diff --git a/modified/plugins/naumi-enterprise/assets/business-context-client.js b/modified/plugins/naumi-enterprise/assets/business-context-client.js
+new file mode 100644
+index 0000000..4331113
+--- /dev/null
++++ b/modified/plugins/naumi-enterprise/assets/business-context-client.js
+@@ -0,0 +1,33 @@
++const errors={BUSINESS_DESKTOP_UPGRADE_REQUIRED:'当前桌面版本尚未加载原生业务桥',BUSINESS_DESKTOP_LOGIN_REQUIRED:'请先连接企业工作空间',BUSINESS_LOGIN_REQUIRED:'请先登录企业协作',BUSINESS_CONTEXT_CONFLICT:'上下文已更新，请刷新',BUSINESS_CONTEXT_ACCOUNT_CHANGED:'账号已变化，请先清除旧上下文',BUSINESS_CONTEXT_PARENT_NOT_VISIBLE:'当前账号未获得完整项目上下文'};
++async function request(sessionId,{context=false,body,signal}={}){
++ const response=await fetch('/naumi/systems'+(body?'':'?'+new URLSearchParams({sessionId,...context?{context:'1'}:{}})),{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',signal,headers:body?{'Content-Type':'application/json','X-Naumi-Business':'1'}:undefined,body:body?JSON.stringify({sessionId,...body}):undefined});
++ const value=await response.json();if(!response.ok)throw Error(errors[value.error]||value.error||'业务系统暂未就绪');return value;
++}
++export function createSystemsStatus(ctx,React){
++ const h=React.createElement;return function SystemsStatus(){
++  const [state,setState]=React.useState(null),[error,setError]=React.useState(null);
++  const refresh=async()=>{try{setState(await request('systems-status'));setError(null);}catch(e){setError(e.message);}};
++  React.useEffect(()=>{void refresh();},[]);
++  return h('div',{className:'naumi-systems-status'},h('div',{className:'naumi-connection-row'},h('strong',null,'原生业务工具'),h('span',null,state?.enterprise?.ready?(state.enterprise.operationStoreReady?'可读取 · 按原权限执行':'可读取 · 写入存储未就绪'):errors[state?.enterprise?.error]||'未就绪'),h('button',{className:'naumi-btn',onClick:refresh},'检查')),
++   state?.enterprise?.ready&&h('div',{className:'naumi-business-counts'},...['projects','requests','tasks','deliverables'].map((key,i)=>h('span',{key},['项目','需求','任务','交付'][i]+' '+(state.enterprise.counts[key]??0)))),
++   h('div',{className:'naumi-connection-row'},h('strong',null,'创作工具'),h('span',null,state?.creation?.ready?'已就绪':state?.creation?.configured?'授权待核对':'待配置创作授权')),error&&h('p',{role:'alert'},error));
++ };
++}
++export function installBusinessContextUI(ctx,React,createPortal){
++ const h=React.createElement;return ctx.inject(['sidebarRight','slots'],scope=>scope.effect(()=>{
++  function ContextButton(){
++   const sessionId=React.useSyncExternalStore(scope.sidebarRight.mounted.subscribe,()=>scope.sidebarRight.mounted.getSnapshot(),()=>null);
++   const [open,setOpen]=React.useState(false),[data,setData]=React.useState(null),[selection,setSelection]=React.useState({}),[error,setError]=React.useState(null),[busy,setBusy]=React.useState(false),returnFocus=React.useRef(null),pending=React.useRef(null),generation=React.useRef(0),activeSession=React.useRef(sessionId);
++   activeSession.current=sessionId;
++   const cancel=()=>{generation.current++;pending.current?.abort();pending.current=null;};
++   const load=async()=>{if(!sessionId)return;cancel();const version=generation.current,controller=new AbortController();pending.current=controller;setBusy(true);setData(null);const current=()=>version===generation.current&&activeSession.current===sessionId;try{const value=await request(sessionId,{context:true,signal:controller.signal});if(!current())return;setData(value);setSelection(value.context.context?.refs||{});setError(value.context.state==='account_changed'?'账号已变化，请先清除旧上下文':null);}catch(e){if(current()&&!controller.signal.aborted)setError(e.message);}finally{if(current())setBusy(false);}};
++   React.useEffect(()=>{cancel();setOpen(false);setData(null);setError(null);setBusy(false);return cancel;},[sessionId]);
++   React.useEffect(()=>{if(!open)return;const close=e=>{if(e.key==='Escape'){cancel();setBusy(false);setOpen(false);returnFocus.current?.focus();}};document.addEventListener('keydown',close);const focus=setTimeout(()=>document.querySelector('.naumi-business-context button')?.focus(),0);return()=>{clearTimeout(focus);document.removeEventListener('keydown',close);};},[open]);
++   const save=async(action)=>{if(!data||busy)return;cancel();const version=generation.current,controller=new AbortController();pending.current=controller;setBusy(true);const current=()=>version===generation.current&&activeSession.current===sessionId;try{await request(sessionId,{signal:controller.signal,body:{action,selection,expectedVersion:data.context.context?.version??data.context.clearVersion??0}});if(!current())return;if(action==='clear')await load();else{setOpen(false);returnFocus.current?.focus();}}catch(e){if(current()&&!controller.signal.aborted)setError(e.message);}finally{if(current())setBusy(false);}};
++   const select=(key,label,items)=>h('label',null,label,h('select',{'aria-label':label,value:selection[key]||'',disabled:busy,onChange:e=>{const value=e.target.value;setSelection(old=>key==='projectId'?{projectId:value}:key==='requestId'?{projectId:old.projectId,requestId:value}:{...old,taskId:value});}},h('option',{value:''},'未选择'),...items.map(x=>h('option',{key:x.id,value:x.id},x.name||x.title))));
++   const workspace=data?.workspace,requests=(workspace?.requests||[]).filter(x=>!selection.projectId||x.projectId===selection.projectId),ids=new Set(requests.filter(x=>!selection.requestId||x.id===selection.requestId).map(x=>x.id)),tasks=(workspace?.tasks||[]).filter(x=>ids.has(x.requestId));
++   return h(React.Fragment,null,h('button',{className:'naumi-browser-open','aria-label':'业务上下文',disabled:!sessionId,onClick:e=>{returnFocus.current=e.currentTarget;setOpen(true);void load();}},'业务上下文'),open&&createPortal(h('div',{className:'naumi-modal-mask',onClick:e=>{if(e.target===e.currentTarget&&!busy){setOpen(false);returnFocus.current?.focus();}}},h('section',{className:'naumi-modal naumi-business-context',role:'dialog','aria-modal':true,'aria-label':'业务上下文',onKeyDown:e=>{if(e.key!=='Tab')return;const nodes=[...e.currentTarget.querySelectorAll('button:not(:disabled),select:not(:disabled)')];if(!nodes.length)return;const first=nodes[0],last=nodes.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}},h('div',{className:'naumi-section-head'},h('h2',null,'业务上下文'),h('button',{className:'naumi-btn',disabled:busy,onClick:()=>{setOpen(false);returnFocus.current?.focus();}},'关闭')),error&&h('p',{role:'alert'},error),workspace&&h(React.Fragment,null,select('projectId','项目',workspace.projects),select('requestId','需求',requests),select('taskId','任务',tasks)),h('div',{className:'naumi-modal-actions'},h('button',{className:'naumi-btn',disabled:busy||!data,onClick:()=>void save('clear')},'清除'),h('button',{className:'naumi-btn primary',disabled:busy||!data||data.context.state==='account_changed',onClick:()=>void save('select')},busy?'处理中':'使用')))),document.body));
++  }
++  return scope.slots.inject('conversation.session.header.actions',()=>scope.slots.register({name:'conversation.session.header.actions',id:'naumi-business-context',order:78},ContextButton));
++ }));
++}
+diff --git a/modified/plugins/naumi-enterprise/assets/business-context.css b/modified/plugins/naumi-enterprise/assets/business-context.css
+new file mode 100644
+index 0000000..b7abf59
+--- /dev/null
++++ b/modified/plugins/naumi-enterprise/assets/business-context.css
+@@ -0,0 +1 @@
++.naumi-business-context label{display:block;margin:16px 0;color:#33445e}.naumi-business-context select{display:block;width:100%;margin-top:7px;padding:10px 12px;border:1px solid #dce4ef;border-radius:9px;background:#fff;color:#23354f;font:inherit}.naumi-business-context [role=alert]{color:#a44a38;background:#fff4ef;padding:10px;border-radius:8px}.naumi-systems-status{border-top:1px solid #e8edf4;margin-top:16px}.naumi-business-counts{display:flex;flex-wrap:wrap;gap:12px;color:#536985;padding:4px 0 12px}.naumi-business-context{background:#fff;max-width:min(520px,calc(100vw - 32px))}
+diff --git a/modified/plugins/naumi-enterprise/business-contract.cjs b/modified/plugins/naumi-enterprise/business-contract.cjs
+new file mode 100644
+index 0000000..f8bd478
+--- /dev/null
++++ b/modified/plugins/naumi-enterprise/business-contract.cjs
+@@ -0,0 +1,59 @@
++'use strict';
++// Shared by Desktop main and Host. Only domain actions, never arbitrary URLs/headers/SQL.
++const ENDPOINT='/enterprise/business',MAX_FILE=20*1024*1024,MAX_BODY=29*1024*1024;
++const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
++const commands={
++ 'project.save':{roles:['governance'],collection:'projects',fields:['id','revision','name','description','ownerId','teamIds','startDate','endDate'],required:['name','ownerId','teamIds']},
++ 'project.transition':{roles:['governance'],collection:'projects',fields:['id','revision','status','reason'],required:['id','revision','status','reason']},
++ 'product.save':{roles:['operations','owner'],collection:'products',fields:['id','revision','name','sku','brand','category','description','supplierIds','imageIds'],required:['name','sku']},
++ 'request.save':{roles:['operations','owner'],collection:'requests',fields:['id','revision','productId','brand','productName','sku','title','brief','priority','deadline','projectId','acceptorId','targetTeamId','deliverables','specialty','requestType','deliveryPlan','estimatedHours','grade','skill','imageIds'],required:['title','brief','deadline']},
++ 'request.publish':{roles:['operations','owner'],collection:'requests',fields:['id','revision'],required:['id','revision']},
++ 'task.assign':{roles:['design_admin','director','owner'],collection:'tasks',fields:['id','revision','assigneeId','reviewerId','startDate','endDate','hours','reason'],required:['id','revision','assigneeId','startDate','endDate','hours']},
++ 'task.claim':{roles:['designer'],collection:'tasks',fields:['id','revision'],required:['id','revision']},
++ 'task.start':{roles:['designer'],collection:'tasks',fields:['id','revision'],required:['id','revision']},
++ 'task.pause':{roles:['designer','design_admin','director','owner'],collection:'tasks',fields:['id','revision','reason'],required:['id','revision','reason']},
++ 'task.resume':{roles:['designer','design_admin','director','owner'],collection:'tasks',fields:['id','revision','reason'],required:['id','revision','reason']},
++ 'deliverable.submit':{roles:['designer'],collection:'deliverables',fields:['id','assetId','description'],required:['id','assetId']},
++};
++const collections=['projects','products','requests','tasks','deliverables','submissions','assets','members','teams','comments','decisions'];
++function fail(code){throw Error(code);}
++function object(v){return v&&typeof v==='object'&&!Array.isArray(v);}
++function only(v,keys){if(!object(v)||Object.keys(v).some(k=>!keys.includes(k)))fail('BUSINESS_INPUT_INVALID');}
++function sessionId(value){if(typeof value!=='string'||!value||value.length>200)fail('BUSINESS_SESSION_REQUIRED');return value;}
++function actorKey(actor){if(!actor||!uuid.test(actor.id??'')||!uuid.test(actor.tenantId??''))fail('BUSINESS_ACTOR_INVALID');return {id:actor.id,tenantId:actor.tenantId};}
++const sameActor=(a,b)=>a?.id===b?.id&&a?.tenantId===b?.tenantId;
++function mayCommand(actor,name){const roles=actor.roles||[];return commands[name]?.roles.some(r=>r==='governance'?(actor.centralManaged?actor.centralTitle==='system_admin':roles.includes('owner')):roles.includes(r)||r==='operations'&&roles.includes('operations_lead'))??false;}
++function command(name,input){
++ const spec=commands[name];if(!spec)fail('BUSINESS_COMMAND_UNSUPPORTED');only(input,spec.fields);
++ for(const key of spec.required)if(input[key]===undefined||input[key]===null||input[key]==='')fail('BUSINESS_COMMAND_FIELD_REQUIRED');
++ for(const key of ['id','productId','projectId','assetId','ownerId','assigneeId','reviewerId','acceptorId'])if(input[key]!=null&&input[key]!==''&&!uuid.test(input[key]))fail('BUSINESS_OBJECT_ID_INVALID');
++ if(input.id&&name!=='deliverable.submit'&&(!Number.isSafeInteger(input.revision)||input.revision<1))fail('BUSINESS_REVISION_REQUIRED');
++ if(name==='request.save'&&!input.id&&!input.specialty&&(!Array.isArray(input.deliverables)||!input.deliverables.length))fail('BUSINESS_DELIVERY_SPEC_REQUIRED');
++ if(Buffer.byteLength(JSON.stringify(input))>128*1024)fail('BUSINESS_COMMAND_TOO_LARGE');return {name,input};
++}
++function selectContext(workspace,input){
++ only(input,['projectId','requestId','taskId']);const refs={};for(const [field,kind]of [['projectId','projects'],['requestId','requests'],['taskId','tasks']])if(input[field]){
++  if(!uuid.test(input[field])||!(workspace[kind]||[]).some(x=>x.id===input[field]))fail('BUSINESS_CONTEXT_NOT_VISIBLE');refs[field]=input[field];
++ }
++ const task=workspace.tasks?.find(x=>x.id===refs.taskId),request=workspace.requests?.find(x=>x.id===(task?.requestId||refs.requestId));
++ if(task&&refs.requestId&&task.requestId!==refs.requestId||request&&refs.projectId&&request.projectId!==refs.projectId)fail('BUSINESS_CONTEXT_RELATION_MISMATCH');
++ if(task&&task.requestId)refs.requestId=task.requestId;if(request?.projectId)refs.projectId=request.projectId;
++ // Reject an inferred parent hidden by an inconsistent/partial upstream projection.
++ for(const [field,kind]of [['projectId','projects'],['requestId','requests']])if(refs[field]&&!(workspace[kind]||[]).some(x=>x.id===refs[field]))fail('BUSINESS_CONTEXT_PARENT_NOT_VISIBLE');
++ return refs;
++}
++function contextAllows(workspace,context,name,input){
++ if(!context)return;
++ const refs=context.refs||{};let taskId,requestId,projectId;
++ if(name==='request.save'&&!input.id&&(refs.requestId||refs.taskId||refs.projectId&&input.projectId!==refs.projectId))fail('BUSINESS_CONTEXT_TARGET_MISMATCH');
++ if(name==='product.save'&&refs.requestId){const request=workspace.requests?.find(x=>x.id===refs.requestId);if(!request||request.productId!==input.id)fail('BUSINESS_CONTEXT_TARGET_MISMATCH');}
++ if(name.startsWith('task.'))taskId=input.id;
++ else if(name==='deliverable.submit'){const d=workspace.deliverables?.find(x=>x.id===input.id);if(!d)fail('BUSINESS_OBJECT_NOT_VISIBLE');taskId=d.taskId;}
++ else if(name.startsWith('request.'))requestId=input.id;
++ else if(name.startsWith('project.'))projectId=input.id;
++ if(taskId){const task=workspace.tasks?.find(x=>x.id===taskId);if(!task)fail('BUSINESS_OBJECT_NOT_VISIBLE');requestId=task.requestId;}
++ if(requestId){const request=workspace.requests?.find(x=>x.id===requestId);if(!request)fail('BUSINESS_OBJECT_NOT_VISIBLE');projectId=request.projectId;}
++ if(refs.taskId&&taskId&&refs.taskId!==taskId||refs.requestId&&requestId&&refs.requestId!==requestId||refs.projectId&&projectId&&refs.projectId!==projectId)fail('BUSINESS_CONTEXT_TARGET_MISMATCH');
++}
++const stable=v=>Array.isArray(v)?v.map(stable):object(v)?Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])])):v;
++module.exports={ENDPOINT,MAX_FILE,MAX_BODY,uuid,commands,collections,fail,only,object,sessionId,actorKey,sameActor,mayCommand,command,selectContext,contextAllows,stable};
+diff --git a/modified/plugins/naumi-enterprise/business-runtime.js b/modified/plugins/naumi-enterprise/business-runtime.js
+new file mode 100644
+index 0000000..1084b9a
+--- /dev/null
++++ b/modified/plugins/naumi-enterprise/business-runtime.js
+@@ -0,0 +1,57 @@
++import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';
++import {DesktopEnterpriseTransport} from './desktop-enterprise.js';
++import contract from './business-contract.cjs';
++const {actorKey,collections,commands,uuid,selectContext}=contract;
++const hash=v=>createHash('sha256').update(v).digest('hex');
++const fields={
++ projects:['id','name','description','status','ownerId','teamIds','revision','startDate','endDate'],products:['id','name','sku','brand','category','status','revision','description'],
++ requests:['id','title','brief','productId','priority','deadline','status','projectId','ownerId','acceptorId','targetTeamId','specialty','requestType','deliveryPlan','referenceSnapshot','revision'],
++ tasks:['id','requestId','title','assigneeId','reviewerId','status','dueDate','skill','estimatedHours','grade','targetTeamId','revision','actualStartedAt','archiveAssetId','progress'],
++ deliverables:['id','taskId','name','status','latestSubmissionId','weight'],submissions:['id','taskId','deliverableId','version','createdAt','createdBy','assetId','description'],
++ assets:['id','taskId','productId','name','mimeType','size','url','createdBy','createdAt','purpose'],members:['id','name','roles','teamId','active','grade','skills','dailyCapacity','centralTitle'],
++ teams:['id','name','kind','status','revision'],comments:['id','taskId','submissionId','authorId','body','text','createdAt','resolved'],decisions:['id','submissionId','taskId','reviewerId','outcome','reason','createdAt'],
++};
++const pick=(obj,keys)=>Object.fromEntries(keys.filter(k=>obj[k]!==undefined).map(k=>[k,obj[k]]));
++export function projectBusinessWorkspace(data){actorKey(data?.actor);if(!Array.isArray(data.tasks))throw Error('BUSINESS_WORKSPACE_INVALID');return {actor:pick(data.actor,['id','name','tenantId','tenantName','roles','teamId','centralManaged','centralTitle']),revision:data.revision,today:data.today,...Object.fromEntries(collections.map(k=>[k,(data[k]||[]).map(x=>pick(x,fields[k]))]))};}
++export class BusinessTransport extends DesktopEnterpriseTransport{
++ async perform(input,{signal}={}){
++  const d=this.descriptor();if(!d)throw Error('BUSINESS_DESKTOP_LOGIN_REQUIRED');if(d.enterprise.business?.protocolVersion!==1)throw Error('BUSINESS_DESKTOP_UPGRADE_REQUIRED');
++  let response;try{response=await this.request(`http://127.0.0.1:${d.port}${contract.ENDPOINT}`,{method:'POST',headers:{Authorization:'Bearer '+d.token,'Content-Type':'application/json'},body:JSON.stringify(input),redirect:'error',signal:AbortSignal.any([...(signal?[signal]:[]),AbortSignal.timeout(45000)])});}catch{throw Error('BUSINESS_CONNECTION_LOST_NO_REPLAY');}
++  const text=await response.text();if(text.length>9*1024*1024)throw Error('BUSINESS_RESPONSE_TOO_LARGE');let result;try{result=JSON.parse(text);}catch{throw Error('BUSINESS_RESPONSE_INVALID');}
++  if(!response.ok||!result.ok)throw Error(/^BUSINESS_[A-Z_]+$/.test(result.error||'')?result.error:'BUSINESS_CONNECTION_LOST_NO_REPLAY');return result.data;
++ }
++}
++export class BusinessRuntime{
++ constructor({transport,creation,workingDirectory}){Object.assign(this,{transport,creation,workingDirectory});}
++ async workspace(sessionId,signal){const data=await this.transport.perform({action:'workspace',sessionId},{signal});return {...projectBusinessWorkspace(data.workspace),operationStoreReady:data.operationStoreReady===true};}
++ async status(sessionId,{agent,signal}={}){
++  let enterprise,creation={configured:false,ready:false};try{const w=await this.workspace(sessionId,signal);enterprise={ready:true,operationStoreReady:w.operationStoreReady,actor:w.actor,revision:w.revision,counts:Object.fromEntries(collections.map(k=>[k,w[k].length])),commands:Object.entries(commands).map(([name,s])=>({name,fields:s.fields,required:s.required,roleEligible:contract.mayCommand(w.actor,name)})),authorization:'server rechecks each command; role eligibility is not object access',uploadRecovery:'manual_if_unknown'};}catch(e){enterprise={ready:false,error:e.message};}
++  if(agent&&this.creation?.())try{creation=await this.creation().health(agent);}catch{creation={configured:true,ready:false,error:'CREATION_NOT_READY'};}
++  else if(this.creation?.())try{creation={configured:!!this.creation().readBinding(),ready:false,requiresSession:true};}catch{creation={configured:false,ready:false,error:'CREATION_BINDING_NOT_READY'};}
++  return {enterprise,creation};
++ }
++ async read(sessionId,{collection,id,query='',offset=0,limit=20,projectId,requestId,taskId}={},signal){
++  if(!collections.includes(collection)||!Number.isInteger(offset)||offset<0||!Number.isInteger(limit)||limit<1||limit>50||typeof query!=='string'||query.length>200)throw Error('BUSINESS_QUERY_INVALID');
++  for(const v of [id,projectId,requestId,taskId])if(v&&!uuid.test(v))throw Error('BUSINESS_OBJECT_ID_INVALID');
++  const w=await this.workspace(sessionId,signal),refs=selectContext(w,{...(projectId?{projectId}:{}),...(requestId?{requestId}:{}),...(taskId?{taskId}:{})});let items=w[collection];
++  const reqs=new Set(w.requests.filter(x=>!refs.projectId||x.projectId===refs.projectId).filter(x=>!refs.requestId||x.id===refs.requestId).map(x=>x.id));
++  const tasks=new Set(w.tasks.filter(x=>reqs.has(x.requestId)).filter(x=>!refs.taskId||x.id===refs.taskId).map(x=>x.id));
++  if(refs.projectId||refs.requestId||refs.taskId){
++   if(collection==='projects')items=items.filter(x=>x.id===refs.projectId);
++   if(collection==='requests')items=items.filter(x=>reqs.has(x.id));
++   if(collection==='tasks')items=items.filter(x=>tasks.has(x.id));
++   if(['deliverables','submissions','assets','comments','decisions'].includes(collection))items=items.filter(x=>tasks.has(x.taskId)||x.submissionId&&w.submissions.some(s=>s.id===x.submissionId&&tasks.has(s.taskId)));
++  }
++  if(id){items=items.filter(x=>x.id===id);if(!items.length)throw Error('BUSINESS_OBJECT_NOT_VISIBLE');}
++  const q=query.trim().toLocaleLowerCase();if(q)items=items.filter(x=>[x.title,x.name,x.brief,x.description,x.sku].some(v=>typeof v==='string'&&v.toLocaleLowerCase().includes(q)));
++  return {actor:actorKey(w.actor),revision:w.revision,collection,total:items.length,offset,items:items.slice(offset,offset+limit),nextOffset:offset+limit<items.length?offset+limit:null};
++ }
++ async context(sessionId,args,signal){const action=args.action||'read';if(!['read','select','clear'].includes(action))throw Error('BUSINESS_CONTEXT_ACTION_INVALID');return this.transport.perform({action:'context.'+action,sessionId,...action==='read'?{}:{expectedContextVersion:args.expectedVersion,selection:args.selection}},{signal});}
++ async command(sessionId,args,signal){const w=await this.workspace(sessionId,signal);return this.transport.perform({action:'command',sessionId,expectedActor:actorKey(w.actor),command:args.command,input:args.input,operationId:args.operationId,...args.contextVersion===undefined?{}:{expectedContextVersion:args.contextVersion}},{signal});}
++ async operation(sessionId,args,signal){if(!['read','recover'].includes(args.action))throw Error('BUSINESS_OPERATION_ACTION_INVALID');return this.transport.perform({action:'operation.'+args.action,sessionId,operationId:args.operationId},{signal});}
++ async upload(sessionId,args,agent,signal){
++  const cwd=await this.workingDirectory(agent,signal);if(!cwd)throw Error('BUSINESS_FILE_WORKSPACE_REQUIRED');const root=fs.realpathSync(cwd),file=fs.realpathSync(path.resolve(root,args.path)),relative=path.relative(root,file);if(!relative||relative.startsWith('..'+path.sep)||relative==='..'||path.isAbsolute(relative))throw Error('BUSINESS_FILE_OUTSIDE_WORKSPACE');
++  const fd=fs.openSync(file,'r');let bytes;try{const s=fs.fstatSync(fd);if(!s.isFile()||s.size<1||s.size>contract.MAX_FILE)throw Error('BUSINESS_FILE_INVALID');bytes=fs.readFileSync(fd);const after=fs.fstatSync(fd),current=fs.statSync(file);if(after.size!==s.size||after.mtimeMs!==s.mtimeMs||current.ino!==s.ino||current.dev!==s.dev||fs.realpathSync(file)!==file)throw Error('BUSINESS_FILE_CHANGED');}finally{fs.closeSync(fd);}
++  const w=await this.workspace(sessionId,signal);return this.transport.perform({action:'asset.upload',sessionId,expectedActor:actorKey(w.actor),operationId:args.operationId,file:{name:path.basename(file),content:bytes.toString('base64'),sha256:hash(bytes),...(args.taskId?{taskId:args.taskId}:{}),...(args.productId?{productId:args.productId}:{}),purpose:args.purpose||'reference'},...args.contextVersion===undefined?{}:{expectedContextVersion:args.contextVersion}},{signal});
++ }
++}
+diff --git a/modified/plugins/naumi-enterprise/business.js b/modified/plugins/naumi-enterprise/business.js
+new file mode 100644
+index 0000000..9da36af
+--- /dev/null
++++ b/modified/plugins/naumi-enterprise/business.js
+@@ -0,0 +1,51 @@
++import {defineTool} from '@deepseek-ai/dsh-tools';
++import {BusinessRuntime,BusinessTransport} from './business-runtime.js';
++import contract from './business-contract.cjs';
++const output={schema:{type:'json'},render:(_args,v)=>[{type:'text',text:JSON.stringify(v)}]},string={type:'string'},required={type:'string',required:true};
++export function createBusinessTools(runtime,caller){
++ const tool=(name,description,parameters,run,write=false)=>defineTool({name,description,parameters,output,execute:(args,exec)=>{exec.signal?.throwIfAborted();const root=caller(exec.agent,typeof write==='function'?write(args):write);return run(root.id,args,exec,root);}});
++ return [
++  tool('naumi_systems','Check actual native enterprise identity/readiness, role-eligible command schemas, and the existing Creation MCP connection. A logged-in page or registered schema is not proof of a usable tool. No browser/SQL or new login credentials needed.',{},(id,_a,e)=>runtime.status(id,{agent:e.agent,signal:e.signal})),
++  tool('naumi_business_read','Read authoritative, permission-filtered projects, requirements, tasks, deliverables, submissions, assets or people. Supports exact IDs, project/request/task relation filters, text search and pagination. Retain returned revisions and actor IDs. An empty list is real empty data, never fabricate examples.',{collection:{type:'string',enum:contract.collections,required:true},id:string,query:string,projectId:string,requestId:string,taskId:string,offset:{type:'integer'},limit:{type:'integer'}},(id,a,e)=>runtime.read(id,a,e.signal)),
++  tool('naumi_business_context','Read/select/clear this root Session\'s explicit project/request/task context. Read first to obtain version; select requires visible exact IDs and expectedVersion. No cross-Session context access; read is not business mutation. On account change explicitly clear before selecting a new context.',{action:{type:'string',enum:['read','select','clear'],required:true},expectedVersion:{type:'integer'},selection:{type:'object',additionalProperties:false,properties:{projectId:string,requestId:string,taskId:string}}},(id,a,e)=>runtime.context(id,a,e.signal),a=>a.action!=='read'),
++  tool('naumi_business_command','Execute an original enterprise domain command as the current signed-in human account, subject to original server roles/state/revisions and native tool approvals. Use naumi_systems for required fields and naumi_business_read for current revisions. inputJson is only the domain input object, no URLs, auth, SQL or _idempotencyKey; operationId is a stable UUID. UNKNOWN: query naumi_business_operation, never generate a new UUID. deliverable.submit starts review, not acceptance; no reviewer/accept/permission commands exposed.',{command:{type:'string',enum:Object.keys(contract.commands),required:true},inputJson:required,operationId:required,contextVersion:{type:'integer'}},(id,a,e)=>{let input;try{input=JSON.parse(a.inputJson);}catch{throw Error('BUSINESS_INPUT_JSON_INVALID');}return runtime.command(id,{...a,input},e.signal);},true),
++  tool('naumi_business_operation','Read a durable operation outcome or explicitly recover an UNKNOWN command using the exact stored actor/session/UUID/payload and the server idempotency receipt. Upload UNKNOWN is manual reconciliation, never repeat upload. Rejected operations are not auto-retried.',{action:{type:'string',enum:['read','recover'],required:true},operationId:required},(id,a,e)=>runtime.operation(id,a,e.signal),a=>a.action==='recover'),
++  tool('naumi_business_upload','Upload an actual file inside this Agent working directory to an assigned enterprise task or editable product. Keeps the source system asset ID/hash receipt for deliverable.submit. No arbitrary outside-workspace reads. Stable operationId UUID; a lost upload response remains UNKNOWN, do not retry upload under any ID automatically.',{path:required,operationId:required,taskId:string,productId:string,purpose:{type:'string',enum:['reference','white-image']},contextVersion:{type:'integer'}},(id,a,e)=>runtime.upload(id,a,e.agent,e.signal),true),
++ ];
++}
++export function installBusiness(ctx,{origin,home=process.env.DSH_HOME,creation,onReady}={}){
++ return ctx.inject(['agents','agentTeams','tools','systemPrompt','workingDirectory','webServer','connection'],scope=>{
++  const runtime=new BusinessRuntime({transport:new BusinessTransport({origin,home}),creation,workingDirectory:(agent,signal)=>scope.workingDirectory.ensure(agent,signal??new AbortController().signal)});onReady?.(runtime);
++  const caller=(agent,write=false)=>{if(!agent)throw Error('BUSINESS_CALLER_REQUIRED');const member=scope.agentTeams.tryMembership(agent);if(!member)throw Error('BUSINESS_CALLER_NOT_LOADED');if(write&&member.role!=='lead')throw Error('BUSINESS_LEAD_REQUIRED');return member.root;};
++  const installed=new Map();const install=agent=>{
++   if(installed.has(agent)||!scope.agentTeams.tryMembership(agent))return;const disposers=[];
++   try{
++    for(const tool of createBusinessTools(runtime,caller))disposers.push(agent.ctx.tools.register(tool));
++    disposers.push(agent.ctx.systemPrompt.section({name:'naumi:native-systems',order:76,text:'For connected Naumi projects/requirements/design/delivery, use naumi_systems and naumi_business_* tools, not browser scraping or SQL. Read naumi_business_context at the start of referenced business work. Select only visible real IDs and retain revisions. Existing mcp__naumi_creation__ tools own design creation/provider work; link their verified downloaded files through naumi_business_upload then deliverable.submit. Pass exact business IDs in delegated task instructions; a new task does not silently inherit another Session context. Native approvals and managed employee execution gates still apply. Never call a different tool/Session to evade a denied operation. Stable UUID receipts distinguish submitted/review/accepted; task completion is not enterprise acceptance.'}));
++    installed.set(agent,()=>{for(const dispose of disposers.reverse())dispose();});
++   }catch(error){for(const dispose of disposers.reverse())dispose();throw error;}
++  };
++  scope.on('agent/created',({agent})=>install(agent));scope.on('agent/disposed',({agent})=>{installed.get(agent)?.();installed.delete(agent);});for(const agent of scope.agents.list())install(agent);
++  scope.on('agent/pre-step',async({agent},next)=>{install(agent);return next();});
++  scope.effect(()=>()=>{for(const dispose of installed.values())dispose();installed.clear();});
++  scope.effect(()=>scope.webServer.register({kind:'exact',path:'/naumi/systems',handler:async(req,res)=>{
++   res.setHeader('Content-Type','application/json; charset=utf-8');res.setHeader('Cache-Control','private, no-store');const send=(code,data)=>{if(!res.destroyed){res.writeHead(code);res.end(JSON.stringify(data));}};
++   const admission=scope.connection.admit(req);if('rejection'in admission){send(admission.rejection,{error:'BUSINESS_OWNER_REQUIRED'});return;}if(admission.peer.principal.kind!=='owner'){send(403,{error:'BUSINESS_OWNER_REQUIRED'});return;}
++   const controller=new AbortController(),closed=()=>{if(!res.writableEnded)controller.abort();};res.once('close',closed);
++   try{
++    if(req.method==='GET'){
++     const sessionId=new URL(req.url,'http://local').searchParams.get('sessionId')||'systems-status';contract.sessionId(sessionId);
++     const agent=scope.agents.list().find(a=>a.id===sessionId),status=await runtime.status(sessionId,{agent,signal:controller.signal});
++     if(new URL(req.url,'http://local').searchParams.get('context')==='1'){
++      const workspace=await runtime.workspace(sessionId,controller.signal),context=await runtime.context(sessionId,{action:'read'},controller.signal);send(200,{...status,workspace,context});
++     }else send(200,status);return;
++    }
++    if(req.method!=='POST'){send(405,{error:'METHOD_NOT_ALLOWED'});return;}
++    if(req.headers['x-naumi-business']!=='1'||req.headers.origin&&![`http://${req.headers.host}`,`https://${req.headers.host}`].includes(req.headers.origin))throw Error('BUSINESS_SAME_ORIGIN_REQUIRED');
++    let raw='',bytes=0;for await(const chunk of req){bytes+=chunk.length;if(bytes>4096)throw Error('BUSINESS_BODY_TOO_LARGE');raw+=chunk.toString();}
++    const input=JSON.parse(raw);contract.only(input,['sessionId','action','selection','expectedVersion']);contract.sessionId(input.sessionId);
++    if(!['select','clear'].includes(input.action))throw Error('BUSINESS_CONTEXT_ACTION_INVALID');send(200,await runtime.context(input.sessionId,input,controller.signal));
++   }catch(error){send(/LOGIN_REQUIRED/.test(error.message)?401:409,{error:/^BUSINESS_[A-Z_]+$/.test(error.message)?error.message:'BUSINESS_SYSTEM_UNAVAILABLE'});}finally{res.off('close',closed);}
++  }}));
++ });
++}
+diff --git a/original/plugins/naumi-enterprise/client.js b/modified/plugins/naumi-enterprise/client.js
+index 9d6ea2b..752f342 100644
+--- a/original/plugins/naumi-enterprise/client.js
++++ b/modified/plugins/naumi-enterprise/client.js
+@@ -1,5 +1,6 @@
+ /** Async presentation-only module; the original enterprise app below stays intact. */
+ function installNaumiContextUI(ctx,React,createPortal,Icon){
++  ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/business-context-client.js').then(m=>{if(!closed)dispose=m.installBusinessContextUI(ctx,React,createPortal);}).catch(()=>console.error('Naumi business context unavailable'));return()=>{closed=true;dispose?.dispose?.();if(typeof dispose==='function')dispose();};});
+   ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/weixin.js').then(m=>{if(!closed)dispose=m.installWeixinUI(ctx,React,createPortal);}).catch(()=>console.error('Naumi Weixin UI unavailable'));return()=>{closed=true;dispose?.();};});
+   ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/session-import.js').then(m=>{if(!closed)dispose=m.installSessionImportUI(ctx,React);}).catch(e=>console.error('Naumi session import:',e));return()=>{closed=true;dispose?.();};});
+   ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/creation-settings.js').then(m=>{if(!closed)dispose=m.installCreationUI(ctx,React);}).catch(e=>console.error('Naumi creation:',e));return()=>{closed=true;dispose?.();};});
+@@ -65,6 +66,7 @@ window.__ModuleLoader__.load({id:'@naumi/dsh-enterprise',factory(require){
+     if(!config)throw Error('Naumi host configuration missing');
+     const BotGroups=React.lazy(()=>import('/naumi/assets/bot-groups.js').then(module=>({default:module.createBotGroupsPage(ctx,React)}))
+       .catch(()=>({default:()=>h('p',{className:'naumi-page',role:'alert'},'群聊界面加载失败，请刷新页面。')})));
++    const NativeSystems=React.lazy(()=>import('/naumi/assets/business-context-client.js').then(m=>({default:m.createSystemsStatus(ctx,React)})));
+     installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);
+     ctx.inject(['sidebarRight','sidebarRightTabs'],scope=>scope.effect(()=>{let dispose,closed=false;void import('/naumi/assets/browser-client.js').then(m=>{if(!closed)dispose=m.installBrowserUI(scope,React,Icon);}).catch(e=>console.error('Naumi browser UI:',e));return()=>{closed=true;dispose?.();};}));
+     ctx.effect(()=>{
+@@ -178,7 +180,7 @@ window.__ModuleLoader__.load({id:'@naumi/dsh-enterprise',factory(require){
+             h('div',{className:'naumi-filterbar'},...['all','unassigned','in_progress','quality_review','business_acceptance','accepted'].map(s=>h('button',{key:s,className:filter===s?'selected':'',onClick:()=>setFilter(s)},s==='all'?'全部':STATUS[s]))),data?h(TaskTable,{tasks:visible,data,onContext:setSelected}):h(ConnectionState,{state}))),
+         page==='naumi-delivery'&&h(DeliveryCenter,{state,tasks}),
+         page==='naumi-design'&&h(React.Fragment,null,h('div',{className:'naumi-design-top'},h('img',{src:'/naumi/assets/wordmark.svg',alt:'Naumi',width:136,height:34}),external(config.designOrigin+'/dashboard','打开设计中心','arrow','naumi-btn primary')),h(DesignGrid),h('div',{className:'naumi-design-links'},external(config.designOrigin+'/works','我的作品'),external(config.designOrigin+'/templates','模板中心'),external(config.designOrigin+'/tools','全部创作工具'))),
+-        page==='naumi-connections'&&h('section',{className:'naumi-card naumi-connections'},h('h2',null,'工作空间连接'),h(IdentityAccount),h('div',{className:'naumi-connection-row'},h(Icon,{name:'grid'}),h('div',null,h('strong',null,'企业协作'),h('code',null,config.collaborationOrigin)),h('span',{className:'naumi-badge '+(state.status==='ready'?'success':'')},state.status==='ready'?'已连接':'需要登录'),external(config.collaborationOrigin+'/login','打开'),globalThis.naumiDesktop?.connectionSettings&&h('button',{className:'naumi-btn',onClick:()=>globalThis.naumiDesktop.connectionSettings()},'连接设置')),h('div',{className:'naumi-connection-row'},h(Icon,{name:'spark'}),h('div',null,h('strong',null,'设计中心'),h('code',null,config.designOrigin)),external(config.designOrigin+'/dashboard','打开')),h('div',{className:'naumi-connection-row'},h(Icon,{name:'chat'}),h('div',null,h('strong',null,'AI 协作'),h('span',null,'会话 · 模型 · 文件 · 工具')),h('button',{className:'naumi-btn',onClick:()=>openAI()},'打开会话'))),
++        page==='naumi-connections'&&h('section',{className:'naumi-card naumi-connections'},h('h2',null,'工作空间连接'),h(IdentityAccount),h('div',{className:'naumi-connection-row'},h(Icon,{name:'grid'}),h('div',null,h('strong',null,'企业协作'),h('code',null,config.collaborationOrigin)),h('span',{className:'naumi-badge '+(state.status==='ready'?'success':'')},state.status==='ready'?'已连接':'需要登录'),external(config.collaborationOrigin+'/login','打开'),globalThis.naumiDesktop?.connectionSettings&&h('button',{className:'naumi-btn',onClick:()=>globalThis.naumiDesktop.connectionSettings()},'连接设置')),h('div',{className:'naumi-connection-row'},h(Icon,{name:'spark'}),h('div',null,h('strong',null,'设计中心'),h('code',null,config.designOrigin)),external(config.designOrigin+'/dashboard','打开')),h('div',{className:'naumi-connection-row'},h(Icon,{name:'chat'}),h('div',null,h('strong',null,'AI 协作'),h('span',null,'会话 · 模型 · 文件 · 工具')),h('button',{className:'naumi-btn',onClick:()=>openAI()},'打开会话')),h(React.Suspense,{fallback:null},h(NativeSystems))),
+         selected&&data&&h(TaskContext,{task:selected,data,onClose:()=>setSelected(null)}));
+     }
+     ctx.effect(()=>{
+diff --git a/original/plugins/naumi-enterprise/host.js b/modified/plugins/naumi-enterprise/host.js
+index fb37d47..c4a4028 100644
+--- a/original/plugins/naumi-enterprise/host.js
++++ b/modified/plugins/naumi-enterprise/host.js
+@@ -1,5 +1,6 @@
+ import {installSessionImport} from './session-import.js';
+ import {installCreation} from './creation.js';
++import {installBusiness} from './business.js';
+ import {installBlender} from './blender.js';
+ import {installPluginMarket} from './plugin-market.js';
+ import {PRODUCT_VERSION} from './product-version.js';
+@@ -25,16 +26,20 @@ export function apply(ctx,config) {
+   installPluginMarket(ctx);
+   installCua(ctx);
+   installBlender(ctx);
+-  installCreation(ctx);
++  let creation;
++  installCreation(ctx,{onReady:manager=>{creation=manager;}});
+   installEgoBrowser(ctx);
+   installDingTalk(ctx);
+   installTeamProfile(ctx);
+   const collaborationOrigin=validateOrigin(desktopCollaborationOrigin(config.collaborationOrigin));
+   const enterpriseTransport=new DesktopEnterpriseTransport({origin:collaborationOrigin});
++  installBusiness(ctx,{origin:collaborationOrigin,creation:()=>creation});
+   installBots(ctx,{collaborationOrigin});
+   const designOrigin=validateOrigin(config.designOrigin);
+   const assets=new Map([['employee-enterprise-work.js','text/javascript; charset=utf-8'],['employee-memory-maintenance.js','text/javascript; charset=utf-8'],['employee-sync-panel.js','text/javascript; charset=utf-8'],['employee-center.js','text/javascript; charset=utf-8'],['employee-center-model.js','text/javascript; charset=utf-8'],['employee-center.css','text/css; charset=utf-8'],['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml'],['browser-client.js','text/javascript; charset=utf-8'],['browser-native-client.js','text/javascript; charset=utf-8'],['browser-native.css','text/css; charset=utf-8'],['browser-scheduler.js','text/javascript; charset=utf-8'],['browser.css','text/css; charset=utf-8'],['team-panel.css','text/css; charset=utf-8'],['team-panel.js','text/javascript; charset=utf-8'],['team-panel-model.js','text/javascript; charset=utf-8'],['bot-sidebar.js','text/javascript; charset=utf-8'],['bot-sidebar-model.js','text/javascript; charset=utf-8'],['bot-sidebar.css','text/css; charset=utf-8']]);
+   assets.set('session-import.js','text/javascript; charset=utf-8');
++  assets.set('business-context-client.js','text/javascript; charset=utf-8');
++  assets.set('business-context.css','text/css; charset=utf-8');
+   for(const name of ['weixin.js','weixin-qrcode.js'])assets.set(name,'text/javascript; charset=utf-8');
+   assets.set('weixin.css','text/css; charset=utf-8');
+   assets.set('session-import.css','text/css; charset=utf-8');
+@@ -100,6 +105,7 @@ export function apply(ctx,config) {
+   }}));
+   ctx.on('webserver/index-inject',table=>{
+     table.push({kind:'global',name:'__NAUMI__',value:{collaborationOrigin,designOrigin,version:'0.3.0',product:'Naumi',productVersion:PRODUCT_VERSION}});
++    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/business-context.css">'});
+     table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/bot-groups.css"><link rel="stylesheet" href="/naumi/assets/primary-bot.css"><link rel="stylesheet" href="/naumi/assets/bot-overview.css"><link rel="stylesheet" href="/naumi/assets/session-import.css"><link rel="stylesheet" href="/naumi/assets/plugin-market.css"><link rel="stylesheet" href="/naumi/assets/desktop-updates.css"><link rel="stylesheet" href="/naumi/assets/delivery-center.css">'});
+     table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/weixin.css"><link rel="stylesheet" href="/naumi/assets/product-identity.css"><link rel="stylesheet" href="/naumi/assets/model-connections.css"><link rel="stylesheet" href="/naumi/assets/im-settings.css"><link rel="stylesheet" href="/naumi/assets/blender-settings.css"><link rel="stylesheet" href="/naumi/assets/employee-center.css"><link rel="stylesheet" href="/naumi/assets/employee-experience.css"><link rel="stylesheet" href="/naumi/assets/browser.css"><link rel="stylesheet" href="/naumi/assets/browser-native.css"><link rel="stylesheet" href="/naumi/assets/team-panel.css"><link rel="stylesheet" href="/naumi/assets/bot-sidebar.css"><link rel="stylesheet" href="/naumi/assets/bot-task.css"><link rel="stylesheet" href="/naumi/assets/bot-avatar.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
+   });
+diff --git a/original/plugins/naumi-enterprise/package.json b/modified/plugins/naumi-enterprise/package.json
+index 3c11001..13e8a0a 100644
+--- a/original/plugins/naumi-enterprise/package.json
++++ b/modified/plugins/naumi-enterprise/package.json
+@@ -94,6 +94,9 @@
+     "blender-bridge",
+     "blender-skills",
+     "creation.js",
++    "business.js",
++    "business-runtime.js",
++    "business-contract.cjs",
+     "creation-runtime.js",
+     "creation-bundle.js",
+     "cua.js",
+diff --git a/modified/scripts/native-systems-evidence.mjs b/modified/scripts/native-systems-evidence.mjs
+new file mode 100644
+index 0000000..102ec64
+--- /dev/null
++++ b/modified/scripts/native-systems-evidence.mjs
+@@ -0,0 +1,34 @@
++import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import {createHash} from 'node:crypto';import {spawnSync,execFileSync} from 'node:child_process';import {fileURLToPath} from 'node:url';
++const root=path.resolve(process.env.NAUMI_SOURCE_ROOT??fileURLToPath(new URL('..',import.meta.url))),e=path.join(root,'evidence/native-systems'),base='07eba7876227c5e6599c5e03c906a81e7027c576',mode=process.argv[2]??'package';
++const files=['desktop/app/business-session.cjs','desktop/app/enterprise.cjs','desktop/app/main.cjs','desktop/app/tools.cjs','desktop/scripts/prepare-runtime.mjs','desktop/scripts/verify-business-native.mjs','plugins/naumi-enterprise/business-contract.cjs','plugins/naumi-enterprise/business-runtime.js','plugins/naumi-enterprise/business.js','plugins/naumi-enterprise/host.js','plugins/naumi-enterprise/client.js','plugins/naumi-enterprise/package.json','plugins/naumi-enterprise/assets/business-context-client.js','plugins/naumi-enterprise/assets/business-context.css','tests/naumi-business.test.mjs','tests/naumi-context-ui.test.mjs','scripts/verify-native-systems.mjs','scripts/native-systems-evidence.mjs','docs/implementation/NATIVE_SYSTEMS.md'];
++const sha=b=>createHash('sha256').update(b).digest('hex'),hash=p=>sha(fs.readFileSync(p));const originalTests=['desktop/tests/enterprise.test.cjs','tests/naumi-enterprise.test.mjs','tests/naumi-context-ui.test.mjs'];
++function run(cmd,args,cwd,log){const r=spawnSync(cmd,args,{cwd,encoding:'utf8',windowsHide:true,maxBuffer:20e6});if(log)fs.writeFileSync(path.join(e,log),r.stdout+'\n'+r.stderr);if(r.status!==0)throw Error('EVIDENCE_COMMAND_FAILED '+cmd+' '+args.join(' ')+' exit='+r.status+'\n'+r.stdout.slice(-2500)+'\n'+r.stderr);return r.stdout;}
++function checkTests(cwd,tests,log){const text=run(process.execPath,['--test',...tests],cwd,log),n=text.match(/(?:#|ℹ) tests (\d+)/)?.[1],pass=text.match(/(?:#|ℹ) pass (\d+)/)?.[1];if(!n||n!==pass)throw Error('TEST_SUMMARY_INVALID');return n;}
++function isolated(){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-native-evidence-'));for(const sub of ['plugins','desktop/app','desktop/scripts','desktop/tests','desktop/vendor','scripts','tests','evidence/naumi-context-ui/original'])fs.cpSync(path.join(root,sub),path.join(dir,sub),{recursive:true,filter:p=>!p.endsWith('.exe')});fs.copyFileSync(path.join(root,'package.json'),path.join(dir,'package.json'));fs.symlinkSync(path.join(root,'node_modules'),path.join(dir,'node_modules'),'junction');fs.symlinkSync(path.join(root,'desktop/node_modules'),path.join(dir,'desktop/node_modules'),'junction');return dir;}
++function clean(dir){if(!path.resolve(dir).startsWith(path.resolve(os.tmpdir())+path.sep))throw Error('COPY_PATH_ESCAPE');for(const sub of ['node_modules','desktop/node_modules'])if(fs.existsSync(path.join(dir,sub)))fs.unlinkSync(path.join(dir,sub));fs.rmSync(dir,{recursive:true,force:true});}
++function snapshot(dir,kind,manifest){for(const f of manifest){const target=path.join(dir,f.path),source=path.join(e,kind,f.path),expected=f[kind==='original'?'originalSHA256':'modifiedSHA256'];if(expected){if(hash(source)!==expected)throw Error('SNAPSHOT_HASH_DRIFT');fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(source,target);}else if(fs.existsSync(target))fs.unlinkSync(target);}}
++if(mode==='package'){
++ fs.mkdirSync(e,{recursive:true});const manifest=[];for(const file of files){const r=spawnSync('git',['show',base+':'+file],{cwd:root,maxBuffer:10e6}),modified=fs.readFileSync(path.join(root,file));for(const [kind,bytes]of [['original',r.status===0?r.stdout:null],['modified',modified]])if(bytes){const p=path.join(e,kind,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);}manifest.push({path:file,originalSHA256:r.status===0?sha(r.stdout):null,modifiedSHA256:sha(modified)});}
++ fs.writeFileSync(path.join(e,'hashes.json'),JSON.stringify({branch:'codex/native-systems-20261120',baseline:base,files:manifest},null,2)+'\n');
++ const diff=spawnSync('git',['-c','core.autocrlf=false','diff','--binary','--no-index','--','original','modified'],{cwd:e,maxBuffer:10e6});if(![0,1].includes(diff.status))throw Error('DIFF_FAILED');fs.writeFileSync(path.join(e,'DIFF_FILE.patch'),diff.stdout);
++ const rollback=`import fs from 'node:fs';import path from 'node:path';import{createHash}from'node:crypto';import{fileURLToPath}from'node:url';import{spawnSync}from'node:child_process';const here=path.dirname(fileURLToPath(import.meta.url)),target=process.argv[2];if(!target||target==='--test'){const r=spawnSync(process.execPath,[path.join(here,'../../scripts/native-systems-evidence.mjs'),'rollback'],{stdio:'inherit',windowsHide:true});process.exit(r.status??1);}const root=fs.realpathSync(target),m=JSON.parse(fs.readFileSync(path.join(here,'hashes.json'))).files;if(fs.readFileSync(path.join(root,'.naumi-native-systems-copy'),'utf8')!=='isolated-copy')throw Error('COPY_MARKER_REQUIRED');const sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');for(const f of m){const p=path.resolve(root,f.path);if(!p.startsWith(root+path.sep)||fs.lstatSync(p).isSymbolicLink()||sha(p)!==f.modifiedSHA256)throw Error('COPY_DRIFT');}for(const f of m){const p=path.join(root,f.path);if(f.originalSHA256){const s=path.join(here,'original',f.path);if(sha(s)!==f.originalSHA256)throw Error('ORIGINAL_HASH');fs.copyFileSync(s,p);}else fs.unlinkSync(p);}console.log('ROLLBACK_SOURCE files='+m.length+' hashes=restored copy_only=1');\n`;
++ fs.writeFileSync(path.join(e,'rollback.mjs'),rollback);fs.writeFileSync(path.join(e,'ROLLBACK.sh'),'#!/usr/bin/env bash\nset -euo pipefail\nHERE="$(cd -- "$(dirname -- "$0")" && pwd)"\nexec "${NAUMI_NODE:-node}" "$HERE/rollback.mjs" "${1:---test}"\n',{mode:0o755});
++ const q=s=>"'"+s.replaceAll("'","''")+"'";run('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-Command',`Compress-Archive -Path ${['original','modified','hashes.json','ROLLBACK.sh','rollback.mjs'].map(s=>q(path.join(e,s))).join(',')} -DestinationPath ${q(path.join(e,'MODIFIED_FILE.zip'))} -Force`],root);
++ console.log('PACKAGE files='+manifest.length+' original='+manifest.filter(f=>f.originalSHA256).length+' modified_archive=PASS copy_only_rollback=1');
++}else{
++ const manifest=JSON.parse(fs.readFileSync(path.join(e,'hashes.json'))).files;
++ if(mode==='modified'){
++  for(const f of manifest)if(hash(path.join(root,f.path))!==f.modifiedSHA256||hash(path.join(e,'modified',f.path))!==f.modifiedSHA256)throw Error('MODIFIED_HASH_DRIFT '+f.path);
++  const n=checkTests(root,[...originalTests,'tests/naumi-business.test.mjs'],'MODIFIED.log'),h=JSON.parse(fs.readFileSync(path.join(e,'HARNESS.json'))),el=JSON.parse(fs.readFileSync(path.join(e,'ELECTRON.json')));
++  if(h.checks.length!==17||el.checks.length!==20)throw Error('CHAIN_EVIDENCE_MISSING');console.log('MODIFIED tests='+n+'/'+n+' harness=17 electron=20 hashes=PASS shared_writes=0 exit=0');
++ }else if(['baseline','rollback'].includes(mode)){
++  const dir=isolated();try{
++   if(mode==='baseline'){snapshot(dir,'original',manifest);const n=checkTests(dir,originalTests,'BASELINE.log');console.log('BASELINE tests='+n+'/'+n+' native_business_tools=absent original_hashes=PASS exit=0');}
++   else{
++    const before=hash(path.join(e,'MODIFIED_FILE.zip'));snapshot(dir,'modified',manifest);fs.writeFileSync(path.join(dir,'.naumi-native-systems-copy'),'isolated-copy');const text=run('D:/DEV/Git/bin/bash.exe',[path.join(e,'ROLLBACK.sh'),dir],root,'ROLLBACK_SOURCE.log');if(!text.includes('hashes=restored'))throw Error('ROLLBACK_NOT_RESTORED');
++    for(const f of manifest){const p=path.join(dir,f.path);if(f.originalSHA256?hash(p)!==f.originalSHA256:fs.existsSync(p))throw Error('RESTORED_HASH_DRIFT');}
++    const n=checkTests(dir,originalTests,'ROLLBACK_TESTS.log');if(before!==hash(path.join(e,'MODIFIED_FILE.zip')))throw Error('MODIFIED_ARCHIVE_CHANGED');console.log('ROLLBACK files='+manifest.length+' baseline_tests='+n+'/'+n+' hashes=restored modified_archive=unchanged exit=0');
++   }
++  }finally{clean(dir);}
++ }else throw Error('EVIDENCE_MODE_INVALID');
++}
+diff --git a/modified/scripts/verify-native-systems.mjs b/modified/scripts/verify-native-systems.mjs
+new file mode 100644
+index 0000000..fef337e
+--- /dev/null
++++ b/modified/scripts/verify-native-systems.mjs
+@@ -0,0 +1,53 @@
++import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import http from 'node:http';import assert from 'node:assert/strict';import {randomUUID,createHash} from 'node:crypto';import {createRequire} from 'node:module';
++import {Context} from '@deepseek-ai/cordis';import {createScope} from '@deepseek-ai/dsh-scope';import Tools from '@deepseek-ai/dsh-tools';import SystemPrompt from '@deepseek-ai/dsh-system-prompt';import Skills from '@deepseek-ai/dsh-skill';import LocalFileSystem from '@deepseek-ai/dsh-fs-local';import {NativeToolExecutor} from '@deepseek-ai/dsh-tool-executor-native';import * as present from '@deepseek-ai/dsh-tool-present';import {Session} from '@deepseek-ai/dsh-session';
++import {CreationSessions} from '../plugins/naumi-enterprise/creation-runtime.js';import {digest} from '../plugins/naumi-enterprise/creation-bundle.js';import {BusinessRuntime,BusinessTransport} from '../plugins/naumi-enterprise/business-runtime.js';import {createBusinessTools} from '../plugins/naumi-enterprise/business.js';
++const require=createRequire(import.meta.url),{BusinessSession}=require('../desktop/app/business-session.cjs'),{EnterpriseSession}=require('../desktop/app/enterprise.cjs'),{startBridge}=require('../desktop/app/tools.cjs'),contract=require('../plugins/naumi-enterprise/business-contract.cjs');
++// Real Harness scopes, NativeToolExecutor, fixed stdio MCP, bridge and HTTP.
++// Only account/enterprise DB/provider and OS crypto are fixtures here. OS crypto is checked separately in Electron.
++const out=path.resolve(process.env.BUSINESS_EVIDENCE??'output/native-systems'),root=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-native-chain-'));fs.mkdirSync(out,{recursive:true});
++const ids=Object.fromEntries(['actor','tenant','project','request','product','task','deliverable','asset','submission'].map(k=>[k,randomUUID()])),token='nmk_'+'a'.repeat(43),cookie='A'.repeat(32),receipts=new Map(),checks=[],seen=[];
++const bytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2F0sAAAAASUVORK5CYII=','base64');let supplier=0,uploads=0,submissions=0,lost=true;
++const workspace={actor:{id:ids.actor,tenantId:ids.tenant,name:'Fixture designer',roles:['designer']},revision:1,projects:[{id:ids.project,name:'Fixture project',revision:1}],products:[{id:ids.product,name:'Fixture product'}],requests:[{id:ids.request,projectId:ids.project,productId:ids.product,title:'Fixture request',brief:'Create preview',revision:1}],tasks:[{id:ids.task,requestId:ids.request,title:'Fixture task',status:'unclaimed',revision:1}],deliverables:[{id:ids.deliverable,taskId:ids.task,name:'Preview',status:'draft'}],assets:[],submissions:[],members:[],teams:[],comments:[],decisions:[]};
++const server=http.createServer(async(req,res)=>{const send=(v,status=200)=>res.writeHead(status,{'Content-Type':'application/json'}).end(JSON.stringify(v));
++ if(req.url.startsWith('/api/agent-gateway/')){if(req.headers.authorization!=='Bearer '+token)return send({},401);if(req.url.endsWith('/me'))return send({account:{email:'fixture@example.test'},token:{id:'token-a',scope:'write'},budget:{remaining:100},balance:100});if(req.url.endsWith('/tools'))return send({tools:[{name:'generate_image',write:true,billed:true,available:true,description:'fixture provider',parameters:{type:'object',properties:{prompt:{type:'string'}}}}]});if(req.url.includes('/media?'))return res.writeHead(200,{'Content-Type':'image/png','Content-Length':bytes.length}).end(bytes);if(req.url.endsWith('/calls')){let raw='';for await(const x of req)raw+=x;const value=JSON.parse(raw);supplier++;res.writeHead(200,{'Content-Type':'application/x-ndjson'}).end(JSON.stringify({type:'result',call:{operationId:value.operationId,state:'succeeded',credits:8,output:{text:'fixture image',media:['media/output.png']}}})+'\n');return;}return send({},404);}
++ if(req.headers.cookie!=='design_ops_session='+cookie)return send({code:'UNAUTHENTICATED'},401);seen.push(req.url);
++ if(req.url==='/api/workspace')return send(workspace);
++ if(req.headers.origin!==site)return send({code:'BAD_ORIGIN'},403);
++ if(req.url==='/api/assets'){const chunks=[];for await(const x of req)chunks.push(x);const raw=Buffer.concat(chunks);assert(raw.includes(bytes));assert(raw.includes(Buffer.from(ids.task)));uploads++;const asset={id:ids.asset,taskId:ids.task,name:'result.png',size:bytes.length,createdBy:ids.actor};workspace.assets.push(asset);return send(asset,201);}
++ if(req.url==='/api/commands'){let raw='';for await(const x of req)raw+=x;const {name,input}=JSON.parse(raw),key=input._idempotencyKey;
++  if(!receipts.has(key)){const task=workspace.tasks[0];if(name.startsWith('task.')&&input.revision!==task.revision)return send({code:'STALE_REVISION'},409);
++   if(name==='task.claim'){task.assigneeId=ids.actor;task.status='claimed';task.revision++;}else if(name==='task.start'){task.status='in_progress';task.revision++;}else if(name==='deliverable.submit'){assert.equal(input.assetId,ids.asset);workspace.deliverables[0].status='quality_review';workspace.submissions.push({id:ids.submission,taskId:ids.task,deliverableId:ids.deliverable,assetId:ids.asset,version:++submissions});}else return send({code:'UNEXPECTED_COMMAND'},400);
++   workspace.revision++;receipts.set(key,{id:input.id,status:name==='deliverable.submit'?'quality_review':task.status,revision:task.revision});}
++  if(name==='deliverable.submit'&&lost){lost=false;req.socket.destroy();return;}return send({ok:true,result:receipts.get(key)});
++ }return send({},404);
++});await new Promise(r=>server.listen(0,'127.0.0.1',r));const site='http://127.0.0.1:'+server.address().port,home=path.join(root,'home');fs.mkdirSync(home);
++const safeStorage={isEncryptionAvailable:()=>true,encryptString:s=>Buffer.from(s).map(x=>x^89),decryptString:b=>Buffer.from(b).map(x=>x^89).toString()},native=new BusinessSession({origin:site,session:{cookies:{get:async()=>[{name:'design_ops_session',value:cookie}]}},root:path.join(root,'private'),safeStorage,protectPath:()=>{},contract,request:async args=>{const r=await fetch(args.url,{method:args.method,headers:args.headers,body:args.body,signal:args.signal,redirect:'error'});return {status:r.status,data:await r.json()};}});
++const enterprise=new EnterpriseSession({origin:site,session:{},business:native}),ctx=new Context(),agents=[],scopes=[],disposers=[];let bridge,manager;
++const check=(n,v)=>{assert(v,n);checks.push(n);console.log('NATIVE_SYSTEMS_PASS '+n);};
++try{
++ bridge=await startBridge({home,guests:{},window:()=>null,enterprise});
++ await ctx.plugin({name:'business-fixture-authority',apply(c){c.provide('agents',{list:()=>agents,turnBoundaryOf:()=>({openTurnStartSeq:0,lastTurn:1})});c.provide('workingDirectory',{ensure:async a=>a.session.header.cwd});}});await ctx.plugin(SystemPrompt,{includeRuntimeContext:false});await ctx.plugin(Tools);await ctx.plugin(Skills);await ctx.plugin(LocalFileSystem);await ctx.plugin(present,{maxFiles:8});let host;await ctx.inject(['tools','skills','workingDirectory','agents','systemPrompt','fs'],c=>{host=c;});
++ const make=id=>{const cwd=path.join(root,id);fs.mkdirSync(cwd);const session=Session.create(id,[],{...Session.create(id).header,cwd});session.append('turn/start',{turn:1});const a={id,session},scope=createScope(host,a);a.ctx=scope.ctx;agents.push(a);scopes.push(scope);return a;},a=make('session-a'),b=make('session-b');
++ const tokenFile=path.join(root,'runtime.token');fs.writeFileSync(tokenFile,token);const selected={version:1,bindingId:randomUUID(),site,account:'fixture@example.test',workspace:'team-a',tokenId:'token-a',tokenFile,ownerRoot:root,tokenFileSha256:digest(token)};manager=new CreationSessions({ctx:host,home,readBinding:()=>selected});await manager.ensure(a);
++ const runtime=new BusinessRuntime({transport:new BusinessTransport({origin:site,home,standalone:true}),creation:()=>manager,workingDirectory:async agent=>agent.session.header.cwd});for(const agent of agents)for(const t of createBusinessTools(runtime,caller=>caller))disposers.push(agent.ctx.tools.register(t));
++ const invoke=async(agent,name,args={})=>{const r=(await new NativeToolExecutor(agent.ctx).execute({agent,signal:new AbortController().signal,calls:[{type:'tool-call',id:randomUUID(),name,arguments:JSON.stringify(args)}]})).results[0].result;return r;};
++ const exec=async(name,args={})=>{const r=await invoke(a,name,args);assert(!r.isError,JSON.stringify(r));return r.value;};
++ let status;for(let i=0;i<50;i++){status=await exec('naumi_systems');if(status.creation.ready)break;await new Promise(r=>setTimeout(r,100));}check('native_Harness_business_and_existing_MCP_ready',status.enterprise.ready&&status.creation.ready);
++ check('business_tools_session_scoped',!host.tools.definitions().some(t=>t.name==='naumi_business_command'));
++ const read=await exec('naumi_business_read',{collection:'tasks',projectId:ids.project});check('real_HTTP_permission_projection',read.items[0].id===ids.task);
++ const context=await exec('naumi_business_context',{action:'select',expectedVersion:0,selection:{taskId:ids.task}});check('context_real_ids_and_inferred_parents',context.context.refs.projectId===ids.project);
++ const command=async(name,input,operationId=randomUUID())=>exec('naumi_business_command',{command:name,inputJson:JSON.stringify(input),operationId,contextVersion:1});
++ const gate=a.ctx.on('tools/pre-execute',async(e,next)=>e.name==='naumi_business_command'?{kind:'deny',reason:'fixture native approval denied'}:next());check('native_denial_before_business_write',(await invoke(a,'naumi_business_command',{command:'task.claim',inputJson:JSON.stringify({id:ids.task,revision:1}),operationId:randomUUID()})).isError&&receipts.size===0);gate();
++ check('claim_uses_original_domain_command',(await command('task.claim',{id:ids.task,revision:1})).status==='acknowledged');check('start_is_separate_revisioned_command',(await command('task.start',{id:ids.task,revision:2})).result.status==='in_progress');
++ const generated=await exec('mcp__naumi_creation__naumi_call',{tool:'generate_image',arguments:{prompt:'fixture preview'},operationId:randomUUID()});check('existing_fixed_stdio_MCP_generates_fixture',generated.structuredContent.state==='succeeded'&&supplier===1);
++ const file=path.join(a.session.header.cwd,'result.png'),download=await exec('mcp__naumi_creation__naumi_download_media',{url:'media/output.png',out:file}),receipt=download.structuredContent;check('download_hash_verified',receipt.sha256===createHash('sha256').update(bytes).digest('hex'));
++ await exec('naumi_present_download',{receipt:{path:receipt.path,bytes:receipt.bytes,sha256:receipt.sha256}});check('original_native_present_event',a.session.snapshotEvents().some(e=>e.type==='deliverables/presented'));
++ const uploaded=await exec('naumi_business_upload',{path:file,taskId:ids.task,operationId:randomUUID(),contextVersion:1});check('original_assets_receipt_linked',uploaded.result.id===ids.asset&&uploads===1);
++ const operationId=randomUUID(),submitted=await command('deliverable.submit',{id:ids.deliverable,assetId:ids.asset,description:'Fixture preview'},operationId);check('lost_submit_unknown_not_false_success',submitted.status==='unknown');
++ check('other_session_cannot_read_original_operation',(await invoke(b,'naumi_business_operation',{action:'read',operationId})).isError);
++ const recovered=await exec('naumi_business_operation',{action:'recover',operationId});check('same_UUID_server_receipt_single_submission',recovered.status==='acknowledged'&&submissions===1&&receipts.size===3);
++ check('delivery_enters_review_not_acceptance',recovered.result.status==='quality_review'&&workspace.deliverables[0].status==='quality_review');
++ check('other_session_context_and_present_unchanged',(await invoke(b,'naumi_business_context',{action:'read'})).value.context===null&&!b.session.snapshotEvents().some(e=>e.type==='deliverables/presented'));
++ check('no_browser_SQL_or_extra_provider',seen.every(p=>['/api/workspace','/api/commands','/api/assets'].includes(p))&&supplier===1);
++ fs.writeFileSync(path.join(out,'HARNESS.json'),JSON.stringify({tier:'real Harness+NativeToolExecutor+fixed stdio MCP+private bridge+HTTP; enterprise DB/provider/OS crypto fixtures',checks,fixtureProviderRequests:supplier,fixtureUploads:uploads,fixtureSubmissions:submissions,productionModelCalls:0,sharedServiceWrites:0},null,2)+'\n');console.log('NATIVE_SYSTEMS_COMPLETE checks='+checks.length+' fixture_provider=1 uploads=1 submissions=1 production=0');
++}finally{await manager?.close();for(const d of disposers)d();for(const scope of scopes)await scope.dispose();await ctx.fiber.dispose();await bridge?.close();server.closeAllConnections();await new Promise(r=>server.close(r));if(!path.resolve(root).startsWith(path.resolve(os.tmpdir())+path.sep))throw Error('TEMP_ESCAPE');fs.rmSync(root,{recursive:true,force:true});}
+diff --git a/modified/tests/naumi-business.test.mjs b/modified/tests/naumi-business.test.mjs
+new file mode 100644
+index 0000000..ee2d4b7
+--- /dev/null
++++ b/modified/tests/naumi-business.test.mjs
+@@ -0,0 +1,65 @@
++import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import {createRequire} from 'node:module';import {createHash,randomUUID} from 'node:crypto';
++import {BusinessRuntime,projectBusinessWorkspace} from '../plugins/naumi-enterprise/business-runtime.js';import {createBusinessTools,installBusiness} from '../plugins/naumi-enterprise/business.js';
++import {assertSupportedJsonSchema} from '@deepseek-ai/dsh-tools';
++const require=createRequire(import.meta.url),{BusinessSession}=require('../desktop/app/business-session.cjs'),{EnterpriseSession}=require('../desktop/app/enterprise.cjs'),c=require('../plugins/naumi-enterprise/business-contract.cjs');
++const ids=Object.fromEntries(['actor','tenant','project','request','product','task','deliverable','other'].map(k=>[k,randomUUID()]));
++const crypto={isEncryptionAvailable:()=>true,encryptString:s=>Buffer.from(s).map(x=>x^0x59),decryptString:b=>Buffer.from(b).map(x=>x^0x59).toString()};
++function workspace(roles=['designer']){return {actor:{id:ids.actor,tenantId:ids.tenant,name:'Fixture owner',roles,centralManaged:true,centralTitle:'designer'},revision:'fixture-1',projects:[{id:ids.project,name:'Fixture project',revision:1}],products:[{id:ids.product,name:'Fixture product',revision:1}],requests:[{id:ids.request,projectId:ids.project,productId:ids.product,title:'Fixture request',revision:1}],tasks:[{id:ids.task,requestId:ids.request,title:'Fixture task',assigneeId:ids.actor,status:'assigned',revision:1}],deliverables:[{id:ids.deliverable,taskId:ids.task,name:'Preview',status:'draft'}],submissions:[],assets:[],members:[{id:ids.actor,name:'Fixture owner',roles,phone:'PRIVATE',password_hash:'PRIVATE',email:'private@example.test'}],teams:[]};}
++function fixture(t,options={}){
++ const root=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-business-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));let current='A'.repeat(32);const state={workspace:workspace(options.roles),calls:[],commands:0,uploads:0,receipts:new Map(),...options};
++ const session={cookies:{get:async()=>[{name:'design_ops_session',value:current}]}};
++ const request=async input=>{state.calls.push({url:input.url,method:input.method,body:input.body});if(input.method==='GET'){if(state.get)await state.get(input);return {status:state.getStatus||200,data:structuredClone(state.workspace)};}
++  if(input.url.endsWith('/api/assets')){state.uploads++;if(state.upload) return state.upload(input);return {status:201,data:{id:ids.other,taskId:ids.task,name:'fixture.png'}};}
++  const value=JSON.parse(input.body),key=value.input._idempotencyKey;if(!state.receipts.has(key)){state.commands++;state.receipts.set(key,{id:value.input.id||ids.other,revision:2});}
++  if(state.command)return state.command(input,value);return {status:200,data:{ok:true,result:state.receipts.get(key)}};
++ };
++ const make=()=>new BusinessSession({origin:'https://enterprise.example.test',session,root,safeStorage:crypto,protectPath:()=>{},contract:c,request});
++ return {root,state,session,make,native:make(),switchCookie:()=>{current='B'.repeat(32);},resetCookie:()=>{current='A'.repeat(32);}};
++}
++const call=(native,input)=>native.perform({sessionId:'session-one',...input});
++const claim=(operationId=randomUUID())=>({action:'command',command:'task.claim',input:{id:ids.task,revision:1},operationId});
++test('shared command registry contains actual source actions and excludes role/acceptance/SQL mutations',()=>{assert(Object.hasOwn(c.commands,'task.start'));for(const name of ['review.decide','task.accept','member.update','employee.create','sql'])assert.throws(()=>c.command(name,{}),/UNSUPPORTED/);assert.throws(()=>c.command('task.claim',{id:ids.task,revision:1,_idempotencyKey:randomUUID()}),/INPUT_INVALID/);});
++test('role eligibility never equates enterprise admin to business owner/designer',()=>{const admin={roles:['admin'],centralManaged:true,centralTitle:'administrator'};assert.equal(c.mayCommand(admin,'project.save'),false);assert.equal(c.mayCommand(admin,'task.claim'),false);assert.equal(c.mayCommand({...admin,centralTitle:'system_admin'},'project.save'),true);});
++test('command revisions and exact IDs are mandatory; a new request requires a delivery specification',()=>{assert.throws(()=>c.command('task.claim',{id:ids.task}),/FIELD_REQUIRED/);assert.throws(()=>c.command('task.claim',{id:'not-a-uuid',revision:1}),/ID_INVALID/);assert.throws(()=>c.command('request.save',{title:'x',brief:'y',deadline:'2030-01-01'}),/SPEC_REQUIRED/);});
++test('workspace snapshot uses only the fixed authenticated API and returns real emptiness',async t=>{const f=fixture(t);f.state.workspace.tasks=[];const r=await call(f.native,{action:'workspace'});assert.deepEqual(r.workspace.tasks,[]);assert.equal(f.state.calls[0].url,'https://enterprise.example.test/api/workspace');});
++test('arbitrary action/url/header inputs fail before touching the source',async t=>{const f=fixture(t);await assert.rejects(call(f.native,{action:'sql',url:'https://evil.test'}),/INPUT_INVALID/);assert.equal(f.state.calls.length,0);});
++test('wrong expected actor fails without a business mutation',async t=>{const f=fixture(t);await assert.rejects(call(f.native,{...claim(),expectedActor:{id:ids.other,tenantId:ids.tenant}}),/ACCOUNT_CHANGED/);assert.equal(f.state.commands,0);});
++test('a successful command records encrypted server acknowledgment and reuses its UUID',async t=>{const f=fixture(t),input=claim();const first=await call(f.native,input),second=await call(f.make(),input);assert.equal(first.status,'acknowledged');assert.deepEqual(second.result,first.result);assert.equal(f.state.commands,1);assert.equal(f.state.calls.filter(x=>x.method==='POST').length,1);const bytes=fs.readFileSync(f.native.store.file('operation:'+input.operationId));assert(!bytes.includes(Buffer.from('task.claim')));});
++test('same UUID with changed payload is rejected even after acknowledgment',async t=>{const f=fixture(t),input=claim();await call(f.native,input);await assert.rejects(call(f.native,{...input,input:{id:ids.task,revision:2}}),/IDEMPOTENCY_CONFLICT/);assert.equal(f.state.commands,1);});
++test('lost command response remains UNKNOWN and explicit recovery reuses the server receipt',async t=>{const f=fixture(t),input=claim();let lost=true;f.state.command=(_req,value)=>{if(lost){lost=false;throw Error('lost');}return {status:200,data:{ok:true,result:f.state.receipts.get(value.input._idempotencyKey)}};};assert.equal((await call(f.native,input)).status,'unknown');assert.equal((await call(f.make(),{action:'operation.read',operationId:input.operationId})).status,'unknown');assert.equal((await call(f.make(),{action:'operation.recover',operationId:input.operationId})).status,'acknowledged');assert.equal(f.state.commands,1);assert.equal(f.state.calls.filter(x=>x.method==='POST').length,2);});
++test('operation scope is actor+tenant+session, never a global UUID lookup',async t=>{const f=fixture(t),input=claim();await call(f.native,input);await assert.rejects(f.native.perform({sessionId:'other-session',action:'operation.read',operationId:input.operationId}),/BINDING_CHANGED/);f.state.workspace.actor.id=ids.other;await assert.rejects(call(f.native,{action:'operation.read',operationId:input.operationId}),/BINDING_CHANGED/);});
++test('source 409 is rejected and not retried by operation recovery',async t=>{const f=fixture(t),input=claim();f.state.command=()=>({status:409,data:{code:'STALE_REVISION'}});assert.equal((await call(f.native,input)).status,'rejected');assert.equal((await call(f.native,{action:'operation.recover',operationId:input.operationId})).status,'rejected');assert.equal(f.state.calls.filter(x=>x.method==='POST').length,1);});
++test('unexpected server failure and malformed ack never become successful delivery',async t=>{for(const status of [500,200]){const f=fixture(t);f.state.command=()=>({status,data:{unexpected:true}});assert.equal((await call(f.native,claim())).status,'unknown');}});
++test('native enterprise activity includes business calls in the existing update idle gate',()=>{const business={running:2,descriptor:()=>({protocolVersion:1})},original=new EnterpriseSession({origin:'https://enterprise.example.test',session:{},business});assert.equal(original.running,2);assert.equal(original.descriptor().business.protocolVersion,1);});
++test('context selection infers visible parents and persists with CAS',async t=>{const f=fixture(t);const selected=await call(f.native,{action:'context.select',expectedContextVersion:0,selection:{taskId:ids.task}});assert.deepEqual(selected.context.refs,{taskId:ids.task,requestId:ids.request,projectId:ids.project});assert.equal((await call(f.make(),{action:'context.read'})).context.version,1);await assert.rejects(call(f.native,{action:'context.clear',expectedContextVersion:0}),/CONFLICT/);});
++test('context rejects forged IDs and cross-project parent relations',()=>{const w=workspace();assert.throws(()=>c.selectContext(w,{taskId:ids.other}),/NOT_VISIBLE/);w.projects.push({id:ids.other});assert.throws(()=>c.selectContext(w,{taskId:ids.task,projectId:ids.other}),/RELATION_MISMATCH/);});
++test('changed account can explicitly clear old context without receiving old refs',async t=>{const f=fixture(t);await call(f.native,{action:'context.select',expectedContextVersion:0,selection:{taskId:ids.task}});f.state.workspace.actor.id=ids.other;const old=await call(f.native,{action:'context.read'});assert.equal(old.context,null);assert.equal(old.clearVersion,1);assert(!JSON.stringify(old).includes(ids.task));await call(f.native,{action:'context.clear',expectedContextVersion:1});assert.equal((await call(f.native,{action:'context.read'})).context.actor.id,ids.other);});
++test('an UNKNOWN command retains its original context even when current UI context is cleared',async t=>{const f=fixture(t),input=claim();await call(f.native,{action:'context.select',expectedContextVersion:0,selection:{taskId:ids.task}});let lost=true;f.state.command=(_r,v)=>{if(lost){lost=false;throw Error();}return {status:200,data:{ok:true,result:f.state.receipts.get(v.input._idempotencyKey)}};};await call(f.native,input);await call(f.native,{action:'context.clear',expectedContextVersion:1});assert.equal((await call(f.native,{action:'operation.recover',operationId:input.operationId})).status,'acknowledged');});
++test('cookie switch after actual commit cannot return old account data to the new UI',async t=>{const f=fixture(t),input=claim();f.state.command=(_r,v)=>{f.switchCookie();return {status:200,data:{ok:true,result:f.state.receipts.get(v.input._idempotencyKey)}};};await assert.rejects(call(f.native,input),/ACCOUNT_CHANGED_NO_REPLAY/);f.resetCookie();assert.equal((await call(f.native,{action:'operation.read',operationId:input.operationId})).status,'acknowledged');assert.equal(f.state.commands,1);});
++test('read-only data minimizes private fields and supports stable relation filters/paging',async()=>{const w=workspace();w.tasks.push({id:ids.other,requestId:ids.request,title:'Second',revision:2});const r=new BusinessRuntime({transport:{perform:async()=>({workspace:w,operationStoreReady:true})}});const data=await r.read('s',{collection:'tasks',projectId:ids.project,limit:1});assert.equal(data.total,2);assert.equal(data.nextOffset,1);const members=await r.read('s',{collection:'members'});assert(!JSON.stringify(members).includes('PRIVATE'));await assert.rejects(r.read('s',{collection:'tasks',id:randomUUID()}),/NOT_VISIBLE/);});
++test('saved credential/cookie values are never included in projected workspace',()=>{const w=workspace();w.actor.cookie='PRIVATE_COOKIE';w.actor.token='PRIVATE_TOKEN';const v=projectBusinessWorkspace(w);assert(!JSON.stringify(v).includes('PRIVATE_'));});
++test('file upload validates bytes and binds source asset to the task without auto-submission',async t=>{const f=fixture(t),bytes=Buffer.from('fixture-image'),operationId=randomUUID();const r=await call(f.native,{action:'asset.upload',operationId,file:{name:'fixture.png',content:bytes.toString('base64'),sha256:createHash('sha256').update(bytes).digest('hex'),taskId:ids.task}});assert.equal(r.status,'acknowledged');assert.equal(r.result.id,ids.other);assert.equal(f.state.uploads,1);assert(!f.native.store.read('operation:'+operationId).payload.content);});
++test('upload UNKNOWN never automatically re-sends file bytes',async t=>{const f=fixture(t),bytes=Buffer.from('fixture'),operationId=randomUUID();f.state.upload=()=>{throw Error('lost after upload');};const input={action:'asset.upload',operationId,file:{name:'fixture.png',content:bytes.toString('base64'),sha256:createHash('sha256').update(bytes).digest('hex'),taskId:ids.task}};assert.equal((await call(f.native,input)).status,'unknown');assert.equal((await call(f.make(),input)).status,'unknown');assert.equal((await call(f.native,{action:'operation.recover',operationId})).recoverable,false);assert.equal(f.state.uploads,1);});
++test('upload rejects changed content/hash and wrong assignee before POST',async t=>{const f=fixture(t),input={action:'asset.upload',operationId:randomUUID(),file:{name:'fixture.png',content:'ZmFrZQ==',sha256:'a'.repeat(64),taskId:ids.task}};await assert.rejects(call(f.native,input),/HASH_INVALID/);f.state.workspace.tasks[0].assigneeId=ids.other;input.file.sha256=createHash('sha256').update(Buffer.from('fake')).digest('hex');await assert.rejects(call(f.native,input),/ASSIGNEE_REQUIRED/);assert.equal(f.state.uploads,0);});
++test('working-directory upload rejects traversal and symlink escape',async t=>{const root=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-biz-files-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));const cwd=path.join(root,'work');fs.mkdirSync(cwd);fs.writeFileSync(path.join(root,'outside.txt'),'private');const r=new BusinessRuntime({workingDirectory:async()=>cwd,transport:{perform:async()=>{throw Error('MUST_NOT_FETCH');}}});await assert.rejects(r.upload('s',{path:'../outside.txt'},{}),/OUTSIDE_WORKSPACE/);});
++test('all six business tools use supported native schemas and recover/context writes retain lead admission',async()=>{let writes=[];const tools=createBusinessTools({context:async()=>({}),operation:async()=>({})},(_a,w)=>{writes.push(w);return {id:'root'};});assert.equal(tools.length,6);for(const tool of tools)assertSupportedJsonSchema(tool.parameters);await tools.find(x=>x.name==='naumi_business_operation').execute({action:'recover',operationId:randomUUID()},{agent:{}});await tools.find(x=>x.name==='naumi_business_context').execute({action:'select',expectedVersion:0,selection:{}},{agent:{}});assert.deepEqual(writes,[true,true]);});
++
++test('real in-flight command remains counted until the source finishes and identical concurrency sends once',async t=>{
++ const f=fixture(t),input=claim();let release,entered;const started=new Promise(r=>{entered=r;});f.state.command=async(_r,v)=>{entered();await new Promise(r=>{release=r;});return {status:200,data:{ok:true,result:f.state.receipts.get(v.input._idempotencyKey)}};};
++ const pending=call(f.native,input);await started;assert.equal(f.native.running,1);const duplicate=await call(f.native,input);assert.equal(duplicate.status,'unknown');assert.equal(f.state.calls.filter(x=>x.method==='POST').length,1);release();assert.equal((await pending).status,'acknowledged');assert.equal(f.native.running,0);
++});
++test('runtime package scanner excludes native business contexts, receipts and generic encrypted vault files',async()=>{
++ const {scanRuntimeInventory}=await import('../desktop/scripts/prepare-runtime.mjs');for(const file of ['home/naumi/business-private/receipt.vault','home/naumi/business-private/not-a-vault.json','home/private/hashed.vault'])assert.throws(()=>scanRuntimeInventory([{path:file}]),/RUNTIME_PRIVATE_FILE/);
++});
++test('production install lifecycle uses scoped native tools and retains managed employee gate and member write admission',async()=>{
++ const {managedRuntimeHost}=await import('./helpers/managed-runtime-host.mjs');const h=await managedRuntimeHost();let install,provider,runtime,calls=0;
++ try{
++  provider=h.ctx.plugin({name:'business-working-directory-fixture',apply(ctx){ctx.provide('workingDirectory',{ensure:async()=>h.dir});}});await provider;
++  install=installBusiness(h.ctx,{origin:'https://enterprise.example.test',home:h.dir,onReady:r=>{runtime=r;}});await install;assert(runtime);runtime.transport={perform:async input=>{calls++;if(input.action==='workspace')return {workspace:workspace(),operationStoreReady:true};return {context:null};}};
++  assert(h.root.ctx.tools.definitions(h.root).some(t=>t.name==='naumi_business_command'));assert(!h.ctx.tools.definitions().some(t=>t.name==='naumi_business_command'));
++  await h.attach();const blocked=await h.invoke('naumi_business_command',h.root,{command:'task.claim',inputJson:JSON.stringify({id:ids.task,revision:1}),operationId:randomUUID()});assert(blocked.isError);assert.equal(calls,0);
++  const child=await h.create('business-child',h.other);await h.ctx.serial(child.ctx,'agent/pre-step',{agent:child,signal:new AbortController().signal,modelSelection:{provider:'fixture',model:'fixture-model'}},async()=>{});
++  const denied=await h.invoke('naumi_business_operation',child,{action:'recover',operationId:randomUUID()});assert(denied.isError);assert.equal(calls,0);
++  const read=await h.invoke('naumi_business_read',h.other,{collection:'tasks'});assert(!read.isError,JSON.stringify(read));assert.equal(read.value.items[0].id,ids.task);assert.equal(calls,1);
++ }finally{await install?.dispose();await provider?.dispose();await h.cleanup();}
++});
+diff --git a/original/tests/naumi-context-ui.test.mjs b/modified/tests/naumi-context-ui.test.mjs
+index 1a24eef..54444f8 100644
+--- a/original/tests/naumi-context-ui.test.mjs
++++ b/modified/tests/naumi-context-ui.test.mjs
+@@ -58,7 +58,12 @@ test('preexisting enterprise front-end remains byte-equivalent apart from declar
+  const deliveryComponent=source.slice(source.indexOf('    function DeliveryCenter('),source.indexOf('    function Page('));
+  const oldDelivery=original.split('\n').find(line=>line.includes("page==='naumi-delivery'"));
+  const deliveryRestored=restored.replace(deliveryComponent,'').replace("        page==='naumi-delivery'&&h(DeliveryCenter,{state,tasks}),",oldDelivery);
+- assert.equal(deliveryRestored.replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'));
++ // Only this declared readiness component is appended to the existing connection
++ // page. Strip the exact two additions, then keep the whole original comparison.
++ const nativeSystems="    const NativeSystems=React.lazy(()=>import('/naumi/assets/business-context-client.js').then(m=>({default:m.createSystemsStatus(ctx,React)})));\n";
++ const nativeRow=",h(React.Suspense,{fallback:null},h(NativeSystems))";
++ assert.equal(source.split(nativeSystems).length,2);assert.equal(source.split(nativeRow).length,2);
++ assert.equal(deliveryRestored.replace(nativeSystems,'').replace(nativeRow,'').replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'));
+ });
+ test('team presentation has no direct credential, model, permission or persistence writes',()=>{
+  const added=panelSource;

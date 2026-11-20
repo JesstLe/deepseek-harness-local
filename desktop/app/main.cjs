@@ -3,6 +3,7 @@ const path=require('node:path');
 const fs=require('node:fs');
 const {app,BrowserWindow,ipcMain,Menu,nativeTheme,shell,session,dialog,safeStorage,clipboard}=require('electron');
 const {EnterpriseSession}=require('./enterprise.cjs');
+const {BusinessSession}=require('./business-session.cjs');
 const {workspaceSummary,selectWorkspace,verifyConnection,assertWorkspaceIdle}=require('./workspaces.cjs');
 const {Guests}=require('./guests.cjs');
 const {startBridge}=require('./tools.cjs');
@@ -217,7 +218,7 @@ async function boot(){
    const connection=enterpriseConnection({home:settings.home,packaged:app.isPackaged,identityOrigin:identityRuntime?.active?.origin??'',configuredOrigin:process.env.NAUMI_ENTERPRISE_ORIGIN});
    if(!connection&&!identityRuntime?.active){await window.loadFile(path.join(__dirname,'connect.html'));return;}
    settings.enterpriseOrigin=connection?.origin??'';
-   if(connection)enterprise??=new EnterpriseSession({origin:connection.origin,session:session.fromPartition('persist:naumi-enterprise-'+(identityRuntime?.active?.profileId??'legacy')+'-'+require('node:crypto').createHash('sha256').update(connection.origin).digest('hex'))});
+   if(connection&&!enterprise){const enterpriseBrowser=session.fromPartition('persist:naumi-enterprise-'+(identityRuntime?.active?.profileId??'legacy')+'-'+require('node:crypto').createHash('sha256').update(connection.origin).digest('hex'));const contract=require(path.join(settings.releaseRoot??settings.root,'plugins/naumi-enterprise/business-contract.cjs'));enterprise=new EnterpriseSession({origin:connection.origin,session:enterpriseBrowser,business:new BusinessSession({origin:connection.origin,session:enterpriseBrowser,root:path.join(settings.home,'naumi/business-private'),safeStorage,contract})});}
   }
   if(identityRuntime?.active&&settings.isolated)await creation.activate(settings.home);
   if(settings.linkedService)installerState.registerProfile(path.resolve(process.resourcesPath,'..'),app.getPath('userData'));
