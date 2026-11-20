@@ -6,7 +6,8 @@ const hash=b=>createHash('sha256').update(b).digest('hex');
 const INERT_EXTRAS=['assets/bot-chat-model.js.queue-stop-before','assets/bot-groups.js.queue-stop-before'];
 // Exact official files retired by the CUA/headless-business migrations. Never classify user/unknown code as removable.
 const CUA_RETIRED={
- 'assets/business-context-client.js':['b52012f7ab44bcf43ea595e72fc13d20e4f16c9d47027040226f049771982a27','b52012f7ab44bcf43ea595e72fc13d20e4f16c9d47027040226f049771982a27'],
+ 'assets/business-context.css':['685a87ec948cecc71c6c29556db912d9ff2d75bed0cad88ccc4599770e80c0c3','a504b0eb8aa5cf98a4adc3c327e1d2d17153c2241b229067e7fa4ad2c33cc2c7'],
+ 'assets/business-context-client.js':['b52012f7ab44bcf43ea595e72fc13d20e4f16c9d47027040226f049771982a27','7676c4e6877b53e7e42c8cc8b3382fe38ffcca92ad3b2c621d2ccd9e594d7e9e'],
  'agent-desktop.js':'2cb1839c9ae5350bc48aa8da5d7fbfa3156a0a512bcf239f7e0cf50da2a339d3',
  'skills/naumi-desktop/references/desktop-1.3.1.md':'abd913be10552c028e461e0a45c20e3734a7a1e5251fc2f9ef6fd63fdd606a6e',
  'skills/naumi-desktop/references/platform-1.3.1.md':'babc8d3f0583afc3f41b3b84cc775d3be24010043b57966755fcf9bda8880073'
