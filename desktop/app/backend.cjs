@@ -106,6 +106,7 @@ async function ensureBackend(settings,{fetcher=fetch,startTimeoutMs=90000,pollMs
    settings.url='http://127.0.0.1:'+await freePort();
   }
   if(settings.linkedService)require('./linked-service.cjs').synchronize(settings);else profile.prepareProfile(settings);
+  require('./embedded-models.cjs').apply(settings);
   settings.workspace??=path.join(settings.home,'workspace');
   if(profile.exists(settings.workspace)&&(!fs.lstatSync(settings.workspace).isDirectory()||fs.lstatSync(settings.workspace).isSymbolicLink()))throw Error('PROFILE_WORKSPACE_UNMANAGED');
   if(!settings.linkedService)await require(path.join(settings.root,'plugins/naumi-enterprise/managed-workspace.cjs')).createManagedWorkspace(settings.workspace,{parent:settings.home});
