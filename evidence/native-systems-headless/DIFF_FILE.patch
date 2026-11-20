@@ -1,0 +1,258 @@
+diff --git a/original/desktop/scripts/verify-business-native.mjs b/modified/desktop/scripts/verify-business-native.mjs
+index 0f68e85..5458da9 100644
+--- a/original/desktop/scripts/verify-business-native.mjs
++++ b/modified/desktop/scripts/verify-business-native.mjs
+@@ -1,20 +1,15 @@
+ import {execFileSync} from 'node:child_process';import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import http from 'node:http';import assert from 'node:assert/strict';import {createRequire} from 'node:module';import {randomUUID,createHash} from 'node:crypto';import {fileURLToPath} from 'node:url';
+-const root=fileURLToPath(new URL('../..',import.meta.url)),require=createRequire(import.meta.url),{_electron}=require('playwright'),{build}=createRequire('E:/Workspace/naumi/package.json')('esbuild');
++const root=fileURLToPath(new URL('../..',import.meta.url)),require=createRequire(import.meta.url),{_electron}=require('playwright');
+ const out=path.resolve(process.env.BUSINESS_EVIDENCE??'output/native-systems'),dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-business-electron-')),appDir=path.join(dir,'app'),home=path.join(dir,'home');fs.mkdirSync(out,{recursive:true});fs.mkdirSync(appDir);fs.mkdirSync(home);
+ const ids=Object.fromEntries(['actor','tenant','project','request','task'].map(k=>[k,randomUUID()])),cookieA='A'.repeat(32),cookieB='B'.repeat(32),receipts=new Map(),checks=[],seen=[];let drop=true,delay=false,arrived,release,uploadAttempts=0;
+-const workspace=()=>({actor:{id:ids.actor,tenantId:ids.tenant,name:'隔离设计师',roles:['designer']},revision:1,projects:[{id:ids.project,name:'新品项目'}],requests:[{id:ids.request,projectId:ids.project,title:'主图需求'}],tasks:[{id:ids.task,requestId:ids.request,title:'首版设计',assigneeId:ids.actor,revision:1}],deliverables:[],products:[],submissions:[],assets:[],members:[],teams:[],comments:[],decisions:[]});let uiBody,uiPosts=[];
++const workspace=()=>({actor:{id:ids.actor,tenantId:ids.tenant,name:'隔离设计师',roles:['designer']},revision:1,projects:[{id:ids.project,name:'新品项目'}],requests:[{id:ids.request,projectId:ids.project,title:'主图需求'}],tasks:[{id:ids.task,requestId:ids.request,title:'首版设计',assigneeId:ids.actor,revision:1}],deliverables:[],products:[],submissions:[],assets:[],members:[],teams:[],comments:[],decisions:[]});const uiBody='<!doctype html><meta charset=\"utf-8\"><title>Native bridge test shell</title><body></body>';
+ const server=http.createServer(async(req,res)=>{const send=(v,status=200)=>res.writeHead(status,{'Content-Type':'application/json'}).end(JSON.stringify(v));
+  if(req.url==='/ui')return res.writeHead(200,{'Content-Type':'text/html'}).end(uiBody);
+- if(req.url.startsWith('/naumi/systems')){const status={enterprise:{ready:true,operationStoreReady:true,counts:{projects:1,requests:1,tasks:1,deliverables:0}},creation:{configured:false,ready:false}};if(req.method==='GET'){const url=new URL(req.url,site);if(url.searchParams.get('sessionId')==='session-slow')await new Promise(r=>setTimeout(r,450));return send(url.searchParams.get('context')==='1'?{...status,workspace:workspace(),context:{context:null}}:status);}let raw='';for await(const c of req)raw+=c;uiPosts.push(JSON.parse(raw));return send({context:{version:1}});}
+  if(req.url==='/api/workspace'){const cookie=req.headers.cookie;seen.push({kind:'read',cookieA:cookie==='design_ops_session='+cookieA,cookieB:cookie==='design_ops_session='+cookieB,unrelated:cookie?.includes('unrelated')??false});return cookie==='design_ops_session='+cookieA?send(workspace()):send({code:'UNAUTHENTICATED'},401);}
+  if(req.url==='/api/assets'){uploadAttempts++;for await(const c of req){}req.socket.destroy();return;}
+  if(req.url==='/api/commands'){let raw='';for await(const c of req)raw+=c;const {input}=JSON.parse(raw),cookie=req.headers.cookie;seen.push({kind:'write',cookieA:cookie==='design_ops_session='+cookieA,unrelated:cookie?.includes('unrelated')??false});assert.equal(req.headers.origin,site);assert.equal(cookie,'design_ops_session='+cookieA);if(!receipts.has(input._idempotencyKey))receipts.set(input._idempotencyKey,{id:input.id,revision:2});if(delay){arrived?.();await new Promise(r=>{release=r;});}if(drop){drop=false;req.socket.destroy();return;}return send({ok:true,result:receipts.get(input._idempotencyKey)});}
+  return send({},404);
+ });await new Promise(r=>server.listen(0,'127.0.0.1',r));const site='http://127.0.0.1:'+server.address().port;
+-const code=`import React from 'react';import{createRoot}from'react-dom/client';import{createPortal}from'react-dom';import{installBusinessContextUI,createSystemsStatus}from'./plugins/naumi-enterprise/assets/business-context-client.js';
+-const h=React.createElement,listeners=new Set();let selected='session-a',Button;const state={subscribe:f=>{listeners.add(f);return()=>listeners.delete(f)},getSnapshot:()=>selected};const ctx={inject:(_deps,fn)=>fn({sidebarRight:{mounted:state},effect:f=>f(),slots:{inject:(_slot,fn)=>fn(),register:(_slot,C)=>{Button=C;return()=>{}}}})};installBusinessContextUI(ctx,React,createPortal);const Status=createSystemsStatus(ctx,React);window.selectSession=id=>{selected=id;for(const f of listeners)f();};createRoot(document.getElementById('root')).render(h(React.Fragment,null,h('header',null,h('h1',null,'系统连接'),h(Button)),h(Status),h('textarea',{'aria-label':'原有输入框',defaultValue:'原有草稿保持'})));`;
+-const bundled=await build({bundle:true,write:false,format:'iife',define:{'process.env.NODE_ENV':'"production"'},nodePaths:['E:/Workspace/naumi/node_modules'],stdin:{contents:code,resolveDir:root},logLevel:'silent'});
+-uiBody='<!doctype html><html lang="zh"><meta charset="utf-8"><title>原生业务工具 · 隔离组件验收</title><style>body{margin:36px;font:15px "Segoe UI","Microsoft YaHei",sans-serif;color:#26354c;background:#f6f8fc}header,.naumi-connection-row{display:flex;align-items:center;gap:20px}header{justify-content:space-between}button{padding:9px 16px;border:1px solid #dce4ef;border-radius:8px;background:white;color:#26354c;cursor:pointer}.primary{background:#4264db;color:white}.naumi-modal-mask{position:fixed;inset:0;background:#17223933;display:flex;align-items:center;justify-content:center}.naumi-modal{padding:24px;border-radius:18px;width:450px;box-shadow:0 18px 70px #20335233}.naumi-section-head,.naumi-modal-actions{display:flex;align-items:center;justify-content:space-between;gap:10px}.naumi-connection-row{padding:18px 0}.naumi-connection-row span{margin-left:auto}textarea{display:block;width:100%;margin-top:30px;padding:14px;box-sizing:border-box;border:1px solid #dce4ef;border-radius:9px}'+fs.readFileSync(path.join(root,'plugins/naumi-enterprise/assets/business-context.css'),'utf8')+'</style><div id="root"></div><script>'+bundled.outputFiles[0].text.replaceAll('</script','<\\/script')+'</script></html>';
+ fs.writeFileSync(path.join(appDir,'package.json'),JSON.stringify({name:'business-electron-fixture',main:'main.cjs'}));
+ fs.writeFileSync(path.join(appDir,'main.cjs'),`const{app,BrowserWindow,session,safeStorage}=require('electron');app.setPath('userData',${JSON.stringify(path.join(dir,'user'))});app.whenReady().then(async()=>{const{BusinessSession}=require(${JSON.stringify(path.join(root,'desktop/app/business-session.cjs'))}),{EnterpriseSession}=require(${JSON.stringify(path.join(root,'desktop/app/enterprise.cjs'))}),{startBridge}=require(${JSON.stringify(path.join(root,'desktop/app/tools.cjs'))});const s=session.fromPartition('persist:business-fixture');await s.cookies.set({url:${JSON.stringify(site)},name:'design_ops_session',value:${JSON.stringify(cookieA)},httpOnly:true});await s.cookies.set({url:${JSON.stringify(site)},name:'unrelated',value:'never-send'});const business=new BusinessSession({origin:${JSON.stringify(site)},session:s,safeStorage,root:${JSON.stringify(path.join(dir,'private'))},contract:require(${JSON.stringify(path.join(root,'plugins/naumi-enterprise/business-contract.cjs'))})});let blocked=false;const enterprise=new EnterpriseSession({origin:${JSON.stringify(site)},session:s,business}),bridge=await startBridge({home:${JSON.stringify(home)},guests:{},window:()=>null,enterprise,maintenance:{blocked:()=>blocked}});global.__businessTest={business,enterprise,session:s,setBlocked:v=>{blocked=v;},bridge};const win=new BrowserWindow({show:false,width:1100,height:800,webPreferences:{nodeIntegration:false,contextIsolation:true}});await win.loadURL(${JSON.stringify(site+'/ui')});});app.on('window-all-closed',()=>app.quit());`);
+ let application;const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;const check=(n,v)=>{assert(v,n);checks.push(n);console.log('BUSINESS_ELECTRON_PASS '+n);};
+@@ -35,9 +30,7 @@ try{
+  delay=true;const got=new Promise(r=>{arrived=r;}),changedId=randomUUID(),pending=call({...claim,operationId:changedId}).then(value=>({value}),e=>({error:e.message}));await got;check('business_running_in_existing_idle_gate',await application.evaluate(()=>global.__businessTest.enterprise.running===1));
+  await application.evaluate(async(_e,{site,cookieB})=>global.__businessTest.session.cookies.set({url:site,name:'design_ops_session',value:cookieB,httpOnly:true}),{site,cookieB});release();const changed=await pending;check('cookie_rotation_does_not_send_as_new_account',changed.error?.includes('BUSINESS_ACCOUNT_CHANGED_NO_REPLAY')&&seen.filter(s=>s.kind==='write').every(s=>s.cookieA));
+  await application.evaluate(async(_e,{site,cookieA})=>global.__businessTest.session.cookies.set({url:site,name:'design_ops_session',value:cookieA,httpOnly:true}),{site,cookieA});check('original_account_can_read_committed_receipt',(await call({action:'operation.read',sessionId:'session-a',operationId:changedId})).status==='acknowledged');
+- await page.getByText('可读取 · 按原权限执行',{exact:true}).waitFor();check('actual_UI_readiness_and_counts',(await page.locator('.naumi-business-counts').innerText()).includes('任务 1'));
+- await page.getByRole('button',{name:'业务上下文',exact:true}).click();await page.getByLabel('任务',{exact:true}).selectOption(ids.task);await page.getByRole('button',{name:'使用',exact:true}).click();await page.getByRole('dialog').waitFor({state:'hidden'});check('actual_UI_explicit_context_CAS',uiPosts.at(-1).selection.taskId===ids.task&&uiPosts.at(-1).expectedVersion===0&&uiPosts.at(-1).sessionId==='session-a');
+- await page.evaluate(()=>window.selectSession('session-slow'));await page.getByRole('button',{name:'业务上下文',exact:true}).click();await page.evaluate(()=>window.selectSession('session-b'));await page.getByRole('dialog').waitFor({state:'hidden'});await new Promise(r=>setTimeout(r,500));await page.getByRole('button',{name:'业务上下文',exact:true}).click();await page.getByLabel('项目',{exact:true}).waitFor();await page.getByRole('button',{name:'清除',exact:true}).click();await page.getByLabel('项目',{exact:true}).waitFor();check('late_old_session_response_not_saved_in_new_session',uiPosts.at(-1).sessionId==='session-b');
+- const png=await application.evaluate(async({BrowserWindow})=>Array.from((await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG()));fs.writeFileSync(path.join(out,'business-context.png'),Buffer.from(png));await page.keyboard.press('Escape');check('Escape_returns_focus_and_preserves_native_draft',await page.getByRole('button',{name:'业务上下文',exact:true}).evaluate(e=>e===document.activeElement)&&(await page.getByLabel('原有输入框').inputValue())==='原有草稿保持');
+- fs.writeFileSync(path.join(out,'ELECTRON.json'),JSON.stringify({tier:'real Electron net.request/Session/safeStorage/Windows DACL/bridge and shipped React UI; isolated enterprise/UI data fixtures',checks,hostStarts:2,productionModelCalls:0,sharedServiceWrites:0},null,2)+'\n');console.log('BUSINESS_ELECTRON_COMPLETE checks='+checks.length+' host_starts=2 OS_crypto=1 ACL=1 production=0');
++ const client=fs.readFileSync(path.join(root,'plugins/naumi-enterprise/client.js'),'utf8'),host=fs.readFileSync(path.join(root,'plugins/naumi-enterprise/host.js'),'utf8');check('no_business_visual_entry_import_or_asset',!client.includes('business-context-client.js')&&!client.includes('NativeSystems')&&!host.includes('business-context.css')&&!fs.existsSync(path.join(root,'plugins/naumi-enterprise/assets/business-context-client.js')));
++ const own=await call({action:'context.read',sessionId:'session-a'}),other=await call({action:'context.read',sessionId:'session-b'});check('native_context_without_UI_remains_Session_isolated',own.context.refs.taskId===ids.task&&other.context===null);
++ fs.writeFileSync(path.join(out,'ELECTRON.json'),JSON.stringify({tier:'real Electron net.request/Session/safeStorage/Windows DACL/private bridge; headless native business integration, isolated enterprise data fixture',checks,hostStarts:2,productionModelCalls:0,sharedServiceWrites:0},null,2)+'\n');console.log('BUSINESS_ELECTRON_COMPLETE checks='+checks.length+' host_starts=2 OS_crypto=1 ACL=1 production=0');
+ }finally{release?.();await application?.close();server.closeAllConnections();await new Promise(r=>server.close(r));if(!path.resolve(dir).startsWith(path.resolve(os.tmpdir())+path.sep))throw Error('TEMP_ESCAPE');fs.rmSync(dir,{recursive:true,force:true});}
+diff --git a/original/docs/implementation/NATIVE_SYSTEMS.md b/modified/docs/implementation/NATIVE_SYSTEMS.md
+index 0e97593..47fc38a 100644
+--- a/original/docs/implementation/NATIVE_SYSTEMS.md
++++ b/modified/docs/implementation/NATIVE_SYSTEMS.md
+@@ -1,5 +1,13 @@
+ # 原生业务系统工具
+ 
++## 当前产品约定：Agent原生发现，无新增可视化入口
++2026-11-20用户明确修正：原生连接不增加可视化入口，Agent自行发现即可。本约定覆盖下方首次实现中的UI描述；原验收数字与归档保留为历史记录。
++- 移除聊天头部“业务上下文”入口，以及系统连接页新增的原生业务状态面板；删除两份专用UI资产、client动态加载、host资产路由和全局CSS注入。不使用CSS隐藏假装移除。
++- 保留6个Agent工具、私有主进程桥、授权/审批、模型与原系统登录入口；内部诊断API不是用户入口，不向新页面暴露。
++- 业务任务由Agent调用naumi_systems自动检查可用能力，读取真实对象，自行调用naumi_business_context选择本Session的精确ID；多个候选时直接在聊天中询问，不要求用户找面板，不猜ID。
++- 原项目/需求/交付/设计/系统连接页面、账户授权、输入器、草稿和导航保持不变。
++- 分支codex/native-systems-headless-20261120，基线9f9ceef；本轮仅移除新增展示并补Agent发现约定，不改版本/安装器/模型配置或已安装固定资源。实际验证与回滚见本轮evidence/native-systems-headless。
++
+ ## 模块与职责
+ 2026-11-20，独立 `codex/native-systems-20261120`，实际基线 `07eba7876227c5e6599c5e03c906a81e7027c576`（开工fetch时29ed31d，建树前已新增安装验收提交）。
+ 负责将已有项目/需求/设计/交付业务能力注册到同一Harness工具运行时。新增business-*；main/enterprise/tools仅有限桥接，host/client/package只追加接线与上下文组件；不改浏览器/微信/CUA、模型、版本或安装器。
+diff --git a/original/plugins/naumi-enterprise/assets/business-context-client.js b/original/plugins/naumi-enterprise/assets/business-context-client.js
+deleted file mode 100644
+index 4331113..0000000
+--- a/original/plugins/naumi-enterprise/assets/business-context-client.js
++++ /dev/null
+@@ -1,33 +0,0 @@
+-const errors={BUSINESS_DESKTOP_UPGRADE_REQUIRED:'当前桌面版本尚未加载原生业务桥',BUSINESS_DESKTOP_LOGIN_REQUIRED:'请先连接企业工作空间',BUSINESS_LOGIN_REQUIRED:'请先登录企业协作',BUSINESS_CONTEXT_CONFLICT:'上下文已更新，请刷新',BUSINESS_CONTEXT_ACCOUNT_CHANGED:'账号已变化，请先清除旧上下文',BUSINESS_CONTEXT_PARENT_NOT_VISIBLE:'当前账号未获得完整项目上下文'};
+-async function request(sessionId,{context=false,body,signal}={}){
+- const response=await fetch('/naumi/systems'+(body?'':'?'+new URLSearchParams({sessionId,...context?{context:'1'}:{}})),{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',signal,headers:body?{'Content-Type':'application/json','X-Naumi-Business':'1'}:undefined,body:body?JSON.stringify({sessionId,...body}):undefined});
+- const value=await response.json();if(!response.ok)throw Error(errors[value.error]||value.error||'业务系统暂未就绪');return value;
+-}
+-export function createSystemsStatus(ctx,React){
+- const h=React.createElement;return function SystemsStatus(){
+-  const [state,setState]=React.useState(null),[error,setError]=React.useState(null);
+-  const refresh=async()=>{try{setState(await request('systems-status'));setError(null);}catch(e){setError(e.message);}};
+-  React.useEffect(()=>{void refresh();},[]);
+-  return h('div',{className:'naumi-systems-status'},h('div',{className:'naumi-connection-row'},h('strong',null,'原生业务工具'),h('span',null,state?.enterprise?.ready?(state.enterprise.operationStoreReady?'可读取 · 按原权限执行':'可读取 · 写入存储未就绪'):errors[state?.enterprise?.error]||'未就绪'),h('button',{className:'naumi-btn',onClick:refresh},'检查')),
+-   state?.enterprise?.ready&&h('div',{className:'naumi-business-counts'},...['projects','requests','tasks','deliverables'].map((key,i)=>h('span',{key},['项目','需求','任务','交付'][i]+' '+(state.enterprise.counts[key]??0)))),
+-   h('div',{className:'naumi-connection-row'},h('strong',null,'创作工具'),h('span',null,state?.creation?.ready?'已就绪':state?.creation?.configured?'授权待核对':'待配置创作授权')),error&&h('p',{role:'alert'},error));
+- };
+-}
+-export function installBusinessContextUI(ctx,React,createPortal){
+- const h=React.createElement;return ctx.inject(['sidebarRight','slots'],scope=>scope.effect(()=>{
+-  function ContextButton(){
+-   const sessionId=React.useSyncExternalStore(scope.sidebarRight.mounted.subscribe,()=>scope.sidebarRight.mounted.getSnapshot(),()=>null);
+-   const [open,setOpen]=React.useState(false),[data,setData]=React.useState(null),[selection,setSelection]=React.useState({}),[error,setError]=React.useState(null),[busy,setBusy]=React.useState(false),returnFocus=React.useRef(null),pending=React.useRef(null),generation=React.useRef(0),activeSession=React.useRef(sessionId);
+-   activeSession.current=sessionId;
+-   const cancel=()=>{generation.current++;pending.current?.abort();pending.current=null;};
+-   const load=async()=>{if(!sessionId)return;cancel();const version=generation.current,controller=new AbortController();pending.current=controller;setBusy(true);setData(null);const current=()=>version===generation.current&&activeSession.current===sessionId;try{const value=await request(sessionId,{context:true,signal:controller.signal});if(!current())return;setData(value);setSelection(value.context.context?.refs||{});setError(value.context.state==='account_changed'?'账号已变化，请先清除旧上下文':null);}catch(e){if(current()&&!controller.signal.aborted)setError(e.message);}finally{if(current())setBusy(false);}};
+-   React.useEffect(()=>{cancel();setOpen(false);setData(null);setError(null);setBusy(false);return cancel;},[sessionId]);
+-   React.useEffect(()=>{if(!open)return;const close=e=>{if(e.key==='Escape'){cancel();setBusy(false);setOpen(false);returnFocus.current?.focus();}};document.addEventListener('keydown',close);const focus=setTimeout(()=>document.querySelector('.naumi-business-context button')?.focus(),0);return()=>{clearTimeout(focus);document.removeEventListener('keydown',close);};},[open]);
+-   const save=async(action)=>{if(!data||busy)return;cancel();const version=generation.current,controller=new AbortController();pending.current=controller;setBusy(true);const current=()=>version===generation.current&&activeSession.current===sessionId;try{await request(sessionId,{signal:controller.signal,body:{action,selection,expectedVersion:data.context.context?.version??data.context.clearVersion??0}});if(!current())return;if(action==='clear')await load();else{setOpen(false);returnFocus.current?.focus();}}catch(e){if(current()&&!controller.signal.aborted)setError(e.message);}finally{if(current())setBusy(false);}};
+-   const select=(key,label,items)=>h('label',null,label,h('select',{'aria-label':label,value:selection[key]||'',disabled:busy,onChange:e=>{const value=e.target.value;setSelection(old=>key==='projectId'?{projectId:value}:key==='requestId'?{projectId:old.projectId,requestId:value}:{...old,taskId:value});}},h('option',{value:''},'未选择'),...items.map(x=>h('option',{key:x.id,value:x.id},x.name||x.title))));
+-   const workspace=data?.workspace,requests=(workspace?.requests||[]).filter(x=>!selection.projectId||x.projectId===selection.projectId),ids=new Set(requests.filter(x=>!selection.requestId||x.id===selection.requestId).map(x=>x.id)),tasks=(workspace?.tasks||[]).filter(x=>ids.has(x.requestId));
+-   return h(React.Fragment,null,h('button',{className:'naumi-browser-open','aria-label':'业务上下文',disabled:!sessionId,onClick:e=>{returnFocus.current=e.currentTarget;setOpen(true);void load();}},'业务上下文'),open&&createPortal(h('div',{className:'naumi-modal-mask',onClick:e=>{if(e.target===e.currentTarget&&!busy){setOpen(false);returnFocus.current?.focus();}}},h('section',{className:'naumi-modal naumi-business-context',role:'dialog','aria-modal':true,'aria-label':'业务上下文',onKeyDown:e=>{if(e.key!=='Tab')return;const nodes=[...e.currentTarget.querySelectorAll('button:not(:disabled),select:not(:disabled)')];if(!nodes.length)return;const first=nodes[0],last=nodes.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}},h('div',{className:'naumi-section-head'},h('h2',null,'业务上下文'),h('button',{className:'naumi-btn',disabled:busy,onClick:()=>{setOpen(false);returnFocus.current?.focus();}},'关闭')),error&&h('p',{role:'alert'},error),workspace&&h(React.Fragment,null,select('projectId','项目',workspace.projects),select('requestId','需求',requests),select('taskId','任务',tasks)),h('div',{className:'naumi-modal-actions'},h('button',{className:'naumi-btn',disabled:busy||!data,onClick:()=>void save('clear')},'清除'),h('button',{className:'naumi-btn primary',disabled:busy||!data||data.context.state==='account_changed',onClick:()=>void save('select')},busy?'处理中':'使用')))),document.body));
+-  }
+-  return scope.slots.inject('conversation.session.header.actions',()=>scope.slots.register({name:'conversation.session.header.actions',id:'naumi-business-context',order:78},ContextButton));
+- }));
+-}
+diff --git a/original/plugins/naumi-enterprise/assets/business-context.css b/original/plugins/naumi-enterprise/assets/business-context.css
+deleted file mode 100644
+index b7abf59..0000000
+--- a/original/plugins/naumi-enterprise/assets/business-context.css
++++ /dev/null
+@@ -1 +0,0 @@
+-.naumi-business-context label{display:block;margin:16px 0;color:#33445e}.naumi-business-context select{display:block;width:100%;margin-top:7px;padding:10px 12px;border:1px solid #dce4ef;border-radius:9px;background:#fff;color:#23354f;font:inherit}.naumi-business-context [role=alert]{color:#a44a38;background:#fff4ef;padding:10px;border-radius:8px}.naumi-systems-status{border-top:1px solid #e8edf4;margin-top:16px}.naumi-business-counts{display:flex;flex-wrap:wrap;gap:12px;color:#536985;padding:4px 0 12px}.naumi-business-context{background:#fff;max-width:min(520px,calc(100vw - 32px))}
+diff --git a/original/plugins/naumi-enterprise/business.js b/modified/plugins/naumi-enterprise/business.js
+index 9da36af..072942d 100644
+--- a/original/plugins/naumi-enterprise/business.js
++++ b/modified/plugins/naumi-enterprise/business.js
+@@ -21,7 +21,7 @@ export function installBusiness(ctx,{origin,home=process.env.DSH_HOME,creation,o
+    if(installed.has(agent)||!scope.agentTeams.tryMembership(agent))return;const disposers=[];
+    try{
+     for(const tool of createBusinessTools(runtime,caller))disposers.push(agent.ctx.tools.register(tool));
+-    disposers.push(agent.ctx.systemPrompt.section({name:'naumi:native-systems',order:76,text:'For connected Naumi projects/requirements/design/delivery, use naumi_systems and naumi_business_* tools, not browser scraping or SQL. Read naumi_business_context at the start of referenced business work. Select only visible real IDs and retain revisions. Existing mcp__naumi_creation__ tools own design creation/provider work; link their verified downloaded files through naumi_business_upload then deliverable.submit. Pass exact business IDs in delegated task instructions; a new task does not silently inherit another Session context. Native approvals and managed employee execution gates still apply. Never call a different tool/Session to evade a denied operation. Stable UUID receipts distinguish submitted/review/accepted; task completion is not enterprise acceptance.'}));
++    disposers.push(agent.ctx.systemPrompt.section({name:'naumi:native-systems',order:76,text:'Native Naumi business connections are automatically available in your tool runtime; no visual entry or manually selected UI context is required. For projects/requirements/design/delivery work, first call naumi_systems to discover actual readiness and command schemas, then use naumi_business_read to resolve the user request to visible real IDs. Read and select the Session context yourself with naumi_business_context, retaining revisions. If multiple objects match, ask the user to disambiguate in chat; never guess IDs or ask them to find a connection/context panel. Use these native tools, not browser scraping or SQL. Existing mcp__naumi_creation__ tools own design creation/provider work; link their verified downloaded files through naumi_business_upload then deliverable.submit. Pass exact business IDs in delegated task instructions; a new task does not silently inherit another Session context. Native approvals and managed employee execution gates still apply. Never call a different tool/Session to evade a denied operation. Stable UUID receipts distinguish submitted/review/accepted; task completion is not enterprise acceptance.'}));
+     installed.set(agent,()=>{for(const dispose of disposers.reverse())dispose();});
+    }catch(error){for(const dispose of disposers.reverse())dispose();throw error;}
+   };
+diff --git a/original/plugins/naumi-enterprise/client.js b/modified/plugins/naumi-enterprise/client.js
+index 752f342..9d6ea2b 100644
+--- a/original/plugins/naumi-enterprise/client.js
++++ b/modified/plugins/naumi-enterprise/client.js
+@@ -1,6 +1,5 @@
+ /** Async presentation-only module; the original enterprise app below stays intact. */
+ function installNaumiContextUI(ctx,React,createPortal,Icon){
+-  ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/business-context-client.js').then(m=>{if(!closed)dispose=m.installBusinessContextUI(ctx,React,createPortal);}).catch(()=>console.error('Naumi business context unavailable'));return()=>{closed=true;dispose?.dispose?.();if(typeof dispose==='function')dispose();};});
+   ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/weixin.js').then(m=>{if(!closed)dispose=m.installWeixinUI(ctx,React,createPortal);}).catch(()=>console.error('Naumi Weixin UI unavailable'));return()=>{closed=true;dispose?.();};});
+   ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/session-import.js').then(m=>{if(!closed)dispose=m.installSessionImportUI(ctx,React);}).catch(e=>console.error('Naumi session import:',e));return()=>{closed=true;dispose?.();};});
+   ctx.effect(()=>{let dispose,closed=false;void import('/naumi/assets/creation-settings.js').then(m=>{if(!closed)dispose=m.installCreationUI(ctx,React);}).catch(e=>console.error('Naumi creation:',e));return()=>{closed=true;dispose?.();};});
+@@ -66,7 +65,6 @@ window.__ModuleLoader__.load({id:'@naumi/dsh-enterprise',factory(require){
+     if(!config)throw Error('Naumi host configuration missing');
+     const BotGroups=React.lazy(()=>import('/naumi/assets/bot-groups.js').then(module=>({default:module.createBotGroupsPage(ctx,React)}))
+       .catch(()=>({default:()=>h('p',{className:'naumi-page',role:'alert'},'群聊界面加载失败，请刷新页面。')})));
+-    const NativeSystems=React.lazy(()=>import('/naumi/assets/business-context-client.js').then(m=>({default:m.createSystemsStatus(ctx,React)})));
+     installNaumiContextUI(ctx,React,require('react-dom').createPortal,Icon);
+     ctx.inject(['sidebarRight','sidebarRightTabs'],scope=>scope.effect(()=>{let dispose,closed=false;void import('/naumi/assets/browser-client.js').then(m=>{if(!closed)dispose=m.installBrowserUI(scope,React,Icon);}).catch(e=>console.error('Naumi browser UI:',e));return()=>{closed=true;dispose?.();};}));
+     ctx.effect(()=>{
+@@ -180,7 +178,7 @@ window.__ModuleLoader__.load({id:'@naumi/dsh-enterprise',factory(require){
+             h('div',{className:'naumi-filterbar'},...['all','unassigned','in_progress','quality_review','business_acceptance','accepted'].map(s=>h('button',{key:s,className:filter===s?'selected':'',onClick:()=>setFilter(s)},s==='all'?'全部':STATUS[s]))),data?h(TaskTable,{tasks:visible,data,onContext:setSelected}):h(ConnectionState,{state}))),
+         page==='naumi-delivery'&&h(DeliveryCenter,{state,tasks}),
+         page==='naumi-design'&&h(React.Fragment,null,h('div',{className:'naumi-design-top'},h('img',{src:'/naumi/assets/wordmark.svg',alt:'Naumi',width:136,height:34}),external(config.designOrigin+'/dashboard','打开设计中心','arrow','naumi-btn primary')),h(DesignGrid),h('div',{className:'naumi-design-links'},external(config.designOrigin+'/works','我的作品'),external(config.designOrigin+'/templates','模板中心'),external(config.designOrigin+'/tools','全部创作工具'))),
+-        page==='naumi-connections'&&h('section',{className:'naumi-card naumi-connections'},h('h2',null,'工作空间连接'),h(IdentityAccount),h('div',{className:'naumi-connection-row'},h(Icon,{name:'grid'}),h('div',null,h('strong',null,'企业协作'),h('code',null,config.collaborationOrigin)),h('span',{className:'naumi-badge '+(state.status==='ready'?'success':'')},state.status==='ready'?'已连接':'需要登录'),external(config.collaborationOrigin+'/login','打开'),globalThis.naumiDesktop?.connectionSettings&&h('button',{className:'naumi-btn',onClick:()=>globalThis.naumiDesktop.connectionSettings()},'连接设置')),h('div',{className:'naumi-connection-row'},h(Icon,{name:'spark'}),h('div',null,h('strong',null,'设计中心'),h('code',null,config.designOrigin)),external(config.designOrigin+'/dashboard','打开')),h('div',{className:'naumi-connection-row'},h(Icon,{name:'chat'}),h('div',null,h('strong',null,'AI 协作'),h('span',null,'会话 · 模型 · 文件 · 工具')),h('button',{className:'naumi-btn',onClick:()=>openAI()},'打开会话')),h(React.Suspense,{fallback:null},h(NativeSystems))),
++        page==='naumi-connections'&&h('section',{className:'naumi-card naumi-connections'},h('h2',null,'工作空间连接'),h(IdentityAccount),h('div',{className:'naumi-connection-row'},h(Icon,{name:'grid'}),h('div',null,h('strong',null,'企业协作'),h('code',null,config.collaborationOrigin)),h('span',{className:'naumi-badge '+(state.status==='ready'?'success':'')},state.status==='ready'?'已连接':'需要登录'),external(config.collaborationOrigin+'/login','打开'),globalThis.naumiDesktop?.connectionSettings&&h('button',{className:'naumi-btn',onClick:()=>globalThis.naumiDesktop.connectionSettings()},'连接设置')),h('div',{className:'naumi-connection-row'},h(Icon,{name:'spark'}),h('div',null,h('strong',null,'设计中心'),h('code',null,config.designOrigin)),external(config.designOrigin+'/dashboard','打开')),h('div',{className:'naumi-connection-row'},h(Icon,{name:'chat'}),h('div',null,h('strong',null,'AI 协作'),h('span',null,'会话 · 模型 · 文件 · 工具')),h('button',{className:'naumi-btn',onClick:()=>openAI()},'打开会话'))),
+         selected&&data&&h(TaskContext,{task:selected,data,onClose:()=>setSelected(null)}));
+     }
+     ctx.effect(()=>{
+diff --git a/original/plugins/naumi-enterprise/host.js b/modified/plugins/naumi-enterprise/host.js
+index 001c6ec..ea0086e 100644
+--- a/original/plugins/naumi-enterprise/host.js
++++ b/modified/plugins/naumi-enterprise/host.js
+@@ -40,8 +40,6 @@ export function apply(ctx,config) {
+   const designOrigin=validateOrigin(config.designOrigin);
+   const assets=new Map([['employee-enterprise-work.js','text/javascript; charset=utf-8'],['employee-memory-maintenance.js','text/javascript; charset=utf-8'],['employee-sync-panel.js','text/javascript; charset=utf-8'],['employee-center.js','text/javascript; charset=utf-8'],['employee-center-model.js','text/javascript; charset=utf-8'],['employee-center.css','text/css; charset=utf-8'],['style.css','text/css; charset=utf-8'],['symbol.svg','image/svg+xml'],['wordmark.svg','image/svg+xml'],['browser-client.js','text/javascript; charset=utf-8'],['browser-native-client.js','text/javascript; charset=utf-8'],['browser-native.css','text/css; charset=utf-8'],['browser-scheduler.js','text/javascript; charset=utf-8'],['browser.css','text/css; charset=utf-8'],['team-panel.css','text/css; charset=utf-8'],['team-panel.js','text/javascript; charset=utf-8'],['team-panel-model.js','text/javascript; charset=utf-8'],['bot-sidebar.js','text/javascript; charset=utf-8'],['bot-sidebar-model.js','text/javascript; charset=utf-8'],['bot-sidebar.css','text/css; charset=utf-8']]);
+   assets.set('session-import.js','text/javascript; charset=utf-8');
+-  assets.set('business-context-client.js','text/javascript; charset=utf-8');
+-  assets.set('business-context.css','text/css; charset=utf-8');
+   for(const name of ['weixin.js','weixin-qrcode.js'])assets.set(name,'text/javascript; charset=utf-8');
+   assets.set('weixin.css','text/css; charset=utf-8');
+   assets.set('session-import.css','text/css; charset=utf-8');
+@@ -107,7 +105,6 @@ export function apply(ctx,config) {
+   }}));
+   ctx.on('webserver/index-inject',table=>{
+     table.push({kind:'global',name:'__NAUMI__',value:{collaborationOrigin,designOrigin,version:'0.3.0',product:'Naumi',productVersion:PRODUCT_VERSION}});
+-    table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/business-context.css">'});
+     table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/bot-groups.css"><link rel="stylesheet" href="/naumi/assets/primary-bot.css"><link rel="stylesheet" href="/naumi/assets/bot-overview.css"><link rel="stylesheet" href="/naumi/assets/session-import.css"><link rel="stylesheet" href="/naumi/assets/plugin-market.css"><link rel="stylesheet" href="/naumi/assets/desktop-updates.css"><link rel="stylesheet" href="/naumi/assets/delivery-center.css">'});
+     table.push({kind:'html',placement:'head',html:'<link rel="stylesheet" href="/naumi/assets/style.css"><link rel="stylesheet" href="/naumi/assets/weixin.css"><link rel="stylesheet" href="/naumi/assets/product-identity.css"><link rel="stylesheet" href="/naumi/assets/model-connections.css"><link rel="stylesheet" href="/naumi/assets/im-settings.css"><link rel="stylesheet" href="/naumi/assets/blender-settings.css"><link rel="stylesheet" href="/naumi/assets/employee-center.css"><link rel="stylesheet" href="/naumi/assets/employee-experience.css"><link rel="stylesheet" href="/naumi/assets/browser.css"><link rel="stylesheet" href="/naumi/assets/browser-native.css"><link rel="stylesheet" href="/naumi/assets/team-panel.css"><link rel="stylesheet" href="/naumi/assets/bot-sidebar.css"><link rel="stylesheet" href="/naumi/assets/bot-task.css"><link rel="stylesheet" href="/naumi/assets/bot-avatar.css"><link rel="icon" type="image/svg+xml" href="/naumi/assets/symbol.svg">'});
+   });
+diff --git a/modified/scripts/native-headless-evidence.mjs b/modified/scripts/native-headless-evidence.mjs
+new file mode 100644
+index 0000000..c0d2dba
+--- /dev/null
++++ b/modified/scripts/native-headless-evidence.mjs
+@@ -0,0 +1,33 @@
++import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import {createHash} from 'node:crypto';import {spawnSync,execFileSync} from 'node:child_process';import {fileURLToPath} from 'node:url';
++const root=path.resolve(process.env.NAUMI_SOURCE_ROOT??fileURLToPath(new URL('..',import.meta.url))),e=path.join(root,'evidence/native-systems-headless'),base='9f9ceef10a18fbcbfb2a9ed4b13bf90e77e2dea1',mode=process.argv[2]??'package';
++const files=['desktop/scripts/verify-business-native.mjs','plugins/naumi-enterprise/assets/business-context-client.js','plugins/naumi-enterprise/assets/business-context.css','plugins/naumi-enterprise/business.js','plugins/naumi-enterprise/client.js','plugins/naumi-enterprise/host.js','tests/naumi-business.test.mjs','tests/naumi-context-ui.test.mjs','tests/native-systems-headless.test.mjs','docs/implementation/NATIVE_SYSTEMS.md','scripts/native-headless-evidence.mjs'];
++const sha=b=>createHash('sha256').update(b).digest('hex'),hash=p=>sha(fs.readFileSync(p));const originalTests=['tests/naumi-business.test.mjs','tests/naumi-context-ui.test.mjs','tests/naumi-enterprise.test.mjs','desktop/tests/enterprise.test.cjs'];
++function run(cmd,args,cwd,log){const r=spawnSync(cmd,args,{cwd,encoding:'utf8',windowsHide:true,maxBuffer:20e6});if(log)fs.writeFileSync(path.join(e,log),r.stdout+'\n'+r.stderr);if(r.status!==0)throw Error('EVIDENCE_COMMAND_FAILED '+cmd+' '+args.join(' ')+' exit='+r.status+'\n'+r.stdout.slice(-2500)+'\n'+r.stderr);return r.stdout;}
++function checkTests(cwd,tests,log){const text=run(process.execPath,['--test',...tests],cwd,log),n=text.match(/(?:#|ℹ) tests (\d+)/)?.[1],pass=text.match(/(?:#|ℹ) pass (\d+)/)?.[1];if(!n||n!==pass)throw Error('TEST_SUMMARY_INVALID');return n;}
++function isolated(){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-headless-evidence-'));for(const sub of ['plugins','desktop/app','desktop/scripts','desktop/tests','desktop/vendor','scripts','tests','evidence/naumi-context-ui/original'])fs.cpSync(path.join(root,sub),path.join(dir,sub),{recursive:true,filter:p=>!p.endsWith('.exe')});fs.copyFileSync(path.join(root,'package.json'),path.join(dir,'package.json'));fs.symlinkSync(path.join(root,'node_modules'),path.join(dir,'node_modules'),'junction');fs.symlinkSync(path.join(root,'desktop/node_modules'),path.join(dir,'desktop/node_modules'),'junction');return dir;}
++function clean(dir){if(!path.resolve(dir).startsWith(path.resolve(os.tmpdir())+path.sep))throw Error('COPY_PATH_ESCAPE');for(const sub of ['node_modules','desktop/node_modules'])if(fs.existsSync(path.join(dir,sub)))fs.unlinkSync(path.join(dir,sub));fs.rmSync(dir,{recursive:true,force:true});}
++function snapshot(dir,kind,manifest){for(const f of manifest){const target=path.join(dir,f.path),source=path.join(e,kind,f.path),expected=f[kind==='original'?'originalSHA256':'modifiedSHA256'];if(expected){if(hash(source)!==expected)throw Error('SNAPSHOT_HASH_DRIFT');fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(source,target);}else if(fs.existsSync(target))fs.unlinkSync(target);}}
++if(mode==='package'){
++ fs.mkdirSync(e,{recursive:true});const manifest=[];for(const file of files){const r=spawnSync('git',['show',base+':'+file],{cwd:root,maxBuffer:10e6}),modified=fs.existsSync(path.join(root,file))?fs.readFileSync(path.join(root,file)):null;for(const [kind,bytes]of [['original',r.status===0?r.stdout:null],['modified',modified]])if(bytes){const p=path.join(e,kind,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);}manifest.push({path:file,originalSHA256:r.status===0?sha(r.stdout):null,modifiedSHA256:modified?sha(modified):null});}
++ fs.writeFileSync(path.join(e,'hashes.json'),JSON.stringify({branch:'codex/native-systems-headless-20261120',baseline:base,files:manifest},null,2)+'\n');
++ const diff=spawnSync('git',['-c','core.autocrlf=false','diff','--binary','--no-index','--','original','modified'],{cwd:e,maxBuffer:10e6});if(![0,1].includes(diff.status))throw Error('DIFF_FAILED');fs.writeFileSync(path.join(e,'DIFF_FILE.patch'),diff.stdout);
++ const rollback=`import fs from 'node:fs';import path from 'node:path';import{createHash}from'node:crypto';import{fileURLToPath}from'node:url';import{spawnSync}from'node:child_process';const here=path.dirname(fileURLToPath(import.meta.url)),target=process.argv[2];if(!target||target==='--test'){const r=spawnSync(process.execPath,[path.join(here,'../../scripts/native-headless-evidence.mjs'),'rollback'],{stdio:'inherit',windowsHide:true});process.exit(r.status??1);}const root=fs.realpathSync(target),m=JSON.parse(fs.readFileSync(path.join(here,'hashes.json'))).files;if(fs.readFileSync(path.join(root,'.naumi-native-headless-copy'),'utf8')!=='isolated-copy')throw Error('COPY_MARKER_REQUIRED');const sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');for(const f of m){const p=path.resolve(root,f.path);if(!p.startsWith(root+path.sep)||(f.modifiedSHA256?(!fs.existsSync(p)||fs.lstatSync(p).isSymbolicLink()||sha(p)!==f.modifiedSHA256):fs.existsSync(p)))throw Error('COPY_DRIFT');}for(const f of m){const p=path.join(root,f.path);if(f.originalSHA256){const s=path.join(here,'original',f.path);if(sha(s)!==f.originalSHA256)throw Error('ORIGINAL_HASH');fs.copyFileSync(s,p);}else if(fs.existsSync(p))fs.unlinkSync(p);}console.log('ROLLBACK_SOURCE files='+m.length+' hashes=restored copy_only=1');\n`;
++ fs.writeFileSync(path.join(e,'rollback.mjs'),rollback);fs.writeFileSync(path.join(e,'ROLLBACK.sh'),'#!/usr/bin/env bash\nset -euo pipefail\nHERE="$(cd -- "$(dirname -- "$0")" && pwd)"\nexec "${NAUMI_NODE:-node}" "$HERE/rollback.mjs" "${1:---test}"\n',{mode:0o755});
++ const q=s=>"'"+s.replaceAll("'","''")+"'";run('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-Command',`Compress-Archive -Path ${['original','modified','hashes.json','ROLLBACK.sh','rollback.mjs'].map(s=>q(path.join(e,s))).join(',')} -DestinationPath ${q(path.join(e,'MODIFIED_FILE.zip'))} -Force`],root);
++ console.log('PACKAGE files='+manifest.length+' original='+manifest.filter(f=>f.originalSHA256).length+' modified_archive=PASS copy_only_rollback=1');
++}else{
++ const manifest=JSON.parse(fs.readFileSync(path.join(e,'hashes.json'))).files;
++ if(mode==='modified'){
++  for(const f of manifest){for(const p of [path.join(root,f.path),path.join(e,'modified',f.path)])if(f.modifiedSHA256?hash(p)!==f.modifiedSHA256:fs.existsSync(p))throw Error('MODIFIED_HASH_DRIFT '+f.path);}
++  const n=checkTests(root,[...originalTests,'tests/native-systems-headless.test.mjs'],'MODIFIED.log');const h=JSON.parse(fs.readFileSync(path.join(e,'HARNESS.json'))),el=JSON.parse(fs.readFileSync(path.join(e,'ELECTRON.json')));if(h.checks.length!==17||el.checks.length!==18)throw Error('CHAIN_EVIDENCE_MISSING');console.log('MODIFIED tests='+n+'/'+n+' visual_entry=absent native_tools=6 harness=17 electron=18 exit=0');
++ }else if(['baseline','rollback'].includes(mode)){
++  const dir=isolated();try{
++   if(mode==='baseline'){snapshot(dir,'original',manifest);const n=checkTests(dir,originalTests,'BASELINE.log');console.log('BASELINE tests='+n+'/'+n+' visual_entry=present original_hashes=PASS exit=0');}
++   else{
++    const before=hash(path.join(e,'MODIFIED_FILE.zip'));snapshot(dir,'modified',manifest);fs.writeFileSync(path.join(dir,'.naumi-native-headless-copy'),'isolated-copy');const text=run('D:/DEV/Git/bin/bash.exe',[path.join(e,'ROLLBACK.sh'),dir],root,'ROLLBACK_SOURCE.log');if(!text.includes('hashes=restored'))throw Error('ROLLBACK_NOT_RESTORED');
++    for(const f of manifest){const p=path.join(dir,f.path);if(f.originalSHA256?hash(p)!==f.originalSHA256:fs.existsSync(p))throw Error('RESTORED_HASH_DRIFT');}
++    const n=checkTests(dir,originalTests,'ROLLBACK_TESTS.log');if(before!==hash(path.join(e,'MODIFIED_FILE.zip')))throw Error('MODIFIED_ARCHIVE_CHANGED');console.log('ROLLBACK files='+manifest.length+' baseline_tests='+n+'/'+n+' hashes=restored modified_archive=unchanged exit=0');
++   }
++  }finally{clean(dir);}
++ }else throw Error('EVIDENCE_MODE_INVALID');
++}
+diff --git a/modified/tests/native-systems-headless.test.mjs b/modified/tests/native-systems-headless.test.mjs
+new file mode 100644
+index 0000000..4028aa5
+--- /dev/null
++++ b/modified/tests/native-systems-headless.test.mjs
+@@ -0,0 +1,16 @@
++import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import {createBusinessTools} from '../plugins/naumi-enterprise/business.js';
++const client=fs.readFileSync('plugins/naumi-enterprise/client.js','utf8'),host=fs.readFileSync('plugins/naumi-enterprise/host.js','utf8');
++test('native business tools have no frontend entry, asset registration or global stylesheet',()=>{
++ for(const token of ['business-context-client.js','NativeSystems','installBusinessContextUI'])assert(!client.includes(token),token);
++ for(const token of ['business-context-client.js','business-context.css'])assert(!host.includes(token),token);
++ for(const file of ['business-context-client.js','business-context.css'])assert(!fs.existsSync('plugins/naumi-enterprise/assets/'+file),file);
++ assert(host.includes('installBusiness(ctx,'));assert(!client.includes('/naumi/systems'));
++});
++test('original login, system pages, draft handoff and native input entry remain intact',()=>{
++ for(const token of ['工作空间连接','企业协作','设计中心','连接设置','h(IdentityAccount)','放入会话草稿','openAI(prompt)','createBotGroupsPage'])assert(client.includes(token),token);
++ assert(client.includes("['naumi-connections','系统连接','link']"));assert(client.includes("['naumi-projects','项目与需求','layers']"));
++});
++test('all six tools remain directly discoverable without a UI registration or selected panel',()=>{
++ const names=createBusinessTools({},agent=>agent).map(t=>t.name);assert.deepEqual(names,['naumi_systems','naumi_business_read','naumi_business_context','naumi_business_command','naumi_business_operation','naumi_business_upload']);
++ const prompt=fs.readFileSync('plugins/naumi-enterprise/business.js','utf8');assert(prompt.includes('first call naumi_systems'));assert(prompt.includes('no visual entry or manually selected UI context is required'));assert(prompt.includes('ask the user to disambiguate in chat'));
++});
+diff --git a/original/tests/naumi-business.test.mjs b/modified/tests/naumi-business.test.mjs
+index ee2d4b7..c00d0ef 100644
+--- a/original/tests/naumi-business.test.mjs
++++ b/modified/tests/naumi-business.test.mjs
+@@ -61,5 +61,7 @@ test('production install lifecycle uses scoped native tools and retains managed
+   const child=await h.create('business-child',h.other);await h.ctx.serial(child.ctx,'agent/pre-step',{agent:child,signal:new AbortController().signal,modelSelection:{provider:'fixture',model:'fixture-model'}},async()=>{});
+   const denied=await h.invoke('naumi_business_operation',child,{action:'recover',operationId:randomUUID()});assert(denied.isError);assert.equal(calls,0);
+   const read=await h.invoke('naumi_business_read',h.other,{collection:'tasks'});assert(!read.isError,JSON.stringify(read));assert.equal(read.value.items[0].id,ids.task);assert.equal(calls,1);
++  const discovery=await h.invoke('naumi_systems',h.other);assert(!discovery.isError);assert.equal(discovery.value.enterprise.ready,true);
++  const prompt=await h.other.ctx.systemPrompt.assemble({scope:h.other,agent:h.other,session:h.other.session});const native=prompt.sections.find(s=>s.name==='naumi:native-systems');assert(native);assert(native.text.includes('no visual entry'));assert(native.text.includes('first call naumi_systems'));assert(native.text.includes('ask the user to disambiguate in chat'));
+  }finally{await install?.dispose();await provider?.dispose();await h.cleanup();}
+ });
+diff --git a/original/tests/naumi-context-ui.test.mjs b/modified/tests/naumi-context-ui.test.mjs
+index 54444f8..84d106a 100644
+--- a/original/tests/naumi-context-ui.test.mjs
++++ b/modified/tests/naumi-context-ui.test.mjs
+@@ -58,12 +58,8 @@ test('preexisting enterprise front-end remains byte-equivalent apart from declar
+  const deliveryComponent=source.slice(source.indexOf('    function DeliveryCenter('),source.indexOf('    function Page('));
+  const oldDelivery=original.split('\n').find(line=>line.includes("page==='naumi-delivery'"));
+  const deliveryRestored=restored.replace(deliveryComponent,'').replace("        page==='naumi-delivery'&&h(DeliveryCenter,{state,tasks}),",oldDelivery);
+- // Only this declared readiness component is appended to the existing connection
+- // page. Strip the exact two additions, then keep the whole original comparison.
+- const nativeSystems="    const NativeSystems=React.lazy(()=>import('/naumi/assets/business-context-client.js').then(m=>({default:m.createSystemsStatus(ctx,React)})));\n";
+- const nativeRow=",h(React.Suspense,{fallback:null},h(NativeSystems))";
+- assert.equal(source.split(nativeSystems).length,2);assert.equal(source.split(nativeRow).length,2);
+- assert.equal(deliveryRestored.replace(nativeSystems,'').replace(nativeRow,'').replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'));
++ assert(!source.includes('business-context-client.js'));assert(!source.includes('NativeSystems'));
++ assert.equal(deliveryRestored.replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'));
+ });
+ test('team presentation has no direct credential, model, permission or persistence writes',()=>{
+  const added=panelSource;

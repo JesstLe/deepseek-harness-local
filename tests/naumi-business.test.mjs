@@ -61,5 +61,7 @@ test('production install lifecycle uses scoped native tools and retains managed 
   const child=await h.create('business-child',h.other);await h.ctx.serial(child.ctx,'agent/pre-step',{agent:child,signal:new AbortController().signal,modelSelection:{provider:'fixture',model:'fixture-model'}},async()=>{});
   const denied=await h.invoke('naumi_business_operation',child,{action:'recover',operationId:randomUUID()});assert(denied.isError);assert.equal(calls,0);
   const read=await h.invoke('naumi_business_read',h.other,{collection:'tasks'});assert(!read.isError,JSON.stringify(read));assert.equal(read.value.items[0].id,ids.task);assert.equal(calls,1);
+  const discovery=await h.invoke('naumi_systems',h.other);assert(!discovery.isError);assert.equal(discovery.value.enterprise.ready,true);
+  const prompt=await h.other.ctx.systemPrompt.assemble({scope:h.other,agent:h.other,session:h.other.session});const native=prompt.sections.find(s=>s.name==='naumi:native-systems');assert(native);assert(native.text.includes('no visual entry'));assert(native.text.includes('first call naumi_systems'));assert(native.text.includes('ask the user to disambiguate in chat'));
  }finally{await install?.dispose();await provider?.dispose();await h.cleanup();}
 });

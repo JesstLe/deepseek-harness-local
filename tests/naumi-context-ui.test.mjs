@@ -58,12 +58,8 @@ test('preexisting enterprise front-end remains byte-equivalent apart from declar
  const deliveryComponent=source.slice(source.indexOf('    function DeliveryCenter('),source.indexOf('    function Page('));
  const oldDelivery=original.split('\n').find(line=>line.includes("page==='naumi-delivery'"));
  const deliveryRestored=restored.replace(deliveryComponent,'').replace("        page==='naumi-delivery'&&h(DeliveryCenter,{state,tasks}),",oldDelivery);
- // Only this declared readiness component is appended to the existing connection
- // page. Strip the exact two additions, then keep the whole original comparison.
- const nativeSystems="    const NativeSystems=React.lazy(()=>import('/naumi/assets/business-context-client.js').then(m=>({default:m.createSystemsStatus(ctx,React)})));\n";
- const nativeRow=",h(React.Suspense,{fallback:null},h(NativeSystems))";
- assert.equal(source.split(nativeSystems).length,2);assert.equal(source.split(nativeRow).length,2);
- assert.equal(deliveryRestored.replace(nativeSystems,'').replace(nativeRow,'').replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'));
+ assert(!source.includes('business-context-client.js'));assert(!source.includes('NativeSystems'));
+ assert.equal(deliveryRestored.replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'));
 });
 test('team presentation has no direct credential, model, permission or persistence writes',()=>{
  const added=panelSource;
