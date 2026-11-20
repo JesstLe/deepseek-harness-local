@@ -1,6 +1,7 @@
 import {naumiMonitorReadings,naumiPortalOptions,teamTaskGroups,teamSchedules,scheduleTime,scheduleToggleRequest,memberState,teamInitials,readEnvironment} from './team-panel-model.js';
 import {createBotAvatar} from './bot-avatar.js';
-import {botCatalog,botForSession,botActivity} from './bot-sidebar-model.js';
+import {botCatalog,botForSession,botActivity,threadOwnership} from './bot-sidebar-model.js';
+import {groupCatalog} from './bot-chat-model.js';
 import {taskActivity,employeeTasks,employeeTaskState} from './bot-task-model.js';
 import {createBotTaskCard} from './bot-task-ui.js';
 
@@ -13,6 +14,14 @@ export function installTeamPanel(ctx,React,createPortal,Icon){
   const getDock=(id,key)=>docks.get(id)?.[key]??null;
   const listen=(id,fn)=>{let set=listeners.get(id);if(!set)listeners.set(id,set=new Set());set.add(fn);return()=>{set.delete(fn);if(!set.size)listeners.delete(id);};};
   const setDock=(id,key,node)=>{const record=docks.get(id)??{};if(record[key]===node)return;record[key]=node;docks.set(id,record);if(!Object.values(record).some(Boolean))docks.delete(id);for(const fn of listeners.get(id)??[])fn();};
+  const markConversationViews=root=>{for(const tabs of root.querySelectorAll('[data-conversation-tabs]')){for(const button of tabs.querySelectorAll('[role="tab"]'))if(button.textContent.trim()==='轨迹'&&button.getAttribute('data-naumi-hidden')!=='true')button.setAttribute('data-naumi-hidden','true');const row=tabs.parentElement;if(row&&!row.hasAttribute('data-naumi-view-strip'))row.setAttribute('data-naumi-view-strip','true');}};
+  // Same authoritative Bot/task/group/session ownership as the thread list.
+  // A native one-member agentTeam projection alone does not make a normal chat a Bot.
+  const peopleSource=botCatalog(),roomSource=groupCatalog();
+  function useTeamScope({sessionId,useSessions}){
+    const people=useSyncExternalStore(peopleSource.subscribe,peopleSource.getSnapshot,peopleSource.getSnapshot),jobs=useSyncExternalStore(activity.subscribe,activity.getSnapshot,activity.getSnapshot),rooms=useSyncExternalStore(roomSource.subscribe,roomSource.getSnapshot,roomSource.getSnapshot),sessions=useSessions(s=>s);
+    return useMemo(()=>threadOwnership(people,jobs,rooms,sessions,{items:[]}).sessionIds.includes(sessionId),[people,jobs,rooms,sessions,sessionId]);
+  }
   const moves=[['conversation.session.header.actions','agent-team','team'],['conversation.session.header.actions','subagent-catalog','children'],['conversation.session.header.actions','agent-preset','preset'],['conversation.composer.dock','activity','activity'],['conversation.composer.dock','usage','usage']];
   for(const [slot,id,dock]of moves)register(ctx.slots.inject(slot,()=>{
     let disposed=false,current=null,undo=null;
@@ -22,7 +31,8 @@ export function installTeamPanel(ctx,React,createPortal,Icon){
       if(!entry||entry===current)return;
       undo?.();current=entry;originals.set(id,entry);
       function NativePortal(props){const target=useSyncExternalStore(fn=>listen(props.sessionId,fn),()=>getDock(props.sessionId,dock),()=>null);const native=h(entry.component,props);return target?createPortal(native,target):native;}
-      relocated.add(NativePortal);undo=ctx.slots.register(naumiPortalOptions(entry,slot),NativePortal);
+      const ScopedPortal=id==='agent-team'?function TeamPortal(props){return useTeamScope(props)?h(NativePortal,props):null;}:NativePortal;
+      relocated.add(ScopedPortal);undo=ctx.slots.register(naumiPortalOptions(entry,slot),ScopedPortal);
     };
     bind();const unsubscribe=ctx.slots.subscribe(slot,bind);
     return()=>{disposed=true;unsubscribe();undo?.();if(originals.get(id)===current)originals.delete(id);};
@@ -112,7 +122,7 @@ export function installTeamPanel(ctx,React,createPortal,Icon){
       const update=()=>{if(scheduled||disposed)return;scheduled=true;queueMicrotask(()=>{scheduled=false;if(disposed)return;
         const list=[...root.querySelectorAll('[data-presented-file="true"] button[title]')].map(button=>({path:button.title,name:button.title.split(/[\\/]/).pop(),button}));
         const seen=new Set(),unique=list.filter(x=>x.path&&!seen.has(x.path)&&seen.add(x.path));setFiles(old=>old.length===unique.length&&old.every((f,i)=>f.path===unique[i].path&&f.button===unique[i].button)?old:unique);
-        for(const tabs of root.querySelectorAll('[data-conversation-tabs]')){for(const button of tabs.querySelectorAll('[role="tab"]'))if(button.textContent.trim()==='轨迹'&&button.getAttribute('data-naumi-hidden')!=='true')button.setAttribute('data-naumi-hidden','true');const row=tabs.parentElement;if(row&&!row.hasAttribute('data-naumi-view-strip'))row.setAttribute('data-naumi-view-strip','true');}
+        markConversationViews(root);
       });};
       const resize=new ResizeObserver(measure);resize.observe(root);window.addEventListener('resize',measure);measure();
       const observer=new MutationObserver(update);observer.observe(root,{childList:true,subtree:true});update();
@@ -153,6 +163,14 @@ export function installTeamPanel(ctx,React,createPortal,Icon){
           h('details',{className:'naumi-native-stat-details'},h('summary',null,'详细用量'),h('div',{ref:refs.activity}),h('div',{ref:refs.usage})),h('details',{className:'naumi-advanced'},h('summary',null,'运行设置'),h('div',{className:'naumi-preset-native',ref:refs.preset}))))));
     return h(React.Fragment,null,h('button',{type:'button',className:'naumi-context-toggle',ref:toggleRef,'aria-label':open?'收起智能体团队':'打开智能体团队','aria-expanded':!!open,onClick:()=>setPreference(!open)},h(Icon,{name:'layers',size:16}),'团队'),side&&createPortal(side,document.body));
   }
-  register(ctx.slots.inject('conversation.session.header.actions',()=>ctx.slots.register({name:'conversation.session.header.actions',id:'naumi-context-ui',order:80},ContextPanel)));
+  function ThreadChrome({sessionId}){
+    useLayoutEffect(()=>{const root=document.querySelector('[data-slot="main.conversation"] > div');if(!root)return;
+      root.dataset.naumiContextRoot='true';root.dataset.naumiContextOpen='false';root.style.setProperty('--naumi-context-reserve','0px');
+      const update=()=>markConversationViews(root),observer=new MutationObserver(update);observer.observe(root,{childList:true,subtree:true});update();
+      return()=>{observer.disconnect();delete root.dataset.naumiContextRoot;delete root.dataset.naumiContextOpen;root.style.removeProperty('--naumi-context-reserve');for(const e of root.querySelectorAll('[data-naumi-hidden],[data-naumi-view-strip]')){e.removeAttribute('data-naumi-hidden');e.removeAttribute('data-naumi-view-strip');}};
+    },[sessionId]);return null;
+  }
+  function ScopedContextPanel(props){return useTeamScope(props)?h(ContextPanel,props):h(ThreadChrome,props);}
+  register(ctx.slots.inject('conversation.session.header.actions',()=>ctx.slots.register({name:'conversation.session.header.actions',id:'naumi-context-ui',order:80},ScopedContextPanel)));
   return()=>{for(const dispose of disposers.reverse())dispose();docks.clear();listeners.clear();originals.clear();};
 }
