@@ -1,0 +1,65 @@
+Native Systems - verified source slice
+Branch: codex/native-systems-20261120
+Original baseline: 07eba7876227c5e6599c5e03c906a81e7027c576
+Integrated upstream before final tests: fc2d183 (product files unchanged by release-note merge)
+Changed branch/fields: native business protocolVersion=1; 6 scoped tools; 11 original domain commands; explicit Session context + CAS; actor/tenant/session/UUID durable receipts; single-attempt upload; original Creation MCP+present; business.running update idle gate.
+Deployment: not performed. Existing 0.4.6 package and shared service unchanged; require one complete future native+Host bundle.
+Evidence tiers: live /api/workspace read-only HTTP200 observed; 17 actual Harness/MCP/private-bridge checks against enterprise/provider fixtures; 20 real Electron/DPAPI/DACL/UI checks with fixture data. No production model or business writes.
+
+Four reopened artifacts:
+E:/Workspace/naumi-desktop/evidence/native-systems/MODIFIED_FILE.zip
+E:/Workspace/naumi-desktop/evidence/native-systems/DIFF_FILE.patch
+E:/Workspace/naumi-desktop/evidence/native-systems/VERIFICATION.txt
+E:/Workspace/naumi-desktop/evidence/native-systems/ROLLBACK.sh
+
+BASELINE
+Command: node scripts/native-systems-evidence.mjs baseline
+Input: independent copy, original Git blob snapshots for 8 changed files; 11 new files absent.
+Literal output: BASELINE tests=42/42 native_business_tools=absent original_hashes=PASS exit=0
+Exit status: 0
+
+MODIFIED
+Command: node scripts/native-systems-evidence.mjs modified
+Input: current modified source and matching 19-file archive snapshots; HARNESS.json and ELECTRON.json.
+Literal output: MODIFIED tests=70/70 harness=17 electron=20 hashes=PASS shared_writes=0 exit=0
+Exit status: 0
+
+ROLLBACK
+Command: & 'D:/DEV/Git/bin/bash.exe' evidence/native-systems/ROLLBACK.sh
+Input: another isolated copy with .naumi-native-systems-copy marker; current 19 modified files.
+Literal output: ROLLBACK files=19 baseline_tests=42/42 hashes=restored modified_archive=unchanged exit=0
+Exit status: 0
+Restored behavior/status: original 42/42 tests pass; 8 old source hashes restored, 11 new source files absent in copy. Current source and MODIFIED_FILE.zip remain modified. Rollback never touches shared or installed runtime.
+
+Additional actual commands/results:
+node --test --test-concurrency=2 tests/*.test.mjs desktop/tests/*.test.cjs
+Literal summary: tests 1063; pass 1063; fail 0; exit 0. See FULL.log.
+node scripts/verify-native-systems.mjs
+Literal output: NATIVE_SYSTEMS_COMPLETE checks=17 fixture_provider=1 uploads=1 submissions=1 production=0; exit 0.
+node desktop/scripts/verify-business-native.mjs
+Literal output: BUSINESS_ELECTRON_COMPLETE checks=20 host_starts=2 OS_crypto=1 ACL=1 production=0; exit 0.
+
+Initial failures retained: MODULE_INITIAL.log (2 schema/wiring issues), FULL_INITIAL.log (1 exact legacy UI extension declaration), ELECTRON_INITIAL.log (Chromium implicit resend observed), BASELINE_COPY_INITIAL.log (missing copied fixture support paths; copy runner fixed). No original failures relabeled as PASS.
+
+Original and modified SHA256:
+desktop/app/business-session.cjs original=ABSENT modified=e535637687c1851dc52f55a2812a824370a0281dba985cdb3b1851e9a568016a
+desktop/app/enterprise.cjs original=07b3adec6685795c146810a8e2d715ec25cfb9fd98488c5c12f6b7045ec9742d modified=118e6008a8c8ab91b5695877f8446b1361bcb751a1f6eb494afe0f60cc5855c2
+desktop/app/main.cjs original=54a80e055fc4702a01a5d4ad1f5298d3857b0077159241a32447181a146107fc modified=3db5b5a308be5717a101f0634b64553dd4fe99baa77532cbe1f4e04b4050cfea
+desktop/app/tools.cjs original=813f0269037afdeb4303262f115be26740b9d51f507913bde126f2c96f34ae44 modified=d6e6bf3c5ff6aa12ed2cf922033b8809a7072e1ec80aa3890357a5922fbc1cae
+desktop/scripts/prepare-runtime.mjs original=fced27e5f3c44f867a1d617c5364bf0c17e44b01dd90cd1128ebe0429e28567a modified=8d119b02d402d4864e17b52e5079e4b5ddd3e224268f7718178b4815036bef6f
+desktop/scripts/verify-business-native.mjs original=ABSENT modified=c1b02d23126a0078c254384e504a952e31d5a8ae1134abfdb290cd4653e6bdff
+plugins/naumi-enterprise/business-contract.cjs original=ABSENT modified=12612a5aabae6b045dd56d78bfad2f77885dd7dd641e7f1fb2f427b7399b137a
+plugins/naumi-enterprise/business-runtime.js original=ABSENT modified=f0cb2f64602dc64666963b7d2742852a92cc46ba4712f56df87a05a6582a05fb
+plugins/naumi-enterprise/business.js original=ABSENT modified=9ac001eb0bb85489942bb2f4b5d8abdef897a248637dbcfe5dc4c35d2eb7736d
+plugins/naumi-enterprise/host.js original=bfeaee6e40bdb04f7fff5a373e321553d24f4701984fd6b798ec43ff80899b89 modified=76426b43a9063a7434c55a15f1156bea2252def8e0e6b9e133221570215c697f
+plugins/naumi-enterprise/client.js original=69027b3ab964fa71b1f8d56569df9ed14f415aa266b4fb1c6150605be2a3b412 modified=01d65587ddf85f5ca07bf3aa45928bc597b80b01ec2bddc4b321543bfb9e9fbc
+plugins/naumi-enterprise/package.json original=6a6d3b6bca4daec2f344e5a74775ad3fbaa0852bcaffb2033ca769c74da56d54 modified=9a93ffafe0f6cef3cf4ccbd40a9928315265cb4deda41d05fe9a47682074cb6b
+plugins/naumi-enterprise/assets/business-context-client.js original=ABSENT modified=b52012f7ab44bcf43ea595e72fc13d20e4f16c9d47027040226f049771982a27
+plugins/naumi-enterprise/assets/business-context.css original=ABSENT modified=685a87ec948cecc71c6c29556db912d9ff2d75bed0cad88ccc4599770e80c0c3
+tests/naumi-business.test.mjs original=ABSENT modified=ed4c474fee205e66b4d050ec89c514cf931254f1eaee84897adde8107606437d
+tests/naumi-context-ui.test.mjs original=aab1e233dfa5e8fa2540c43541c690b3db7c7ea7bb2a311f46647e7688c21015 modified=3c48985bd4fe70c432c849ff06904dcd722b80963ee854f2fe8216edf52b42f2
+scripts/verify-native-systems.mjs original=ABSENT modified=311d5945546e23ecc32403f1125e6249bb6ced80b548d07cbe39f0d58584bdf1
+scripts/native-systems-evidence.mjs original=ABSENT modified=6795521fe5ad0809b344f0cbed6e4825cdaa3f99231b2f29233ce9e04081762a
+docs/implementation/NATIVE_SYSTEMS.md original=ABSENT modified=eee3d18fd962193e7e70ced6606fc6aeef1b2943ac6bfe58c835e6f5d3474b69
+
+Reopened archive CRC: PASS; hashes.json covers all 19 files.
