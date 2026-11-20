@@ -1,0 +1,248 @@
+diff --git a/modified/docs/implementation/CONTEXT_RECOVERY.md b/modified/docs/implementation/CONTEXT_RECOVERY.md
+new file mode 100644
+index 0000000..0e86319
+--- /dev/null
++++ b/modified/docs/implementation/CONTEXT_RECOVERY.md
+@@ -0,0 +1,32 @@
++# 普通会话上下文超限恢复
++
++## 模块与职责
++2026-11-20，`codex/context-overflow-20261120`，基线11fe569。负责原生压缩摘要自身超限时的恢复；新增context-recovery.js，host/package仅追加安装/文件。模型配置、UI、电脑操作、原会话数据不改，不热补CProgramFiles固定资源。
++
++## 调研结论
++截图为CONTEXT_WINDOW_EXCEEDED。只读实际普通会话发现483个可见surface节点、770286 UTF8 bytes；91个工具，request header约68427 bytes，声明窗口938384，输出预留16384。原生自动压缩已经启动，但compaction/end记载摘要再次context_too_large，随后原turn/end失败。不是list_windows失败，也不是用户hi本身过长。此前只对导入历史首轮做有界保护，这次是普通旧会话。
++
++## 公共接口、依赖与状态归属
++- 复用BasicCompactionEngine公开的实例summarize hook、compactIfNeeded、范围校验、原生compaction事件与surface替换；不改prototype、依赖包或模型请求执行器，不另建输入器/压缩账本。
++- 普通摘要按原路径执行；只有精确上下文错误才采用有界原文检查点，明确标注非完整语义摘要。原system/developer/隐藏思考/图片不混入历史节选；当前原生系统头保持。
++- 已有未恢复的超限turn在下次pre-step本地恢复，避免再次提交整个历史作摘要；该操作不发模型、不重放旧业务/电脑工具。
++- 原生事件、工具回执、原文件保留；原生session_event_search/read可检索被shadow的历史。检查点与当前请求的序号及可压缩边界仍由原引擎拥有。
++- 持久化成功才继续下游请求；取消/鉴权/配额/网络错误不伪装成上下文恢复。当前会话小到没有有效缩减空间时保留错误，不制造虚假成功。
++
++## 实现与验证进度
++实现一项普通旧会话续聊恢复切片。集中验证包括原失败基线、原生压缩替换、原记录前缀保持、scope生命周期、跨Session、取消与非上下文错误、实际受影响会话副本原生持久化重开、全仓与四工件回滚。结果后续补录。
++
++### 已完成验证
++- 全仓集中 `node --test --test-concurrency=2 tests/*.test.mjs desktop/tests/*.test.cjs`：1088/1088，0 skip、exit0。
++- `node --test tests/context-recovery.test.mjs tests/naumi-import-context.test.mjs tests/naumi-bot-task-continuity.test.mjs`：32/32。
++- 实际受影响普通Session副本，原始1301个持久事件前缀逐项保持；原文件SHA256为`f01c2ae46f77923bdd5f0236cbc2466840d0f35d70f9b80479d1ac27c758bbb9`，前后不变。
++- `node scripts/verify-context-recovery.mjs baseline`（原插件副本）：6检查；原生用户请求和摘要请求都超出隔离供应商阈值，最终turn仍error，稳定复现截图的双重超限。
++- `node scripts/verify-context-recovery.mjs modified`：10检查、2宿主启动；可见消息770286→43419 UTF8 bytes，首个真实Harness发出的HTTP请求102079 bytes（含系统及88工具），继续成功；重启后98435 bytes，继续成功。
++- 上述为真实Harness/AgentLoop/TokenMeter/BasicCompaction/JSONL与实际历史副本；供应商是loopback fixture，0真实供应商调用/0共享服务写入。副本中无任何旧工具call/result重放。
++- 最初runner漏考虑Session.create临时end-seed，逐字比较改为原始持久事件前缀；另修测试fixture空tools字段与缺ctx.get，以及runner重复stop等待已退出子进程。失败原样保留，不改业务代码掩盖测试数据问题。
++- 只有上下文超限触发本地节选，不把鉴权、配额、超时或其他400转换为成功。检查点始终明确不是完整语义摘要；历史仍通过原事件和原生检索可回查。
++
++本切片只改3个产品文件（新增context-recovery，host/package追加），不复制摘要执行器。scope创建/首次pre-step兼容原生延迟实例化，最后一个owner释放时恢复原实例hook，未知第三方compactor保持原路径。
++
++## 未完成项与下一步
++当前为独立源码开发；不宣称运行已加载。既有实际会话仅只读，用户下一次发送才经修复链继续，不自动重发hi。固定安装包需后续完整构建纳入；真实供应商不为复现再次调用。
+diff --git a/modified/plugins/naumi-enterprise/context-recovery.js b/modified/plugins/naumi-enterprise/context-recovery.js
+new file mode 100644
+index 0000000..4a70432
+--- /dev/null
++++ b/modified/plugins/naumi-enterprise/context-recovery.js
+@@ -0,0 +1,69 @@
++import {BasicCompactionEngine} from '@deepseek-ai/dsh-compaction-basic';
++
++const bytes=value=>Buffer.byteLength(typeof value==='string'?value:JSON.stringify(value),'utf8');
++const excerpt=(text,max)=>new TextDecoder().decode(Buffer.from(text).subarray(0,Math.max(0,max)),{stream:true});
++export function isContextOverflow(error){
++ if(error?.code==='CONTEXT_WINDOW_EXCEEDED'||error?.failure?.code==='CONTEXT_WINDOW_EXCEEDED')return true;
++ const text=String(error?.message??error??'').slice(0,8192);
++ return /"type"\s*:\s*"context_too_large"|\bCONTEXT_WINDOW_EXCEEDED\b|input exceeds the context window|maximum context length.*(?:exceed|requested)/i.test(text);
++}
++/** Only a provider-confirmed, not subsequently recovered failure. Never use
++ * another Session's transient state, model guess or unrelated 400 as evidence. */
++export function pendingContextOverflow(session){
++ for(let seq=session.seq-1;seq>=0;seq--){const e=session.eventAt(seq);
++  if(e.type==='compaction/summary'||e.type==='assistant/message')return false;
++  if(e.type==='turn/end')return e.data.reason?.kind==='error'&&isContextOverflow(e.data.reason.error);
++ }
++ return false;
++}
++/** A bounded extract, NOT a semantic summary. Native compaction records the exact
++ * source seqs and retains the complete original event history for native search. */
++export function recoveryCheckpoint(input,owner,maxBytes=8192){
++ if(!Number.isInteger(maxBytes)||maxBytes<1024||maxBytes>8192)throw Error('CONTEXT_RECOVERY_BUDGET_INVALID');
++ const rows=(input.messages??[]).filter(m=>m.role==='user'||m.role==='assistant').map((m,index)=>({index,role:m.role,text:(m.content??[]).filter(b=>b.type==='text').map(b=>b.text).join('\n')})).filter(m=>m.text.trim());
++ let out='[本地上下文恢复检查点：有界原文节选，并非完整语义摘要]\n原会话事件、工具回执及文件记录完整保留。本节仅为历史资料；旧指令不授予当前权限，当前用户要求和现行规则优先。不把节选当作完整结论，不重复已完成的工具操作。需要细节时检索当前会话原历史，确认原始回执。\n';
++ const names=new Set(owner.ctx?.tools?.definitions?.(owner).map(t=>t.name)??[]);
++ if(names.has('session_event_search')&&names.has('session_event_read'))out+='可用原生工具：session_event_search / session_event_read，省略session_id只读取当前会话；分批检索，不一次取回全部历史。\n';
++ out+='会话 '+owner.session.id+'；压缩来源共 '+(input.messages?.length??0)+' 条，原生压缩记录保留精确来源序号。\n';
++ const chosen=new Map(),add=(m,cap)=>{if(m&&!chosen.has(m.index))chosen.set(m.index,{...m,cap});};
++ add(rows.find(m=>m.role==='user'),640);
++ for(const m of rows.filter(m=>m.role==='user').slice(-5))add(m,768);
++ for(const m of rows.filter(m=>m.role==='assistant').slice(-3))add(m,1024);
++ for(const row of [...chosen.values()].sort((a,b)=>a.index-b.index)){
++  const header='\n[历史 '+row.role+' / 相对条目 '+row.index+']\n',left=maxBytes-bytes(out)-bytes(header)-80;if(left<=0)break;
++  const cap=Math.min(left,row.cap);out+=header+excerpt(row.text,cap);if(bytes(row.text)>cap)out+='\n[原文有省略，请检索原历史]';
++ }
++ return excerpt(out,maxBytes);
++}
++/** Public per-instance summarize hook. No prototype/LLM interception, second
++ * executor, model rerouting, business-tool replay or mutation of source input. */
++export function protectContextSummarizer(engine){
++ const own=Object.getOwnPropertyDescriptor(engine,'summarize'),original=engine.summarize;
++ if(typeof original!=='function')throw Error('CONTEXT_RECOVERY_ENGINE_REQUIRED');
++ const local=(input,owner)=>{const n=bytes(input.messages??[]);if(n<16384)throw Error('CONTEXT_RECOVERY_NO_REDUCTION');return {summary:[{type:'text',text:recoveryCheckpoint(input,owner,Math.min(8192,Math.max(1024,Math.floor(n/8))))}],provider:'naumi-local',model:'bounded-recovery-excerpt-v1'};};
++ const wrapped=async function(input,owner,signal){
++  signal?.throwIfAborted();if(pendingContextOverflow(owner.session))return local(input,owner);
++  try{return await original.call(this,input,owner,signal);}catch(error){signal?.throwIfAborted();if(!isContextOverflow(error))throw error;return local(input,owner);}
++ };
++ Object.defineProperty(engine,'summarize',{value:wrapped,writable:true,configurable:true});
++ return()=>{if(engine.summarize!==wrapped)return;if(own)Object.defineProperty(engine,'summarize',own);else delete engine.summarize;};
++}
++export function installContextRecovery(ctx){
++ return ctx.inject(['agents'],scope=>{
++  const engines=new Map();
++  const mount=(agent,engine=agent.ctx.get('compaction'))=>{if(!engine||typeof engine.summarize!=='function'||typeof engine.compactIfNeeded!=='function')return false;let entry=engines.get(engine);if(!entry){entry={owners:new Set(),undo:protectContextSummarizer(engine)};engines.set(engine,entry);}entry.owners.add(agent);return true;};
++  const prepare=async(agent,signal)=>{
++   signal?.throwIfAborted();let engine=agent.ctx.get('compaction');
++   if(!engine&&agent.ctx.plugin&&agent.ctx.get('tokenMeter')){const handle=agent.ctx.plugin(BasicCompactionEngine,{auto:true,headroomTokens:4096,maxTokens:2048});await handle.await();engine=agent.ctx.get('compaction');}
++   if(!engine)return;
++   if(!mount(agent,engine))return;
++   if(!pendingContextOverflow(agent.session))return;
++   const result=await engine.compactIfNeeded(agent,'context-overflow',signal);
++   signal?.throwIfAborted();if(result){await agent.ctx.sessions.flush(agent.session);scope.logger.info('context recovery: native bounded checkpoint committed');}
++  };
++  scope.on('agent/pre-step',async({agent,signal},next)=>{await prepare(agent,signal);return next();},{prepend:true});
++  scope.on('agent/created',({agent})=>mount(agent));for(const agent of scope.agents.list())mount(agent);
++  scope.on('agent/disposed',({agent})=>{for(const[engine,e]of engines){e.owners.delete(agent);if(!e.owners.size){e.undo();engines.delete(engine);}}});
++  scope.effect(()=>()=>{for(const e of engines.values())e.undo();engines.clear();});
++ });
++}
+diff --git a/original/plugins/naumi-enterprise/host.js b/modified/plugins/naumi-enterprise/host.js
+index c4a4028..001c6ec 100644
+--- a/original/plugins/naumi-enterprise/host.js
++++ b/modified/plugins/naumi-enterprise/host.js
+@@ -1,4 +1,5 @@
+ import {installSessionImport} from './session-import.js';
++import {installContextRecovery} from './context-recovery.js';
+ import {installCreation} from './creation.js';
+ import {installBusiness} from './business.js';
+ import {installBlender} from './blender.js';
+@@ -22,6 +23,7 @@ export function apply(ctx,config) {
+   installDesktopIdentity(ctx);
+   installModelPolicy(ctx);
+   installSessionImport(ctx);
++  installContextRecovery(ctx);
+   installModelConnections(ctx);
+   installPluginMarket(ctx);
+   installCua(ctx);
+diff --git a/original/plugins/naumi-enterprise/package.json b/modified/plugins/naumi-enterprise/package.json
+index 13e8a0a..fa11810 100644
+--- a/original/plugins/naumi-enterprise/package.json
++++ b/modified/plugins/naumi-enterprise/package.json
+@@ -11,6 +11,7 @@
+     "./cordis.patch.yml": "./cordis.patch.yml"
+   },
+   "files": [
++    "context-recovery.js",
+     "host.js",
+     "session-import.js",
+     "session-import-source.js",
+diff --git a/modified/scripts/context-recovery-evidence.mjs b/modified/scripts/context-recovery-evidence.mjs
+new file mode 100644
+index 0000000..225ebeb
+--- /dev/null
++++ b/modified/scripts/context-recovery-evidence.mjs
+@@ -0,0 +1,33 @@
++import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import {createHash} from 'node:crypto';import {spawnSync,execFileSync} from 'node:child_process';import {fileURLToPath} from 'node:url';
++const root=path.resolve(process.env.NAUMI_SOURCE_ROOT??fileURLToPath(new URL('..',import.meta.url))),e=path.join(root,'evidence/context-recovery'),base='11fe56942e0c7a8ee9ace3d0aadd690b94eb760a',mode=process.argv[2]??'package';
++const files=['plugins/naumi-enterprise/context-recovery.js','plugins/naumi-enterprise/host.js','plugins/naumi-enterprise/package.json','tests/context-recovery.test.mjs','scripts/verify-context-recovery.mjs','scripts/context-recovery-evidence.mjs','docs/implementation/CONTEXT_RECOVERY.md'];
++const sha=b=>createHash('sha256').update(b).digest('hex'),hash=p=>sha(fs.readFileSync(p));const originalTests=['tests/naumi-import-context.test.mjs','tests/naumi-bot-task-continuity.test.mjs'];
++function run(cmd,args,cwd,log){const r=spawnSync(cmd,args,{cwd,encoding:'utf8',windowsHide:true,maxBuffer:20e6});if(log)fs.writeFileSync(path.join(e,log),r.stdout+'\n'+r.stderr);if(r.status!==0)throw Error('EVIDENCE_COMMAND_FAILED '+cmd+' '+args.join(' ')+' exit='+r.status+'\n'+r.stdout.slice(-2500)+'\n'+r.stderr);return r.stdout;}
++function checkTests(cwd,tests,log){const text=run(process.execPath,['--test',...tests],cwd,log),n=text.match(/(?:#|ℹ) tests (\d+)/)?.[1],pass=text.match(/(?:#|ℹ) pass (\d+)/)?.[1];if(!n||n!==pass)throw Error('TEST_SUMMARY_INVALID');return n;}
++function isolated(){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-context-evidence-'));for(const sub of ['plugins','desktop/app','desktop/scripts','desktop/tests','desktop/vendor','scripts','tests','evidence/naumi-context-ui/original'])fs.cpSync(path.join(root,sub),path.join(dir,sub),{recursive:true,filter:p=>!p.endsWith('.exe')});fs.copyFileSync(path.join(root,'package.json'),path.join(dir,'package.json'));fs.symlinkSync(path.join(root,'node_modules'),path.join(dir,'node_modules'),'junction');fs.symlinkSync(path.join(root,'desktop/node_modules'),path.join(dir,'desktop/node_modules'),'junction');return dir;}
++function clean(dir){if(!path.resolve(dir).startsWith(path.resolve(os.tmpdir())+path.sep))throw Error('COPY_PATH_ESCAPE');for(const sub of ['node_modules','desktop/node_modules'])if(fs.existsSync(path.join(dir,sub)))fs.unlinkSync(path.join(dir,sub));fs.rmSync(dir,{recursive:true,force:true});}
++function snapshot(dir,kind,manifest){for(const f of manifest){const target=path.join(dir,f.path),source=path.join(e,kind,f.path),expected=f[kind==='original'?'originalSHA256':'modifiedSHA256'];if(expected){if(hash(source)!==expected)throw Error('SNAPSHOT_HASH_DRIFT');fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(source,target);}else if(fs.existsSync(target))fs.unlinkSync(target);}}
++if(mode==='package'){
++ fs.mkdirSync(e,{recursive:true});const manifest=[];for(const file of files){const r=spawnSync('git',['show',base+':'+file],{cwd:root,maxBuffer:10e6}),modified=fs.readFileSync(path.join(root,file));for(const [kind,bytes]of [['original',r.status===0?r.stdout:null],['modified',modified]])if(bytes){const p=path.join(e,kind,file);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes);}manifest.push({path:file,originalSHA256:r.status===0?sha(r.stdout):null,modifiedSHA256:sha(modified)});}
++ fs.writeFileSync(path.join(e,'hashes.json'),JSON.stringify({branch:'codex/context-overflow-20261120',baseline:base,files:manifest},null,2)+'\n');
++ const diff=spawnSync('git',['-c','core.autocrlf=false','diff','--binary','--no-index','--','original','modified'],{cwd:e,maxBuffer:10e6});if(![0,1].includes(diff.status))throw Error('DIFF_FAILED');fs.writeFileSync(path.join(e,'DIFF_FILE.patch'),diff.stdout);
++ const rollback=`import fs from 'node:fs';import path from 'node:path';import{createHash}from'node:crypto';import{fileURLToPath}from'node:url';import{spawnSync}from'node:child_process';const here=path.dirname(fileURLToPath(import.meta.url)),target=process.argv[2];if(!target||target==='--test'){const r=spawnSync(process.execPath,[path.join(here,'../../scripts/context-recovery-evidence.mjs'),'rollback'],{stdio:'inherit',windowsHide:true});process.exit(r.status??1);}const root=fs.realpathSync(target),m=JSON.parse(fs.readFileSync(path.join(here,'hashes.json'))).files;if(fs.readFileSync(path.join(root,'.naumi-context-recovery-copy'),'utf8')!=='isolated-copy')throw Error('COPY_MARKER_REQUIRED');const sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');for(const f of m){const p=path.resolve(root,f.path);if(!p.startsWith(root+path.sep)||fs.lstatSync(p).isSymbolicLink()||sha(p)!==f.modifiedSHA256)throw Error('COPY_DRIFT');}for(const f of m){const p=path.join(root,f.path);if(f.originalSHA256){const s=path.join(here,'original',f.path);if(sha(s)!==f.originalSHA256)throw Error('ORIGINAL_HASH');fs.copyFileSync(s,p);}else fs.unlinkSync(p);}console.log('ROLLBACK_SOURCE files='+m.length+' hashes=restored copy_only=1');\n`;
++ fs.writeFileSync(path.join(e,'rollback.mjs'),rollback);fs.writeFileSync(path.join(e,'ROLLBACK.sh'),'#!/usr/bin/env bash\nset -euo pipefail\nHERE="$(cd -- "$(dirname -- "$0")" && pwd)"\nexec "${NAUMI_NODE:-node}" "$HERE/rollback.mjs" "${1:---test}"\n',{mode:0o755});
++ const q=s=>"'"+s.replaceAll("'","''")+"'";run('D:/DEV/PowerShell/pwsh.exe',['-NoProfile','-Command',`Compress-Archive -Path ${['original','modified','hashes.json','ROLLBACK.sh','rollback.mjs'].map(s=>q(path.join(e,s))).join(',')} -DestinationPath ${q(path.join(e,'MODIFIED_FILE.zip'))} -Force`],root);
++ console.log('PACKAGE files='+manifest.length+' original='+manifest.filter(f=>f.originalSHA256).length+' modified_archive=PASS copy_only_rollback=1');
++}else{
++ const manifest=JSON.parse(fs.readFileSync(path.join(e,'hashes.json'))).files;
++ if(mode==='modified'){
++  for(const f of manifest)if(hash(path.join(root,f.path))!==f.modifiedSHA256||hash(path.join(e,'modified',f.path))!==f.modifiedSHA256)throw Error('MODIFIED_HASH_DRIFT '+f.path);
++  const n=checkTests(root,[...originalTests,'tests/context-recovery.test.mjs'],'MODIFIED.log');const h=JSON.parse(fs.readFileSync(path.join(e,'CHAIN_MODIFIED.json'))),baseline=JSON.parse(fs.readFileSync(path.join(e,'CHAIN_BASELINE.json')));if(h.checks.length!==10||baseline.checks.length!==6||!h.originalSourceUnchanged||h.productionCalls!==0)throw Error('CHAIN_EVIDENCE_MISSING');console.log('MODIFIED tests='+n+'/'+n+' actual_copy=10/10 source_hash=unchanged production=0 exit=0');
++ }else if(['baseline','rollback'].includes(mode)){
++  const dir=isolated();try{
++   if(mode==='baseline'){snapshot(dir,'original',manifest);const n=checkTests(dir,originalTests,'BASELINE.log');console.log('BASELINE tests='+n+'/'+n+' context_recovery=absent original_hashes=PASS exit=0');}
++   else{
++    const before=hash(path.join(e,'MODIFIED_FILE.zip'));snapshot(dir,'modified',manifest);fs.writeFileSync(path.join(dir,'.naumi-context-recovery-copy'),'isolated-copy');const text=run('D:/DEV/Git/bin/bash.exe',[path.join(e,'ROLLBACK.sh'),dir],root,'ROLLBACK_SOURCE.log');if(!text.includes('hashes=restored'))throw Error('ROLLBACK_NOT_RESTORED');
++    for(const f of manifest){const p=path.join(dir,f.path);if(f.originalSHA256?hash(p)!==f.originalSHA256:fs.existsSync(p))throw Error('RESTORED_HASH_DRIFT');}
++    const n=checkTests(dir,originalTests,'ROLLBACK_TESTS.log');if(before!==hash(path.join(e,'MODIFIED_FILE.zip')))throw Error('MODIFIED_ARCHIVE_CHANGED');console.log('ROLLBACK files='+manifest.length+' baseline_tests='+n+'/'+n+' hashes=restored modified_archive=unchanged exit=0');
++   }
++  }finally{clean(dir);}
++ }else throw Error('EVIDENCE_MODE_INVALID');
++}
+diff --git a/modified/scripts/verify-context-recovery.mjs b/modified/scripts/verify-context-recovery.mjs
+new file mode 100644
+index 0000000..8a347de
+--- /dev/null
++++ b/modified/scripts/verify-context-recovery.mjs
+@@ -0,0 +1,31 @@
++import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import http from 'node:http';import assert from 'node:assert/strict';import {randomUUID,createHash} from 'node:crypto';import {spawn} from 'node:child_process';import {stringify} from 'yaml';import {Context} from '@deepseek-ai/cordis';import Sessions,{Session} from '@deepseek-ai/dsh-session';import * as P from '@deepseek-ai/dsh-session-persistence-jsonl';
++// The affected real history is read-only, copied to an isolated profile. Only a
++// local model fixture receives it. No real supplier, tool replay or shared writes.
++const root=process.cwd(),out=path.resolve(process.env.NAUMI_CONTEXT_EVIDENCE??'output/context-overflow'),mode=process.argv[2]??'modified',sourceRoot=path.resolve(process.env.NAUMI_CONTEXT_SOURCE??'E:/Workspace/naumi-desktop/.dsh/sessions'),sid='session-22bbe73c-ab15-4495-818d-1c419b56413d',hash=b=>createHash('sha256').update(b).digest('hex');fs.mkdirSync(out,{recursive:true});
++const rel=fs.readdirSync(sourceRoot,{recursive:true}).filter(x=>x.includes(sid)&&x.endsWith('session.v4.jsonl.zstd'));assert.equal(rel.length,1,'EXACT_AFFECTED_SOURCE_REQUIRED');const source=path.join(sourceRoot,rel[0]),original=fs.readFileSync(source),originalHash=hash(original),temp=fs.mkdtempSync(path.join(os.tmpdir(),'naumi-context-chain-')),home=path.join(temp,'home'),profile=path.join(home,'profiles/web'),requests=[],checks=[];fs.mkdirSync(path.join(profile,'node_modules/@naumi'),{recursive:true});
++const copy=path.join(home,'sessions',rel[0]);fs.mkdirSync(path.dirname(copy),{recursive:true});fs.writeFileSync(copy,original);
++for(const[name,folder]of [['dsh-enterprise','naumi-enterprise'],['dsh-ui-layout','naumi-ui-layout'],['dsh-sidebar-browser','naumi-sidebar-browser']])fs.symlinkSync(folder==='naumi-enterprise'&&process.env.NAUMI_CONTEXT_PLUGIN_ROOT?path.resolve(process.env.NAUMI_CONTEXT_PLUGIN_ROOT):path.join(root,'plugins',folder),path.join(profile,'node_modules/@naumi',name),'junction');fs.symlinkSync(path.join(root,'node_modules/@deepseek-ai'),path.join(profile,'node_modules/@deepseek-ai'),'junction');
++fs.writeFileSync(path.join(profile,'package.json'),JSON.stringify({name:'naumi-context-recovery-fixture',private:true,dsh:{profile:{bundles:['@deepseek-ai/dsh-base','@deepseek-ai/dsh-web-app','@deepseek-ai/dsh-experimental-agent-team-profile','@naumi/dsh-enterprise']}}}));
++const upstream=http.createServer(async(req,res)=>{let raw='';for await(const c of req)raw+=c;const body=JSON.parse(raw),size=Buffer.byteLength(raw),over=size>160000;requests.push({bytes:size,overflow:over,model:body.model,hasCurrent:raw.includes('hi-current-context-recovery'),hasCheckpoint:raw.includes('本地上下文恢复检查点'),hasOriginalSystem:raw.includes('You are'),toolCount:body.tools?.length??0});
++ if(over){res.writeHead(400,{'Content-Type':'application/json'}).end(JSON.stringify({error:{type:'context_too_large',message:'Your input exceeds the context window of this model.'}}));return;}
++ res.writeHead(200,{'Content-Type':'text/event-stream'});for(const x of [{choices:[{index:0,delta:{role:'assistant',content:'已保留原会话并恢复续聊。'},finish_reason:null}]},{choices:[{index:0,delta:{},finish_reason:'stop'}],usage:{prompt_tokens:18000,completion_tokens:20,total_tokens:18020}}])res.write('data: '+JSON.stringify({id:'context-fixture',object:'chat.completion.chunk',created:1,model:body.model,...x})+'\n\n');res.end('data: [DONE]\n\n');});await new Promise(r=>upstream.listen(0,'127.0.0.1',r));
++fs.writeFileSync(path.join(home,'cordis.patch.yml'),stringify([{id:'agent-default-model',config:{provider:'fixture',model:'fixture-model'}}]));fs.writeFileSync(path.join(profile,'cordis.patch.yml'),stringify([{id:'ui-settings-general',config:{welcomeNoticeVersion:'2026-09-28.1'}},{id:'llm-pi-ai',config:{providers:{fixture:{displayName:'隔离上下文验收',api:'openai-completions',baseURL:'http://127.0.0.1:'+upstream.address().port+'/v1',apiKeyEnv:'NAUMI_CONTEXT_FIXTURE_KEY',models:[{id:'fixture-model',name:'isolated fixture',contextWindow:938384,maxTokens:16384,reasoningEfforts:false}]}}}}]));
++const reserve=http.createServer();await new Promise(r=>reserve.listen(0,'127.0.0.1',r));const port=reserve.address().port;await new Promise(r=>reserve.close(r));const base='http://127.0.0.1:'+port;let child,log='',cookie,boots=0;const logs=[];
++const boot=async()=>{boots++;log='';const env={...process.env,DSH_HOME:home,CODEX_HOME:path.join(temp,'codex'),CLAUDE_CONFIG_DIR:path.join(temp,'claude'),DSH_TELEMETRY_MODE:'DISABLED',NAUMI_CONTEXT_FIXTURE_KEY:'local-fixture-only'};for(const k of ['NAUMI_DESKTOP_INSTANCE_ID','NAUMI_ENTERPRISE_ORIGIN','NAUMI_MODEL_POLICY'])delete env[k];child=spawn(process.execPath,[path.join(root,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'web','--host','127.0.0.1','--port',String(port),'--no-open'],{cwd:root,env,windowsHide:true});child.stdout.on('data',b=>log+=b);child.stderr.on('data',b=>log+=b);let launch;for(let i=0;i<300;i++){launch=log.match(new RegExp(base.replaceAll('.','\\.')+'/?\\?token=[A-Za-z0-9_~.%-]+'))?.[0];if(launch)break;if(child.exitCode!==null)throw Error('ISOLATED_HOST_BOOT_FAILED '+log.slice(-2500));await new Promise(r=>setTimeout(r,100));}assert(launch,'ISOLATED_HOST_TIMEOUT '+log.slice(-2500));const r=await fetch(launch,{redirect:'manual'});cookie=r.headers.getSetCookie().map(s=>s.split(';')[0]).join('; ');};
++const stop=async()=>{const active=child;child=null;if(active&&active.exitCode===null&&active.signalCode===null){const closed=new Promise(r=>active.once('close',r));active.kill();await closed;}if(active)logs.push(log.replace(/token=[A-Za-z0-9_~.%-]+/g,'token=REDACTED'));};
++const rpc=async(method,args)=>{const r=await fetch(base+'/api/'+method,{method:'POST',headers:{cookie,'Content-Type':'application/json'},body:JSON.stringify({type:'client-request',rpcId:randomUUID(),method,payload:{args}}),signal:AbortSignal.timeout(45000)}),data=await r.json();assert(data.result?.ok,JSON.stringify(data));return data.result.value;};
++const check=(n,v)=>{assert(v,n);checks.push(n);console.log('CONTEXT_CHAIN_PASS '+n);};
++const inspect=async()=>{const ctx=new Context(),sm=ctx.plugin(Sessions),pm=ctx.plugin(P,{root:path.join(home,'sessions')});await pm.await();try{const h=await ctx.sessionPersistence.open(sid,'read');try{const r=await h.read(),s=Session.create(sid,r.events,h.header);return{persistedEvents:r.events,events:s.snapshotEvents(),bytes:Buffer.byteLength(JSON.stringify(s.deriveMessages())),text:JSON.stringify(s.deriveMessages())};}finally{await h.close();}}finally{await pm.dispose();await sm.dispose();}};
++let receipt;
++try{
++ const before=await inspect();check('actual_source_copy_reproduces_large_ordinary_surface',before.bytes>700000);await boot();check('boot_has_no_model_or_tool_replay',requests.length===0);
++ await rpc('session/selectModel',{request:{sessionId:sid,provider:'fixture',model:'fixture-model'}});await rpc('session/prompt',{request:{sessionId:sid,requestId:randomUUID(),mode:'queue',content:[{type:'text',text:'hi-current-context-recovery，只打招呼，不执行电脑工具。'}]}});const wait=await rpc('session/wait',{request:{sessionId:sid,timeoutMs:35000,maxMessages:1}});await stop();const after=await inspect();
++ check('original_event_prefix_retained',JSON.stringify(after.persistedEvents.slice(0,before.persistedEvents.length))===JSON.stringify(before.persistedEvents));check('original_real_file_hash_unchanged',hash(fs.readFileSync(source))===originalHash);
++ if(mode==='baseline'){check('baseline_provider_and_summary_reject_oversized_input',requests.some(r=>r.overflow)&&after.events.some(e=>e.seq>=before.events.length&&e.type==='compaction/end'&&String(e.data.error).includes('context_too_large')));check('baseline_turn_still_fails',after.events.filter(e=>e.type==='turn/end').at(-1).data.reason.kind==='error');}
++ else{
++  check('first_wire_request_bounded_without_failing_summary',requests.length===1&&!requests[0].overflow&&requests[0].hasCurrent&&requests[0].hasCheckpoint);check('native_turn_completes_after_prior_overflow',JSON.stringify(wait).includes('已保留原会话并恢复续聊。'));check('native_checkpoint_preserves_system_and_cuts_history',after.bytes<100000&&after.text.includes('hi-current-context-recovery')&&after.events.some(e=>e.type==='compaction/summary'&&e.data.provider==='naumi-local'));
++  check('no_completed_tool_is_reexecuted',!after.events.slice(before.events.length).some(e=>e.type==='tool/result'||e.type==='tool/call'));
++  await boot();check('restart_itself_does_not_call_model',requests.length===1);await rpc('session/prompt',{request:{sessionId:sid,requestId:randomUUID(),mode:'queue',content:[{type:'text',text:'重启后继续打招呼，不调用工具。'}]}});const second=await rpc('session/wait',{request:{sessionId:sid,timeoutMs:35000,maxMessages:1}});check('real_host_restart_reopens_compacted_surface',requests.length===2&&requests.every(r=>!r.overflow)&&JSON.stringify(second).includes('已保留原会话并恢复续聊。'));await stop();
++ }
++ receipt={mode,status:'PASS',checks,boots,requests,originalSHA256:originalHash,originalSourceUnchanged:hash(fs.readFileSync(source))===originalHash,beforeBytes:before.bytes,afterBytes:after.bytes,originalEvents:before.persistedEvents.length,originalPrefixPreserved:true,productionCalls:0,sharedServiceWrites:0,tier:'actual affected Session COPY; real isolated Harness/AgentLoop/native TokenMeter/BasicCompaction/JSONL; loopback provider fixture'};fs.writeFileSync(path.join(out,'CHAIN_'+mode.toUpperCase()+'.json'),JSON.stringify(receipt,null,2)+'\n');console.log('CONTEXT_CHAIN_COMPLETE mode='+mode+' checks='+checks.length+' boots='+boots+' model_fixture_requests='+requests.length+' original_hash=unchanged production=0');
++}finally{await stop();fs.writeFileSync(path.join(out,'HOST_'+mode.toUpperCase()+'.log'),logs.join('\n---BOOT---\n'));upstream.closeAllConnections();await new Promise(r=>upstream.close(r));for(const p of ['node_modules/@naumi/dsh-enterprise','node_modules/@naumi/dsh-ui-layout','node_modules/@naumi/dsh-sidebar-browser','node_modules/@deepseek-ai']){const link=path.join(profile,p);if(fs.existsSync(link))fs.unlinkSync(link);}assert(path.resolve(temp).startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(temp,{recursive:true,force:true});}
+diff --git a/modified/tests/context-recovery.test.mjs b/modified/tests/context-recovery.test.mjs
+new file mode 100644
+index 0000000..be8f514
+--- /dev/null
++++ b/modified/tests/context-recovery.test.mjs
+@@ -0,0 +1,23 @@
++import test from 'node:test';import assert from 'node:assert/strict';import {Context} from '@deepseek-ai/cordis';import Sessions,{Session} from '@deepseek-ai/dsh-session';import {BasicCompactionEngine} from '@deepseek-ai/dsh-compaction-basic';import {createUserMessage,LlmError} from '@deepseek-ai/dsh-llm';
++import {isContextOverflow,pendingContextOverflow,recoveryCheckpoint,protectContextSummarizer,installContextRecovery} from '../plugins/naumi-enterprise/context-recovery.js';
++const signal=()=>new AbortController().signal,overflow=()=>new LlmError('400 {"error":{"type":"context_too_large","message":"Your input exceeds the context window"}}','CONTEXT_WINDOW_EXCEEDED');
++function fixture({pending=false,id='ordinary-session',summaryError=overflow()}={}){
++ const session=Session.create(id);session.append('turn/start',{turn:1});session.append('step/start',{turn:1,step:1});session.append('system/message',{message:{role:'system',content:[{type:'text',text:'Current system rules remain protected.'}]}},{surfaceOp:'append'});
++ for(let i=0;i<20;i++){session.append('user/message',createUserMessage({source:{kind:'owner'},content:[{type:'text',text:'原始要求 '+i+' '+('中文😀 historical text ').repeat(2500)}]}),{surfaceOp:'append'});session.append('assistant/message',{turn:1,step:1,message:{role:'assistant',content:[{type:'text',text:'原答复 '+i+' '+('retained output ').repeat(600)}]}},{surfaceOp:'append'});}
++ session.append('request/header',{header:{config:{provider:'fixture',model:'oversized-declaration',maxTokens:4096}},reason:'initial'});session.append('step/end',{turn:1,step:1});session.append('turn/end',{turn:1,reason:pending?{kind:'error',error:{code:'CONTEXT_WINDOW_EXCEEDED',message:overflow().message}}:{kind:'completed'}});
++ const meter={estimateMessage:m=>Math.ceil(Buffer.byteLength(JSON.stringify(m))/4),measure:s=>{const nodes=s.surface.nodes.map(seq=>{const m=s.deriveEventMessage(s.eventAt(seq)),tokens=m?Math.ceil(Buffer.byteLength(JSON.stringify(m))/4):0;return{seq,tokens,heuristicTokens:tokens};});return{nodes,totalTokens:nodes.reduce((n,x)=>n+x.tokens,0)};}};
++ const engine=Object.create(BasicCompactionEngine.prototype);let calls=0,flushes=0;engine.ctx={tokenMeter:meter,get:()=>undefined,waterfall:()=>false};engine.summarize=async()=>{calls++;throw summaryError;};const services={compaction:engine,tokenMeter:meter,llm:{}};
++ const agent={id,session,ctx:{get:k=>services[k],sessions:{flush:async()=>{flushes++;}},tools:{definitions:()=>[{name:'session_event_search'},{name:'session_event_read'}]}}};
++ return{session,engine,meter,agent,services,counts:()=>({calls,flushes})};
++}
++test('only explicit context-limit failures activate recovery, never auth, quota, timeout or arbitrary 400',()=>{
++ assert(isContextOverflow(overflow()));assert(isContextOverflow(Error('400 {"error":{"type":"context_too_large"}}')));for(const s of ['400 invalid request','401 unauthorized','429 budget exhausted','ETIMEDOUT'])assert(!isContextOverflow(Error(s)));
++});
++test('baseline native compaction reproduces summary-overflow dead end with original events unchanged apart from failure markers',async()=>{const f=fixture();f.session.append('turn/start',{turn:2});const before=f.session.snapshotEvents();await assert.rejects(f.engine.compactIfNeeded(f.agent,'context-overflow',signal()),/context_too_large/);assert.deepEqual(f.session.snapshotEvents().slice(0,before.length),before);assert.equal(f.session.snapshotEvents().filter(e=>e.type==='compaction/summary').length,0);assert.equal(f.counts().calls,1);});
++test('normal summarization keeps the exact original hook, input, target and return value',async()=>{const f=fixture(),input={messages:[{role:'user',content:[{type:'text',text:'small'}]}]},expected={summary:[{type:'text',text:'semantic'}],provider:'fixture',model:'original'};let received;f.engine.summarize=function(...args){received={owner:this,args};return expected;};const undo=protectContextSummarizer(f.engine);try{assert.equal(await f.engine.summarize(input,f.agent,signal()),expected);assert.equal(received.owner,f.engine);assert.equal(received.args[0],input);}finally{undo();}});
++test('provider-rejected summarization becomes a durable native replacement without deleting original messages',async()=>{const f=fixture();const original=f.engine.summarize,undo=protectContextSummarizer(f.engine);f.session.append('turn/start',{turn:2});f.session.append('user/message',createUserMessage({source:{kind:'owner'},content:[{type:'text',text:'hi-new-current-user'}]}),{surfaceOp:'append'});const before=f.session.snapshotEvents();try{const result=await f.engine.compactIfNeeded(f.agent,'context-overflow',signal());assert(result);assert.equal(f.counts().calls,1);assert.deepEqual(f.session.snapshotEvents().slice(0,before.length),before);const sent=JSON.stringify(f.session.deriveMessages());assert(sent.includes('hi-new-current-user'));assert(sent.includes('并非完整语义摘要'));assert(sent.includes('session_event_search'));assert(Buffer.byteLength(sent)<20000);assert.equal(f.session.eventAt(result.summarySeq).data.provider,'naumi-local');assert.equal(f.session.snapshotEvents().filter(e=>e.type==='compaction/summary').length,1);}finally{undo();assert.equal(f.engine.summarize,original);}});
++test('known failed prior turn recovers locally before any new model call, then pending flag clears',async()=>{const f=fixture({pending:true});assert(pendingContextOverflow(f.session));const undo=protectContextSummarizer(f.engine);try{f.session.append('turn/start',{turn:2});await f.engine.compactIfNeeded(f.agent,'context-overflow',signal());assert.equal(f.counts().calls,0);assert(!pendingContextOverflow(f.session));}finally{undo();}});
++test('cancellation, unrelated summary failures and too-small history never become misleading checkpoints',async()=>{const f=fixture({summaryError:Error('401 AUTH_REQUIRED')}),undo=protectContextSummarizer(f.engine);try{await assert.rejects(f.engine.summarize({messages:[]},f.agent,signal()),/AUTH_REQUIRED/);const c=new AbortController();c.abort();await assert.rejects(f.engine.summarize({messages:[]},f.agent,c.signal),{name:'AbortError'});}finally{undo();}const a=fixture({pending:true}),off=protectContextSummarizer(a.engine);try{await assert.rejects(a.engine.summarize({messages:[]},a.agent,signal()),/NO_REDUCTION/);}finally{off();}});
++test('checkpoint is UTF8 byte-bounded, excludes system/developer/reasoning/image content and labels omissions',()=>{const f=fixture(),input={messages:[{role:'system',content:[{type:'text',text:'SYSTEM_SENTINEL'}]},{role:'developer',content:[{type:'text',text:'DEVELOPER_SENTINEL'}]},{role:'user',content:[{type:'text',text:'中文😀'.repeat(4000)},{type:'image',url:'PRIVATE_IMAGE'}]},{role:'assistant',content:[{type:'reasoning',text:'REASONING_SENTINEL'},{type:'text',text:'原结论'}]}]},before=JSON.stringify(input);for(const n of [1024,4096,8192]){const text=recoveryCheckpoint(input,f.agent,n);assert(Buffer.byteLength(text)<=n);assert(!text.includes('\ufffd'));for(const k of ['SYSTEM_SENTINEL','DEVELOPER_SENTINEL','REASONING_SENTINEL','PRIVATE_IMAGE'])assert(!text.includes(k));assert(text.includes('并非完整语义摘要'));}assert.equal(JSON.stringify(input),before);});
++test('different sessions and hook disposal never mutate native prototype or leak another history',async()=>{const a=fixture({id:'a',pending:true}),b=fixture({id:'b',pending:true}),p=BasicCompactionEngine.prototype.summarize,own=Object.getOwnPropertyDescriptor(a.engine,'summarize'),ua=protectContextSummarizer(a.engine),ub=protectContextSummarizer(b.engine);try{const input={messages:[{role:'user',content:[{type:'text',text:'x'.repeat(30000)}]}]},[ra,rb]=await Promise.all([a.engine.summarize(input,a.agent,signal()),b.engine.summarize(input,b.agent,signal())]);assert(ra.summary[0].text.includes('会话 a'));assert(!ra.summary[0].text.includes('会话 b'));assert(rb.summary[0].text.includes('会话 b'));assert.equal(BasicCompactionEngine.prototype.summarize,p);}finally{ua();ub();assert.deepEqual(Object.getOwnPropertyDescriptor(a.engine,'summarize'),own);}});
++test('production pre-step extension owns native checkpoint and flush before downstream request, restores hook on dispose',async()=>{const f=fixture({pending:true}),ctx=new Context();await ctx.plugin({name:'fixture-agent-provider',apply(c){c.provide('agents',{list:()=>[f.agent]});}});const plugin=installContextRecovery(ctx);await plugin;f.session.append('turn/start',{turn:2});let forwarded=false;try{await ctx.serial('agent/pre-step',{agent:f.agent,signal:signal()},async()=>{forwarded=true;assert.equal(f.counts().flushes,1);assert(!pendingContextOverflow(f.session));});assert(forwarded);assert.equal(f.counts().calls,0);}finally{await plugin.dispose();await ctx.fiber.dispose();}});
