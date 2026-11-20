@@ -100,3 +100,5 @@ test('real native Anthropic serialization sends gpt-6-luna for both Sol and Terr
   assert.equal(requests.length,2);assert(requests.every(r=>r.model==='gpt-6-luna'&&r.key==='fixture-shared-luna-key'));assert(requests.every(r=>!JSON.stringify(r).includes('gpt6.1sol')&&!JSON.stringify(r).includes('gpt6.1terra')));
  }finally{await plugin?.dispose();await host.dispose();server.closeAllConnections();await new Promise(r=>server.close(r));}
 });
+
+test('optional Claude route preserves real Sonnet ID, custom display name and existing three choices',()=>{const p=source();p['tdh-claude55']={api:'anthropic-messages',baseURL:'https://fixture.invalid/cpa',apiKeyEnv:'CLAUDE_FIXTURE',models:[{id:'claude-sonnet-5-5',input:['text'],maxTokens:16384}]};const plan=modelPolicyPlan(p);assert.equal(Object.values(plan.providers).flatMap(v=>v.models).length,4);const m=plan.providers['tdh-claude55'].models[0];assert.equal(m.id,'claude-sonnet-5-5');assert.equal(m.name,'claude opus5.5');assert.deepEqual(m.input,['text']);assert.equal(plan.providers['tdh-claude55'].apiKeyEnv,'CLAUDE_FIXTURE');assert.equal(modelPolicyPlan(source()).missing.length,0);});

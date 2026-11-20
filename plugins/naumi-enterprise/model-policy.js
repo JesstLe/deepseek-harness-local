@@ -9,6 +9,7 @@ import {ModelConnections} from './model-connections.js';
 export const MODEL_POLICY_REVISION='three-options-vision-20261120';
 export const LUNA_TERRA_PROVIDER='naumi-luna-terra';
 export const MODEL_POLICY_MODELS=Object.freeze([
+ Object.freeze({id:'claude-sonnet-5-5',name:'claude opus5.5',preferredProvider:'tdh-claude55',optional:true,input:['text']}),
  Object.freeze({id:'deepseek-flash',name:'claude fable5.2',preferredProvider:'ccs-deepseek-992333'}),
  Object.freeze({id:'gpt-6-luna',name:'gpt6.1sol',preferredProvider:'ccs-provider-8c7ab447-51aed7'}),
  Object.freeze({id:'gpt-6-luna',name:'gpt6.1terra',preferredProvider:'ccs-provider-8c7ab447-51aed7',aliasProvider:LUNA_TERRA_PROVIDER}),
@@ -22,11 +23,11 @@ export function modelPolicyPlan(providers,{partial=false,eligible=()=>true}={}){
  for(const rule of MODEL_POLICY_MODELS){
   const candidates=Object.entries(providers??{}).filter(([id,p])=>id!==LUNA_TERRA_PROVIDER&&eligible(id,p)&&p?.models?.some(m=>m.id===rule.id));
   const row=candidates.find(([id])=>id===rule.preferredProvider)??candidates[0];
-  if(!row){if(!missing.includes(rule.id))missing.push(rule.id);continue;}
+  if(!row){if(!rule.optional&&!missing.includes(rule.id))missing.push(rule.id);continue;}
   const [sourceId,p]=row,id=rule.aliasProvider??sourceId;
   if(!['openai-completions','openai-responses','anthropic-messages'].includes(p.api)||!p.apiKeyEnv)fail('MODEL_POLICY_SOURCE_INVALID');
   const url=new URL(p.baseURL);if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash)fail('MODEL_POLICY_SOURCE_INVALID');
-  const model={...structuredClone(p.models.find(m=>m.id===rule.id)),name:rule.name,input:['text','image']};
+  const model={...structuredClone(p.models.find(m=>m.id===rule.id)),name:rule.name,input:rule.input??['text','image']};
   if(rule.aliasProvider&&providers[id]){
    const prior=providers[id];
    if(prior.api!==p.api||prior.baseURL!==p.baseURL||prior.apiKeyEnv!==p.apiKeyEnv||!isDeepStrictEqual(prior.headers??{},p.headers??{})||prior.models?.length!==1||prior.models[0].id!==rule.id)fail('MODEL_POLICY_ALIAS_ROUTE_COLLISION');
@@ -48,7 +49,7 @@ function validRoute(p){try{const u=new URL(p.baseURL);return ['openai-completion
 /** Read-only, bounded, authenticated discovery on the device's existing routes.
  * Exact catalog IDs alone may fill missing declarations; secrets never move. */
 async function recoverDeclarations(providers,configured,discover){
- const required=[...new Set(MODEL_POLICY_MODELS.map(m=>m.id))];
+ const required=[...new Set(MODEL_POLICY_MODELS.filter(m=>!m.optional).map(m=>m.id))];
  const missing=required.filter(id=>!Object.entries(providers).some(([key,p])=>key!==LUNA_TERRA_PROVIDER&&configured.has(key)&&p.models?.some(m=>m.id===id)));
  if(!missing.length)return providers;
  const augmented=structuredClone(providers),signal=AbortSignal.timeout(12000);
@@ -101,7 +102,7 @@ export class ModelPolicy{
    this.routes=structuredClone(actual);this.defaultSelection=plan.defaultSelection;
    let defaultPending=false;const current=this.ctx.agentDefaultModel.currentSelection();
    if(!this.allowed(current))try{await this.ctx.agentDefaultModel.saveSelection(this.remap(current));}catch{defaultPending=true;}
-   this.state={revision:MODEL_POLICY_REVISION,ready:true,error:null,missing:plan.missing,models:Object.entries(actual).flatMap(([provider,p])=>p.models.map(({id,name})=>({provider,id,name,input:['text','image']}))),defaultPending};
+   this.state={revision:MODEL_POLICY_REVISION,ready:true,error:null,missing:plan.missing,models:Object.entries(actual).flatMap(([provider,p])=>p.models.map(({id,name,input})=>({provider,id,name,input:input??['text']}))),defaultPending};
    if(!plan.missing.length&&Object.keys(saved.providers).length)try{this.recovery.write({},saved.revision);}catch{this.state.recoveryPending=true;}
    for(const agent of this.ctx.agents?.list()??[])try{this.select(agent);}catch{this.state.defaultPending=true;}
    return this.state;

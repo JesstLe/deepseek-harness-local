@@ -1,3 +1,4 @@
+import {stageEmbeddedModels} from './stage-embedded-models.mjs';
 import {stageCuaDriver} from './stage-cua.mjs';
 import {installNativeModelPicker,MODEL_PICKER_POLICY} from '../../scripts/native-model-picker-extension.mjs';
 import {stageTrialModels} from './internal-trial-models.mjs';
@@ -35,7 +36,8 @@ export function scanRuntimeInventory(files){
   for(const file of files)if(forbidden.test(file.path)||/^(?:sessions|logs|browser-profiles)\//i.test(file.path)||/(?:^|\/)(?:\.git|\.dsh|browser-profiles|identity-profiles|business-private|creation-private)\//i.test(file.path))throw Error('RUNTIME_PRIVATE_FILE '+file.path);
   return {files:files.length,forbiddenPaths:0};
 }
-export async function prepareRuntime({root=project,target=path.join(root,'runtime/desktop-backend'),archive=process.env.NAUMI_DINGTALK_ARCHIVE,trialInput,modelPolicy=process.env.NAUMI_BUILD_MODEL_POLICY}={}){
+export async function prepareRuntime({root=project,target=path.join(root,'runtime/desktop-backend'),archive=process.env.NAUMI_DINGTALK_ARCHIVE,trialInput,modelPolicy=process.env.NAUMI_BUILD_MODEL_POLICY,embeddedInput=process.env.NAUMI_EMBEDDED_MODELS_FILE}={}){
+  if(embeddedInput&&(trialInput||process.env.NAUMI_EMBEDDED_TEST_ACK!=='two-users-accepted-20261120'||modelPolicy!=='three-options-vision-20261120'))throw Error('EMBEDDED_TEST_BUILD_ACK_REQUIRED');
   if(modelPolicy!==undefined&&modelPolicy!=='three-options-vision-20261120')throw Error('MODEL_POLICY_RESOURCE_INVALID');
   root=path.resolve(root);target=path.resolve(target);
   const runtime=path.join(root,'runtime');
@@ -68,9 +70,10 @@ export async function prepareRuntime({root=project,target=path.join(root,'runtim
     const closure=auditPackage(path.join(staged,'node_modules/@naumi/dsh-enterprise'),{checkInstalled:true,dependencyRoot:path.join(staged,'node_modules')});
     verifyStagedImports(staged);
     const trial=trialInput?stageTrialModels(staged,trialInput):null;
+    const embeddedModels=embeddedInput?stageEmbeddedModels(staged,embeddedInput):null;
     const inventory=runtimeInventory(staged),scan=scanRuntimeInventory(inventory);
     fs.writeFileSync(path.join(staged,'runtime-files.json'),JSON.stringify(inventory,null,2)+'\n');
-    const manifest={product:'Naumi',...trial?{edition:'internal-trial',trial}:{},schemaVersion:2,desktop:{profileVersion:1,identityProtocol:2,maintenanceProtocol:1,workspaceProtocol:1},version:JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json'))).version,node:process.versions.node,harness:'0.2.2-rc.1',desktopEngine:'cua',cuaDriver:'0.54.0',dingtalk,personalCredentials:!!trial,browserProfiles:false,bootstrap:'offline',nodeSHA256:sha(path.join(staged,'node.exe')),inventorySHA256:sha(path.join(staged,'runtime-files.json')),closure,scan};
+    const manifest={product:'Naumi',...trial?{edition:'internal-trial',trial}:{},...embeddedModels?{edition:'embedded-test',embeddedModels}:{},schemaVersion:2,desktop:{profileVersion:1,identityProtocol:2,maintenanceProtocol:1,workspaceProtocol:1},version:JSON.parse(fs.readFileSync(path.join(root,'desktop/package.json'))).version,node:process.versions.node,harness:'0.2.2-rc.1',desktopEngine:'cua',cuaDriver:'0.54.0',dingtalk,personalCredentials:!!trial||!!embeddedModels,browserProfiles:false,bootstrap:'offline',nodeSHA256:sha(path.join(staged,'node.exe')),inventorySHA256:sha(path.join(staged,'runtime-files.json')),closure,scan};
     if(modelPolicy)manifest.modelPolicy=modelPolicy;
     manifest.modelPicker=MODEL_PICKER_POLICY;
     fs.writeFileSync(path.join(staged,'runtime-manifest.json'),JSON.stringify(manifest,null,2)+'\n');
